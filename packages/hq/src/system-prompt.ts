@@ -48,14 +48,31 @@ function taskWorker(i: IdentityRow): string {
   ].join('\n');
 }
 
-/** Compose L0 (identity) + L1 (company.md, directives.md, project charter). */
-export function buildSystemPrompt(companyDir: string, i: IdentityRow, managerId: string): string {
+/** A one-off helper of the personal team (opened by eli for one errand): no worktree or PR, just the errand. */
+function helperWorker(i: IdentityRow): string {
+  const opener = i.reports_to ?? OWNER;
+  return [
+    `# אתה עוזר חד-פעמי: ${i.title || i.name} (\`${i.id}\`)`,
+    '',
+    `\`${opener}\` פתח אותך למשימה אחת, והיא מגיעה בהודעה הראשונה. אין פרויקט ואין קוד: עושים את המשימה עצמה (אתר, טופס, מסמך, בירור).`,
+    '1. עובדים בדפדפן ובכלים של המכונה לפי הצורך. כניסה שצריכה את רן (קוד, 2FA, QR) מבקשים ממנו ישירות ב-`ask`.',
+    '2. **פעולה חדשה כלפי אנשים בחוץ** (מייל או הודעה לאדם, תשלום, העברה, שליחת טופס בשמו, פרסום) רק אחרי אישור של רן. שואלים ב-`ask`, פעם אחת, בקצרה.',
+    '3. ידע שיחסוך לפעם הבאה (איך אתר מתנהג, מה הוחלט, מה נשאר פתוח) נשמר ב-`remember`, בתחום הזיכרון של מי שפתח אותך (לרוב `memory/personal/`). בלי סיסמאות ומספרים מזהים.',
+    `4. מסכמים במשפט-שניים ב-\`tell\` ל-\`${opener}\`: מה נעשה, ומה מחכה למישהו. אחר כך \`status\` עם \`state: "done"\`. זה סוגר את המשימה ואת המשמרת.`,
+  ].join('\n');
+}
+
+/** The team whose runtime helpers get the errand prompt instead of the code-task rules. */
+export const HELPER_TEAM = 'personal';
+
+/** Compose L0 (identity) + L1 (company.md, directives.md, project charter). `opener` = the identity `i` reports to. */
+export function buildSystemPrompt(companyDir: string, i: IdentityRow, managerId: string, opener?: IdentityRow): string {
   const parts: string[] = [];
   const dossier = read(join(companyDir, 'identities', `${i.id}.md`));
   if (dossier) {
     parts.push(`# הזהות שלך\n\nאתה ${i.name}${i.title ? `, ${i.title}` : ''} (identity: \`${i.id}\`) בחברת הסוכנים של רן. זה התיק שלך:\n\n${dossier}`);
   } else if (i.team_kind === 'task' || i.source === 'runtime') {
-    parts.push(taskWorker(i));
+    parts.push(!i.project && opener?.team === HELPER_TEAM ? helperWorker(i) : taskWorker(i));
   } else {
     parts.push(`# הזהות שלך\n\nאתה ${i.name}${i.title ? `, ${i.title}` : ''} (identity: \`${i.id}\`) בחברת הסוכנים של רן.`);
   }

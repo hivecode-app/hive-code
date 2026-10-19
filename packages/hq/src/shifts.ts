@@ -518,7 +518,8 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       // Never launch bare: an unknown identity still learns how to reply, and the board shows why.
       this.store.emit('shift.no_identity', identity, { shift: shiftId });
     }
-    return writeSystemPrompt(shiftDir(this.paths, shiftId), buildSystemPrompt(this.cfg.companyDir, row ?? unknownIdentity(identity), this.cfg.managerId));
+    return writeSystemPrompt(shiftDir(this.paths, shiftId), buildSystemPrompt(this.cfg.companyDir, row ?? unknownIdentity(identity), this.cfg.managerId,
+      row?.reports_to ? getIdentity(this.store, row.reports_to) : undefined));
   }
 
   /** Memory lookup for prime.json (set by hq: ingest recall over memory/). */

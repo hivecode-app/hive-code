@@ -129,6 +129,21 @@ test('system prompt (L0+L1): dossier, how to reply, Authority, charter; task wor
   assert.match(worker, /gh pr merge --squash/);
   assert.match(worker, /# אמנת agent-company/);                  // project charter
   assert.match(worker, /מדווח ל-`adi`/);
+  // A helper eli opens has no project: the errand itself, no worktree/PR, outward acts need the owner (#24).
+  const task = { ...base, team_kind: 'task', lifecycle: 'ephemeral', source: 'runtime' };
+  const eli = { ...base, id: 'eli', name: 'אלי', title: 'ראש הצוות האישי', team: 'personal', lifecycle: 'lead' };
+  const helper = buildSystemPrompt(companyDir, { ...task, id: 'company-t9', name: 't9', title: 'טופס TM.30', reports_to: 'eli' }, 'yoav', eli);
+  assert.match(helper, /עוזר חד-פעמי/);
+  assert.match(helper, /`eli` פתח אותך/);
+  assert.match(helper, /כלפי אנשים בחוץ/);
+  assert.doesNotMatch(helper.split('\n---\n')[0]!, /git worktree|gh pr merge/); // company.md below still mentions them
+  // Any other task without a project (noga's contract PRs, an owner task with no project) keeps the code-task rules.
+  const noga = { ...base, id: 'noga', name: 'נגה', title: 'ראש מחלקת השיפור', team: 'improvement', lifecycle: 'lead' };
+  for (const opener of [noga, undefined]) {
+    const t = buildSystemPrompt(companyDir, { ...task, id: 'company-t10', name: 't10', title: 'x', reports_to: opener?.id ?? 'yoav' }, 'yoav', opener);
+    assert.match(t, /צוות משימה/);
+    assert.doesNotMatch(t, /עוזר חד-פעמי/);
+  }
 });
 
 test('host-args.json carries the system prompt file when there is one', async () => {
