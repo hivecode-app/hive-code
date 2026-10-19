@@ -21,8 +21,8 @@ class Ic extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Unknown names (e.g. a team symbol from org.yaml the app does not ship) fall back quietly.
     final data = kIcons[name];
-    assert(data != null, 'icon "$name" missing from tool/gen_icons.sh');
     // Glyphs are drawn as-is like the mockup's font (no automatic RTL mirroring): the back arrow
     // points right in RTL, and the send arrow is mirrored explicitly where the mockup does it.
     return Directionality(
@@ -275,7 +275,8 @@ enum BtnKind { plain, primary, tonal }
 
 /// `.btn`, `.btn.pri`, `.btn.ton`, `.btn.wide`.
 class Btn extends StatelessWidget {
-  const Btn(this.label, {super.key, this.onTap, this.kind = BtnKind.plain, this.wide = false, this.icon, this.height = 36, this.fontSize = 14, this.leading});
+  const Btn(this.label, {super.key, this.onTap, this.kind = BtnKind.plain, this.wide = false, this.icon, this.height = 36, this.fontSize = 14, this.leading, this.hpad = 16});
+  final double hpad;
   final String label;
   final VoidCallback? onTap;
   final BtnKind kind;
@@ -291,7 +292,7 @@ class Btn extends StatelessWidget {
     final (bg, border, fg) = switch (kind) {
       BtnKind.plain => (p.surface, p.line, p.text),
       BtnKind.primary => (p.accent, p.accent, p.onAccent),
-      BtnKind.tonal => (p.surface2, p.surface2, p.text),
+      BtnKind.tonal => p.dark ? (p.surface3, p.surface3, p.text) : (p.surface2, p.surface2, p.text),
     };
     final radius = BorderRadius.circular(wide ? 10 : height / 2);
     final text = Text(label,
@@ -308,7 +309,7 @@ class Btn extends StatelessWidget {
       children: [
         if (leading != null) ...[leading!, const SizedBox(width: 6)],
         if (icon != null) ...[Ic(icon!, size: 18, color: fg), const SizedBox(width: 6)],
-        if (wide) Expanded(child: text) else text,
+        if (wide) Expanded(child: text) else Flexible(child: text),
       ],
     );
     return Semantics(
@@ -322,7 +323,7 @@ class Btn extends StatelessWidget {
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: wide ? 42 : height),
             child: Padding(
-              padding: wide ? const EdgeInsets.symmetric(horizontal: 16, vertical: 9) : const EdgeInsets.symmetric(horizontal: 16),
+              padding: wide ? EdgeInsets.symmetric(horizontal: hpad, vertical: 9) : EdgeInsets.symmetric(horizontal: hpad),
               child: Center(widthFactor: wide ? null : 1, child: content),
             ),
           ),
@@ -550,7 +551,11 @@ class Rich extends StatelessWidget {
     final out = <InlineSpan>[];
     var i = 0;
     for (final m in _tok.allMatches(s)) {
-      if (m.start > i) out.add(TextSpan(text: s.substring(i, m.start)));
+      if (m.start > i) {
+        var pre = s.substring(i, m.start);
+        if (m.group(1) != null) pre = pre.replaceFirstMapped(RegExp(r' ([א-ת]{1,2}-)$'), (x) => '\u00A0${x.group(1)}');
+        out.add(TextSpan(text: pre));
+      }
       if (m.group(1) != null) {
         final code = m.group(1)!;
         final mono = T.mono((base.fontSize ?? 15.5) * 0.86, lh: (base.fontSize ?? 15.5) * 1.2).copyWith(color: base.color);

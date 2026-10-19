@@ -9,9 +9,9 @@ import 'theme/tokens.dart';
 import 'ui/nav.dart';
 import 'ui/shell.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final store = AppStore(selectBackend());
+  final store = AppStore(await selectBackend());
   store.start();
   runApp(CompanyApp(store: store));
 }

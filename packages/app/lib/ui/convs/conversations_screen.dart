@@ -117,7 +117,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         expand: false,
         initialChildSize: 0.7,
         builder: (_, sc) => ListView(controller: sc, children: [
-          const Section('עובד או צוות. בצוות, ההודעה הולכת לראש הצוות.', top: 0),
+          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 10), child: Text('עובד או צוות. בצוות, ההודעה הולכת לראש הצוות.', style: T.small.copyWith(color: p.text2))),
           ListBlock(children: [
             for (final who in d.identities.values)
               InkWell(
@@ -179,11 +179,11 @@ class Fab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    return Material(
+    return DecoratedBox(
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Color(0x1A000000), offset: Offset(0, 1), blurRadius: 3)]),
+      child: Material(
       color: p.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.line)),
-      shadowColor: Colors.black,
-      elevation: 1,
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: onTap ?? () {},
@@ -199,6 +199,7 @@ class Fab extends StatelessWidget {
           ),
         ),
       ),
+    ),
     );
   }
 }

@@ -167,7 +167,7 @@ class _ComposerState extends State<Composer> {
                 ),
               ),
               _FieldBtn(icon: 'attach_file', tip: 'צירוף', onTap: _attach),
-              _FieldBtn(icon: 'photo_camera', tip: 'מצלמה', onTap: _attach),
+              if (MediaQuery.sizeOf(context).width < 800) _FieldBtn(icon: 'photo_camera', tip: 'מצלמה', onTap: _attach),
             ]),
     );
 
@@ -222,7 +222,7 @@ class _ComposerState extends State<Composer> {
                   link: _link,
                   targetAnchor: AlignmentDirectional.topEnd.resolve(Directionality.of(context)),
                   followerAnchor: AlignmentDirectional.bottomEnd.resolve(Directionality.of(context)),
-                  offset: const Offset(0, -8),
+                  offset: const Offset(0, -16),
                   child: Align(
                     alignment: AlignmentDirectional.bottomEnd.resolve(Directionality.of(context)),
                     child: TapRegion(

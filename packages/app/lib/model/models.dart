@@ -104,7 +104,11 @@ class WaitItem {
     this.doneLine,
     this.state = WaitState.open,
     this.answerLine,
-  });
+    String? short,
+  }) : short = short ?? kicker;
+
+  /// One-line peek for the desktop context column.
+  final String short;
   final String id;
   final WaitKind kind;
   final String from;

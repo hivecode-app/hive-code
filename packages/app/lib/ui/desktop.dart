@@ -371,7 +371,7 @@ class _ContextColumn extends StatelessWidget {
                 onTap: () => Nav.chat(context, w.from),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: Rich('${d.who(w.from).name} · ${w.kicker.split(' · ').first}', style: TextStyle(fontFamily: kFont, fontSize: 13.5, height: 1.8, color: p.text)),
+                  child: Rich('${d.who(w.from).name} · ${w.short}', style: TextStyle(fontFamily: kFont, fontSize: 13.5, height: 1.8, color: p.text)),
                 ),
               ),
             const SizedBox(height: 4),

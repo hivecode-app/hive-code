@@ -25,12 +25,12 @@ class Bubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
     return LayoutBuilder(builder: (context, c) {
-      final maxW = c.maxWidth - 24;
+      final maxW = c.maxWidth;
       return Align(
         alignment: out ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart,
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-          constraints: BoxConstraints(maxWidth: maxW * (wide ? 0.92 / 0.97 : 0.88 / 0.97), minWidth: wide ? maxW * 0.92 / 0.97 : 0),
+          constraints: BoxConstraints(maxWidth: maxW * (wide ? 0.92 : 0.88), minWidth: wide ? maxW * 0.92 : 0),
           padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
           decoration: BoxDecoration(
             color: out ? p.bubbleOut : p.bubbleIn,
@@ -240,11 +240,10 @@ class ServiceLine extends StatelessWidget {
     );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Center(
-        child: FractionallySizedBox(
-          widthFactor: null,
+      child: LayoutBuilder(
+        builder: (context, c) => Center(
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.92),
+            constraints: BoxConstraints(maxWidth: c.maxWidth * 0.92),
             child: onTap == null ? pill : GestureDetector(onTap: onTap, child: pill),
           ),
         ),
@@ -282,11 +281,11 @@ class _ToolGroupRowState extends State<ToolGroupRow> {
     final running = g.outcome == Outcome.running;
     Widget outcome = Ic(_outcomeIcon(g.outcome), size: 18, color: g.outcome == Outcome.error ? p.urgent : p.text2, fill: g.outcome == Outcome.error);
     if (running) outcome = Spin(child: outcome);
-    return Align(
+    return LayoutBuilder(builder: (context, c) => Align(
       alignment: AlignmentDirectional.centerStart,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.92),
+        constraints: BoxConstraints(maxWidth: c.maxWidth * 0.92),
         decoration: BoxDecoration(color: p.toolBg, borderRadius: BorderRadius.circular(10)),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           InkWell(
@@ -330,7 +329,7 @@ class _ToolGroupRowState extends State<ToolGroupRow> {
           ),
         ]),
       ),
-    );
+    ));
   }
 }
 
@@ -356,7 +355,7 @@ class _ToolItem extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: T.mono(11.5, lh: 16).copyWith(color: p.text)),
           ),
-          if (t.trail != null) ...[const SizedBox(width: 8), Rich(t.trail!, style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: p.text2))],
+          if (t.trail != null) ...[const SizedBox(width: 8), Rich(ltr(t.trail!), style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: p.text2))],
         ]),
       ),
     );
@@ -376,7 +375,7 @@ class ChatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
     return LayoutBuilder(builder: (context, c) {
-      final w = (c.maxWidth - 24) * 0.92 / 0.97;
+      final w = c.maxWidth * 0.92;
       return Align(
         alignment: AlignmentDirectional.centerStart,
         child: Container(
@@ -607,7 +606,7 @@ class TestCardView extends StatelessWidget {
                       textDirection: TextDirection.ltr,
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         Row(children: [
-                          Expanded(child: Text(f.name, style: T.mono(12.5, w: FontWeight.w500, lh: 18).copyWith(color: p.text))),
+                          Expanded(child: Text(f.name, softWrap: false, overflow: TextOverflow.ellipsis, style: T.mono(12.5, w: FontWeight.w500, lh: 18).copyWith(color: p.text))),
                           Text(f.location, style: T.mono(12.5, lh: 18).copyWith(color: p.text2)),
                         ]),
                         Text(f.why, style: T.mono(11.5, lh: 17).copyWith(color: p.text2)),
@@ -746,7 +745,7 @@ class AskCardView extends StatelessWidget {
             TextSpan(
                 text: go != null
                     ? ' · ${go.target}'
-                    : ' · ${card.blocking ? 'חוסמת את העבודה' : 'יכולה לחכות · $from ממשיך במשהו אחר'}${card.escalation != null ? ' · ${card.escalation}' : ''}'),
+                    : ' · ${card.blocking ? 'חוסמת את העבודה' : 'יכולה לחכות · $from ממשיך במשהו אחר'}${card.escalation != null ? ' · ${card.escalation!.replaceAll(' ', '\u00A0')}' : ''}'),
           ]),
           style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.5, color: p.text2),
         ),

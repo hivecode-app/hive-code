@@ -265,6 +265,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
       options: const [AskOption(id: 'go', label: 'GO לחזרה', primary: true)],
       askId: 'ask-rotem',
       doneLine: 'GO נשלח · רותם מחזירה ל-r207',
+      short: 'דחוף · טיקיבוט 502',
     ),
     WaitItem(
       id: 'w-ido',
@@ -275,6 +276,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
       body: 'רותם מצאה 37 מנויים עם כרטיס שנדחה פעמיים השבוע. מה עושים איתם?',
       options: idoOptions,
       askId: 'ask-ido',
+      short: 'שאלה · 37 מנויים',
     ),
     WaitItem(
       id: 'w-dana',
@@ -286,6 +288,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
       options: const [AskOption(id: 'go', label: 'GO', primary: true)],
       askId: 'ask-dana-go',
       doneLine: 'GO נשלח · דנה מתחילה פריסה',
+      short: 'GO · לומו 1.1.20',
     ),
     WaitItem(
       id: 'w-amit',
@@ -295,6 +298,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
       kicker: 'כניסה לאתר · `mercury.com`',
       body: "נדרש קוד אימות כדי להוריד את דוח אוקטובר. בתוקף עוד 8 דק'.",
       domain: 'app.mercury.com',
+      short: 'קוד ל-Mercury',
     ),
   ];
 
@@ -445,7 +449,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
       ('נפתח', 'היום 12:38 · דנה'),
       ('ענף', '`t3711-renew-retry`'),
       ('PR', '`#3712` · CI עבר · סקירה רצה'),
-      ('שינויים', '+48 −11 · 4 קבצים'),
+      ('שינויים', '`+48 −11` · 4 קבצים'),
     ],
     timeline: const [
       TimelineEntry(icon: 'front_hand', filled: true, text: 'שאלה אליך: מה עושים עם 37 המנויים', time: '14:02', link: 'בשיחה'),
