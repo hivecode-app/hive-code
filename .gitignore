@@ -6,3 +6,4 @@ dist/
 .omc/
 *.tsbuildinfo
 .claude/worktrees/
+.worktrees/

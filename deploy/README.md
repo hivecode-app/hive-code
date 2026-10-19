@@ -2,7 +2,7 @@
 
 ## hq ב-hq-host
 
-ה-unit מוכן אבל עוד לא מופעל. linger מופעל ל-ran ב-hq-host (`loginctl show-user ran -p Linger` → `Linger=yes`), ולכן יחידות `--user` שורדות logout.
+**מופעל מ-20/10/2026** (ספר ההפעלה: [docs/RUNBOOK.md](../docs/RUNBOOK.md)). linger מופעל ל-ran ב-hq-host (`loginctl show-user ran -p Linger` → `Linger=yes`), ולכן יחידות `--user` שורדות logout.
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -22,9 +22,9 @@ journalctl --user -u agent-company-hq -f
 
 ## heartbeat חיצוני מ-ci-host (B.17)
 
-**לא הותקן עדיין.** הסיבה: ci-host לא ב-tailnet, ו-`api.hq.example.com` עוד לא מנותב ב-Caddy, כך ש-`/health` של hq לא נגיש מ-ci-host. התקנה עכשיו הייתה שולחת טלגרם "hq לא עונה" כל 3 דקות.
+**מותקן מ-20/10/2026.** נבדק בכיבוי של hq: הטלגרם הגיע אחרי 205 שניות, והודעת "חזר" הגיעה בדקה שאחרי ההפעלה. הפקודות למטה הן להתקנה מחדש.
 
-התקנה, אחרי ש-hq רץ וה-Caddy מנותב (ב-ci-host linger כבר מופעל):
+התקנה (ב-ci-host linger כבר מופעל):
 
 ```bash
 # מ-hq-host
