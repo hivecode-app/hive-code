@@ -41,6 +41,7 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
     private var initialRoute: String? = null
     private var initialShare: Intent? = null
     private var permissionResult: MethodChannel.Result? = null
+    private val passkeys by lazy { Passkeys(activity) }
 
     /** The intent the activity was created with: remembered until Dart asks for it. */
     fun takeLaunchIntent(intent: Intent?) {
@@ -119,6 +120,8 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
                 HqSync.startDemo(ctx)
                 result.success(NotificationManagerCompat.from(ctx).areNotificationsEnabled())
             }
+            "passkeyCreate" -> passkeys.create(call.argument<String>("json").orEmpty(), result)
+            "passkeyGet" -> passkeys.get(call.argument<String>("json").orEmpty(), result)
             else -> result.notImplemented()
         }
     }

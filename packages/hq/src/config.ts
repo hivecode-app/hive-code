@@ -42,6 +42,16 @@ export interface HqConfig {
     maxSlots: number;
   };
   backupsKeep: number;
+  /** WebAuthn and device pairing (auth.ts). */
+  auth: {
+    rpId: string;                // passkeys are bound to this host (and its subdomains)
+    rpName: string;
+    /** Accepted clientData origins: the web app, plus `android:apk-key-hash:<b64url sha256>` for the APK. */
+    origins: string[];
+    /** Where a pairing link points (`<appUrl>?pair=<code>`); null = code only. */
+    appUrl: string | null;
+    pairCodeMs: number;
+  };
 }
 
 export function defaultStateDir(): string {
@@ -80,6 +90,14 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     },
     capacity: { reserveMb: 4096, rssIdleMb: 450, rssWorkMb: 2500, residents: ['yoav'], maxSlots: 8 },
     backupsKeep: 48,
+    auth: {
+      rpId: 'app.hq.example.com',
+      rpName: 'החברה',
+      // The APK's origin is the sha256 of its release signing cert (public; tool/make_keystore.sh).
+      origins: ['https://app.hq.example.com', 'android:apk-key-hash:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'],
+      appUrl: defaultAppUrl(stateDir),
+      pairCodeMs: 10 * 60_000,
+    },
   };
   const file = join(stateDir, 'hq.config.json');
   let fromFile: Partial<HqConfig> = {};
@@ -88,9 +106,18 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     ...base, ...fromFile, ...overrides,
     timers: { ...base.timers, ...fromFile.timers, ...overrides.timers },
     capacity: { ...base.capacity, ...fromFile.capacity, ...overrides.capacity },
+    auth: { ...base.auth, ...fromFile.auth, ...overrides.auth },
   };
   if (!overrides.dbPath && !fromFile.dbPath) cfg.dbPath = join(cfg.stateDir, 'hq.db');
   if (process.env.HQ_PORT) cfg.port = Number(process.env.HQ_PORT);
   if (process.env.HQ_HOST) cfg.host = process.env.HQ_HOST;
   return cfg;
+}
+
+/** The app is served under the secret path tool/deploy.sh keeps in $STATE/app-path. */
+function defaultAppUrl(stateDir: string): string | null {
+  const f = join(stateDir, 'app-path');
+  if (!existsSync(f)) return null;
+  const path = readFileSync(f, 'utf8').trim();
+  return path ? `https://app.hq.example.com/${path}/` : null;
 }

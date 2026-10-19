@@ -259,6 +259,39 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX night_empty_night ON night_empty(night_id);
   `,
+  // 4 — devices and passkeys (auth.ts, #23). Device tokens are stored as sha256 only.
+  `
+  CREATE TABLE passkeys (
+    id TEXT PRIMARY KEY,
+    public_key BLOB NOT NULL,
+    counter INTEGER NOT NULL DEFAULT 0,
+    transports TEXT,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER,
+    revoked_at INTEGER
+  );
+
+  CREATE TABLE devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    via TEXT NOT NULL,
+    passkey_id TEXT REFERENCES passkeys(id),
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER,
+    revoked_at INTEGER
+  );
+
+  CREATE TABLE pair_codes (
+    code_hash TEXT PRIMARY KEY,
+    created_by TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER,
+    used_by TEXT
+  );
+  `,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [

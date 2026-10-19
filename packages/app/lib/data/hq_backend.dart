@@ -37,6 +37,18 @@ class HqBackend extends Backend {
   final _boardShift = <String, String>{}; // identity -> live shift id
   final _askToInbox = <String, int>{};
 
+  /// hq refused this device's token (revoked in settings → devices on any device). The app goes
+  /// back to the sign-in screen (main.dart).
+  bool get unauthorized => _unauthorized;
+  bool _unauthorized = false;
+
+  void _refused() {
+    if (_unauthorized || _disposed) return;
+    _unauthorized = true;
+    _retry?.cancel();
+    notifyListeners();
+  }
+
   @override
   CompanyData? get data => _data;
   @override
@@ -48,6 +60,7 @@ class HqBackend extends Backend {
 
   Future<dynamic> _get(String path) async {
     final r = await _http.get(Uri.parse('$baseUrl$path'), headers: _headers).timeout(const Duration(seconds: 10));
+    if (r.statusCode == 401) _refused();
     if (r.statusCode != 200) throw HqError(r.statusCode, r.body);
     return jsonDecode(utf8.decode(r.bodyBytes));
   }
@@ -59,7 +72,10 @@ class HqBackend extends Backend {
         ..body = jsonEncode(body ?? {});
       final r = await http.Response.fromStream(await _http.send(req).timeout(const Duration(seconds: 10)));
       if (r.statusCode == 200) return const CommandResult.ok();
-      if (r.statusCode == 401) return const CommandResult.fail('השרת לא קיבל את הטוקן. יש לבדוק אותו בהגדרות.');
+      if (r.statusCode == 401) {
+        _refused();
+        return const CommandResult.fail('המכשיר הזה נותק מהחברה. צריך להיכנס שוב.');
+      }
       if (r.statusCode == 404 || r.statusCode == 409) return const CommandResult.fail('הפריט כבר טופל או שאינו קיים יותר.');
       return const CommandResult.fail('השרת לא קיבל את הפעולה. אפשר לנסות שוב.');
     } catch (_) {
@@ -98,10 +114,17 @@ class HqBackend extends Backend {
 
   void _scheduleRetry() {
     _retry?.cancel();
-    if (_disposed) return;
+    if (_disposed || _unauthorized) return;
     _retry = Timer(const Duration(seconds: 5), () async {
+      if (_unauthorized) return;
       try {
-        if (_data == null) await _load();
+        // A refused WS handshake (device revoked while the link was down) looks like any network
+        // error; one plain request tells them apart, and a 401 there sends the app to sign-in.
+        if (_data == null) {
+          await _load();
+        } else {
+          await _get('/api/toggles');
+        }
         _connect();
       } catch (_) {
         _scheduleRetry();
@@ -186,6 +209,8 @@ class HqBackend extends Backend {
     _replayed = 0;
     try {
       _ws = WebSocketChannel.connect(ws);
+      // A failed handshake also reaches the stream's onError below, which retries.
+      _ws!.ready.catchError((_) {});
     } catch (_) {
       _setDown();
       _scheduleRetry();
@@ -200,6 +225,7 @@ class HqBackend extends Backend {
       },
       onDone: () {
         if (_disposed) return;
+        if (_ws?.closeCode == 4401) return _refused(); // this device was revoked
         _setDown();
         notifyListeners();
         _scheduleRetry();

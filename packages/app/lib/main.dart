@@ -1,20 +1,131 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'data/auth_client.dart';
 import 'data/backend.dart';
 import 'data/backend_select.dart';
+import 'data/fake_backend.dart';
+import 'data/hq_backend.dart';
 import 'data/store.dart';
+import 'native/native_bridge.dart';
 import 'native/native_glue.dart';
 import 'theme/theme.dart';
 import 'theme/tokens.dart';
+import 'ui/auth/sign_in_screen.dart';
 import 'ui/nav.dart';
 import 'ui/shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final store = AppStore(await selectBackend());
-  store.start();
-  runApp(CompanyApp(store: store));
+  runApp(AuthGate(initial: await selectBackend(), hqUrl: gatewayUrl()));
+}
+
+/// Sign-in or the app (#23). A device without a token signs in; a device whose token hq refuses
+/// (revoked in settings → devices) forgets it and comes back here.
+class AuthGate extends StatefulWidget {
+  const AuthGate({super.key, required this.initial, required this.hqUrl, this.client});
+
+  /// null: sign in first.
+  final Backend? initial;
+  final String hqUrl;
+
+  /// Tests pass one with a fake HTTP client and passkeys.
+  final AuthClient? client;
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  late final client = widget.client ?? AuthClient(widget.hqUrl);
+  AppStore? store;
+  String? note;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initial != null) _open(widget.initial!);
+  }
+
+  void _open(Backend b) {
+    final s = AppStore(b);
+    b.addListener(_watch);
+    s.start();
+    store = s;
+  }
+
+  void _watch() {
+    final b = store?.backend;
+    if (b is HqBackend && b.unauthorized) _signOut();
+  }
+
+  Future<void> _signOut() async {
+    final s = store!;
+    s.backend.removeListener(_watch);
+    setState(() {
+      store = null;
+      note = 'המכשיר הזה נותק מהחברה. אפשר להיכנס שוב.';
+    });
+    await clearSession();
+    await NativeBridge.instance.clearConfig();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      s.dispose();
+      s.backend.dispose();
+    });
+  }
+
+  Future<void> _signedIn(Session session) async {
+    await saveSession(session);
+    setState(() => _open(HqBackend(baseUrl: session.baseUrl, token: session.token)));
+  }
+
+  @override
+  void dispose() {
+    final s = store;
+    if (s != null) {
+      s.backend.removeListener(_watch);
+      s.dispose();
+      s.backend.dispose();
+    }
+    client.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = store;
+    if (s != null) return CompanyApp(key: ObjectKey(s), store: s);
+    return _Frame(
+      home: SignInScreen(
+        client: client,
+        note: note,
+        pairCode: note == null ? pairCodeFromUrl() : null, // after a sign-out the link's code is spent
+        onSignedIn: _signedIn,
+        onDemo: () => setState(() => _open(FakeBackend())),
+      ),
+    );
+  }
+}
+
+/// MaterialApp with the app's theme and locale, for the sign-in screen.
+class _Frame extends StatelessWidget {
+  const _Frame({required this.home});
+  final Widget home;
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+        title: 'החברה',
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(Palette.light),
+        darkTheme: buildTheme(Palette.darkPalette),
+        locale: const Locale('he'),
+        supportedLocales: const [Locale('he')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        home: home,
+      );
 }
 
 class CompanyApp extends StatefulWidget {

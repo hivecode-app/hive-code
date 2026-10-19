@@ -3,12 +3,15 @@
 //   node packages/hq/src/main.ts [--port 7420] [--host 127.0.0.1] [--state DIR] [--company DIR]
 //   node packages/hq/src/main.ts backup      # one-off sqlite backup, then exit
 //   node packages/hq/src/main.ts token       # print the API token (creates it on first run)
+//   node packages/hq/src/main.ts pair        # one-time pairing code + link for a new device (10 min)
 import { parseArgs } from 'node:util';
 import { join } from 'node:path';
 import { loadConfig } from './config.ts';
 import { Hq, loadForeignInjector } from './hq.ts';
 import { backupOnce } from './backup.ts';
 import { loadOrCreateToken } from './api.ts';
+import { Store } from './store.ts';
+import { Auth } from './auth.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -27,6 +30,16 @@ if (values.host) cfg.host = values.host;
 
 if (args[0] === 'token') {
   console.log(loadOrCreateToken(cfg.stateDir));
+  process.exit(0);
+}
+
+if (args[0] === 'pair') {
+  // Opens the store directly: works whether or not hq is running (WAL, one short write).
+  const store = new Store(cfg.dbPath);
+  const p = new Auth(store, cfg.auth).createPairCode({ kind: 'admin' });
+  store.close();
+  console.log(`code: ${p.code}  (valid until ${new Date(p.expires_at).toLocaleTimeString('he-IL')})`);
+  if (p.link) console.log(`link: ${p.link}`);
   process.exit(0);
 }
 

@@ -2,7 +2,8 @@
 # Builds and publishes the app on hq-host:
 #   web  -> /var/www/hq-app/<secret>/            (https://app.hq.example.com/<secret>/)
 #   apk  -> /var/www/hq-app/<secret>/agent-company.apk
-# The secret path is the gate until passkeys exist (APP-SPEC §2). It lives outside the repo.
+# Sign-in is a passkey or a pairing code (#23); the path only keeps the app out of crawlers. It lives
+# outside the repo. Also publishes .well-known/assetlinks.json (Android passkeys, deploy/caddy/app.caddy).
 # Usage: tool/deploy.sh [web|apk|all]   (default all)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -27,6 +28,8 @@ if [[ "$what" == apk || "$what" == all ]]; then
   cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "$dest/agent-company.apk"
   rm -rf build/app/intermediates build/app/tmp
 fi
+sudo -n mkdir -p /var/www/hq-app/.well-known
+sudo -n cp ../../deploy/caddy/assetlinks.json /var/www/hq-app/.well-known/assetlinks.json
 chmod -R a+rX /var/www/hq-app 2>/dev/null || sudo -n chmod -R a+rX /var/www/hq-app
 echo "web: https://app.hq.example.com/$secret/"
 echo "apk: https://app.hq.example.com/$secret/agent-company.apk"

@@ -118,6 +118,10 @@ Uint8List wavFromPcm(Uint8List pcm, {int rate = kDictateRate}) {
       .takeBytes();
 }
 
+/// Through the app's gateway Caddy puts dictate-server's own token on the request (deploy/caddy/app-dictate.caddy);
+/// any non-empty value works here, and no real token ships inside the app.
+const _gatewayToken = 'gateway';
+
 class DictateClient {
   DictateClient({required this.baseUrl, required this.token, http.Client? client, this.engine = 'openai'}) : _http = client ?? http.Client();
 
@@ -131,7 +135,7 @@ class DictateClient {
     if (kDictateUrl.isNotEmpty) return DictateClient(baseUrl: kDictateUrl, token: kDictateToken);
     final gw = gatewayUrl();
     if (!gw.endsWith('/hq')) return null;
-    return DictateClient(baseUrl: '${gw.substring(0, gw.length - 3)}/dictate', token: kGatewayToken);
+    return DictateClient(baseUrl: '${gw.substring(0, gw.length - 3)}/dictate', token: _gatewayToken);
   }
 
   /// Sends the WAV and returns the Hebrew text. Throws [DictationError].

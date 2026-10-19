@@ -46,28 +46,22 @@ class NativeGlue {
     });
   }
 
-  /// Hands the hq address to the native side, so notifications, the widget and the tiles work
-  /// without Flutter running. Source: the URL and token saved in settings, else the built-in
-  /// gateway (`--dart-define=HQ_URL=...`; Caddy injects the real token, any non-empty one works).
-  /// Only calls configure when native is unconfigured or holds something else. Call it again after
-  /// settings change.
+  /// Hands the hq address and this device's token to the native side, so notifications, the
+  /// widget and the tiles work without Flutter running. Not signed in (or demo): native is
+  /// cleared. Only calls configure when native is unconfigured or holds something else. Call it
+  /// again after settings change.
   Future<void> syncConfig() async {
     final b = NativeBridge.instance;
     if (!b.supported) return;
     try {
       final p = await SharedPreferences.getInstance();
-      var url = (p.getString(kHqUrl) ?? '').trim();
-      var token = (p.getString(kHqToken) ?? '').trim();
-      if (url.isEmpty || token.isEmpty) {
-        url = kBuiltInHqUrl;
-        token = kGatewayToken;
-      }
-      // Demo chosen in settings: native stays unconfigured, so nothing real is posted.
-      if (p.getBool(kDemo) == true) {
-        await b.clearConfig();
+      final url = (p.getString(kHqUrl) ?? '').trim();
+      final token = (p.getString(kHqToken) ?? '').trim();
+      // Demo or signed out: native stays unconfigured, so nothing real is posted.
+      if (url.isEmpty || token.isEmpty || p.getBool(kDemo) == true) {
+        if (await b.getConfig() != null) await b.clearConfig();
         return;
       }
-      if (url.isEmpty) return;
       final current = await b.getConfig();
       if (current?.baseUrl == url && current?.token == token) return;
       await b.configure(baseUrl: url, token: token);

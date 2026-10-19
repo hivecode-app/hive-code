@@ -17,6 +17,7 @@ import { Pusher, loadOrCreateVapid, telegramVia, type TelegramSend, type WebPush
 import { backupOnce } from './backup.ts';
 import { board } from './board.ts';
 import { startApi, loadOrCreateToken, health, type ApiServer } from './api.ts';
+import { Auth } from './auth.ts';
 import { Ingest, startIngestSocket, type Ticketer } from './ingest.ts';
 
 export interface HqDeps {
@@ -48,6 +49,7 @@ function lazyTemplateLauncher(cfg: HqConfig): Launcher {
 
 export class Hq {
   readonly store: Store;
+  readonly auth: Auth;
   readonly inbox: Inbox;
   readonly shifts: ShiftManager;
   readonly mailbox: Mailbox;
@@ -67,6 +69,7 @@ export class Hq {
     this.cfg = cfg;
     this.store = new Store(cfg.dbPath, { now: deps.now });
     this.inbox = new Inbox(this.store);
+    this.auth = new Auth(this.store, cfg.auth);
     this.shifts = new ShiftManager(this.store, cfg, deps.launcher ?? lazyTemplateLauncher(cfg), deps.connect);
     this.mailbox = new Mailbox(this.store, cfg, this.shifts, this.inbox, deps.foreign ?? noForeignInjector);
     this.scheduler = new Scheduler(this.store, cfg, this.shifts, this.mailbox);

@@ -1,11 +1,14 @@
-// HTTP + WebSocket API on 127.0.0.1 (B.8). Token auth on everything except GET /health (heartbeat).
-// The PWA uses this through Caddy; mcp-company and hooks use it for writes (idempotent by msg_id).
+// HTTP + WebSocket API on 127.0.0.1 (B.8). Token auth on everything except GET /health (heartbeat) and
+// /api/auth/* (getting a device token: passkey or pairing code, auth.ts). A token is either hq's own
+// api-token (stays on the server) or a device token. The app uses this through Caddy; mcp-company and
+// hooks use it for writes (idempotent by msg_id).
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Hq } from './hq.ts';
+import { AuthError, type Caller } from './auth.ts';
 import { OWNER } from '@company/shared';
 
 export function loadOrCreateToken(stateDir: string): string {
@@ -26,7 +29,7 @@ class HttpError extends Error {
   }
 }
 
-type Handler = (ctx: { req: IncomingMessage; url: URL; params: string[]; body: () => Promise<Record<string, unknown>> }) => unknown | Promise<unknown>;
+type Handler = (ctx: { req: IncomingMessage; url: URL; params: string[]; body: () => Promise<Record<string, unknown>>; caller: Caller }) => unknown | Promise<unknown>;
 
 function tokenOk(given: string | null | undefined, expected: string): boolean {
   if (!given) return false;
@@ -64,6 +67,10 @@ const oneOf = <T extends string>(v: unknown, allowed: readonly T[], name: string
   if (v == null) return undefined;
   if (!allowed.includes(v as T)) throw new HttpError(400, `${name} must be one of ${allowed.join('|')}`);
   return v as T;
+};
+const deviceName = (v: unknown): string => {
+  const s = typeof v === 'string' ? v.trim().slice(0, 80) : '';
+  return s || 'מכשיר';
 };
 const URGENCIES = ['urgent', 'normal', 'low'] as const;
 const PRIORITIES = ['now', 'next', 'later'] as const;
@@ -219,6 +226,36 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   route('GET', '/api/accounts', () => ({ accounts: hq.store.db.prepare(
     `SELECT name, email, org, plan, expires_at, health, five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at, snapshot_at FROM accounts ORDER BY name`).all() }));
 
+  // Devices and passkeys (settings → devices). The caller's own device is marked `current`.
+  route('GET', '/api/devices', ({ caller }) => {
+    const d = hq.auth.devices();
+    return { ...d, devices: d.devices.map((x) => ({ ...x, current: caller.kind === 'device' && caller.id === x.id })) };
+  });
+  route('POST', '/api/devices/pair', ({ caller }) => hq.auth.createPairCode(caller));
+  route('POST', '/api/devices/:id/revoke', ({ params }) => ({ device: hq.auth.revokeDevice(decodeURIComponent(params[0]!)) }));
+  route('POST', '/api/passkeys/:id/revoke', ({ params }) => hq.auth.revokePasskey(decodeURIComponent(params[0]!)));
+
+  return r;
+}
+
+/**
+ * Who is asking, for counting wrong pairing codes. hq listens on loopback behind Caddy, which sets
+ * X-Forwarded-For to the client it saw (the last entry); direct local callers count by socket.
+ */
+function clientAddress(req: IncomingMessage): string {
+  const xff = String(req.headers['x-forwarded-for'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return xff.at(-1) ?? req.socket.remoteAddress ?? 'local';
+}
+
+/** Open routes: how a device gets its token. Everything here proves itself (passkey or one-time code). */
+export function buildAuthRoutes(hq: Hq): [string, RegExp, Handler][] {
+  const r: [string, RegExp, Handler][] = [];
+  const route = (path: string, h: Handler) => r.push(['POST', new RegExp(`^${path}$`), h]);
+  route('/api/auth/login/options', () => hq.auth.loginOptions());
+  route('/api/auth/login', async ({ body }) => { const b = await body(); return hq.auth.login(b.credential, deviceName(b.name)); });
+  route('/api/auth/register/options', async ({ req, body }) => hq.auth.registerOptions((await body()).code, clientAddress(req)));
+  route('/api/auth/register', async ({ req, body }) => { const b = await body(); return hq.auth.register(b.credential, deviceName(b.name), clientAddress(req)); });
+  route('/api/auth/pair', async ({ req, body }) => { const b = await body(); return hq.auth.pair(b.code, deviceName(b.name), clientAddress(req)); });
   return r;
 }
 
@@ -226,15 +263,28 @@ export interface ApiServer { server: Server; wss: WebSocketServer; port: number;
 
 export async function startApi(hq: Hq, token: string, host: string, port: number): Promise<ApiServer> {
   const routes = buildRoutes(hq);
+  const authRoutes = buildAuthRoutes(hq);
   const json = (res: ServerResponse, status: number, v: unknown) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
     res.end(JSON.stringify(v));
   };
+  const who = (given: string | null | undefined): Caller | null =>
+    tokenOk(given, token) ? { kind: 'admin' } : hq.auth.deviceFor(given);
   // Bearer header for HTTP. `?token=` only on the WS upgrade (browsers can't set headers there), so the
   // token doesn't end up in proxy logs for ordinary requests.
-  const authed = (req: IncomingMessage, url: URL, allowQuery = false) => {
+  const caller = (req: IncomingMessage, url: URL, allowQuery = false): Caller | null => {
     const h = req.headers.authorization;
-    return tokenOk(h?.startsWith('Bearer ') ? h.slice(7) : (allowQuery ? url.searchParams.get('token') : null), token);
+    return who(h?.startsWith('Bearer ') ? h.slice(7) : (allowQuery ? url.searchParams.get('token') : null));
+  };
+  const dispatch = async (table: [string, RegExp, Handler][], req: IncomingMessage, res: ServerResponse, url: URL, c: Caller | null) => {
+    for (const [m, re, h] of table) {
+      if (m !== req.method) continue;
+      const match = re.exec(url.pathname);
+      if (!match) continue;
+      json(res, 200, await h({ req, url, params: match.slice(1), body: () => readBody(req), caller: c! }));
+      return true;
+    }
+    return false;
   };
 
   const server = createServer(async (req, res) => {
@@ -244,33 +294,45 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
         const h = health(hq);
         return json(res, h.ok ? 200 : 503, h);
       }
-      if (!authed(req, url)) return json(res, 401, { error: 'unauthorized' });
-      if (await hq.ingest.handle(req, res, () => readBody(req))) return;
-      for (const [m, re, h] of routes) {
-        if (m !== req.method) continue;
-        const match = re.exec(url.pathname);
-        if (!match) continue;
-        const out = await h({ req, url, params: match.slice(1), body: () => readBody(req) });
-        return json(res, 200, out);
+      if (url.pathname.startsWith('/api/auth/')) {
+        if (await dispatch(authRoutes, req, res, url, null)) return;
+        return json(res, 404, { error: 'not found' });
       }
+      const c = caller(req, url);
+      if (!c) return json(res, 401, { error: 'unauthorized' });
+      if (await hq.ingest.handle(req, res, () => readBody(req))) return;
+      if (await dispatch(routes, req, res, url, c)) return;
       return json(res, 404, { error: 'not found' });
     } catch (e) {
-      const status = e instanceof HttpError ? e.status : /required|invalid|must be/.test((e as Error).message) ? 400 : 500;
+      const status = e instanceof HttpError || e instanceof AuthError ? e.status : /required|invalid|must be/.test((e as Error).message) ? 400 : 500;
       return json(res, status, { error: (e as Error).message });
     }
   });
 
   // WS /ws?after=<seq>&identity=<id>: replays events after seq, then streams live (B.8 "resume from the last seq").
   const wss = new WebSocketServer({ noServer: true });
+  // A revoked device loses its live stream at once, not on its next request.
+  const deviceSockets = new Map<string, Set<WebSocket>>();
+  const offRevoke = hq.auth.onRevoke((ids) => {
+    for (const id of ids) for (const ws of deviceSockets.get(id) ?? []) ws.close(4401, 'device revoked');
+  });
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://hq');
     const protoToken = String(req.headers['sec-websocket-protocol'] ?? '').split(',').map((s) => s.trim()).find((p) => p.startsWith('token.'))?.slice(6);
-    if (url.pathname !== '/ws' || !(authed(req, url, true) || tokenOk(protoToken, token))) {
+    const c = url.pathname === '/ws' ? (caller(req, url, true) ?? who(protoToken)) : null;
+    if (!c) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;
     }
-    wss.handleUpgrade(req, socket, head, (ws) => streamEvents(hq, ws, url));
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      if (c.kind === 'device') {
+        const set = deviceSockets.get(c.id) ?? new Set<WebSocket>();
+        deviceSockets.set(c.id, set.add(ws));
+        ws.on('close', () => { set.delete(ws); if (!set.size) deviceSockets.delete(c.id); });
+      }
+      streamEvents(hq, ws, url);
+    });
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -281,6 +343,7 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
   return {
     server, wss, port: typeof addr === 'object' && addr ? addr.port : port,
     close: () => new Promise((resolve) => {
+      offRevoke();
       for (const c of wss.clients) c.terminate();
       wss.close();
       server.closeAllConnections();

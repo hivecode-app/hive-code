@@ -70,6 +70,9 @@ dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
     // WebSocket + REST to hq from the service and receivers, without the Flutter engine.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Passkeys (#23): Credential Manager, with Google Password Manager on Android 13 and older.
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     testImplementation("junit:junit:4.13.2")
     // android.jar ships org.json as stubs; the real one lets parsers run in JVM unit tests.
     testImplementation("org.json:json:20250517")

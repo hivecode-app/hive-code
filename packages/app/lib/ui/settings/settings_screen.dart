@@ -1,14 +1,16 @@
-// "עוד" → settings (APP-SPEC §4.8): server, focus, appearance, version. Stripe-style pairs.
+// "עוד" → settings (APP-SPEC §4.8): data source, devices, focus, appearance, version. Stripe-style pairs.
+// Signing in is a passkey or a pairing code (#23); hq's own token is never entered on a device.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/backend_select.dart';
-import '../../data/hq_backend.dart';
+import '../../data/auth_client.dart';
 import '../../data/store.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import '../org/org_screen.dart';
+import 'devices_screen.dart';
 import '../../native/native_bridge.dart';
 import '../../native/native_glue.dart';
 
@@ -21,60 +23,39 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final url = TextEditingController();
-  final token = TextEditingController();
   String? note;
   bool busy = false;
 
-  @override
-  void initState() {
-    super.initState();
-    SharedPreferences.getInstance().then((p) {
-      if (!mounted) return;
-      url.text = p.getString(kHqUrl) ?? gatewayUrl();
-      token.text = p.getString(kHqToken) ?? '';
-      setState(() {});
-    });
-  }
-
-  @override
-  void dispose() {
-    url.dispose();
-    token.dispose();
-    super.dispose();
-  }
-
-  Future<void> _connect() async {
-    setState(() {
-      busy = true;
-      note = null;
-    });
-    final probe = HqBackend(baseUrl: url.text.trim(), token: token.text.trim());
+  /// Leaving the real company on this device (demo, or back to sign-in) revokes its token in hq
+  /// first, so no live token is left behind in the devices list (#23).
+  Future<void> _leave({required bool demo}) async {
+    setState(() => busy = true);
     try {
-      await probe.start();
-      final ok = probe.data != null;
-      if (ok) {
-        final p = await SharedPreferences.getInstance();
-        await p.setString(kHqUrl, url.text.trim());
-        await p.setString(kHqToken, token.text.trim());
-        await p.remove(kDemo);
-        // The Android link service and the notification actions call hq without the app open.
-        await kGlue?.syncConfig();
+      final s = await savedSession();
+      if (s != null) {
+        final c = AuthClient(s.baseUrl);
+        try {
+          final list = await c.devices(s.token);
+          final me = list.devices.where((d) => d.current).firstOrNull;
+          if (me != null) await c.revokeDevice(s.token, me.id);
+        } on AuthFailure {
+          // Offline or already revoked: the token is dropped here anyway; the devices screen can revoke it later.
+        } finally {
+          c.close();
+        }
       }
-      setState(() => note = ok ? 'מחובר. האפליקציה תעבור לשרת בפתיחה הבאה.' : 'השרת לא ענה. כדאי לבדוק את הכתובת ואת הטוקן.');
+      await clearSession();
+      final p = await SharedPreferences.getInstance();
+      if (demo) {
+        await p.setBool(kDemo, true);
+      } else {
+        await p.remove(kDemo);
+      }
+      await kGlue?.syncConfig();
+      if (mounted) setState(() => note = demo ? 'בפתיחה הבאה האפליקציה תציג את ההדגמה.' : 'בפתיחה הבאה האפליקציה תבקש כניסה.');
     } finally {
-      probe.dispose();
       if (mounted) setState(() => busy = false);
     }
-  }
-
-  Future<void> _demo() async {
-    final p = await SharedPreferences.getInstance();
-    await p.remove(kHqUrl);
-    await p.remove(kHqToken);
-    await p.setBool(kDemo, true);
-    await kGlue?.syncConfig();
-    setState(() => note = 'בפתיחה הבאה האפליקציה תציג את ההדגמה.');
   }
 
   @override
@@ -82,14 +63,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final p = context.p;
     final store = StoreScope.of(context);
     final d = store.data;
-    InputDecoration deco(String hint) => InputDecoration(
-          isDense: true,
-          hintText: hint,
-          hintStyle: T.row2.copyWith(color: p.text3),
-          filled: true,
-          fillColor: p.surface2,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-        );
     Widget pair(String k, Widget v) => Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
           child: Row(children: [Text(k, style: T.row2.copyWith(color: p.text2)), const SizedBox(width: 12), Expanded(child: Align(alignment: AlignmentDirectional.centerEnd, child: v))]),
@@ -107,30 +80,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Text('כתובת', style: T.small.copyWith(color: p.text2)),
-                    const SizedBox(height: 4),
-                    TextField(controller: url, textDirection: TextDirection.ltr, style: T.mono(13).copyWith(color: p.text), decoration: deco('https://…/hq')),
-                    const SizedBox(height: 10),
-                    Text('טוקן', style: T.small.copyWith(color: p.text2)),
-                    const SizedBox(height: 4),
-                    TextField(controller: token, obscureText: true, textDirection: TextDirection.ltr, style: T.mono(13).copyWith(color: p.text), decoration: deco('api-token של hq')),
-                    const SizedBox(height: 12),
                     Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                      Btn(busy ? 'בודק…' : 'חיבור', kind: BtnKind.primary, onTap: busy ? null : _connect),
-                      Btn('הדגמה', onTap: _demo),
-                      Btn('חברה אמיתית', onTap: () async {
-                        final p = await SharedPreferences.getInstance();
-                        await p.remove(kDemo);
-                        await p.remove(kHqUrl);
-                        await p.remove(kHqToken);
-                        await kGlue?.syncConfig();
-                        setState(() => note = 'בפתיחה הבאה האפליקציה תתחבר לחברה.');
-                      }),
+                      Btn('הדגמה', onTap: busy ? null : () => _leave(demo: true)),
+                      Btn('חברה אמיתית', onTap: busy ? null : () => _leave(demo: false)),
                     ]),
                     if (note != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(note!, style: T.secondary.copyWith(color: p.text))),
                   ]),
                 ),
               ]),
+              const Section('מכשירים'),
+              MoreRow(
+                icon: 'devices',
+                bold: 'מכשירים ו-passkeys',
+                rest: 'ביטול וצימוד',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DevicesScreen())),
+              ),
               const Section('התראות'),
               ListBlock(inset: 16, children: [
                 pair('פוקוס', Toggle(on: d?.focus ?? false, label: 'פוקוס', onTap: store.toggleFocus)),

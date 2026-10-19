@@ -80,4 +80,8 @@ const Map<String, IconData> kIcons = {
   'tune': Symbols.tune_rounded,
   'text_fields': Symbols.text_fields_rounded,
   'help': Symbols.help_rounded,
+  'fingerprint': Symbols.fingerprint_rounded,
+  'passkey': Symbols.passkey_rounded,
+  'link': Symbols.link_rounded,
+  'logout': Symbols.logout_rounded,
 };

@@ -1,0 +1,36 @@
+# The app (packages/app) after #23. Replaces the app.hq block in /etc/caddy/Caddyfile, then
+# `sudo systemctl reload caddy`. <path> is $STATE/app-path (tool/deploy.sh); <dictate-token> is
+# DICTATE_TOKEN of dictate-server.service.
+# hq checks each device's own token (passkey or pairing code, packages/hq/src/auth.ts), so Caddy no
+# longer adds hq's token: that token stays on the server.
+app.hq.example.com {
+	encode zstd gzip
+	# Android passkeys: proves the APK (release cert) belongs to this host (Passkeys.kt).
+	handle /.well-known/assetlinks.json {
+		root * /var/www/hq-app
+		file_server
+	}
+	handle_path /<path>/hq/* {
+		reverse_proxy 127.0.0.1:7420 {
+			flush_interval -1
+		}
+	}
+	# Dictation (#27, app-dictate.caddy): Caddy adds dictate-server's token, not hq's.
+	handle_path /<path>/dictate/* {
+		request_body {
+			max_size 25MB
+		}
+		reverse_proxy 127.0.0.1:8790 {
+			header_up Authorization "Bearer <dictate-token>"
+		}
+	}
+	handle /<path>/* {
+		root * /var/www/hq-app
+		header Cache-Control "no-cache"
+		header X-Robots-Tag "noindex, nofollow"
+		file_server
+	}
+	handle {
+		respond "not found" 404
+	}
+}
