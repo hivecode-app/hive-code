@@ -230,6 +230,35 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE messages ADD COLUMN text_ref TEXT;
   `,
+  // 3 — night mode (B.16): one row per night, which tasks were in its queue, and every interval a slot sat empty
+  // while the queue was not (with the reason). The morning summary is computed from these and stored on the night.
+  `
+  CREATE TABLE nights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    until_at INTEGER,                        -- the hour he set; NULL = until his first message in the morning
+    scope TEXT,                              -- JSON array of projects ("רק לומו"), NULL = all active
+    note TEXT,                               -- the rest of what he wrote ("בלי פריסות"), passed to every night task
+    started_by TEXT,
+    end_reason TEXT,
+    summary TEXT
+  );
+  CREATE TABLE night_tasks (
+    night_id INTEGER NOT NULL,
+    task_id INTEGER NOT NULL,
+    first_seen_at INTEGER NOT NULL,
+    PRIMARY KEY (night_id, task_id)
+  );
+  CREATE TABLE night_empty (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    night_id INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    reason TEXT NOT NULL
+  );
+  CREATE INDEX night_empty_night ON night_empty(night_id);
+  `,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [

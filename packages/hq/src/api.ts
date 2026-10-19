@@ -6,6 +6,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Hq } from './hq.ts';
+import { OWNER } from '@company/shared';
 
 export function loadOrCreateToken(stateDir: string): string {
   if (process.env.HQ_TOKEN) return process.env.HQ_TOKEN;
@@ -174,6 +175,18 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     if (!t) throw new HttpError(404, `no task ${params[0]}`);
     return { task: t };
   });
+
+  // Night mode (B.16): the same as writing "לילה" / the first message in the morning, for the app.
+  route('GET', '/api/night', () => {
+    const last = hq.night.last();
+    return { night: hq.night.current() ?? null, last: last ? { ...last, summary: last.summary ? JSON.parse(last.summary) as unknown : null } : null };
+  });
+  route('POST', '/api/night/start', async ({ body }) => {
+    const b = await body();
+    return { night: await hq.night.start({ scope: Array.isArray(b.scope) ? b.scope.map(String) : null, note: str(b.note, 'note', false) ?? null,
+      until: typeof b.until === 'number' ? b.until : null, by: OWNER }) };
+  });
+  route('POST', '/api/night/end', () => ({ summary: hq.night.end('owner') ?? null }));
 
   route('GET', '/api/toggles', () => ({ toggles: hq.store.toggles() }));
   route('PUT', '/api/toggles/:key', async ({ params, body }) => {

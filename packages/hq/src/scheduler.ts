@@ -1,7 +1,7 @@
 // The scheduler is code, not an LLM (A.2(8), B.5, B.16). It:
 //  - fills every free work slot from the queue immediately, in B.16 order, with no quota-percentage gate;
 //  - escalates unanswered blocking asks to the manager (A.4: 10 min by day, immediately at night);
-//  - records every minute a slot was empty while the queue was not (B.16 measurement).
+//  - lets night.ts (B.16) scope the queue, add the night note and measure empty slots after every fill.
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import type { Mailbox } from './mailbox.ts';
@@ -49,6 +49,10 @@ const QUEUE_SQL = `
 
 export class Scheduler {
   memInfo: () => { totalMb: number; availableMb: number } = memInfoMb;
+  /** Night mode (night.ts) plugs in here: the scope filter, a note for every task prompt, and a look after each fill. */
+  scope: () => string[] | null = () => null;
+  promptNote: () => string | null = () => null;
+  afterFill: () => void = () => {};
 
   private store: Store;
   private cfg: HqConfig;
@@ -105,8 +109,8 @@ export class Scheduler {
   }
 
   queue(): (TaskRow & { bucket: number })[] {
-    const scopeRaw = this.store.toggle('night') ? this.store.getMeta('night_scope') : undefined;
-    return this.store.db.prepare(QUEUE_SQL).all({ scope: scopeRaw ?? null }) as (TaskRow & { bucket: number })[];
+    const scope = this.scope();
+    return this.store.db.prepare(QUEUE_SQL).all({ scope: scope ? JSON.stringify(scope) : null }) as (TaskRow & { bucket: number })[];
   }
 
   slots() {
@@ -118,6 +122,13 @@ export class Scheduler {
   private filling: Promise<number[]> | null = null;
   private refill = false;
   private lastStartAt = new Map<number, number>();
+  /** The last launch error, for the empty-slot reason (B.16). Cleared by the next successful start. */
+  lastStartError: string | null = null;
+
+  /** A task that just started (and crashed or failed to launch) waits taskRetryMs before the next try. */
+  inBackoff(id: number): boolean {
+    return this.store.now() - (this.lastStartAt.get(id) ?? -Infinity) < this.cfg.timers.taskRetryMs;
+  }
 
   /** Fill free slots from the queue. Concurrent calls coalesce into one more pass. Returns task ids started. */
   async fill(): Promise<number[]> {
@@ -132,17 +143,20 @@ export class Scheduler {
         for (const t of this.queue()) {
           if (free <= 0) break;
           // Backoff: a task that just started (and crashed or failed to launch) waits before the next try.
-          if (this.store.now() - (this.lastStartAt.get(t.id) ?? 0) < this.cfg.timers.taskRetryMs) continue;
+          if (this.inBackoff(t.id)) continue;
           this.lastStartAt.set(t.id, this.store.now());
           try {
             await this.start(t);
             started.push(t.id);
             free--;
+            this.lastStartError = null;
           } catch (e) {
+            this.lastStartError = (e as Error).message;
             this.store.emit('scheduler.start_failed', t.identity, { task: t.id, error: (e as Error).message });
           }
         }
       } while (this.refill && ++passes < 3);
+      try { this.afterFill(); } catch (e) { this.store.emit('loop.error', null, { loop: 'scheduler.afterFill', error: (e as Error).message }); }
       return started;
     })();
     // Cleared on settle, never inside the IIFE: a pass with no awaits would finish before the assignment.
@@ -169,7 +183,7 @@ export class Scheduler {
     this.store.emit('task.state', identity, { id: t.id, state: 'running', shift: row.id });
     // One prompt per run of the shift: a resumed run gets the task again (the old prompt id would be a no-op).
     this.mailbox.tell({ msg_id: `task-${t.id}-${row.id}-${row.started_at}`, from: openedBy ?? lead ?? 'hq', to: identity, priority: 'next',
-      body: [`משימה ${t.ref ?? `#${t.id}`}: ${t.title}`, t.body].filter(Boolean).join('\n\n') });
+      body: [`משימה ${t.ref ?? `#${t.id}`}: ${t.title}`, t.body, this.promptNote()].filter(Boolean).join('\n\n') });
   }
 
   private onTaskShiftEnded(taskId: number, reason: string): void {
@@ -231,9 +245,7 @@ export class Scheduler {
     this.escalateAsks();
     await this.ensureResidents();
     await this.fill();
-    const { free } = this.slots();
-    const waiting = this.store.toggle('scheduler') ? this.queue().length : 0;
-    if (free > 0 && waiting > 0) this.store.emit('metric.empty_slot', null, { free, waiting, reason: 'start_failed_or_blocked' });
+    // Empty-slot measurement (metric.empty_slot) is night.ts: per interval, with its reason.
     this.store.setMeta('last_sweep_at', String(now));
   }
 }

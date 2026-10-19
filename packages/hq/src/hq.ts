@@ -10,6 +10,7 @@ import { Inbox } from './inbox.ts';
 import { ShiftManager, TemplateLauncher, type Launcher, type ConnectionFactory } from './shifts.ts';
 import { Mailbox, noForeignInjector, type ForeignInjector } from './mailbox.ts';
 import { Scheduler } from './scheduler.ts';
+import { Night, type IssueSource } from './night.ts';
 import { Watchdog } from './watchdog.ts';
 import { ProbeRunner } from './probes.ts';
 import { Pusher, loadOrCreateVapid, telegramVia, type TelegramSend, type WebPushSend } from './push.ts';
@@ -25,6 +26,7 @@ export interface HqDeps {
   telegram?: TelegramSend;
   webPush?: WebPushSend;
   ticketer?: Ticketer;
+  issues?: IssueSource;
   now?: () => number;
 }
 
@@ -50,6 +52,7 @@ export class Hq {
   readonly shifts: ShiftManager;
   readonly mailbox: Mailbox;
   readonly scheduler: Scheduler;
+  readonly night: Night;
   readonly watchdog: Watchdog;
   readonly probes: ProbeRunner;
   readonly pusher: Pusher;
@@ -67,6 +70,7 @@ export class Hq {
     this.shifts = new ShiftManager(this.store, cfg, deps.launcher ?? lazyTemplateLauncher(cfg), deps.connect);
     this.mailbox = new Mailbox(this.store, cfg, this.shifts, this.inbox, deps.foreign ?? noForeignInjector);
     this.scheduler = new Scheduler(this.store, cfg, this.shifts, this.mailbox);
+    this.night = new Night(this.store, cfg, this.scheduler, this.mailbox, this.inbox, deps.issues);
     this.watchdog = new Watchdog(this.store, cfg, this.shifts, this.mailbox, this.inbox);
     this.probes = new ProbeRunner(this.store, cfg, this.mailbox);
     this.pusher = new Pusher(this.store, this.inbox, cfg, loadOrCreateVapid(cfg.stateDir),
@@ -123,7 +127,7 @@ export class Hq {
       this.every(5_000, 'spool', () => this.shifts.collectSpools());
       this.every(T.watchdogMs, 'watchdog', async () => { await this.watchdog.sweep(); await this.shifts.releaseEnded(); });
       this.every(T.livenessMs, 'liveness', () => this.shifts.pingAll());
-      this.every(T.schedulerMs, 'scheduler', () => this.scheduler.sweep());
+      this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); await this.night.sweep(); });
       this.every(5_000, 'probes', () => this.probes.tick());
       this.every(30_000, 'push', () => this.pusher.sweepUnacked());
       this.every(T.backupMs, 'backup', async () => {
