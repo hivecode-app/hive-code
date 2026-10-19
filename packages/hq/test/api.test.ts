@@ -64,7 +64,7 @@ test('API: org/board with derived status, tell, asks/answer, toggles, tasks, inb
     assert.equal(ask.json.ask.state, 'open');
     const board = await call('GET', '/api/board');
     assert.equal(board.json.identities.find((i: { id: string }) => i.id === 'eli').status, 'waiting_for_you');
-    assert.equal(board.json.identities.find((i: { id: string }) => i.id === 'eli').status_symbol, '⏸');
+    assert.equal(board.json.identities.find((i: { id: string }) => i.id === 'eli').status_symbol, 'pause_circle');
     const ans = await call('POST', '/api/asks/ask-api/answer', { answer: 'כן' });
     assert.equal(ans.json.ask.state, 'answered');
     assert.equal((await call('POST', '/api/asks/nope/answer', { answer: 'x' })).status, 404);

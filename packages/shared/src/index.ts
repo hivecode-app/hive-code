@@ -13,16 +13,18 @@ export type MessageKind = 'tell' | 'ask' | 'answer' | 'system' | 'probe_anomaly'
 
 /** Derived (never stored) status per A.3 — computed at read time from facts (B.11). */
 export type DerivedStatus =
-  | 'working'          // ▶
-  | 'waiting_for_you'  // ⏸ open ask/GO on the owner
-  | 'blocked'          // ⛔ on something else (named in `blocked_on`)
-  | 'stuck'            // ⚠ alive, not progressing
-  | 'restarting'       // ↻
-  | 'resting'          // 💤 answers when addressed
-  | 'done';            // ✓ (ephemeral task worker whose task closed)
+  | 'working'          // play_arrow
+  | 'waiting_for_you'  // pause_circle · open ask/GO on the owner
+  | 'blocked'          // block · on something else (named in `blocked_on`)
+  | 'stuck'            // warning · alive, not progressing
+  | 'restarting'       // autorenew
+  | 'resting'          // bedtime · answers when addressed
+  | 'done';            // check_circle (ephemeral task worker whose task closed)
 
+/** Material Symbols icon name per status (company.md, dir-0017): an icon from one set, never an emoji. */
 export const STATUS_SYMBOL: Record<DerivedStatus, string> = {
-  working: '▶', waiting_for_you: '⏸', blocked: '⛔', stuck: '⚠', restarting: '↻', resting: '💤', done: '✓',
+  working: 'play_arrow', waiting_for_you: 'pause_circle', blocked: 'block', stuck: 'warning',
+  restarting: 'autorenew', resting: 'bedtime', done: 'check_circle',
 };
 
 export type ShiftState = 'starting' | 'live' | 'ended' | 'dead';

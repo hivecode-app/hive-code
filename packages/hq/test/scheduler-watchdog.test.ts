@@ -128,11 +128,11 @@ test('watchdog rests an idle non-resident shift after 20 min; residents stay', a
     assert.equal(hq.shifts.get('yoav-1')!.state, 'live');
     const eli = hq.board().find((b) => b.id === 'eli')!;
     assert.equal(eli.status, 'resting');
-    assert.equal(eli.status_symbol, '💤');
+    assert.equal(eli.status_symbol, 'bedtime');
   } finally { await env.cleanup(); }
 });
 
-test('liveness (bet 4): claude not answering pings → ⚠ "לא עונה" on the board, then interrupt → fresh process', async () => {
+test('liveness (bet 4): claude not answering pings → warning "לא עונה" on the board, then interrupt → fresh process', async () => {
   const env = await makeEnv();
   try {
     const { hq, launcher, clock } = env;

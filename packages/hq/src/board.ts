@@ -27,13 +27,13 @@ export function deriveStatus(i: IdentityRow, s: ShiftRow | undefined, f: {
       return { status: 'blocked', blocked_on: `מכסה, חוזר ב-${new Date(s.rate_limited_until).toISOString().slice(11, 16)}` };
     }
     if (s.stuck_since) return { status: 'stuck', blocked_on: null };
-    // Unresponsive ≠ dead (bet 4): claude stopped answering control pings. Shown as ⚠ with the reason.
+    // Unresponsive ≠ dead (bet 4): claude stopped answering control pings. Shown as `warning` with the reason.
     if (s.state === 'live' && f.unresponsiveAfterMs && f.now - Math.max(s.last_ping_ok_at ?? 0, s.started_at) > f.unresponsiveAfterMs) {
       return { status: 'stuck', blocked_on: 'לא עונה' };
     }
     if (s.state === 'starting') return { status: f.hadEarlierShift ? 'restarting' : 'working', blocked_on: null };
     if (s.in_turn) return { status: 'working', blocked_on: null };
-    return { status: 'resting', blocked_on: null };   // live and idle: "💤 זמין"
+    return { status: 'resting', blocked_on: null };   // live and idle: bedtime, "זמין"
   }
   if (f.taskState === 'parked' || f.taskState === 'needs_decision') return { status: 'blocked', blocked_on: 'מחכה להחלטה' };
   return { status: 'resting', blocked_on: null };
@@ -50,7 +50,7 @@ export function board(store: Store, unresponsiveAfterMs?: number): BoardEntry[] 
   return listIdentities(store).map((i) => {
     const [latest, older] = shiftQ.all(i.id) as ShiftRow[];
     const live = latest && (latest.state === 'starting' || latest.state === 'live') ? latest : undefined;
-    // ↻ = coming back: an earlier shift exists, or this same shift (resume) ended before.
+    // restarting (autorenew) = coming back: an earlier shift exists, or this same shift (resume) ended before.
     const hadEarlierShift = !!live && (older != null || endedQ.get(i.id) != null);
     const openAsks = (askQ.get(i.id) as { n: number }).n;
     const task = taskQ.get(i.id) as BoardEntry['task'] | undefined;
