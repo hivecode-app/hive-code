@@ -16,6 +16,8 @@ export interface Account {
   name: string;
   /** CLAUDE_CODE_OAUTH_TOKEN; absent = the CLI's own login. */
   oauthToken?: string;
+  /** Managed CLAUDE_CONFIG_DIR; absent = the CLI's own ~/.claude login. */
+  configDir?: string;
 }
 
 export interface Engine {
@@ -84,7 +86,7 @@ export class ClaudeEngine implements Engine {
     writeFileSync(settingsFile, JSON.stringify({ autoMemoryEnabled: false }));
     const p = new ClaudeProcess({
       identity: '_usage', shift: '_usage', sessionId: newUuid(), resume: false, cwd: dir, settingsFile,
-      oauthToken: account.oauthToken, stateRoot: this.o.stateRoot, claudeBin: this.bin, model: 'haiku',
+      oauthToken: account.oauthToken, configDir: account.configDir, stateRoot: this.o.stateRoot, claudeBin: this.bin, model: 'haiku',
     });
     try {
       return toUsageReply(await p.usage());

@@ -223,8 +223,23 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     return { ok: true };
   });
 
-  route('GET', '/api/accounts', () => ({ accounts: hq.store.db.prepare(
-    `SELECT name, email, org, plan, expires_at, health, five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at, snapshot_at FROM accounts ORDER BY name`).all() }));
+  // B.7 accounts: the view, "כולם ל-X" (name null = automatic), guided login, identity check, quota now.
+  route('GET', '/api/accounts', () => hq.accounts.view());
+  route('PUT', '/api/accounts/pinned', async ({ body }) => {
+    const b = await body();
+    try { hq.accounts.setPinned(b.name == null || b.name === '' ? null : str(b.name, 'name')!); }
+    catch (e) { throw new HttpError(400, (e as Error).message); }
+    return hq.accounts.view();
+  });
+  route('POST', '/api/accounts/:name/login', async ({ params }) => {
+    try { return await hq.accounts.startLogin(decodeURIComponent(params[0]!)); }
+    catch (e) { throw new HttpError(400, (e as Error).message); }
+  });
+  route('POST', '/api/accounts/:name/verify', async ({ params }) => {
+    if (!hq.accounts.get(decodeURIComponent(params[0]!))) throw new HttpError(404, 'no such account');
+    return { account: await hq.accounts.verify(decodeURIComponent(params[0]!)) };
+  });
+  route('POST', '/api/accounts/refresh', async () => { await hq.accounts.refresh(); return hq.accounts.view(); });
 
   // Devices and passkeys (settings → devices). The caller's own device is marked `current`.
   route('GET', '/api/devices', ({ caller }) => {

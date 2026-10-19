@@ -71,7 +71,7 @@ export class Scheduler {
     shifts.on('ended', (row, reason) => {
       if (row.task_id != null) this.onTaskShiftEnded(row.task_id, reason);
       // A failed launch frees nothing: refilling on it would spin (start → fail → ended → fill → …).
-      if (row.kind === 'work' && reason !== 'launch_failed') this.store.bg(this.fill(), 'scheduler.fill');
+      if (row.kind === 'work' && reason !== 'launch_failed' && reason !== 'account_switch') this.store.bg(this.fill(), 'scheduler.fill');
     });
     // A resting task worker woken by a message is working on its task again.
     shifts.on('live', (row) => {
@@ -314,6 +314,8 @@ export class Scheduler {
   private onTaskShiftEnded(taskId: number, reason: string): void {
     const t = this.task(taskId);
     if (!t || t.state !== 'running') return;
+    // B.7: the account manager resumes this same shift on another account right away; the task keeps running.
+    if (reason === 'account_switch') return;
     // done: closed by the worker. rest: idle worker released its process, the task waits for its next
     // message (not re-queued, or it would restart forever). Anything else: back to the head of the queue.
     const next = reason === 'task_done' ? 'done' : reason === 'rest' ? 'resting' : t.worktree ? 'interrupted' : 'queued';

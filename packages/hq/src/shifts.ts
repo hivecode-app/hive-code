@@ -32,6 +32,9 @@ export interface LaunchSpec {
   unit: string;
   /** L0 + L1 (B.3), passed as --append-system-prompt-file. */
   systemPromptFile?: string;
+  /** Account the shift runs on (B.7); configDir absent = the CLI's own ~/.claude login. */
+  account?: string | null;
+  configDir?: string | null;
 }
 
 /** Starts a shift-host process. Default: systemd-run --user (B.5); tests inject a fake. */
@@ -49,7 +52,12 @@ export interface RequestOpts {
   forceNew?: boolean;        // new shift with handoff instead of resume
   taskId?: number | null;
   cwd?: string;
+  /** Run on this account (B.7 switch); default: the account manager's pick. */
+  account?: string;
 }
+
+/** The account a new run goes to (B.7). configDir null = the CLI's own ~/.claude login (dir-0016). */
+export interface AccountChoice { name: string; configDir: string | null }
 
 const NEW_SHIFT_REASONS = new Set(['rotation', 'task_done', 'role_change', 'machine_move', 'resume_rejected', 'stuck']);
 
@@ -77,6 +85,7 @@ export function hostArgs(spec: LaunchSpec, stateDir: string): Record<string, str
     identity: spec.identity, shift: spec.shiftId, 'shift-no': String(spec.shiftNo), 'session-id': spec.sessionId,
     cwd: spec.cwd, 'state-dir': stateDir, resume: spec.resume,
     ...(spec.systemPromptFile ? { 'append-system-prompt-file': spec.systemPromptFile } : {}),
+    ...(spec.configDir ? { 'config-dir': spec.configDir } : {}),
   };
 }
 
@@ -134,7 +143,7 @@ export class TemplateLauncher implements Launcher {
 export interface ShiftEvents {
   live: [ShiftRow];
   delta: [ShiftRow, EngineDelta];
-  frame: [ShiftRow, LoggedFrame];
+  frame: [ShiftRow, LoggedFrame, boolean]; // live=false: replayed after a reconnect
   ended: [ShiftRow, string];
   launchFailed: [string, string, Error]; // identity, shiftId, error
 }
@@ -249,9 +258,11 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       }
       this.writePrime(shiftId, identity);
       const systemPromptFile = this.writeSystem(shiftId, identity);
+      const acct = this.chooseAccount?.(identity, opts.account) ?? null;
+      this.patch(shiftId, { account: acct?.name ?? null });
       await this.launcher.launch({
         shiftId, identity, shiftNo, sessionId, resume, kind, socketPath, taskId, unit,
-        cwd: opts.cwd ?? this.taskCwd(taskId, identity) ?? this.cfg.defaultCwd, systemPromptFile,
+        cwd: opts.cwd ?? this.taskCwd(taskId, identity) ?? this.cfg.defaultCwd, systemPromptFile, account: acct?.name ?? null, configDir: acct?.configDir ?? null,
       });
     } catch (e) {
       this.markEnded(shiftId, 'dead', stage);
@@ -408,11 +419,11 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
         if (live) this.markEnded(id, 'ended', exitReason(f), row.started_at);
         else this.heldExits.set(id, [...(this.heldExits.get(id) ?? []), f]); // decided at `live`
       }
-      this.emit('frame', this.get(id)!, f);
+      this.emit('frame', this.get(id)!, f, live);
       return;
     }
     this.patch(id, fields);
-    this.emit('frame', this.get(id)!, f);
+    this.emit('frame', this.get(id)!, f, live);
   }
 
   /** `startedAt` guards against ending a newer run of the same shift id (a resume) by a stale caller. */
@@ -425,6 +436,18 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     this.conns.delete(id);
     this.store.emit('shift.state', row.identity, { shift: id, state, reason });
     this.emit('ended', this.get(id)!, reason);
+  }
+
+  /** Stop a run and start the next one under a single lock (B.7 account switch: same session, other account). */
+  relaunch(id: string, reason: string, startedAt: number, opts: RequestOpts): Promise<ShiftRow | null> {
+    const row = this.get(id);
+    if (!row) return Promise.resolve(null);
+    return this.locked(row.identity, async () => {
+      const cur = this.get(id);
+      if (!cur || cur.state !== 'live' || cur.started_at !== startedAt) return null;
+      await this.stopUnlocked(id, reason, startedAt);
+      return this.requestUnlocked(row.identity, opts);
+    });
   }
 
   stop(id: string, reason: string, startedAt?: number): Promise<void> {
@@ -535,6 +558,9 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     return writeSystemPrompt(shiftDir(this.paths, shiftId), buildSystemPrompt(this.cfg.companyDir, row ?? unknownIdentity(identity), this.cfg.managerId,
       row?.reports_to ? getIdentity(this.store, row.reports_to) : undefined));
   }
+
+  /** B.7: which account a run goes to (set by hq's AccountManager); null = the CLI's own login. */
+  chooseAccount: ((identity: string, want?: string) => AccountChoice | null) | null = null;
 
   /** Memory lookup for prime.json (set by hq: ingest recall over memory/). */
   primeRecall: ((identity: string, query: string) => { top?: { ref: string; body: string }; others: string[] }) | null = null;

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../data/backend.dart';
 import '../../data/backend_select.dart';
 import '../../data/auth_client.dart';
 import '../../data/store.dart';
@@ -88,6 +89,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ]),
                 ),
               ]),
+              _AccountSwitch(backend: store.backend),
               const Section('מכשירים'),
               MoreRow(
                 icon: 'devices',
@@ -130,5 +132,88 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ]),
       ),
     );
+  }
+}
+
+/// B.7 "החלפה בלחיצה": which account the company runs on. Shown only when the backend has accounts.
+class _AccountSwitch extends StatefulWidget {
+  const _AccountSwitch({required this.backend});
+  final Backend backend;
+  @override
+  State<_AccountSwitch> createState() => _AccountSwitchState();
+}
+
+class _AccountSwitchState extends State<_AccountSwitch> {
+  AccountsView? view;
+  String? note;
+  bool busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final v = await widget.backend.accounts();
+    if (mounted) setState(() => view = v);
+  }
+
+  Future<void> _pin(String? name) async {
+    setState(() {
+      busy = true;
+      note = null;
+    });
+    final r = await widget.backend.pinAccount(name);
+    await _load();
+    if (mounted) {
+      setState(() {
+        busy = false;
+        note = r.ok ? (name == null ? 'החברה בוחרת לבד לפי המקום שנשאר.' : 'משמרות חדשות הולכות לחשבון הזה, והחיות עוברות בסוף התור הנוכחי.') : r.error;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = view;
+    if (v == null) return const SizedBox.shrink();
+    final p = context.p;
+    String state(AccountInfo a) {
+      if (!a.usable) return a.note ?? 'לא מחובר';
+      if (a.blocked) return 'חסום: מכסה';
+      final room = a.room == null ? '' : ' · ${a.room!.round()}% פנוי';
+      return '${a.name == v.active ? 'בשימוש' : 'זמין'}$room';
+    }
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const Section('חשבון'),
+      ListBlock(inset: 16, children: [
+        for (final a in v.accounts)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(a.label, style: T.row2.copyWith(color: p.text)),
+                  Text(state(a), style: T.small.copyWith(color: p.text2)),
+                ]),
+              ),
+              if (a.usable)
+                v.pinned == a.name
+                    ? Text('כולם כאן', style: T.small.copyWith(color: p.text2))
+                    : Btn('העבר לכאן', onTap: busy ? null : () => _pin(a.name)),
+            ]),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 11),
+          child: Row(children: [
+            Expanded(child: Text(v.pinned == null ? 'אוטומטי: לחשבון עם הכי הרבה מקום, ומעבר לבד כשחשבון נגמר.' : 'נעוץ ידנית.', style: T.small.copyWith(color: p.text2))),
+            if (v.pinned != null) Btn('אוטומטי', onTap: busy ? null : () => _pin(null)),
+          ]),
+        ),
+        if (note != null) Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 11), child: Text(note!, style: T.secondary.copyWith(color: p.text))),
+      ]),
+    ]);
   }
 }

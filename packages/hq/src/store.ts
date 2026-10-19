@@ -292,6 +292,16 @@ const MIGRATIONS: string[] = [
     used_by TEXT
   );
   `,
+  // 5 — accounts manager (B.7, issue #25): a managed config dir per extra account, identity check, block window
+  `
+  ALTER TABLE accounts ADD COLUMN label TEXT NOT NULL DEFAULT '';
+  ALTER TABLE accounts ADD COLUMN expect TEXT NOT NULL DEFAULT '';   -- the email (or its local part) he asked to connect
+  ALTER TABLE accounts ADD COLUMN config_dir TEXT;                    -- NULL = the CLI's own ~/.claude login (dir-0016)
+  ALTER TABLE accounts ADD COLUMN account_uuid TEXT;                  -- from /api/oauth/profile: two rows never share one
+  ALTER TABLE accounts ADD COLUMN verified_at INTEGER;
+  ALTER TABLE accounts ADD COLUMN blocked_until INTEGER;              -- rate limit rejected until (ms)
+  ALTER TABLE accounts ADD COLUMN note TEXT;                          -- last verdict, in Hebrew, for the app
+  `,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [

@@ -31,6 +31,7 @@ const OPTIONS = {
     'state-dir': { type: 'string' },
     'claude-bin': { type: 'string' },
     'oauth-token-file': { type: 'string' },
+    'config-dir': { type: 'string' },           // managed CLAUDE_CONFIG_DIR of the account hq picked (B.7)
     'company-repo': { type: 'string' },
     'linger-ms': { type: 'string' },
     'args-file': { type: 'string' },            // JSON {flag: value} written by hq (template unit)
@@ -101,7 +102,7 @@ const spec: ShiftSpec = {
   identity, shift, sessionId, resume: v.resume === true, cwd, stateRoot,
   model: v.model, effort: v.effort,
   appendSystemPromptFile: v['append-system-prompt-file'],
-  mcpConfigFile, settingsFile, oauthToken,
+  mcpConfigFile, settingsFile, oauthToken, configDir: v['config-dir'],
   claudeBin: v['claude-bin'],
   env: { COMPANY_REPO: v['company-repo'] ?? process.env.COMPANY_REPO ?? repoRoot },
 };

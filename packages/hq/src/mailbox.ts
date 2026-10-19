@@ -59,6 +59,9 @@ export class Mailbox {
     shifts.on('ended', (row) => this.requeueUndelivered(row));
   }
 
+  /** hq's own asks (account login): the answer goes straight here, in process: never the store, never the WS. */
+  onHqAnswer: ((askId: string, answer: string) => void) | null = null;
+
   label(id: string): string {
     if (id === OWNER) return 'רן';
     if (id === 'hq') return 'hq';
@@ -379,11 +382,15 @@ export class Mailbox {
     if (!a) throw new Error(`no ask ${id}`);
     if (a.state === 'answered' || a.state === 'cancelled') return a;
     if (by === 'manager' && a.state !== 'escalated') throw new Error('manager may answer only escalated asks');
+    // hq's own asks (account login) carry a one-time code: it is handed over live only (never in asks,
+    // events or backups), and hq has no mailbox to deliver an answer to.
+    const fromHq = a.from_identity === 'hq';
     this.store.db.prepare(`UPDATE asks SET state = 'answered', answer = ?, answered_by = ?, answered_at = ? WHERE id = ?`)
-      .run(answer, by, this.store.now(), id);
+      .run(fromHq ? '(התקבל)' : answer, by, this.store.now(), id);
     this.inbox.resolveByRef('ask', id);
+    if (fromHq) this.onHqAnswer?.(id, answer);
     const from = by === 'owner' ? OWNER : this.cfg.managerId;
-    this.tell({ msg_id: `${id}-answer`, from, to: a.from_identity, kind: 'answer', ref: id, urgency: a.urgency, priority: 'now',
+    if (!fromHq) this.tell({ msg_id: `${id}-answer`, from, to: a.from_identity, kind: 'answer', ref: id, urgency: a.urgency, priority: 'now',
       body: by === 'owner' ? `תשובה לשאלה ${id}: ${answer}` : `יואב החליט במקום רן (${id}): ${answer}${why ? `, כי ${why}` : ''}` });
     if (by === 'manager') {
       // "החלטתי במקומך: X, כי Y" — informational, never pushed.

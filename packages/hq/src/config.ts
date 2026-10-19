@@ -33,6 +33,7 @@ export interface HqConfig {
     livenessMs: number;          // bet 4: claude ping (get_context_usage) interval; unresponsive after 3 misses
     unresponsiveActMs: number;   // unresponsive this long → interrupt, then a fresh process (resume)
     taskRetryMs: number;         // a task whose shift just started is not restarted again within this window
+    accountsMs: number;          // B.7: quota read per account (get_usage), 10 min
   };
   capacity: {
     reserveMb: number;           // B.5: 4GB reserve
@@ -52,6 +53,19 @@ export interface HqConfig {
     appUrl: string | null;
     pairCodeMs: number;
   };
+  /** B.7: the accounts the company runs on. managed=false is the CLI's own ~/.claude login, never touched
+   *  (dir-0016); managed=true gets its own config dir under state/accounts/<name>. */
+  accounts: AccountDef[];
+  /** The owner's global Claude dir: read-only for us, source of the shared projects/sessions symlinks. */
+  claudeHome: string;
+}
+
+export interface AccountDef {
+  name: string;
+  label: string;
+  /** Email he asked to connect, or just its local part (verified after every login). */
+  expect: string;
+  managed: boolean;
 }
 
 export function defaultStateDir(): string {
@@ -87,6 +101,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       livenessMs: 5_000,
       unresponsiveActMs: 2 * 60_000,
       taskRetryMs: 60_000,
+      accountsMs: 10 * 60_000,
     },
     capacity: { reserveMb: 4096, rssIdleMb: 450, rssWorkMb: 2500, residents: ['yoav'], maxSlots: 8 },
     backupsKeep: 48,
@@ -98,6 +113,11 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       appUrl: defaultAppUrl(stateDir),
       pairCodeMs: 10 * 60_000,
     },
+    accounts: [
+      { name: 'owner-account', label: 'החשבון הראשי', expect: 'owner-account@example.com', managed: false },
+      { name: 'hive-owner', label: 'hive-owner', expect: 'hive-owner', managed: true },
+    ],
+    claudeHome: join(homedir(), '.claude'),
   };
   const file = join(stateDir, 'hq.config.json');
   let fromFile: Partial<HqConfig> = {};

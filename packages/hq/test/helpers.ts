@@ -144,6 +144,8 @@ export class FakeHost {
           // Real host: answers right away, then stops claude and exits a little later.
           write({ t: 'reply', re: f.id, ok: true, data: { stopping: true } });
           setTimeout(() => {
+            // Already killed (systemd stop waits until the process is gone): a dead host writes nothing more.
+            if (this.closed) return;
             this.push({ t: 'lifecycle', ts: this.iso(), state: 'exited', exitCode: 0, note: f.reason } as Omit<LoggedFrame, 'seq'>);
             void this.close();
           }, 20);
@@ -260,7 +262,8 @@ export async function makeEnv(opts: { cfg?: Partial<HqConfig>; deps?: HqDeps; pr
   mkdirSync(join(company, 'projects'), { recursive: true });
   writeFileSync(join(company, 'org.yaml'), ORG_YAML);
   for (const [p, md] of Object.entries(opts.projects ?? {})) writeFileSync(join(company, 'projects', `${p}.md`), md);
-  const cfg = loadConfig({ stateDir: join(dir, 'state'), companyDir: company, port: 0, ...opts.cfg });
+  // claudeHome: never the real ~/.claude (its token would go to /api/oauth/profile from a test).
+  const cfg = loadConfig({ stateDir: join(dir, 'state'), companyDir: company, port: 0, claudeHome: join(dir, 'claude-home'), ...opts.cfg });
   const clock = new Clock();
   const launcher = new FakeLauncher();
   launcher.now = clock.now;

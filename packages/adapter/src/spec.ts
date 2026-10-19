@@ -20,6 +20,8 @@ export interface ShiftSpec {
   settingsFile: string;
   /** Account token (B.7); absent = the CLI's own login. */
   oauthToken?: string;
+  /** Managed config dir of a second account (B.7, issue #25); absent = the CLI's own ~/.claude login. */
+  configDir?: string;
   /** Extra env for the child (COMPANY_* is filled in by the adapter). */
   env?: Record<string, string>;
   stateRoot: string;
@@ -113,6 +115,7 @@ export function buildEnv(spec: ShiftSpec, base: NodeJS.ProcessEnv = process.env)
     COMPANY_STATE_DIR: spec.stateRoot,
   }, spec.env ?? {});
   if (spec.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = spec.oauthToken;
+  if (spec.configDir) env.CLAUDE_CONFIG_DIR = spec.configDir;
   return env;
 }
 

@@ -409,6 +409,33 @@ class HqBackend extends Backend {
   @override
   Future<CommandResult> handoffDone(WaitItem item) => _send('POST', '/api/inbox/${item.inboxId}/done', {'note': 'done'}).then(_after);
 
+  @override
+  Future<AccountsView?> accounts() async {
+    try {
+      final j = await _get('/api/accounts') as Map<String, dynamic>;
+      return AccountsView(
+        pinned: j['pinned'] as String?,
+        active: j['active'] as String?,
+        accounts: [
+          for (final a in (j['accounts'] as List).cast<Map<String, dynamic>>())
+            AccountInfo(
+              name: a['name'] as String,
+              label: (a['label'] as String?) ?? a['name'] as String,
+              usable: a['usable'] == true,
+              blocked: a['blocked_until'] != null,
+              room: a['room'] as num?,
+              note: a['note'] as String?,
+            ),
+        ],
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<CommandResult> pinAccount(String? name) => _send('PUT', '/api/accounts/pinned', {'name': name});
+
   CommandResult _after(CommandResult r) {
     if (r.ok) _refreshSoon();
     return r;

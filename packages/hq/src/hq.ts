@@ -19,6 +19,7 @@ import { board } from './board.ts';
 import { startApi, loadOrCreateToken, health, type ApiServer } from './api.ts';
 import { Auth } from './auth.ts';
 import { Ingest, startIngestSocket, type Ticketer } from './ingest.ts';
+import { AccountManager, type AccountDeps } from './accounts.ts';
 
 export interface HqDeps {
   launcher?: Launcher;
@@ -28,6 +29,7 @@ export interface HqDeps {
   webPush?: WebPushSend;
   ticketer?: Ticketer;
   issues?: IssueSource;
+  accounts?: AccountDeps;
   now?: () => number;
 }
 
@@ -59,6 +61,7 @@ export class Hq {
   readonly probes: ProbeRunner;
   readonly pusher: Pusher;
   readonly ingest: Ingest;
+  readonly accounts: AccountManager;
   private ingestServer: Server | null = null;
   private timers: NodeJS.Timeout[] = [];
   private api: ApiServer | null = null;
@@ -74,6 +77,7 @@ export class Hq {
     this.mailbox = new Mailbox(this.store, cfg, this.shifts, this.inbox, deps.foreign ?? noForeignInjector);
     this.scheduler = new Scheduler(this.store, cfg, this.shifts, this.mailbox);
     this.night = new Night(this.store, cfg, this.scheduler, this.mailbox, this.inbox, deps.issues);
+    this.accounts = new AccountManager(this.store, cfg, this.shifts, this.mailbox, this.inbox, deps.accounts);
     this.watchdog = new Watchdog(this.store, cfg, this.shifts, this.mailbox, this.inbox);
     this.probes = new ProbeRunner(this.store, cfg, this.mailbox);
     this.pusher = new Pusher(this.store, this.inbox, cfg, loadOrCreateVapid(cfg.stateDir),
@@ -120,6 +124,9 @@ export class Hq {
 
   async start(opts: { listen?: boolean; timers?: boolean } = {}): Promise<void> {
     this.reloadContract();
+    this.accounts.sync();
+    // The identity check runs once at start for every account (no inference; profile + cached oauthAccount).
+    for (const a of this.accounts.rows()) this.store.bg(this.accounts.verify(a.name), 'accounts.verify');
     await this.shifts.reattachAll();
     await this.shifts.restoreLost(this.watchdog.procCheck);
     this.store.bg(this.ingest.drainPendingTickets(), 'open_ticket.drain');
@@ -133,12 +140,20 @@ export class Hq {
       this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); await this.night.sweep(); });
       this.every(5_000, 'probes', () => this.probes.tick());
       this.every(30_000, 'push', () => this.pusher.sweepUnacked());
+      // B.7: quota per account every 10 minutes (get_usage, no inference) + the identity check again.
+      this.every(T.accountsMs, 'accounts', async () => {
+        if (!this.store.toggle('yoav/accounts')) return;
+        for (const a of this.accounts.rows()) if (a.config_dir && a.health !== 'needs_login') await this.accounts.verify(a.name);
+        await this.accounts.refresh();
+      });
       this.every(T.backupMs, 'backup', async () => {
         if (!this.store.toggle('backup')) return;
         await backupOnce(this.store, join(this.cfg.stateDir, 'backups'), this.cfg.backupsKeep);
         this.probes.prune();
         this.store.pruneEvents();
       });
+      // First quota read right away, so placement doesn't wait 10 minutes for numbers.
+      if (this.store.toggle('yoav/accounts')) this.store.bg(this.accounts.refresh(), 'accounts.refresh');
       await this.scheduler.sweep();
     }
     if (opts.listen !== false) {
@@ -168,6 +183,7 @@ export class Hq {
   async stop(): Promise<void> {
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
+    this.accounts.stop();
     await this.api?.close();
     await new Promise<void>((r) => (this.healthServer ? this.healthServer.close(() => r()) : r()));
     if (this.ingestServer) { this.ingestServer.closeAllConnections(); await new Promise<void>((r) => this.ingestServer!.close(() => r())); }

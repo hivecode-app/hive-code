@@ -66,6 +66,28 @@ class CommandResult {
   final String? error;
 }
 
+/// One Claude account as the switch button in settings shows it (B.7).
+class AccountInfo {
+  const AccountInfo({required this.name, required this.label, required this.usable, this.room, this.note, this.blocked = false});
+  final String name;
+  final String label;
+  final bool usable;
+  final bool blocked;
+
+  /// Percent left in the tighter window (5 hours / week), when known.
+  final num? room;
+  final String? note;
+}
+
+class AccountsView {
+  const AccountsView({required this.accounts, this.pinned, this.active});
+  final List<AccountInfo> accounts;
+
+  /// "כולם ל-X"; null = automatic.
+  final String? pinned;
+  final String? active;
+}
+
 abstract class Backend extends ChangeNotifier {
   CompanyData? get data;
   SystemStatus get status;
@@ -89,6 +111,12 @@ abstract class Backend extends ChangeNotifier {
   Future<CommandResult> setFocus(bool on);
   Future<CommandResult> wake(String teamId);
   Future<CommandResult> handoffDone(WaitItem item);
+
+  /// B.7 accounts for the switch button; null when this backend has none (the demo).
+  Future<AccountsView?> accounts() async => null;
+
+  /// "כולם ל-X": new shifts go to [name], live ones move at their next turn boundary. null = automatic.
+  Future<CommandResult> pinAccount(String? name) async => const CommandResult.fail('אין חשבונות בהדגמה.');
 
   /// Called when a conversation opens (hq: replay events for that identity).
   Future<void> openConversation(String identityId) async {}
