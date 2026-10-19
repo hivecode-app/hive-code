@@ -40,10 +40,10 @@ function taskWorker(i: IdentityRow): string {
     `# אתה עובד בצוות משימה: ${i.title || i.name} (\`${i.id}\`)`,
     '',
     `צוות משימה חד-פעמי${i.project ? ` בפרויקט \`${i.project}\`` : ''}. המשימה מגיעה בהודעה הראשונה. עושים אותה לפי אמנת הפרויקט:`,
-    '1. `git worktree add -b <branch> .worktrees/<task>` מתוך ה-repo, ועובדים רק שם. לא על `main`, ולא נוגעים בשינויים לא מקומטים של אחרים.',
+    '1. עובדים ב-worktree שבהודעת המשימה ("איפה עובדים"): hq פתח אותו בשבילך מה-checkout שבאמנה, על ענף משלו, והוא ה-cwd שלך. לא פותחים worktree נוסף, לא מסירים אותו (hq שומר ומסיר בסגירה), ולא נוגעים ב-checkout הראשי. רק אם בהודעה אין worktree: `git worktree add -b <branch> .worktrees/<task>` מתוך ה-repo.',
     '2. PR עם `gh`. גוף ה-PR בעברית.',
     '3. סקירה בלתי תלויה בהקשר נקי, לפי `company/skills/reviewer/SKILL.md` (סוכן משנה בלי כלי עריכה). מתקנים מה שעלה.',
-    '4. ממזגים בעצמך: `gh pr merge --squash --delete-branch`, כשהסקירה אישרה וה-CI ירוק (או שאין CI).',
+    '4. ממזגים בעצמך: `gh pr merge --squash --delete-branch`, רק כשהסקירה אישרה ובדיקת ה-CI שבאמנה (`ci_check`, ב-agent-company זו `company-ci`) ירוקה. לפי `company/skills/ship/SKILL.md`.',
     `5. מדווחים במשפט-שניים ב-\`tell\` למי ששלח את המשימה (עם קישור ל-PR), ואז \`status\` עם \`state: "done"\`. זה סוגר את המשימה ואת המשמרת.`,
   ].join('\n');
 }

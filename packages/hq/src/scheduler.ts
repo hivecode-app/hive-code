@@ -6,8 +6,10 @@ import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import type { Mailbox } from './mailbox.ts';
 import type { ShiftManager } from './shifts.ts';
-import { ensureRuntimeIdentity, projectLead } from './org.ts';
+import { ensureRuntimeIdentity, getIdentity, projectLead } from './org.ts';
 import { memInfoMb } from './proc.ts';
+import { dirname, join } from 'node:path';
+import { noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
 
 export interface TaskRow {
   id: number; ref: string | null; project: string | null; title: string; body: string; source: string; state: string;
@@ -53,6 +55,8 @@ export class Scheduler {
   scope: () => string[] | null = () => null;
   promptNote: () => string | null = () => null;
   afterFill: () => void = () => {};
+  /** Worktrees per task in the project's checkout (B.5). Tests swap in one over a temp repo. */
+  workspaces = new Workspaces();
 
   private store: Store;
   private cfg: HqConfig;
@@ -142,10 +146,12 @@ export class Scheduler {
         let { free } = this.slots();
         for (const t of this.queue()) {
           if (free <= 0) break;
-          // Backoff: a task that just started (and crashed or failed to launch) waits before the next try.
-          if (this.inBackoff(t.id)) continue;
-          this.lastStartAt.set(t.id, this.store.now());
           try {
+            // A dormant project (charter status) gets no workers until it moves to the company (D phase 3).
+            if (this.dormant(t.project)) continue;
+            // Backoff: a task that just started (and crashed or failed to launch) waits before the next try.
+            if (this.inBackoff(t.id)) continue;
+            this.lastStartAt.set(t.id, this.store.now());
             await this.start(t);
             started.push(t.id);
             free--;
@@ -175,7 +181,23 @@ export class Scheduler {
         reports_to: openedBy ?? lead ?? this.cfg.managerId });
       this.store.db.prepare('UPDATE tasks SET identity = ? WHERE id = ?').run(identity, t.id);
     }
-    const row = await this.shifts.request(identity, { kind: 'work', reason: 'task', taskId: t.id, cwd: t.worktree ?? undefined });
+    // A task handed to a standing identity (yoav, a lead…) runs where that identity runs: no worktree.
+    const taskIdentity = !t.identity || (getIdentity(this.store, identity)?.team_kind === 'task');
+    let ws: { path: string; note: string } | null = null;
+    if (taskIdentity) {
+      try {
+        ws = await this.prepareWorktree(t);
+      } catch (e) {
+        // Wrong machine, no repository, worktree and branch gone: retrying will not help. Out of the
+        // queue (needs-decision) and the opener hears why.
+        const labels = [...new Set([...(JSON.parse(t.labels || '[]') as string[]), 'needs-decision'])];
+        this.store.db.prepare('UPDATE tasks SET labels = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(labels), this.store.now(), t.id);
+        this.mailbox.tell({ msg_id: `task-${t.id}-worktree-failed-${this.store.now()}`, from: 'hq', to: openedBy ?? lead ?? this.cfg.managerId, priority: 'next',
+          body: `משימה ${t.ref ?? `#${t.id}`} (${t.title}) לא התחילה: ${(e as Error).message}. היא סומנה needs-decision ויצאה מהתור.` });
+        throw e;
+      }
+    }
+    const row = await this.shifts.request(identity, { kind: 'work', reason: 'task', taskId: t.id, cwd: ws?.path });
     // The identity already had a live shift (no new launch): bind the task to it so its end closes the loop.
     if (row.task_id !== t.id) this.shifts.setFields(row.id, { task_id: t.id });
     this.store.db.prepare(`UPDATE tasks SET state = 'running', shift_id = ?, started_at = COALESCE(started_at, ?), updated_at = ? WHERE id = ?`)
@@ -183,7 +205,110 @@ export class Scheduler {
     this.store.emit('task.state', identity, { id: t.id, state: 'running', shift: row.id });
     // One prompt per run of the shift: a resumed run gets the task again (the old prompt id would be a no-op).
     this.mailbox.tell({ msg_id: `task-${t.id}-${row.id}-${row.started_at}`, from: openedBy ?? lead ?? 'hq', to: identity, priority: 'next',
-      body: [`משימה ${t.ref ?? `#${t.id}`}: ${t.title}`, t.body, this.promptNote()].filter(Boolean).join('\n\n') });
+      body: [`משימה ${t.ref ?? `#${t.id}`}: ${t.title}`, ws?.note, t.body, this.promptNote()].filter(Boolean).join('\n\n') });
+  }
+
+  private invalidReported = new Map<string, number>();
+
+  private dormant(project: string | null): boolean {
+    if (!project) return false;
+    const ch = readCharter(this.cfg.companyDir, project);
+    if (ch?.status === 'invalid' && this.store.now() - (this.invalidReported.get(project) ?? -Infinity) > 60 * 60_000) {
+      this.invalidReported.set(project, this.store.now());
+      this.store.emit('charter.invalid', null, { project, error: ch.error });
+    }
+    return noWorkers(ch);
+  }
+
+  /** The charter checkout a stored worktree belongs to: <checkout>/<worktree_dir>/<name>, nothing else. */
+  private checkoutOf(t: Pick<TaskRow, 'project' | 'worktree'>) {
+    const ch = t.project ? readCharter(this.cfg.companyDir, t.project) : null;
+    const c = ch?.checkouts.find((x) => dirname(t.worktree!) === join(x.path, ch.worktreeDir));
+    return { ch, c };
+  }
+
+  /**
+   * The task's worktree (B.5): created on first start in the charter's checkout, reused (or brought back
+   * on its branch) on a resume. A project without a checkout in its charter runs in hq's default cwd.
+   */
+  async prepareWorktree(t: Pick<TaskRow, 'id' | 'project' | 'worktree' | 'labels' | 'started_at'>): Promise<{ path: string; note: string } | null> {
+    const ch = t.project ? readCharter(this.cfg.companyDir, t.project) : null;
+    if (t.worktree) {
+      const { c } = this.checkoutOf(t);
+      if (!(await this.workspaces.ensure(t.worktree, c?.path))) throw new Error(`task ${t.id}: worktree ${t.worktree} is gone and its branch too`);
+      return { path: t.worktree, note: worktreeNote(t.worktree, ch) };
+    }
+    // Started before hq made worktrees: its session and work live where it ran (hq's default cwd and
+    // a worktree the worker made itself). Moving it would orphan both.
+    if (t.started_at != null) return null;
+    if (!ch) return null;
+    const repoLabel = (JSON.parse(t.labels || '[]') as string[]).find((l) => l.startsWith('repo:'))?.slice(5);
+    const c = this.workspaces.checkout(ch, repoLabel);
+    if (!c) return null;
+    const w = await this.workspaces.create(ch, c, `company-t${t.id}`);
+    this.store.db.prepare('UPDATE tasks SET worktree = ?, updated_at = ? WHERE id = ?').run(w.path, this.store.now(), t.id);
+    this.store.emit('task.worktree', null, { id: t.id, path: w.path, branch: w.branch, base: w.base });
+    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) };
+  }
+
+  /**
+   * The whole worktree path of a task, with no worker: create in the charter's checkout, look inside,
+   * close (preserve + remove). Works on a dormant project too; that is what it is for.
+   */
+  async dryRunWorktree(project: string) {
+    const ch = readCharter(this.cfg.companyDir, project);
+    if (!ch) throw new Error(`no charter for ${project}`);
+    const c = this.workspaces.checkout(ch);
+    if (!c) throw new Error(`charter of ${project} names no checkout`);
+    const w = await this.workspaces.create(ch, c, `company-dryrun-${this.store.now().toString(36)}`);
+    let inside: Awaited<ReturnType<Workspaces['inspect']>> | { error: string };
+    try { inside = await this.workspaces.inspect(w.path); } catch (e) { inside = { error: (e as Error).message }; }
+    const closed = await this.workspaces.close(w.path, c.defaultBranch);
+    const result = { project, status: ch.status, machine: ch.machine, checkout: c, worktree: w, inside, closed };
+    this.store.emit('task.worktree_dry_run', null, result);
+    return result;
+  }
+
+  /**
+   * Task done: preserve and remove its worktree (B.5). Only a worktree inside a charter checkout's
+   * worktree_dir is touched (never a path someone put on the task by hand). Failures are events, and
+   * sweep() retries them; the task stays done.
+   */
+  private closeAttemptAt = new Map<number, number>();
+  private closeWorktree(id: number): Promise<void> {
+    const t = this.task(id);
+    if (!t?.worktree) return Promise.resolve();
+    this.closeAttemptAt.set(id, this.store.now());
+    const { ch, c } = this.checkoutOf(t);
+    // An unreadable charter may be a passing typo: keep the path, retryCloses tries again later.
+    if (!ch || ch.status === 'invalid') return Promise.resolve();
+    if (!c) {
+      this.store.emit('task.worktree_close_failed', t.identity, { id, path: t.worktree, error: 'not inside a charter checkout worktree_dir: left alone' });
+      this.store.db.prepare('UPDATE tasks SET worktree = NULL WHERE id = ? AND worktree = ?').run(id, t.worktree);
+      return Promise.resolve();
+    }
+    const run = (async () => {
+      // The worker may still be exiting: let its unit go first.
+      const live = t.identity ? this.shifts.current(t.identity) : undefined;
+      if (live && live.task_id === id) return;
+      const r: CloseResult = await this.workspaces.close(t.worktree!, c.defaultBranch);
+      if (r.removed || r.error === 'missing') {
+        this.store.db.prepare('UPDATE tasks SET worktree = NULL WHERE id = ? AND worktree = ?').run(id, t.worktree);
+        this.closeAttemptAt.delete(id);
+      }
+      this.store.emit(r.error && r.error !== 'missing' ? 'task.worktree_close_failed' : 'task.worktree_closed', t.identity, { id, ...r });
+    })();
+    this.store.bg(run, 'task.worktree.close');
+    return run;
+  }
+
+  /** Done tasks whose worktree is still there (a close failed, or hq restarted mid-close): try again every 10 min. */
+  async retryCloses(): Promise<void> {
+    const rows = this.store.db.prepare(`SELECT id FROM tasks WHERE state = 'done' AND worktree IS NOT NULL`).all() as { id: number }[];
+    for (const { id } of rows) {
+      if (this.store.now() - (this.closeAttemptAt.get(id) ?? -Infinity) < 10 * 60_000) continue;
+      await this.closeWorktree(id).catch(() => {});
+    }
   }
 
   private onTaskShiftEnded(taskId: number, reason: string): void {
@@ -194,6 +319,7 @@ export class Scheduler {
     const next = reason === 'task_done' ? 'done' : reason === 'rest' ? 'resting' : t.worktree ? 'interrupted' : 'queued';
     this.store.db.prepare('UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?').run(next, this.store.now(), taskId);
     this.store.emit('task.state', t.identity, { id: taskId, state: next, reason });
+    if (next === 'done') this.closeWorktree(taskId);
   }
 
   /** The worker (status op state=done) or the owner closed the task: end its shift with task_done. */
@@ -202,7 +328,10 @@ export class Scheduler {
     if (!t || t.state === 'done') return t;
     const cur = t.identity ? this.shifts.current(t.identity) : undefined;
     if (cur && cur.task_id === id) await this.shifts.stop(cur.id, 'task_done', cur.started_at);
-    if (this.task(id)!.state !== 'done') this.setTaskState(id, 'done');
+    if (this.task(id)!.state !== 'done') {
+      this.setTaskState(id, 'done');
+      this.closeWorktree(id);
+    }
     return this.task(id);
   }
 
@@ -246,6 +375,17 @@ export class Scheduler {
     await this.ensureResidents();
     await this.fill();
     // Empty-slot measurement (metric.empty_slot) is night.ts: per interval, with its reason.
+    await this.retryCloses();
     this.store.setMeta('last_sweep_at', String(now));
   }
+}
+
+/** What the worker is told about where it works (first prompt of each run). */
+function worktreeNote(path: string, ch: ReturnType<typeof readCharter>, branch?: string, base?: string): string {
+  const cmds = Object.entries(ch?.commands ?? {}).map(([k, v]) => `${k}: \`${v}\``).join(' · ');
+  return [
+    `**איפה עובדים:** hq פתח לך worktree ב-\`${path}\`${branch ? ` על הענף \`${branch}\` (מ-\`${base}\`)` : ''}. זה ה-cwd שלך. לא פותחים worktree נוסף ולא מסירים אותו: hq שומר ומסיר אותו כשהמשימה נסגרת.`,
+    cmds ? `**פקודות מהאמנה:** ${cmds}` : '',
+    ch?.ciCheck ? `**CI:** ממזגים רק כשהבדיקה \`${ch.ciCheck}\` ירוקה ב-PR.` : '',
+  ].filter(Boolean).join('\n');
 }

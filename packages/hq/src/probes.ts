@@ -39,7 +39,9 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
   const lists: unknown[] = [];
   const fm = /^---\n([\s\S]*?)\n---/.exec(md);
   if (fm) {
-    const y = (parse(fm[1]!) ?? {}) as Record<string, unknown>;
+    // A broken frontmatter must not stop hq from starting; the scheduler reports it (charter.invalid).
+    let y: Record<string, unknown> = {};
+    try { y = (parse(fm[1]!) ?? {}) as Record<string, unknown>; } catch { /* no probes from it */ }
     if (Array.isArray(y.monitoring)) lists.push(...y.monitoring);
     if (Array.isArray(y.probes)) lists.push(...y.probes);
   }

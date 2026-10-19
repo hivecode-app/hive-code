@@ -1,0 +1,20 @@
+# GitHub Actions runner for hivecode-app/hive-code (label "company"), as a user unit on hq-host.
+# Runs .github/workflows/company-ci.yml. Install:
+#   cp ~/projects/agent-company/deploy/actions-runner-company.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+#   systemctl --user enable --now actions-runner-company
+[Unit]
+Description=GitHub Actions runner (hivecode-app/hive-code, company-ci)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/actions-runner-company
+ExecStart=%h/actions-runner-company/runsvc.sh
+KillMode=process
+KillSignal=SIGTERM
+TimeoutStopSec=5min
+Restart=always
+RestartSec=10
+MemoryMax=3G
+
+[Install]
+WantedBy=default.target

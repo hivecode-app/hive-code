@@ -12,6 +12,7 @@ import {
   type Urgency, type WalEntry,
 } from '@company/shared';
 import type { Hq } from './hq.ts';
+import { noWorkers, readCharter } from './workspace.ts';
 
 const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket']);
 
@@ -124,6 +125,9 @@ export class Ingest {
           || (!existsSync(join(this.hq.cfg.companyDir, 'projects', `${project}.md`)) && !db.prepare('SELECT 1 FROM identities WHERE project = ?').get(project)))) {
           throw new IngestError(400, `open_team: unknown project ${project}`);
         }
+        if (project != null && noWorkers(readCharter(this.hq.cfg.companyDir, project))) {
+          throw new IngestError(400, `open_team: project ${project} is dormant or its charter is invalid; it gets workers only after it moves to the company`);
+        }
         // Same ticket while its task is still open → that task. A finished one is not reopened silently.
         const base = s(a.ref) ?? `team:${e.id}`;
         const open = db.prepare(`SELECT ref FROM tasks WHERE (ref = ? OR ref LIKE ? ESCAPE '\\') AND state != 'done' ORDER BY id DESC LIMIT 1`)
@@ -131,7 +135,7 @@ export class Ingest {
         const taken = !open && db.prepare('SELECT 1 FROM tasks WHERE ref = ?').get(base);
         const ref = open?.ref ?? (taken ? `${base} · ${e.id}` : base);
         const task = this.hq.scheduler.addTask({
-          title: need('name'), body: need('purpose'), project, ref, labels: [`opened-by:${e.identity}`],
+          title: need('name'), body: need('purpose'), project, ref, labels: [`opened-by:${e.identity}`, ...(s(a.repo) ? [`repo:${s(a.repo)}`] : [])],
         });
         return { ok: true, id: e.id, ref: `task-${task.id}`, result: { task: task.id, state: task.state } };
       }

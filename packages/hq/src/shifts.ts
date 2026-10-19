@@ -251,7 +251,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       const systemPromptFile = this.writeSystem(shiftId, identity);
       await this.launcher.launch({
         shiftId, identity, shiftNo, sessionId, resume, kind, socketPath, taskId, unit,
-        cwd: opts.cwd ?? this.cfg.defaultCwd, systemPromptFile,
+        cwd: opts.cwd ?? this.taskCwd(taskId, identity) ?? this.cfg.defaultCwd, systemPromptFile,
       });
     } catch (e) {
       this.markEnded(shiftId, 'dead', stage);
@@ -260,6 +260,20 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     }
     this.store.bg(this.attach(row), 'shift.attach');
     return this.get(shiftId)!;
+  }
+
+  /**
+   * A task worker always runs in its task's worktree (B.5), also when a message or the watchdog wakes it:
+   * a resume elsewhere would not find its session, and would work in the wrong tree.
+   */
+  private taskCwd(taskId: number | null, identity: string): string | undefined {
+    // A fresh (not resumed) shift of a task identity carries no task id: the identity is the task's own.
+    const r = (taskId != null
+      ? this.store.db.prepare('SELECT worktree FROM tasks WHERE id = ?').get(taskId)
+      : this.store.db.prepare(`SELECT t.worktree FROM tasks t JOIN identities i ON i.id = t.identity
+          WHERE t.identity = ? AND i.team_kind = 'task' AND t.state != 'done' ORDER BY t.updated_at DESC LIMIT 1`).get(identity)
+    ) as { worktree: string | null } | undefined;
+    return r?.worktree ?? undefined;
   }
 
   /** Connect (with retries while the host boots) and keep the connection. Safe to call repeatedly. */

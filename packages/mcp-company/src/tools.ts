@@ -71,6 +71,7 @@ export const TOOLS: readonly ToolDef[] = [
     purpose: s('מה בדיוק לעשות ואיך יודעים שזה גמור / what to do and the definition of done'),
     project: s('הפרויקט, e.g. agent-company (ברירת מחדל: הפרויקט שלך) / project (default: yours)'),
     ref: s('טיקט, e.g. hivecode-app/hive-code#11 / issue reference'),
+    repo: s('ה-checkout מהאמנה (name), אם יש בפרויקט יותר מאחד. ברירת מחדל: הראשון / charter checkout name, default the first'),
     members: strs('identities של חברי הצוות / member identities'),
   }, ['name', 'purpose']),
   tool('close_team', 'סגירת צוות. Close a team.', {

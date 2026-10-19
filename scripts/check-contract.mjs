@@ -339,6 +339,27 @@ export function main() {
       for (const g of Array.isArray(fm.grants) ? fm.grants : []) for (const f of ['team', 'action', 'quote', 'date']) if (!g?.[f]) err(`${rel(charter)}: grant is missing "${f}"`);
       for (const d of Array.isArray(fm.deviations) ? fm.deviations : []) if (!d?.reason) err(`${rel(charter)}: every deviation needs a reason`);
       if (pr.status === 'active' && !identityIds.has(fm.ceo)) err(`${rel(charter)}: ceo "${fm.ceo}" is not an identity`);
+      // B.5: where workers run. hq makes <path>/<worktree_dir>/<task> per task in the first checkout.
+      if (fm.checkouts != null) {
+        if (!Array.isArray(fm.checkouts)) err(`${rel(charter)}: "checkouts" must be a list`);
+        else {
+          if (!MACHINES.includes(fm.machine)) err(`${rel(charter)}: "checkouts" needs "machine", one of ${MACHINES.join('|')}`);
+          const names = new Set();
+          for (const c of fm.checkouts) {
+            if (!isObj(c) || [c.name, c.path, c.default_branch].some((v) => typeof v !== 'string' || !v)) { err(`${rel(charter)}: every checkout needs name, path and default_branch (strings; quote a numeric branch)`); continue; }
+            if (names.has(c.name)) err(`${rel(charter)}: duplicate checkout "${c.name}"`);
+            names.add(c.name);
+            if (!/^(~\/|\/)/.test(c.path)) err(`${rel(charter)}: checkout "${c.name}" path must be absolute or start with ~/`);
+          }
+        }
+      }
+      if (fm.worktree_dir != null && (typeof fm.worktree_dir !== 'string' || fm.worktree_dir.startsWith('/') || fm.worktree_dir.includes('..'))) {
+        err(`${rel(charter)}: "worktree_dir" must be a path inside the checkout`);
+      }
+      if (fm.commands != null && (!isObj(fm.commands) || Object.values(fm.commands).some((v) => typeof v !== 'string' || !v))) {
+        err(`${rel(charter)}: "commands" must map names to command strings`);
+      }
+      if (fm.ci === 'required' && !fm.ci_check) err(`${rel(charter)}: ci: required needs "ci_check" (the check name a merge waits for)`);
     }
     const projDir = join(companyDir, 'projects');
     if (existsSync(projDir)) for (const f of readdirSync(projDir)) {

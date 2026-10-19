@@ -119,6 +119,10 @@ test('open_team opens a task: queued under the project, the worker hears the tas
     assert.equal(again.json.result.task, id, 'same ticket → same task');
     assert.equal((await post(sock, '/v1/ops', entry('open_team', { name: 'x', purpose: 'y', project: 'my project' }, 'yoav-1:03', 'yoav'))).status, 400, 'bad slug = permanent reject');
     assert.equal((await post(sock, '/v1/ops', entry('open_team', { name: 'x', purpose: 'y', project: 'nope' }, 'yoav-1:04', 'yoav'))).status, 400, 'unknown project');
+    writeFileSync(join(env.cfg.companyDir, 'projects', 'sleepy.md'), '---\nproject: sleepy\nstatus: dormant\n---\n');
+    const dormant = await post(sock, '/v1/ops', entry('open_team', { name: 'x', purpose: 'y', project: 'sleepy' }, 'yoav-1:04b', 'yoav'));
+    assert.equal(dormant.status, 400, 'a dormant project gets no team');
+    assert.match(JSON.stringify(dormant.json), /dormant/);
     await hq.scheduler.fill();
     await until(() => launcher.launches.some((l) => l.identity === `agent-company-t${id}`), 2000, 'task worker launched');
     const first = hq.mailbox.list(`agent-company-t${id}`).find((m) => m.to_identity === `agent-company-t${id}`)!;

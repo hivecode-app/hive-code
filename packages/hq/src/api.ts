@@ -170,6 +170,12 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     }) };
   });
 
+  // B.5 plumbing check with no worker: create + inspect + close a worktree in the project's checkout.
+  route('POST', '/api/projects/:p/worktree-dry-run', async ({ params }) => {
+    try { return { dryRun: await hq.scheduler.dryRunWorktree(decodeURIComponent(params[0]!)) }; }
+    catch (e) { throw new HttpError(400, (e as Error).message); }
+  });
+
   route('POST', '/api/tasks/:id/done', async ({ params }) => {
     const t = await hq.scheduler.completeTask(Number(params[0]));
     if (!t) throw new HttpError(404, `no task ${params[0]}`);

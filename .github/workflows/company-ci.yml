@@ -1,0 +1,33 @@
+# company-ci: the check every agent-company PR must pass before a worker merges (charter ci_check).
+# Runs on our own runner on hq-host (deploy/actions-runner-company.service, label "company"):
+# GitHub-hosted runners are blocked on this account's billing, self-hosted ones are not.
+name: company-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: company-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  company-ci:
+    runs-on: [self-hosted, company]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: node --version
+      - run: npm ci --no-audit --no-fund
+      - name: contract
+        run: npm run check:contract && npm run test:contract
+      - name: typecheck
+        run: npm run typecheck
+      - name: test
+        run: npm test
