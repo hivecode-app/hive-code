@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "tsc -b packages/*/tsconfig.json",
+    "pretest": "node scripts/check-shared-resolution.mjs",
     "test": "node --test --experimental-strip-types 'packages/*/test/**/*.test.ts'",
     "typecheck": "tsc -b packages/*/tsconfig.json",
     "check:contract": "node scripts/check-contract.mjs",
