@@ -1,10 +1,267 @@
-// Placeholder until its PR lands.
+// Conversations (APP-SPEC §4.3, mockup screen 2): WhatsApp-like list, one name per worker,
+// Yoav pinned first, status as icon + word, open code changes as +N −M.
 import 'package:flutter/material.dart';
 
-class ConversationsScreen extends StatelessWidget {
-  const ConversationsScreen({super.key});
-  
-  
+import '../../data/backend.dart';
+import '../../data/store.dart';
+import '../../model/models.dart';
+import '../../theme/tokens.dart';
+import '../common.dart';
+import '../nav.dart';
+import '../system_bar.dart';
+import 'kbd.dart';
+
+export 'kbd.dart';
+
+class ConversationsScreen extends StatefulWidget {
+  const ConversationsScreen({super.key, this.compact = false});
+
+  /// Desktop list column (mockup screen 10): smaller rows, quick-switch field.
+  final bool compact;
+
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  State<ConversationsScreen> createState() => _ConversationsScreenState();
+}
+
+class _ConversationsScreenState extends State<ConversationsScreen> {
+  bool searching = false;
+  String q = '';
+
+  bool _match(CompanyData d, ConversationSummary c) {
+    if (q.isEmpty) return true;
+    final who = d.who(c.identityId);
+    return '${who.name} ${who.title} ${d.teamOf(c.identityId)?.name ?? ''} ${c.lastLine}'.contains(q);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final d = store.data;
+    final p = context.p;
+    if (d == null) return const SizedBox.shrink();
+    final list = [
+      ...d.conversations.where((c) => c.pinned),
+      ...d.conversations.where((c) => !c.pinned),
+    ].where((c) => _match(d, c)).toList();
+
+    if (widget.compact) {
+      return Container(
+        color: p.surface,
+        child: Column(children: [
+          const TopBar(title: 'שיחות'),
+          _QuickSwitch(onChanged: (v) => setState(() => q = v)),
+          Expanded(
+            child: ListView(padding: EdgeInsets.zero, children: [
+              for (final (i, c) in list.indexed) ...[
+                if (i > 0) Padding(padding: const EdgeInsetsDirectional.only(start: 62), child: Container(height: 1, color: p.line)),
+                ConversationRow(c: c, compact: true, selected: store.selectedConversation == c.identityId),
+              ],
+            ]),
+          ),
+        ]),
+      );
+    }
+
+    return Stack(children: [
+      Column(children: [
+        searching
+            ? SizedBox(
+                height: 56,
+                child: Row(children: [
+                  IBtn('arrow_forward', tip: 'סגירת החיפוש', onTap: () => setState(() {
+                        searching = false;
+                        q = '';
+                      })),
+                  Expanded(
+                    child: TextField(
+                      autofocus: true,
+                      onChanged: (v) => setState(() => q = v),
+                      style: T.body.copyWith(color: p.text),
+                      decoration: InputDecoration(border: InputBorder.none, hintText: 'חיפוש לפי שם, תואר, צוות או תוכן', hintStyle: T.body.copyWith(color: p.text3)),
+                    ),
+                  ),
+                ]),
+              )
+            : TopBar(title: 'שיחות', actions: [
+                IBtn('search', tip: 'חיפוש', onTap: () => setState(() => searching = true)),
+                IBtn('more_vert', tip: 'עוד', onTap: () => Nav.settings(context)),
+              ]),
+        const SystemBar(),
+        Expanded(
+          child: ListView(padding: EdgeInsets.zero, children: [
+            ListBlock(top: false, children: [for (final c in list) ConversationRow(c: c)]),
+            if (q.isEmpty) ...[
+              const MoreRow(icon: 'expand_more', bold: 'לפי צוות', rest: 'עוד 6 עובדים'),
+              const MoreRow(icon: 'history', bold: '', rest: 'נסגרו השבוע · 4 צוותי משימה', top: false),
+            ],
+            const SizedBox(height: 80),
+          ]),
+        ),
+      ]),
+      PositionedDirectional(
+        end: 16,
+        bottom: 16,
+        child: Fab(icon: 'edit_square', label: 'שיחה חדשה', onTap: () => _newChat(context, d)),
+      ),
+    ]);
+  }
+
+  void _newChat(BuildContext context, CompanyData d) {
+    final p = context.p;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: p.bg,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        builder: (_, sc) => ListView(controller: sc, children: [
+          const Section('עובד או צוות. בצוות, ההודעה הולכת לראש הצוות.', top: 0),
+          ListBlock(children: [
+            for (final who in d.identities.values)
+              InkWell(
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Nav.chat(context, who.id, focus: true);
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Row(children: [
+                    Monogram.of(d, who.id, size: AvSize.sm),
+                    const SizedBox(width: 12),
+                    Text(who.name, style: T.name.copyWith(color: p.text)),
+                    const SizedBox(width: 6),
+                    Expanded(child: Text(who.title, style: T.secondary.copyWith(color: p.text2), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  ]),
+                ),
+              ),
+          ]),
+        ]),
+      ),
+    );
+  }
+}
+
+class _QuickSwitch extends StatelessWidget {
+  const _QuickSwitch({required this.onChanged});
+  final ValueChanged<String> onChanged;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(color: p.surface2, borderRadius: BorderRadius.circular(19)),
+      child: Row(children: [
+        Ic('search', size: 20, color: p.text3),
+        const SizedBox(width: 8),
+        Expanded(
+          child: TextField(
+            onChanged: onChanged,
+            style: T.secondary.copyWith(color: p.text, fontSize: 14),
+            decoration: InputDecoration(isCollapsed: true, border: InputBorder.none, hintText: 'מעבר מהיר', hintStyle: T.secondary.copyWith(color: p.text3, fontSize: 14)),
+          ),
+        ),
+        const Kbd('Ctrl K'),
+      ]),
+    );
+  }
+}
+
+/// `.fab`: extended, quiet surface button (not a coloured blob).
+class Fab extends StatelessWidget {
+  const Fab({super.key, required this.icon, required this.label, this.onTap});
+  final String icon;
+  final String label;
+  final VoidCallback? onTap;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Material(
+      color: p.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.line)),
+      shadowColor: Colors.black,
+      elevation: 1,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap ?? () {},
+        child: SizedBox(
+          height: 52,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Ic(icon, size: 22, color: p.text),
+              const SizedBox(width: 8),
+              Text(label, style: TextStyle(fontFamily: kFont, fontSize: 14.5, fontWeight: FontWeight.w500, color: p.text)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ConversationRow extends StatelessWidget {
+  const ConversationRow({super.key, required this.c, this.compact = false, this.selected = false});
+  final ConversationSummary c;
+  final bool compact;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final d = store.data!;
+    final p = context.p;
+    final who = d.who(c.identityId);
+    final pr = d.presence[c.identityId] ?? const Presence(status: WorkerStatus.free);
+    final title = compact ? who.short : (who.taskRef != null ? '${who.title} · ${ltr(who.taskRef!)}' : who.title);
+    final status = Row(children: [
+      Flexible(child: StatusWord.of(pr, who.gender, withActivity: pr.status == WorkerStatus.working && !compact)),
+      if (c.diffStat != null) ...[const SizedBox(width: 6), DiffStat(c.diffStat!)],
+      if (c.extra != null && !compact) ...[const SizedBox(width: 6), Text(c.extra!, style: T.small.copyWith(color: p.text2))],
+    ]);
+    return Semantics(
+      button: true,
+      label: '${who.name}, ${who.title}, ${statusWord(pr.status, who.gender)}',
+      child: Material(
+        color: selected ? p.surface2 : p.surface,
+        child: InkWell(
+          onTap: () => Nav.chat(context, c.identityId),
+          child: Padding(
+            padding: compact ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10) : const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Monogram.of(d, c.identityId, size: compact ? AvSize.sm : AvSize.md),
+              SizedBox(width: compact ? 12 : 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+                    Text(who.name, style: T.name.copyWith(color: p.text)),
+                    const SizedBox(width: 6),
+                    Expanded(child: Rich(title, maxLines: 1, style: T.secondary.copyWith(color: p.text2))),
+                    const SizedBox(width: 6),
+                    Text(c.time, style: T.meta.copyWith(color: p.text3)),
+                  ]),
+                  if (!compact)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Row(children: [
+                        Expanded(
+                          child: Rich(c.lastLine,
+                              auto: true,
+                              maxLines: 1,
+                              style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: c.lastIsMine ? p.text : p.text2)),
+                        ),
+                      ]),
+                    ),
+                  Padding(padding: const EdgeInsets.only(top: 4), child: status),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
 }

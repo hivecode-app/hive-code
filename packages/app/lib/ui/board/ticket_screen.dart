@@ -2,7 +2,8 @@
 import 'package:flutter/material.dart';
 
 class TicketScreen extends StatelessWidget {
-  const TicketScreen({super.key, required this.number});
+  const TicketScreen({super.key, required this.number, this.embedded = false});
+  final bool embedded;
   final String number;
   
   @override

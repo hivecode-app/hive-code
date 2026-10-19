@@ -327,7 +327,7 @@ enum PrState { open, merged, closed }
 enum Check { none, running, ok, failed }
 
 class PrCard extends ChatItem {
-  PrCard({required super.id, required super.ts, required this.number, required this.title, this.state = PrState.open, this.ci = Check.none, this.review = Check.none, this.add = 0, this.del = 0, this.files = 0, super.seq});
+  PrCard({required super.id, required super.ts, required this.number, required this.title, this.state = PrState.open, this.ci = Check.none, this.review = Check.none, this.add = 0, this.del = 0, this.files = 0, this.fileList = const [], super.seq});
   final int number;
   final String title;
   PrState state;
@@ -336,6 +336,9 @@ class PrCard extends ChatItem {
   final int add;
   final int del;
   final int files;
+
+  /// Per-file stats for the desktop context column.
+  final List<DiffFile> fileList;
 }
 
 enum AskState { open, pending, answered, decidedByManager, expired }

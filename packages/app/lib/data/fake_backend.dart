@@ -341,7 +341,12 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
     ]),
     EventLine(id: 'new1', ts: at(13, 57), text: '2 הודעות חדשות', strong: true),
     EventLine(id: 'ev1', ts: at(13, 57), icon: 'forward', text: 'עידו ביקש מרותם לבדוק בלוגים כמה חידושים נכשלו השבוע'),
-    PrCard(id: 'pr1', ts: at(13, 58), number: 3712, title: 'תשלומים: ניסיון שני לכרטיס שנדחה', ci: Check.ok, review: Check.running, add: 48, del: 11, files: 4),
+    PrCard(id: 'pr1', ts: at(13, 58), number: 3712, title: 'תשלומים: ניסיון שני לכרטיס שנדחה', ci: Check.ok, review: Check.running, add: 48, del: 11, files: 4, fileList: const [
+      DiffFile(path: 'internal/billing/renew.go', add: 12, del: 3),
+      DiffFile(path: 'internal/billing/renew_test.go', add: 22, del: 6),
+      DiffFile(path: 'internal/billing/queue.go', add: 11, del: 0),
+      DiffFile(path: 'DECISIONS.md', add: 3, del: 2),
+    ]),
     AskCard(
         id: 'a1',
         ts: at(14, 2),

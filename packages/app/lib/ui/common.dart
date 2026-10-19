@@ -23,7 +23,11 @@ class Ic extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = kIcons[name];
     assert(data != null, 'icon "$name" missing from tool/gen_icons.sh');
-    return Icon(
+    // Glyphs are drawn as-is like the mockup's font (no automatic RTL mirroring): the back arrow
+    // points right in RTL, and the send arrow is mirrored explicitly where the mockup does it.
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Icon(
       data ?? kIcons['help']!,
       size: size,
       fill: fill ? 1 : 0,
@@ -32,6 +36,7 @@ class Ic extends StatelessWidget {
       grade: 0,
       color: color ?? IconTheme.of(context).color,
       semanticLabel: semantic,
+    ),
     );
   }
 }
@@ -447,7 +452,7 @@ class MoreRow extends StatelessWidget {
               child: Text.rich(
                 TextSpan(children: [
                   TextSpan(text: bold, style: TextStyle(color: p.text, fontWeight: FontWeight.w700)),
-                  TextSpan(text: rest.isEmpty ? '' : ' · $rest'),
+                  TextSpan(text: bold.isEmpty ? rest : (rest.isEmpty ? '' : ' · $rest')),
                 ]),
                 style: TextStyle(fontFamily: kFont, fontSize: 14, height: 1.4, color: p.text2),
               ),
