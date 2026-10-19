@@ -1,1 +1,5 @@
 prior-art/
+node_modules/
+dist/
+*.db
+*.db-*

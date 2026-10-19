@@ -1,0 +1,13 @@
+{
+  "name": "agent-company",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc -b packages/*",
+    "test": "node --test --experimental-strip-types 'packages/*/test/**/*.test.ts'",
+    "typecheck": "tsc -b packages/* --noEmit"
+  },
+  "devDependencies": { "typescript": "^5.7.0", "@types/node": "^22.0.0" }
+}
