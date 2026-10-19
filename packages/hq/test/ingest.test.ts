@@ -104,6 +104,35 @@ test('handoff feeds prime.json of the next shift; open_ticket reports back; reca
   } finally { await env.cleanup(); }
 });
 
+test('open_team opens a task: queued under the project, the worker hears the task from the opener', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock, launcher } = env;
+    const r = await post(sock, '/v1/ops', entry('open_team', { name: 'תיקון typo ב-README', purpose: 'להחליף X ב-Y', project: 'agent-company', ref: 'hivecode-app/hive-code#3' }, 'yoav-1:01', 'yoav'));
+    assert.equal(r.status, 200);
+    const id = r.json.result.task as number;
+    assert.equal(r.json.ref, `task-${id}`);
+    const t = hq.scheduler.task(id)!;
+    assert.equal(t.project, 'agent-company');
+    assert.equal(t.ref, 'hivecode-app/hive-code#3');
+    const again = await post(sock, '/v1/ops', entry('open_team', { name: 'תיקון typo ב-README', purpose: 'שוב', ref: 'hivecode-app/hive-code#3' }, 'yoav-1:02', 'yoav'));
+    assert.equal(again.json.result.task, id, 'same ticket → same task');
+    assert.equal((await post(sock, '/v1/ops', entry('open_team', { name: 'x', purpose: 'y', project: 'my project' }, 'yoav-1:03', 'yoav'))).status, 400, 'bad slug = permanent reject');
+    assert.equal((await post(sock, '/v1/ops', entry('open_team', { name: 'x', purpose: 'y', project: 'nope' }, 'yoav-1:04', 'yoav'))).status, 400, 'unknown project');
+    await hq.scheduler.fill();
+    await until(() => launcher.launches.some((l) => l.identity === `agent-company-t${id}`), 2000, 'task worker launched');
+    const first = hq.mailbox.list(`agent-company-t${id}`).find((m) => m.to_identity === `agent-company-t${id}`)!;
+    assert.equal(first.from_identity, 'yoav', 'the opener sends the task, so the report comes back to him');
+    assert.match(first.body, /תיקון typo ב-README/);
+    assert.equal((hq.store.db.prepare('SELECT reports_to FROM identities WHERE id = ?').get(`agent-company-t${id}`) as { reports_to: string }).reports_to, 'yoav');
+    await hq.scheduler.completeTask(id);
+    const reopened = await post(sock, '/v1/ops', entry('open_team', { name: 'שוב', purpose: 'עוד פעם', ref: 'hivecode-app/hive-code#3' }, 'yoav-1:05', 'yoav'));
+    assert.notEqual(reopened.json.result.task, id, 'a done task is not returned for the same ticket');
+    const again2 = await post(sock, '/v1/ops', entry('open_team', { name: 'שוב', purpose: 'ושוב', ref: 'hivecode-app/hive-code#3' }, 'yoav-1:06', 'yoav'));
+    assert.equal(again2.json.result.task, reopened.json.result.task, 'while the reopened task is open, the same ticket returns it');
+  } finally { await env.cleanup(); }
+});
+
 test('ingest over TCP requires the token', async () => {
   const env = await ingestEnv();
   try {

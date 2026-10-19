@@ -86,7 +86,8 @@ export class Scheduler {
       t.state ?? 'queued', JSON.stringify(t.labels ?? []), t.priority ?? 2, t.night_weight ?? 1, t.worktree ?? null, t.identity ?? null, now, now);
     const task = this.task(Number(r.lastInsertRowid))!;
     this.store.emit('task.new', task.identity, task);
-    this.store.bg(this.fill(), 'scheduler.fill');
+    // After the caller's transaction (ingest applies ops inside one), never inside it.
+    queueMicrotask(() => this.store.bg(this.fill(), 'scheduler.fill'));
     return task;
   }
 
@@ -152,10 +153,12 @@ export class Scheduler {
   /** Open a task worker under the project CEO (B.16) and hand it the task as its first prompt. */
   private async start(t: TaskRow): Promise<void> {
     const lead = t.project ? projectLead(this.store, t.project) : undefined;
+    const OPENED_BY = 'opened-by:';
+    const openedBy = (JSON.parse(t.labels || '[]') as string[]).find((l) => l.startsWith(OPENED_BY))?.slice(OPENED_BY.length);
     const identity = t.identity ?? `${t.project ?? 'company'}-t${t.id}`;
     if (!t.identity) {
       ensureRuntimeIdentity(this.store, { id: identity, name: `t${t.id}`, title: t.title.slice(0, 60), project: t.project,
-        reports_to: lead ?? this.cfg.managerId });
+        reports_to: openedBy ?? lead ?? this.cfg.managerId });
       this.store.db.prepare('UPDATE tasks SET identity = ? WHERE id = ?').run(identity, t.id);
     }
     const row = await this.shifts.request(identity, { kind: 'work', reason: 'task', taskId: t.id, cwd: t.worktree ?? undefined });
@@ -165,7 +168,7 @@ export class Scheduler {
       .run(row.id, this.store.now(), this.store.now(), t.id);
     this.store.emit('task.state', identity, { id: t.id, state: 'running', shift: row.id });
     // One prompt per run of the shift: a resumed run gets the task again (the old prompt id would be a no-op).
-    this.mailbox.tell({ msg_id: `task-${t.id}-${row.id}-${row.started_at}`, from: lead ?? 'hq', to: identity, priority: 'next',
+    this.mailbox.tell({ msg_id: `task-${t.id}-${row.id}-${row.started_at}`, from: openedBy ?? lead ?? 'hq', to: identity, priority: 'next',
       body: [`משימה ${t.ref ?? `#${t.id}`}: ${t.title}`, t.body].filter(Boolean).join('\n\n') });
   }
 

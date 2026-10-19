@@ -113,8 +113,30 @@ export class Ingest {
         }
         return { ok: true, id: e.id, result: { stored: true } };
       }
+      case 'open_team': {
+        // Phase 1: a team opened by a worker is a task team = a task in the scheduler queue (B.16). The
+        // opener is who the worker reports to (labels opened-by:<id>). Deduped on ref (e.g. an issue).
+        const db = this.hq.store.db;
+        const own = (db.prepare('SELECT project FROM identities WHERE id = ?').get(e.identity) as { project: string | null } | undefined)?.project;
+        const project = s(a.project) ?? own ?? undefined;
+        // 4xx, not a thrown 500: the WAL retries 5xx at its head forever and would hold back every later op.
+        if (project != null && (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(project)
+          || (!existsSync(join(this.hq.cfg.companyDir, 'projects', `${project}.md`)) && !db.prepare('SELECT 1 FROM identities WHERE project = ?').get(project)))) {
+          throw new IngestError(400, `open_team: unknown project ${project}`);
+        }
+        // Same ticket while its task is still open → that task. A finished one is not reopened silently.
+        const base = s(a.ref) ?? `team:${e.id}`;
+        const open = db.prepare(`SELECT ref FROM tasks WHERE (ref = ? OR ref LIKE ? ESCAPE '\\') AND state != 'done' ORDER BY id DESC LIMIT 1`)
+          .get(base, `${base.replace(/[\\%_]/g, (c) => `\\${c}`)} · %`) as { ref: string } | undefined;
+        const taken = !open && db.prepare('SELECT 1 FROM tasks WHERE ref = ?').get(base);
+        const ref = open?.ref ?? (taken ? `${base} · ${e.id}` : base);
+        const task = this.hq.scheduler.addTask({
+          title: need('name'), body: need('purpose'), project, ref, labels: [`opened-by:${e.identity}`],
+        });
+        return { ok: true, id: e.id, ref: `task-${task.id}`, result: { task: task.id, state: task.state } };
+      }
       default:
-        // remember / handoff / status / open_team / close_team: stored durably now (ops table),
+        // remember / handoff / status / close_team: stored durably now (ops table),
         // consumed by memory consolidation, prime.json (handoff) and the board.
         return { ok: true, id: e.id, result: { stored: true } };
     }
