@@ -12,5 +12,5 @@
 | `packages/adapter` | המודול היחיד שמכיר את Claude Code |
 | `packages/mcp-company` | ה-MCP `company` (stdio, לכל משמרת) |
 | `packages/hooks` | hooks מסוג command, שכותבים ל-spool |
-| `packages/app` | ה-PWA |
+| `packages/app` | האפליקציה: Flutter לאנדרואיד ול-web ([docs/app/APP-SPEC.md](docs/app/APP-SPEC.md)) |
 | `spikes/` | ניסויי שער ההיתכנות |
