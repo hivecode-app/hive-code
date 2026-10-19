@@ -15,7 +15,8 @@
     "check:contract": "node scripts/check-contract.mjs",
     "test:contract": "node --test scripts/check-contract.test.mjs",
     "canary": "node scripts/canary.mjs",
-    "smoke": "node scripts/smoke-shift-host.mjs"
+    "smoke": "node scripts/smoke-shift-host.mjs",
+    "test:vscode-workspace": "node --test scripts/vscode-workspace.test.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.0",
