@@ -16,7 +16,12 @@ export interface MessageRow {
   priority: Priority; ref: string | null; state: MessageState; attempts: number; resurrected: number; shift_id: string | null;
   error: string | null; created_at: number; last_attempt_at: number | null; delivered_at: number | null; seen_at: number | null;
   handled_at: number | null; failed_at: number | null;
+  /** Engine messageId of the assistant text this message was made from (an owner reply, chat.md §2.3א). */
+  text_ref: string | null;
 }
+
+/** Tools whose output the owner already sees as its own item: a turn that used one has no text reply (chat.md §2.3א). */
+const OWNER_FACING_TOOLS = new Set(['mcp__company__ask', 'mcp__company__request_go']);
 
 /** Native socket path for sessions we don't hold (B.4 row 2). Provided by the adapter (engine lane). */
 export interface ForeignInjector {
@@ -49,6 +54,7 @@ export class Mailbox {
     // conversation). Assistant text is not proof: a `later` message can still be waiting behind the turn.
     shifts.on('frame', (row, f) => {
       if (f.t === 'delivery') this.onDelivery(row, f.msgId, f.state, f.error);
+      if (f.t === 'event' && f.ev.kind === 'result') this.onTurnEnd(row, f.ev);
     });
     shifts.on('ended', (row) => this.requeueUndelivered(row));
   }
@@ -84,7 +90,7 @@ export class Mailbox {
   }
 
   /** Store then deliver. Idempotent by msg_id: a retried request returns the existing message. */
-  tell(req: TellRequest & { kind?: MessageKind }): MessageRow {
+  tell(req: TellRequest & { kind?: MessageKind; text_ref?: string }): MessageRow {
     const id = req.msg_id ?? `m-${randomUUID()}`;
     const existing = this.get(id);
     if (existing) return existing;
@@ -101,9 +107,9 @@ export class Mailbox {
       }
     }
     const now = this.store.now();
-    this.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, ref, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, from, req.to, req.kind ?? 'tell', req.body, req.urgency ?? 'normal',
-      req.priority ?? (req.urgency === 'urgent' ? 'now' : 'next'), req.ref ?? null, now);
+    this.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, ref, text_ref, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, from, req.to, req.kind ?? 'tell', req.body, req.urgency ?? 'normal',
+      req.priority ?? (req.urgency === 'urgent' ? 'now' : 'next'), req.ref ?? null, req.text_ref ?? null, now);
     const m = this.get(id)!;
     this.store.emit('message.new', req.to, m);
     // A reply that references a message marks that message handled (B.4 `handled`).
@@ -200,6 +206,63 @@ export class Mailbox {
     if (state === 'written') return;
     if (m.state === 'queued') this.setState(msgId, 'delivered', { shift_id: row.id, error: null });
     if ((state === 'started' || state === 'completed') && this.get(msgId)!.state === 'delivered') this.setState(msgId, 'seen');
+  }
+
+  /**
+   * The conversation model with the owner (chat.md §2.3א): in a turn he started, the worker's own final
+   * assistant text IS the reply. It becomes one stored message worker → owner (ref = his message, text_ref =
+   * the engine messageId), so it is in his conversation list, closes his message as handled, and the app shows
+   * the streamed bubble and the stored message as a single item. A turn that already reached him through
+   * `tell`/`ask`/`request_go` has no text reply: its text was internal and is not stored.
+   * The turn is the event-log window after this shift's previous `engine.result` up to this one (indexed on
+   * identity, seq). Its triggers are his messages dequeued (`seen`) inside that window and still unanswered, so a
+   * message left over from an errored turn never turns a later, unrelated turn's text into a reply. Everything
+   * comes from the store, so a result replayed after an hq restart still yields exactly one reply (`<msg>-reply`).
+   */
+  private onTurnEnd(row: Pick<ShiftRow, 'id' | 'identity'>, ev: { isError: boolean; text?: string }): void {
+    const db = this.store.db;
+    type Ev = { seq: number; ts: number; data: string };
+    const results = (db.prepare(`SELECT seq, ts, data FROM events WHERE identity = ? AND type = 'engine.result' ORDER BY seq DESC LIMIT 50`)
+      .all(row.identity) as Ev[]).filter((r) => shiftOf(r.data) === row.id);
+    if (!results.length) return;
+    const cur = results[0]!;
+    // First turn of the shift: the window starts at its `starting`, never at the start of the worker's history.
+    const start = results[1] ?? (db.prepare(`SELECT seq, ts, data FROM events WHERE identity = ? AND type = 'shift.state' ORDER BY seq DESC LIMIT 50`)
+      .all(row.identity) as Ev[]).find((r) => shiftOf(r.data) === row.id && (JSON.parse(r.data) as { state?: string }).state === 'starting');
+    const window = (db.prepare(`SELECT seq, type, data FROM events WHERE identity = ? AND seq > ? AND seq < ? ORDER BY seq`)
+      .all(row.identity, start?.seq ?? 0, cur.seq) as { seq: number; type: string; data: string }[])
+      .map((r) => ({ type: r.type, data: JSON.parse(r.data) as Record<string, any> }));
+    const triggers = window
+      .filter((e) => e.type === 'message.state' && e.data.state === 'seen' && e.data.from === OWNER)
+      .map((e) => this.get(String(e.data.id)))
+      .filter((m): m is MessageRow => !!m && m.state === 'seen' && m.shift_id === row.id);
+    if (!triggers.length) return;
+    // Reached him in this turn: a stored message to him (any path: MCP, API from Bash), or the tool call itself
+    // (its op may be ingested after the result).
+    const stored = db.prepare(`SELECT 1 FROM messages WHERE from_identity = ? AND to_identity = ? AND created_at >= ? LIMIT 1`)
+      .get(row.identity, OWNER, Math.min(...triggers.map((t) => t.seen_at ?? t.created_at)));
+    const told = !!stored || window.some((e) => {
+      if (e.type !== 'engine.tool_use' || e.data.shift !== row.id || e.data.ev?.parentToolUseId) return false;
+      const { name, input } = e.data.ev as { name?: string; input?: { to?: unknown } };
+      if (OWNER_FACING_TOOLS.has(name ?? '')) return true;
+      if (name !== 'mcp__company__tell') return false;
+      // A `to` that is no identity ("רן") was meant for him; ingest rejects it and the worker resends.
+      const to = typeof input?.to === 'string' ? input.to : '';
+      return to === OWNER || (to !== 'hq' && !getIdentity(this.store, to));
+    });
+    let answered = told;
+    if (!told && !ev.isError) {
+      const last = window.filter((e) => e.type === 'engine.text' && e.data.shift === row.id).at(-1)?.data.ev as
+        { text: string; messageId?: string } | undefined;
+      const body = (ev.text ?? last?.text ?? '').trim();
+      if (body) {
+        const to = triggers.at(-1)!;
+        this.tell({ msg_id: `${to.id}-reply`, from: row.identity, to: OWNER, body, ref: to.id, text_ref: last?.messageId });
+        answered = true;
+      }
+    }
+    // Everything he sent into this turn is answered by what the turn showed him.
+    if (answered) for (const t of triggers) if (this.get(t.id)!.state === 'seen') this.setState(t.id, 'handled');
   }
 
   /** A shift ended before echoing: its messages go back to waiting for the next shift. */
@@ -345,6 +408,10 @@ export class Mailbox {
       ].filter(Boolean).join('\n') });
     this.store.emit('ask.escalated', a.from_identity, { id: a.id, why });
   }
+}
+
+function shiftOf(data: string): string | undefined {
+  try { return (JSON.parse(data) as { shift?: string }).shift; } catch { return undefined; }
 }
 
 function askDTO(r: AskRow): AskDTO {

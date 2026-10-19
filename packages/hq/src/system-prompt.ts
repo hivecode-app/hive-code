@@ -8,15 +8,29 @@ import type { IdentityRow } from './org.ts';
 
 const read = (p: string): string | null => (existsSync(p) ? readFileSync(p, 'utf8').trim() : null);
 
-/** How work moves through hq. Short on purpose: the contract files below carry the rules. */
+/**
+ * How work moves through hq. Short on purpose: the contract files below carry the rules.
+ * The conversation model (docs/app/chat.md §2.3א): with רן your own text is the reply, streamed into his app
+ * like Claude Code, and hq stores the turn's final text as one message to him. `tell` to him is only for things
+ * he did not just write about. With everyone else, `tell`.
+ */
 function howWeTalk(i: IdentityRow, managerId: string): string {
   const boss = i.reports_to ?? OWNER;
   return [
     '## איך מדברים בחברה',
-    `- הודעות מגיעות אליך בתור הודעת משתמש שמתחילה ב-\`[הודעה מ-<שם> (<identity>) · דחיפות: … · <msg_id>]\`. זה לא רן שמקליד בטרמינל: זו תיבת הדואר שלך.`,
-    `- **עונים רק דרך הכלי \`tell\` של ה-MCP \`company\`**, עם \`to\` = ה-identity של השולח (מה שבסוגריים בכותרת, לא השם) ו-\`ref\` = ה-msg_id שעליו עונים. טקסט רגיל בתשובה שלך לא מגיע לאף אחד. ה-identity של רן הוא \`${OWNER}\`.`,
+    `- הודעות מגיעות אליך בתור הודעת משתמש שמתחילה ב-\`[הודעה מ-<שם> (<identity>) · דחיפות: … · <msg_id>]\`. זו תיבת הדואר שלך, לא טרמינל. ה-identity של רן הוא \`${OWNER}\`.`,
+    '',
+    '### כשרן כתב לך (`owner`)',
+    '- **הטקסט שאתה כותב הוא התשובה.** הוא מופיע אצלו באפליקציה תוך כדי כתיבה, כמו ב-Claude Code, והטקסט האחרון בסבב נשמר כהודעה ממך אליו. **לא עונים לו ב-`tell`.** כך הוא מקבל את התשובה פעם אחת.',
+    '- כותבים אליו ישירות, בגוף שני ("PR #17 מוזג. לפתוח צוות ל-CI?"), בעברית פשוטה וקצרה. לא מסכמים לעצמך מה עשית ("ענית לרן ש…"), לא מספרים על הכלים, ולא כותבים פרטים פנימיים כמו "ההודעה נכנסה לתור המסירה" או מזהי הודעות.',
+    '- משתמשים בכלים בשקט: בודקים, ואז כותבים לו את התוצאה. אם כותבים משהו לפני הכלים, זה משפט אחד ("בודק"), לא הסבר.',
+    '- שאלה עם אפשרויות לבחירה, או שאלה שחוסמת את העבודה: `ask` (הוא מקבל כרטיס עם כפתורים). אישור לפרודקשן: `request_go`. במקרים האלה לא כותבים גם טקסט.',
+    '',
+    '### כל השאר',
+    '- **לכל מי שאינו רן עונים רק דרך הכלי `tell` של ה-MCP `company`**, עם `to` = ה-identity של השולח (מה שבסוגריים בכותרת, לא השם) ו-`ref` = ה-msg_id שעליו עונים. טקסט רגיל בסבב כזה לא מגיע לאף אחד, ולכן לא כותבים בו סיכומים.',
+    '- לרן כותבים ב-`tell` רק כשהוא לא כתב לך עכשיו: משימה שנגמרה, משהו שהוא צריך לדעת. אותם כללי ניסוח: ישירות אליו, קצר, בלי פרטים פנימיים.',
     '- הודעה מ-`hq` היא הודעת מערכת (תזכורת, טיקט שנפתח, הודעה שלא נמסרה). פועלים לפיה, לא עונים לה.',
-    '- שאלה לרן: `ask` (עם `blocking` אם העבודה עוצרת). אישור לפרודקשן: `request_go`. ידע שצריך להישמר: `remember`. לפני סוף משמרת: `handoff`.',
+    '- ידע שצריך להישמר: `remember`. לפני סוף משמרת: `handoff`.',
     `- אתה מדווח ל-\`${boss}\`. מנהל החברה הוא \`${managerId}\`.`,
   ].join('\n');
 }

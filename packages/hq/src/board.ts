@@ -33,7 +33,8 @@ export function deriveStatus(i: IdentityRow, s: ShiftRow | undefined, f: {
     }
     if (s.state === 'starting') return { status: f.hadEarlierShift ? 'restarting' : 'working', blocked_on: null };
     if (s.in_turn) return { status: 'working', blocked_on: null };
-    return { status: 'resting', blocked_on: null };   // live and idle: bedtime, "זמין"
+    // Live and idle: awake, answers right away (APP-SPEC §6.2 "פנוי"). Never "נח" while a shift is up.
+    return { status: 'free', blocked_on: null };
   }
   if (f.taskState === 'parked' || f.taskState === 'needs_decision') return { status: 'blocked', blocked_on: 'מחכה להחלטה' };
   return { status: 'resting', blocked_on: null };

@@ -4,6 +4,8 @@
 //   engine.delta (live only, seq 0), shift.state.
 // Pure: no IO. Feeding the same event twice is a no-op (dedupe by seq), so replay after a
 // reconnect (`/ws?after=<seq>`) never duplicates a line (chat.md §7).
+// The conversation model (chat.md §2.3א): a turn that reached the owner through `tell`/`ask`/`request_go`
+// shows that item, not its own text: the text of such a turn is dropped when the turn ends.
 import '../model/models.dart';
 
 class EngineModel {
@@ -19,6 +21,8 @@ class EngineModel {
   final _toolNames = <String, List<String>>{}; // group id -> tool names in order
   final _toolStarted = <String, DateTime>{};
   int? _shiftNo;
+  final _turnTexts = <TextMsg>[];
+  bool _turnToldOwner = false;
 
   /// Applies one hq event `{seq, ts, type, identity, data}`.
   void apply(Map<String, dynamic> e) {
@@ -30,6 +34,9 @@ class EngineModel {
     final data = (e['data'] as Map?)?.cast<String, dynamic>() ?? const {};
 
     if (type == 'shift.state') {
+      // A run that died mid-turn never sent `result`: its turn is over, nothing carries into the next one.
+      _turnTexts.clear();
+      _turnToldOwner = false;
       final id = data['id'] as String? ?? data['shift'] as String? ?? '';
       final n = int.tryParse(id.split('-').last);
       if (n != null && data['state'] == 'live' && _shiftNo != n) {
@@ -49,6 +56,7 @@ class EngineModel {
           _closeGroup(Outcome.ok);
           final m = TextMsg(id: 't:$mid', ts: ts, text: '', streaming: true);
           items.add(m);
+          _turnTexts.add(m);
           return m;
         });
         t.text += ev['text'] as String? ?? '';
@@ -66,11 +74,14 @@ class EngineModel {
             ..seq = seq;
         } else if (text.trim().isNotEmpty) {
           _closeGroup(Outcome.ok);
-          items.add(TextMsg(id: 't:${mid ?? seq}', ts: ts, text: text, seq: seq));
+          final m = TextMsg(id: 't:${mid ?? seq}', ts: ts, text: text, seq: seq);
+          items.add(m);
+          _turnTexts.add(m);
         }
       case 'tool_use':
         if (ev['parentToolUseId'] != null) return; // subagent internals: only the Task line shows
         final name = ev['name'] as String? ?? '?';
+        if (reachesOwner(name, ev['input'])) _turnToldOwner = true;
         final id = ev['toolUseId'] as String? ?? '$seq';
         final input = (ev['input'] as Map?)?.cast<String, dynamic>() ?? const {};
         final g = _group ??= _newGroup(ts, seq);
@@ -101,6 +112,12 @@ class EngineModel {
         }
         _streams.clear();
         _closeGroup(ev['isError'] == true ? Outcome.error : Outcome.ok);
+        if (_turnToldOwner) {
+          final drop = _turnTexts.toSet();
+          items.removeWhere(drop.contains);
+        }
+        _turnTexts.clear();
+        _turnToldOwner = false;
         if (ev['isError'] == true) {
           items.add(ErrorLine(id: 'r:$seq', ts: ts, text: 'הסבב נגמר בשגיאה. ${gender == Gender.f ? 'היא תנסה' : 'הוא ינסה'} שוב בהודעה הבאה.', seq: seq));
         }
@@ -133,6 +150,12 @@ class EngineModel {
     _group = null;
   }
 }
+
+/// A company tool whose result the owner sees as its own item (a message, an ask card, a GO card).
+bool reachesOwner(String name, Object? input) =>
+    name == 'mcp__company__ask' ||
+    name == 'mcp__company__request_go' ||
+    (name == 'mcp__company__tell' && input is Map && const {'owner', 'רן', 'ran'}.contains(input['to']));
 
 String toolIcon(String name) => switch (name) {
       'Read' => 'description',

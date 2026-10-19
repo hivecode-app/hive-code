@@ -15,11 +15,11 @@ test('store: WAL, migrations idempotent across reopen, toggles seeded once', () 
     const path = join(dir, 'hq.db');
     const s1 = new Store(path);
     assert.equal(s1.db.pragma('journal_mode', { simple: true }), 'wal');
-    assert.equal(s1.schemaVersion, 1);
+    assert.equal(s1.schemaVersion, 2);
     s1.setToggle('probes', false);
     s1.close();
     const s2 = new Store(path);
-    assert.equal(s2.schemaVersion, 1);
+    assert.equal(s2.schemaVersion, 2);
     assert.equal(s2.toggle('probes'), false, 'manual off survives restart');
     assert.equal(s2.toggle('scheduler'), true);
     const e = s2.emit('x', 'eli', { a: 1 });
@@ -117,6 +117,12 @@ test('system prompt (L0+L1): dossier, how to reply, Authority, charter; task wor
   assert.match(yoav, /The complete list of things you may not do/); // Authority, verbatim (directives.md)
   assert.match(yoav, /`tell`/);
   assert.match(yoav, /ה-identity של רן הוא `owner`/);
+  // chat.md §2.3א: with the owner the text is the reply; no tell back, no self-narration or delivery internals.
+  assert.match(yoav, /\*\*הטקסט שאתה כותב הוא התשובה\.\*\*/);
+  assert.match(yoav, /\*\*לא עונים לו ב-`tell`\.\*\*/);
+  assert.match(yoav, /לא מסכמים לעצמך מה עשית/);
+  assert.match(yoav, /ההודעה נכנסה לתור המסירה/);
+  assert.doesNotMatch(yoav, /טקסט רגיל בתשובה שלך לא מגיע לאף אחד/, 'the old rule that made every reply a tell');
   const worker = buildSystemPrompt(companyDir, { ...base, id: 'agent-company-t7', name: 't7', title: 'fix typo', team_kind: 'task',
     project: 'agent-company', reports_to: 'adi', lifecycle: 'ephemeral', source: 'runtime' }, 'yoav');
   assert.match(worker, /צוות משימה/);

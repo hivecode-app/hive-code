@@ -88,4 +88,40 @@ void main() {
     expect(ask.options.map((o) => o.label), ['ניסיון נוסף', 'ביטול']);
     expect(d.waiting.firstWhere((w) => w.inboxId == 8).kind, WaitKind.go);
   });
+
+  // 20/10, yoav after "היי": a tell(owner) and then the turn's own self-narration were two bubbles (chat.md §2.3א).
+  test('a turn that told the owner shows the tell, not its own text', () {
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.m);
+    final events = [
+      ev(1, 'user_echo', {'uuid': 'u', 'text': '[הודעה מ-רן (owner) · דחיפות: רגילה · m-1]\nהיי'}),
+      ev(2, 'tool_use', {'toolUseId': 't1', 'name': 'mcp__company__tell', 'input': {'to': 'owner', 'ref': 'm-1', 'body': 'היי רן. לפתוח צוות?'}}),
+      ev(3, 'tool_result', {'toolUseId': 't1', 'isError': false, 'preview': '{"queued":true}'}),
+      ev(4, 'text', {'text': 'ענית לרן ושאלת אם לפתוח צוות. ההודעה נכנסה לתור המסירה.', 'messageId': 'n'}),
+      ev(5, 'result', {'subtype': 'success', 'isError': false}),
+    ];
+    for (final e in [...events, ...events]) {
+      m.apply(e);
+    }
+    expect(items.whereType<TextMsg>(), isEmpty, reason: 'the stored tell is the only bubble');
+    // The next turn (a plain text reply) is not affected.
+    m.apply(ev(6, 'text', {'text': 'בטח.', 'messageId': 'o'}));
+    m.apply(ev(7, 'result', {'subtype': 'success', 'isError': false}));
+    expect(items.whereType<TextMsg>().map((t) => t.text), ['בטח.']);
+  });
+
+  test('a reply hq stored from the streamed text (text_ref) is the same bubble, not a second one', () {
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.m);
+    m.apply(ev(1, 'text', {'text': 'היי רן. PR #17 מוזג.', 'messageId': 'msg_b'}));
+    m.apply(ev(2, 'result', {'subtype': 'success', 'isError': false}));
+    expect(streamedAlready(items, {'id': 'm-1-reply', 'text_ref': 'msg_b', 'body': 'היי רן. PR #17 מוזג.'}), isTrue);
+    expect(streamedAlready(items, {'id': 'm-2-reply', 'text_ref': 'msg_other'}), isFalse, reason: 'stream outside the loaded window: the stored message shows');
+    expect(streamedAlready(items, {'id': 'tell-1', 'text_ref': null}), isFalse);
+  });
+
+  test('board status "free" is פנוי, not נח', () {
+    expect(mapStatus('free'), WorkerStatus.free);
+    expect(mapStatus('resting'), WorkerStatus.resting);
+  });
 }

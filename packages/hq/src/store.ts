@@ -7,8 +7,8 @@ import type { HqEvent, IdentityId } from '@company/shared';
 
 export type DB = Database.Database;
 
-// Migration 1 is still being shaped on the hq-phase1 branch (no deployed hq.db exists yet). From the first
-// deploy on, every change is a new migration appended below — never an edit of a shipped one.
+// hq.db is deployed (hq-host, since 19/10): every change is a new migration appended below — never an edit
+// of a shipped one.
 const MIGRATIONS: string[] = [
   // 1 — phase 1 schema
   `
@@ -224,6 +224,11 @@ const MIGRATIONS: string[] = [
   CREATE INDEX ops_identity ON ops(identity, op, received_at);
 
   CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  `,
+  // 2 — a reply the owner got as the worker's own assistant text (chat.md §2.3א): the engine messageId of
+  // that text, so the app shows the streamed bubble and the stored message as one item.
+  `
+  ALTER TABLE messages ADD COLUMN text_ref TEXT;
   `,
 ];
 

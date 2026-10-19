@@ -2,7 +2,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { LineSplitter, type EngineEvent, type Priority } from '@company/shared';
-import { normalize, type LifecycleSignal } from './normalize.ts';
+import { normalize, type LifecycleSignal, type StreamState } from './normalize.ts';
 import { buildArgs, buildEnv, type ShiftSpec } from './spec.ts';
 import { resolveClaudeBin } from './binary.ts';
 import { newUuid } from './ids.ts';
@@ -44,6 +44,7 @@ export class ClaudeProcess {
   private readonly h: ClaudeProcessHandlers;
   private readonly pending = new Map<string, Pending>();
   private reqSeq = 0;
+  private readonly stream: StreamState = {};
   private readonly queue: EngineEvent[] = [];
   private waiters: Array<(r: IteratorResult<EngineEvent>) => void> = [];
   private readonly exitPromise: Promise<void>;
@@ -103,7 +104,7 @@ export class ClaudeProcess {
     let o: any;
     try { o = JSON.parse(line); } catch { this.stderrTail += `\n[adapter] non-JSON stdout: ${line.slice(0, 200)}`; return; }
     this.h.onRaw?.(o);
-    const n = normalize(o);
+    const n = normalize(o, this.stream);
     if (o?.type === 'system' && o.subtype === 'init') this.sawInit = true;
     if (n.control) {
       const p = this.pending.get(n.control.requestId);

@@ -35,7 +35,14 @@ const textOf = (content: unknown): string =>
   typeof content === 'string' ? content
     : Array.isArray(content) ? content.filter((b: J) => b?.type === 'text').map((b: J) => b.text).join('') : '';
 
-export function normalize(o: J): Normalized {
+/**
+ * Per-process stream state. Deltas carry no message id on the wire; the id arrives once in `message_start`.
+ * Stamping it on every delta lets a client grow the bubble that the final `text` (same messageId) replaces,
+ * instead of a second bubble (chat.md §2.3א: one reply, one bubble).
+ */
+export interface StreamState { messageId?: string }
+
+export function normalize(o: J, st: StreamState = {}): Normalized {
   const type = o?.type;
   const ev: EngineEvent[] = [];
   switch (type) {
@@ -63,16 +70,19 @@ export function normalize(o: J): Normalized {
     }
     case 'stream_event': {
       const e = o.event ?? {};
+      // Subagent streams interleave with the main one; only the main conversation's id is tracked.
+      if (e.type === 'message_start' && !o.parent_tool_use_id) st.messageId = e.message?.id ?? undefined;
       if (e.type === 'content_block_delta') {
         const d = e.delta ?? {};
+        const mid = o.parent_tool_use_id ? {} : st.messageId ? { messageId: st.messageId } : {};
         if (d.type === 'text_delta' && typeof d.text === 'string') {
-          return { events: [{ kind: 'text_delta', text: d.text }] };
+          return { events: [{ kind: 'text_delta', text: d.text, ...mid }] };
         }
         if (d.type === 'thinking_delta' && typeof d.thinking === 'string') {
-          return { events: [{ kind: 'thinking_delta', text: d.thinking }] };
+          return { events: [{ kind: 'thinking_delta', text: d.thinking, ...mid }] };
         }
       }
-      return { events: [] };   // message_start/stop etc. carry nothing we need
+      return { events: [] };   // message_stop etc. carry nothing we need
     }
     case 'assistant': {
       const m = o.message ?? {};

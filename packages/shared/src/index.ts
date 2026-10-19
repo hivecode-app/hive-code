@@ -18,13 +18,14 @@ export type DerivedStatus =
   | 'blocked'          // block · on something else (named in `blocked_on`)
   | 'stuck'            // warning · alive, not progressing
   | 'restarting'       // autorenew
-  | 'resting'          // bedtime · answers when addressed
+  | 'free'             // radio_button_unchecked · live shift, idle: answers right away ("פנוי")
+  | 'resting'          // bedtime · no live shift: a message wakes it ("נח")
   | 'done';            // check_circle (ephemeral task worker whose task closed)
 
 /** Material Symbols icon name per status (company.md, dir-0017): an icon from one set, never an emoji. */
 export const STATUS_SYMBOL: Record<DerivedStatus, string> = {
   working: 'play_arrow', waiting_for_you: 'pause_circle', blocked: 'block', stuck: 'warning',
-  restarting: 'autorenew', resting: 'bedtime', done: 'check_circle',
+  restarting: 'autorenew', free: 'radio_button_unchecked', resting: 'bedtime', done: 'check_circle',
 };
 
 export type ShiftState = 'starting' | 'live' | 'ended' | 'dead';

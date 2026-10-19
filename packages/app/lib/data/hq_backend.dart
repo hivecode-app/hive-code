@@ -257,7 +257,9 @@ class HqBackend extends Backend {
         final from = m['from_identity'] as String;
         final chat = d.chats.putIfAbsent(from, () => Conversation(identityId: from, items: []));
         if (!chat.items.any((i) => i.id == 'msg:${m['id']}')) {
-          chat.items.add(TextMsg(id: 'msg:${m['id']}', ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int), text: m['body'] as String));
+          if (!streamedAlready(chat.items, m)) {
+            chat.items.add(TextMsg(id: 'msg:${m['id']}', ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int), text: m['body'] as String));
+          }
           if (openIdentity == from) unawaited(_send('POST', '/api/messages/${Uri.encodeComponent(m['id'] as String)}/handled'));
           _bumpConversation(from, m['body'] as String, m['created_at'] as int);
           notifyListeners();
@@ -321,7 +323,7 @@ class HqBackend extends Backend {
         } else if (m['to_identity'] == 'owner') {
           if (m['kind'] == 'system') {
             chat.items.add(EventLine(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String));
-          } else {
+          } else if (!streamedAlready(chat.items, m)) {
             chat.items.add(TextMsg(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String));
           }
           // He read it: mark it handled so the worker's mailbox closes the loop (B.4).
@@ -447,12 +449,20 @@ Delivery mapDelivery(String? s) => switch (s) {
       _ => Delivery.queued,
     };
 
+/// A reply hq stored from the worker's own text (chat.md §2.3א) is the bubble that already streamed in:
+/// `text_ref` is that text's engine messageId. One item, never two.
+bool streamedAlready(List<ChatItem> items, Map<String, dynamic> m) {
+  final ref = m['text_ref'] as String?;
+  return ref != null && items.any((i) => i is TextMsg && i.id == 't:$ref');
+}
+
 WorkerStatus mapStatus(String? s) => switch (s) {
       'working' => WorkerStatus.working,
       'waiting_for_you' => WorkerStatus.waiting,
       'blocked' => WorkerStatus.blocked,
       'stuck' => WorkerStatus.stuck,
       'restarting' => WorkerStatus.restarting,
+      'free' => WorkerStatus.free,
       'resting' => WorkerStatus.resting,
       'done' => WorkerStatus.done,
       _ => WorkerStatus.free,

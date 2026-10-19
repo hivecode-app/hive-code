@@ -61,6 +61,14 @@ test('normalize: wire shapes observed on 2.1.303', () => {
   assert.deepEqual(rl, { kind: 'rate_limit', status: 'allowed', rateLimitType: 'five_hour', resetsAt: 1, fiveHour: 0.17, sevenDay: 0.5 });
   const d = normalize({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'O' } } });
   assert.deepEqual(d.events, [{ kind: 'text_delta', text: 'O' }]);
+  // Deltas get the id of their message (from message_start), so the final `text` replaces that bubble.
+  const st = {};
+  normalize({ type: 'stream_event', event: { type: 'message_start', message: { id: 'msg_b' } } }, st);
+  assert.deepEqual(normalize({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'היי' } } }, st).events,
+    [{ kind: 'text_delta', text: 'היי', messageId: 'msg_b' }]);
+  assert.deepEqual(normalize({ type: 'stream_event', parent_tool_use_id: 't9', event: { type: 'message_start', message: { id: 'msg_sub' } } }, st).events, []);
+  assert.deepEqual(normalize({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '!' } } }, st).events,
+    [{ kind: 'text_delta', text: '!', messageId: 'msg_b' }], 'a subagent message_start does not take over');
   const tr = normalize({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } });
   assert.deepEqual(tr.events, [{ kind: 'tool_result', toolUseId: 't1', isError: false, preview: 'ok' }]);
   const cr = normalize({ type: 'control_response', response: { subtype: 'success', request_id: 'r', response: { a: 1 } } });
