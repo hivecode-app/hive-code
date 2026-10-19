@@ -7,7 +7,9 @@
   "scripts": {
     "build": "tsc -b packages/*",
     "test": "node --test --experimental-strip-types 'packages/*/test/**/*.test.ts'",
-    "typecheck": "tsc -b packages/* --noEmit"
+    "typecheck": "tsc -b packages/* --noEmit",
+    "check:contract": "node scripts/check-contract.mjs",
+    "test:contract": "node --test scripts/check-contract.test.mjs"
   },
   "devDependencies": { "typescript": "^5.9.0", "@types/node": "^24.0.0" }
 }
