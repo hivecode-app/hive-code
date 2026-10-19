@@ -1,0 +1,186 @@
+// App frame. Phone (<800px): one column + bottom navigation (mockup `.nav`).
+// Desktop (APP-SPEC §8.1): rail · list · main · context, the context column from 1280px.
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../data/store.dart';
+import '../theme/tokens.dart';
+import 'board/board_screen.dart';
+import 'common.dart';
+import 'convs/conversations_screen.dart';
+import 'desktop.dart';
+import 'home/home_screen.dart';
+import 'nav.dart';
+import 'org/org_screen.dart';
+
+class Shell extends StatelessWidget {
+  const Shell({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final nav = NavScope.of(context);
+    final store = StoreScope.of(context);
+    return LayoutBuilder(builder: (context, c) {
+      nav.wide = c.maxWidth >= 800;
+      final p = context.p;
+      final body = nav.wide
+          ? DesktopFrame(width: c.maxWidth)
+          : Column(children: [
+              Expanded(
+                child: IndexedStack(index: nav.tab.index, children: const [
+                  HomeScreen(),
+                  ConversationsScreen(),
+                  BoardScreen(),
+                  OrgScreen(),
+                ]),
+              ),
+              const BottomNav(),
+            ]);
+      return AnnotatedRegion<SystemUiOverlayStyle>(
+        value: (p.dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark).copyWith(
+          statusBarColor: Colors.transparent,
+          systemNavigationBarColor: nav.wide ? p.bg : p.surface,
+        ),
+        child: Scaffold(
+          backgroundColor: p.bg,
+          body: SafeArea(bottom: true, child: Stack(children: [body, if (store.error != null) _ErrorBar(store.error!)])),
+        ),
+      );
+    });
+  }
+}
+
+/// Error as a bar with "הבנתי" (design-taste E16): it stays until dismissed.
+class _ErrorBar extends StatelessWidget {
+  const _ErrorBar(this.text);
+  final String text;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return PositionedDirectional(
+      start: 12,
+      end: 12,
+      top: 8,
+      child: Material(
+        color: p.surface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: p.line)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+          child: Row(children: [
+            Ic('error', size: 18, fill: true, color: p.urgent),
+            const SizedBox(width: 8),
+            Expanded(child: Text(text, style: T.secondary.copyWith(color: p.text))),
+            TextButton(onPressed: StoreScope.read(context).clearError, child: Text('הבנתי', style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700))),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class NavDest {
+  const NavDest(this.tab, this.icon, this.label);
+  final AppTab tab;
+  final String icon;
+  final String label;
+}
+
+const kDests = [
+  NavDest(AppTab.home, 'home', 'בית'),
+  NavDest(AppTab.convs, 'chat', 'שיחות'),
+  NavDest(AppTab.board, 'view_kanban', 'לוח'),
+  NavDest(AppTab.org, 'account_tree', 'ארגון'),
+];
+
+/// Mockup `.nav`: 72dp, pill 56x30 in accent-soft on the active tab, FILL 1 icon,
+/// count on home = things waiting for you, dot on chats = unread (APP-SPEC §3).
+class BottomNav extends StatelessWidget {
+  const BottomNav({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final nav = NavScope.of(context);
+    final d = StoreScope.of(context).data;
+    final p = context.p;
+    final unread = d?.conversations.any((c) => c.unread > 0) ?? false;
+    return Container(
+      height: 72,
+      decoration: BoxDecoration(color: p.surface, border: Border(top: BorderSide(color: p.line))),
+      child: Row(children: [
+        for (final dest in kDests)
+          Expanded(
+            child: NavItem(
+              dest: dest,
+              on: nav.tab == dest.tab,
+              count: dest.tab == AppTab.home ? d?.waitingCount : null,
+              dot: dest.tab == AppTab.convs && unread && nav.tab != AppTab.convs,
+              onTap: () => nav.go(dest.tab),
+            ),
+          ),
+      ]),
+    );
+  }
+}
+
+class NavItem extends StatelessWidget {
+  const NavItem({super.key, required this.dest, required this.on, this.count, this.dot = false, this.warn = false, required this.onTap, this.pillWidth = 56, this.fontSize = 12});
+  final NavDest dest;
+  final bool on;
+  final int? count;
+  final bool dot;
+  final bool warn;
+  final VoidCallback onTap;
+  final double pillWidth;
+  final double fontSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final color = on ? p.text : p.text2;
+    return Semantics(
+      selected: on,
+      button: true,
+      label: count != null && count! > 0 ? '${dest.label}, $count מחכים לך' : dest.label,
+      child: InkWell(
+        onTap: onTap,
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          SizedBox(
+            width: pillWidth,
+            height: 30,
+            child: Stack(clipBehavior: Clip.none, children: [
+              Container(
+                width: pillWidth,
+                height: 30,
+                decoration: BoxDecoration(color: on ? p.accentSoft : null, borderRadius: BorderRadius.circular(15)),
+                alignment: Alignment.center,
+                child: Ic(dest.icon, fill: on, color: color),
+              ),
+              if (count != null && count! > 0)
+                PositionedDirectional(
+                  top: -1,
+                  start: pillWidth / 2 + 3,
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 18),
+                    height: 18,
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    decoration: BoxDecoration(color: p.text, borderRadius: BorderRadius.circular(9)),
+                    alignment: Alignment.center,
+                    child: Text('$count', style: TextStyle(fontFamily: kFont, fontSize: 11, height: 1, fontWeight: FontWeight.w700, color: p.surface)),
+                  ),
+                ),
+              if (dot)
+                PositionedDirectional(
+                  top: 4,
+                  start: pillWidth / 2 + 7,
+                  child: Container(width: 7, height: 7, decoration: BoxDecoration(color: p.text, shape: BoxShape.circle)),
+                ),
+              if (warn) PositionedDirectional(top: -2, start: pillWidth / 2 + 4, child: Ic('warning', size: 15, fill: true, color: p.text)),
+            ]),
+          ),
+          const SizedBox(height: 3),
+          Text(dest.label, style: TextStyle(fontFamily: kFont, fontSize: fontSize, height: 1.3, fontWeight: on ? FontWeight.w700 : FontWeight.w500, color: color)),
+        ]),
+      ),
+    );
+  }
+}

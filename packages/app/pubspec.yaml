@@ -1,0 +1,46 @@
+name: agent_company
+description: "החברה: the company app for Android and desktop web (docs/app/APP-SPEC.md)."
+publish_to: 'none'
+
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  material_symbols_icons: ^4.2960.0
+  http: ^1.6.0
+  web_socket_channel: ^3.0.3
+  shared_preferences: ^2.5.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  # Heebo (UI) and JetBrains Mono (code), static instances cut from the variable fonts
+  # (APP-SPEC §7.3: weights 400, 500, 700). Licenses: OFL, see assets/fonts/OFL.txt.
+  fonts:
+    - family: Heebo
+      fonts:
+        - asset: assets/fonts/Heebo-400.ttf
+          weight: 400
+        - asset: assets/fonts/Heebo-500.ttf
+          weight: 500
+        - asset: assets/fonts/Heebo-700.ttf
+          weight: 700
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-400.ttf
+          weight: 400
+        - asset: assets/fonts/JetBrainsMono-500.ttf
+          weight: 500
+        - asset: assets/fonts/JetBrainsMono-700.ttf
+          weight: 700

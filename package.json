@@ -9,9 +9,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -b packages/*",
+    "build": "tsc -b packages/*/tsconfig.json",
     "test": "node --test --experimental-strip-types 'packages/*/test/**/*.test.ts'",
-    "typecheck": "tsc -b packages/* --noEmit",
+    "typecheck": "tsc -b packages/*/tsconfig.json --noEmit",
     "check:contract": "node scripts/check-contract.mjs",
     "test:contract": "node --test scripts/check-contract.test.mjs",
     "canary": "node scripts/canary.mjs",
