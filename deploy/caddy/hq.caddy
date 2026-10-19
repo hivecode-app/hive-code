@@ -1,0 +1,7 @@
+# Public entry for the PWA/API (B.8). Append to /etc/caddy/Caddyfile, then `sudo systemctl reload caddy`.
+# hq itself listens on 127.0.0.1:7420 only; every route except GET /health needs the API token.
+api.hq.example.com {
+	reverse_proxy 127.0.0.1:7420 {
+		flush_interval -1
+	}
+}

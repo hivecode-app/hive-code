@@ -1,0 +1,26 @@
+# company hq (B.1) — one process on hq-host. systemd --user unit; linger is on for ran.
+# Install (not enabled yet):
+#   ln -sf ~/projects/agent-company/deploy/agent-company-hq.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now agent-company-hq
+# Shift-hosts run as their own transient units (systemd-run --user --unit=shift-<id>), outside this
+# unit's cgroup, so restarting hq never kills a shift (B.5).
+[Unit]
+Description=agent-company hq (store, mailboxes, inbox, scheduler, watchdog, probes, API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/agent-company
+ExecStart=/usr/bin/node %h/projects/agent-company/packages/hq/src/main.ts
+Environment=NODE_ENV=production
+# Everything hq writes (db, backups, tokens, sockets) is owner-only.
+UMask=0077
+# State lives under ~/.local/state/agent-company (B.11) — never /tmp.
+Restart=always
+RestartSec=2
+TimeoutStopSec=20
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,301 @@
+// HTTP + WebSocket API on 127.0.0.1 (B.8). Token auth on everything except GET /health (heartbeat).
+// The PWA uses this through Caddy; mcp-company and hooks use it for writes (idempotent by msg_id).
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { timingSafeEqual, randomBytes } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { WebSocketServer, type WebSocket } from 'ws';
+import type { Hq } from './hq.ts';
+
+export function loadOrCreateToken(stateDir: string): string {
+  if (process.env.HQ_TOKEN) return process.env.HQ_TOKEN;
+  const file = join(stateDir, 'api-token');
+  if (existsSync(file)) return readFileSync(file, 'utf8').trim();
+  mkdirSync(stateDir, { recursive: true });
+  const t = randomBytes(32).toString('base64url');
+  writeFileSync(file, t + '\n', { mode: 0o600 });
+  return t;
+}
+
+class HttpError extends Error {
+  public status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+type Handler = (ctx: { req: IncomingMessage; url: URL; params: string[]; body: () => Promise<Record<string, unknown>> }) => unknown | Promise<unknown>;
+
+function tokenOk(given: string | null | undefined, expected: string): boolean {
+  if (!given) return false;
+  const a = Buffer.from(given), b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function readBody(req: IncomingMessage, limit = 1 << 20): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => {
+      size += c.length;
+      if (size > limit) { reject(new HttpError(413, 'body too large')); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      if (!chunks.length) return resolve({});
+      try {
+        const v: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (!v || typeof v !== 'object' || Array.isArray(v)) return reject(new HttpError(400, 'body must be a JSON object'));
+        resolve(v as Record<string, unknown>);
+      } catch { reject(new HttpError(400, 'invalid JSON')); }
+    });
+    req.on('error', reject);
+  });
+}
+
+const str = (v: unknown, name: string, required = true): string | undefined => {
+  if (v == null || v === '') { if (required) throw new HttpError(400, `${name} is required`); return undefined; }
+  if (typeof v !== 'string') throw new HttpError(400, `${name} must be a string`);
+  return v;
+};
+const oneOf = <T extends string>(v: unknown, allowed: readonly T[], name: string): T | undefined => {
+  if (v == null) return undefined;
+  if (!allowed.includes(v as T)) throw new HttpError(400, `${name} must be one of ${allowed.join('|')}`);
+  return v as T;
+};
+const URGENCIES = ['urgent', 'normal', 'low'] as const;
+const PRIORITIES = ['now', 'next', 'later'] as const;
+
+export function health(hq: Hq) {
+  const lastSweep = Number(hq.store.getMeta('last_sweep_at') ?? 0);
+  const age = lastSweep ? hq.store.now() - lastSweep : null;
+  const live = (hq.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state = 'live'`).get() as { n: number }).n;
+  const ok = age != null && age < hq.cfg.timers.schedulerMs * 3;
+  return { ok, last_sweep_at: lastSweep || null, sweep_age_ms: age, live_shifts: live, schema: hq.store.schemaVersion };
+}
+
+export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
+  const r: [string, RegExp, Handler][] = [];
+  const route = (method: string, path: string, h: Handler) => r.push([method, new RegExp(`^${path.replace(/:\w+/g, '([^/]+)')}$`), h]);
+
+  route('GET', '/api/org', () => ({ identities: hq.board(), teams: hq.teams() }));
+  route('GET', '/api/board', () => ({ identities: hq.board(), tasks: hq.scheduler.tasks(), slots: hq.scheduler.slots(), probes: hq.probes.summary() }));
+
+  route('GET', '/api/inbox', () => ({ items: hq.inbox.open() }));
+  route('POST', '/api/inbox/:id/ack', ({ params }) => ({ ok: hq.inbox.ack(Number(params[0])) }));
+  // Workers (mcp-company request_go, browser-memory tab handoff) put "blocked on you" items here.
+  route('POST', '/api/inbox', async ({ body }) => {
+    const b = await body();
+    const kind = oneOf(b.kind, ['go', 'login', 'incident'] as const, 'kind');
+    if (!kind) throw new HttpError(400, 'kind is required');
+    const from = str(b.from, 'from')!;
+    const key = str(b.msg_id, 'msg_id', false);
+    return { item: hq.inbox.add({ kind, from_identity: from, title: str(b.title, 'title')!, body: str(b.body, 'body', false),
+      urgency: oneOf(b.urgency, URGENCIES, 'urgency'), blocking: b.blocking !== false, ref: str(b.ref, 'ref', false),
+      dedupe_key: key ? `api:${key}` : null }) };
+  });
+  // He finished it ("סיימתי") or declined: the requester hears it now, through its mailbox.
+  route('POST', '/api/inbox/:id/done', async ({ params, body }) => {
+    const b = await body();
+    try { return hq.mailbox.complete(Number(params[0]), { note: str(b.note, 'note', false) }); }
+    catch (e) { throw new HttpError(404, (e as Error).message); }
+  });
+  route('POST', '/api/inbox/:id/dismiss', async ({ params, body }) => {
+    const b = await body();
+    try { return hq.mailbox.complete(Number(params[0]), { note: str(b.note, 'note', false), declined: true }); }
+    catch (e) { throw new HttpError(404, (e as Error).message); }
+  });
+
+  route('GET', '/api/messages', ({ url }) => {
+    const identity = str(url.searchParams.get('identity'), 'identity')!;
+    const before = url.searchParams.get('before');
+    return { messages: hq.mailbox.list(identity, Number(url.searchParams.get('limit') ?? 200), before ? Number(before) : undefined) };
+  });
+  route('POST', '/api/messages/tell', async ({ body }) => {
+    const b = await body();
+    return { message: hq.mailbox.tell({
+      msg_id: str(b.msg_id, 'msg_id', false), from: str(b.from, 'from', false), to: str(b.to, 'to')!, body: str(b.body, 'body')!,
+      urgency: oneOf(b.urgency, URGENCIES, 'urgency'), priority: oneOf(b.priority, PRIORITIES, 'priority'), ref: str(b.ref, 'ref', false),
+    }) };
+  });
+  route('POST', '/api/messages/:id/handled', ({ params }) => ({ ok: hq.mailbox.markHandled(decodeURIComponent(params[0]!)) }));
+
+  route('GET', '/api/asks', () => ({ asks: hq.mailbox.openAsks() }));
+  route('POST', '/api/asks', async ({ body }) => {
+    const b = await body();
+    return { ask: hq.mailbox.ask({
+      msg_id: str(b.msg_id, 'msg_id', false), from: str(b.from, 'from')!, question: str(b.question, 'question')!,
+      options: Array.isArray(b.options) ? b.options.map(String) : [], blocking: b.blocking === true,
+      urgency: oneOf(b.urgency, URGENCIES, 'urgency'),
+    }) };
+  });
+  route('POST', '/api/asks/:id/answer', async ({ params, body }) => {
+    const b = await body();
+    const by = oneOf(b.by, ['owner', 'manager'] as const, 'by') ?? 'owner';
+    try {
+      return { ask: hq.mailbox.answer(decodeURIComponent(params[0]!), str(b.answer, 'answer')!, by, str(b.why, 'why', false)) };
+    } catch (e) { throw new HttpError(/no ask/.test((e as Error).message) ? 404 : 409, (e as Error).message); }
+  });
+
+  route('GET', '/api/shifts', () => ({ shifts: hq.shifts.active() }));
+  route('POST', '/api/shifts/start', async ({ body }) => {
+    const b = await body();
+    const identity = str(b.identity, 'identity')!;
+    if (!hq.identityExists(identity)) throw new HttpError(404, `no identity ${identity}`);
+    const shift = await hq.shifts.request(identity, { reason: 'manual', forceNew: b.new === true });
+    if (typeof b.prompt === 'string' && b.prompt) hq.mailbox.tell({ to: identity, body: b.prompt, msg_id: str(b.msg_id, 'msg_id', false) });
+    return { shift };
+  });
+  route('POST', '/api/shifts/:id/stop', async ({ params, body }) => {
+    const b = await body();
+    const id = decodeURIComponent(params[0]!);
+    if (!hq.shifts.get(id)) throw new HttpError(404, `no shift ${id}`);
+    await hq.shifts.stop(id, str(b.reason, 'reason', false) ?? 'owner_stop');
+    return { shift: hq.shifts.get(id) };
+  });
+  route('POST', '/api/shifts/:id/interrupt', async ({ params }) => {
+    await hq.shifts.interrupt(decodeURIComponent(params[0]!));
+    return { ok: true };
+  });
+
+  route('GET', '/api/tasks', () => ({ tasks: hq.scheduler.tasks(), queue: hq.scheduler.queue().map((t) => ({ id: t.id, bucket: t.bucket })) }));
+  route('POST', '/api/tasks', async ({ body }) => {
+    const b = await body();
+    return { task: hq.scheduler.addTask({
+      title: str(b.title, 'title')!, ref: str(b.ref, 'ref', false), project: str(b.project, 'project', false), body: str(b.body, 'body', false),
+      labels: Array.isArray(b.labels) ? b.labels.map(String) : undefined, priority: typeof b.priority === 'number' ? b.priority : undefined,
+      worktree: str(b.worktree, 'worktree', false), identity: str(b.identity, 'identity', false),
+    }) };
+  });
+
+  route('POST', '/api/tasks/:id/done', async ({ params }) => {
+    const t = await hq.scheduler.completeTask(Number(params[0]));
+    if (!t) throw new HttpError(404, `no task ${params[0]}`);
+    return { task: t };
+  });
+
+  route('GET', '/api/toggles', () => ({ toggles: hq.store.toggles() }));
+  route('PUT', '/api/toggles/:key', async ({ params, body }) => {
+    const b = await body();
+    if (typeof b.enabled !== 'boolean') throw new HttpError(400, 'enabled must be boolean');
+    const key = decodeURIComponent(params[0]!);
+    if (!hq.store.toggles().some((t) => t.key === key)) throw new HttpError(404, `no toggle ${key}`);
+    hq.store.setToggle(key, b.enabled, true);
+    return { toggles: hq.store.toggles() };
+  });
+
+  route('GET', '/api/events', ({ url }) => ({
+    events: hq.store.eventsAfter(Number(url.searchParams.get('after') ?? 0), Math.min(2000, Number(url.searchParams.get('limit') ?? 500)),
+      url.searchParams.get('identity') ?? undefined),
+  }));
+
+  route('GET', '/api/push/vapid', () => ({ publicKey: hq.pusher.publicKey }));
+  route('POST', '/api/push/subscribe', async ({ body }) => {
+    const b = await body();
+    try { hq.pusher.subscribe(b as never); } catch (e) { throw new HttpError(400, (e as Error).message); }
+    return { ok: true };
+  });
+
+  route('GET', '/api/accounts', () => ({ accounts: hq.store.db.prepare(
+    `SELECT name, email, org, plan, expires_at, health, five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at, snapshot_at FROM accounts ORDER BY name`).all() }));
+
+  return r;
+}
+
+export interface ApiServer { server: Server; wss: WebSocketServer; port: number; close(): Promise<void> }
+
+export async function startApi(hq: Hq, token: string, host: string, port: number): Promise<ApiServer> {
+  const routes = buildRoutes(hq);
+  const json = (res: ServerResponse, status: number, v: unknown) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(JSON.stringify(v));
+  };
+  // Bearer header for HTTP. `?token=` only on the WS upgrade (browsers can't set headers there), so the
+  // token doesn't end up in proxy logs for ordinary requests.
+  const authed = (req: IncomingMessage, url: URL, allowQuery = false) => {
+    const h = req.headers.authorization;
+    return tokenOk(h?.startsWith('Bearer ') ? h.slice(7) : (allowQuery ? url.searchParams.get('token') : null), token);
+  };
+
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://hq');
+    try {
+      if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/healthz')) {
+        const h = health(hq);
+        return json(res, h.ok ? 200 : 503, h);
+      }
+      if (!authed(req, url)) return json(res, 401, { error: 'unauthorized' });
+      if (await hq.ingest.handle(req, res, () => readBody(req))) return;
+      for (const [m, re, h] of routes) {
+        if (m !== req.method) continue;
+        const match = re.exec(url.pathname);
+        if (!match) continue;
+        const out = await h({ req, url, params: match.slice(1), body: () => readBody(req) });
+        return json(res, 200, out);
+      }
+      return json(res, 404, { error: 'not found' });
+    } catch (e) {
+      const status = e instanceof HttpError ? e.status : /required|invalid|must be/.test((e as Error).message) ? 400 : 500;
+      return json(res, status, { error: (e as Error).message });
+    }
+  });
+
+  // WS /ws?after=<seq>&identity=<id>: replays events after seq, then streams live (B.8 "resume from the last seq").
+  const wss = new WebSocketServer({ noServer: true });
+  server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url ?? '/', 'http://hq');
+    const protoToken = String(req.headers['sec-websocket-protocol'] ?? '').split(',').map((s) => s.trim()).find((p) => p.startsWith('token.'))?.slice(6);
+    if (url.pathname !== '/ws' || !(authed(req, url, true) || tokenOk(protoToken, token))) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => streamEvents(hq, ws, url));
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, host, () => resolve());
+  });
+  const addr = server.address();
+  return {
+    server, wss, port: typeof addr === 'object' && addr ? addr.port : port,
+    close: () => new Promise((resolve) => {
+      for (const c of wss.clients) c.terminate();
+      wss.close();
+      server.closeAllConnections();
+      server.close(() => resolve());
+    }),
+  };
+}
+
+function lastSeq(hq: Hq): number {
+  return (hq.store.db.prepare('SELECT COALESCE(MAX(seq), 0) s FROM events').get() as { s: number }).s;
+}
+
+function streamEvents(hq: Hq, ws: WebSocket, url: URL): void {
+  const identity = url.searchParams.get('identity') ?? undefined;
+  let cursor = Number(url.searchParams.get('after') ?? 0);
+  // A fresh client (no cursor) gets the recent tail only; older history is paged over REST /api/events.
+  if (!url.searchParams.has('after')) cursor = Math.max(0, lastSeq(hq) - 1000);
+  const buffered: unknown[] = [];
+  let replaying = true;
+  const off = hq.store.onEvent((e) => {
+    if (identity && e.identity !== identity) return;
+    if (e.seq === 0) { if (!replaying) ws.send(JSON.stringify(e)); return; } // live-only (deltas)
+    if (replaying) buffered.push(e);
+    else if (e.seq > cursor) { cursor = e.seq; ws.send(JSON.stringify(e)); }
+  });
+  ws.on('close', off);
+  ws.on('error', off);
+  // Replay from the log, then hand over to the live listener without gaps or duplicates.
+  for (;;) {
+    const batch = hq.store.eventsAfter(cursor, 1000, identity);
+    for (const e of batch) { ws.send(JSON.stringify(e)); cursor = e.seq; }
+    if (batch.length < 1000) break;
+  }
+  replaying = false;
+  for (const e of buffered as { seq: number }[]) if (e.seq > cursor) { cursor = e.seq; ws.send(JSON.stringify(e)); }
+  ws.send(JSON.stringify({ type: 'live', seq: cursor }));
+}

@@ -13,6 +13,8 @@ StartLimitBurst=5
 [Service]
 Type=simple
 Environment=DISABLE_AUTOUPDATER=1
+# logs, spool, prime and sockets are owner-only
+UMask=0077
 ExecStart=/usr/bin/env node %h/projects/agent-company/packages/shift-host/src/cli.ts --args-file %h/.local/state/agent-company/shifts/%i/host-args.json
 Restart=on-failure
 RestartSec=1

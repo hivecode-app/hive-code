@@ -1,0 +1,241 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { makeEnv, until } from './helpers.ts';
+import { capacity } from '../src/scheduler.ts';
+import { loadConfig } from '../src/config.ts';
+import { join } from 'node:path';
+
+test('capacity formula: floor((RAM − reserve − residents × idle) / work), capped by what is free now', () => {
+  const cfg = loadConfig({ stateDir: '/nonexistent', capacity: { reserveMb: 4096, rssIdleMb: 500, rssWorkMb: 2500, residents: ['yoav'], maxSlots: 8 } });
+  assert.deepEqual(capacity(cfg, { totalMb: 23_552, availableMb: 19_000 }, 0, 1), { total: 7, running: 0, free: 5 });
+  assert.equal(capacity(cfg, { totalMb: 23_552, availableMb: 19_000 }, 6, 1).free, 1);
+  assert.equal(capacity(cfg, { totalMb: 23_552, availableMb: 5_000 }, 0, 1).free, 0);
+  assert.equal(capacity(cfg, { totalMb: 64_000, availableMb: 60_000 }, 0, 1).total, 8, 'maxSlots cap');
+});
+
+test('queue follows B.16 order and skips needs-decision', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, clock } = env;
+    hq.store.setToggle('scheduler', false);
+    const s = hq.scheduler;
+    const d = s.addTask({ title: 'default p1', priority: 1 }); clock.advance(1);
+    const n = s.addTask({ title: 'night p2', labels: ['company:night'], priority: 2 }); clock.advance(1);
+    const left = s.addTask({ title: 'leftover' }); clock.advance(1);
+    hq.store.db.prepare('UPDATE tasks SET carried_over = 1 WHERE id = ?').run(left.id);
+    const open = s.addTask({ title: 'interrupted with worktree', state: 'interrupted', worktree: '/w/t1' }); clock.advance(1);
+    s.addTask({ title: 'open without worktree', state: 'open' });
+    s.addTask({ title: 'needs decision', labels: ['needs-decision'], priority: 0 });
+    const d0 = s.addTask({ title: 'default p0', priority: 0 });
+    assert.deepEqual(s.queue().map((t) => t.id), [open.id, left.id, n.id, d0.id, d.id]);
+  } finally { await env.cleanup(); }
+});
+
+test('scheduler fills free slots immediately with task workers under the project CEO', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 450 + 2 * 2500 + 100, availableMb: 4096 + 2 * 2500 + 100 }); // 2 slots
+    const t1 = hq.scheduler.addTask({ title: 'תקן את ה-CI', project: 'agent-company' });
+    const t2 = hq.scheduler.addTask({ title: 'שני', project: 'agent-company' });
+    const t3 = hq.scheduler.addTask({ title: 'שלישי', project: 'agent-company' });
+    await until(() => hq.scheduler.task(t1.id)!.state === 'running' && hq.scheduler.task(t2.id)!.state === 'running', 3000, 'two running');
+    await hq.scheduler.fill();
+    assert.equal(launcher.launches.length, 2, 'no third slot');
+    assert.equal(hq.scheduler.task(t1.id)!.state, 'running');
+    assert.equal(hq.scheduler.task(t3.id)!.state, 'queued');
+    const ident = hq.store.db.prepare('SELECT * FROM identities WHERE id = ?').get(`agent-company-t${t1.id}`) as { reports_to: string; lifecycle: string };
+    assert.equal(ident.reports_to, 'ac-ceo');
+    assert.equal(ident.lifecycle, 'ephemeral');
+    const promptOf = (id: number) => hq.store.db.prepare(`SELECT state FROM messages WHERE id LIKE ?`).get(`task-${id}-agent-company-t${id}-1-%`) as { state: string } | undefined;
+    await until(() => promptOf(t1.id)?.state === 'delivered', 3000, 'task prompt');
+
+    // A slot frees → the next task starts without waiting for the sweep.
+    await hq.shifts.stop(`agent-company-t${t2.id}-1`, 'task_done');
+    await until(() => hq.scheduler.task(t3.id)!.state === 'running', 3000, 'third task starts on slot free');
+    assert.equal(launcher.launches.length, 3);
+    assert.equal(hq.scheduler.task(t2.id)!.state, 'done');
+    assert.equal(hq.scheduler.task(t3.id)!.state, 'running');
+  } finally { await env.cleanup(); }
+});
+
+test('watchdog: one failed signal is suspect, two are dead; dead shift with mail is resurrected (resume)', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    hq.mailbox.tell({ msg_id: 'w-1', to: 'eli', body: 'שלום' });
+    await until(() => hq.mailbox.get('w-1')!.state === 'delivered');
+    let alive = true;
+    hq.watchdog.procCheck = () => (alive ? hq.shifts.get('eli-1')!.proc_start : null);
+    assert.equal((await hq.watchdog.sweep())['eli-1'], 'progressing');
+
+    alive = false;
+    assert.equal((await hq.watchdog.sweep())['eli-1'], 'suspect', 'pid gone but host answers: not proof of death');
+    hq.mailbox.tell({ msg_id: 'w-2', to: 'eli', body: 'עוד אחת' });
+    await launcher.hosts.get('eli-1')!.close(); // now the host is unreachable too
+    launcher.mode = 'echo';
+    const r = await hq.watchdog.sweep();
+    assert.equal(r['eli-1'], 'dead');
+    assert.equal(launcher.launches.length, 2);
+    assert.equal(launcher.launches[1]!.resume, true);
+  } finally { await env.cleanup(); }
+});
+
+test('watchdog: stuck in a turn → nudge → interrupt → new shift', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    hq.mailbox.tell({ msg_id: 's-1', to: 'eli', body: 'משימה ארוכה' });
+    await until(() => hq.mailbox.get('s-1')!.state === 'delivered');
+    hq.watchdog.procCheck = () => hq.shifts.get('eli-1')!.proc_start;
+    launcher.hosts.get('eli-1')!.event({ kind: 'text', text: 'מתחיל' });
+    await until(() => hq.shifts.get('eli-1')!.in_turn === 1);
+
+    clock.advance(10 * 60_000 + 1);
+    await hq.shifts.pingAll(); // claude still answers pings: alive but not progressing
+    assert.equal((await hq.watchdog.sweep())['eli-1'], 'stuck');
+    const nudge = hq.store.db.prepare(`SELECT * FROM messages WHERE to_identity = 'eli' AND id LIKE 'nudge-%'`).get() as { priority: string } | undefined;
+    assert.equal(nudge?.priority, 'now');
+
+    clock.advance(5 * 60_000);
+    await hq.shifts.pingAll();
+    await hq.watchdog.sweep();
+    assert.ok(hq.shifts.get('eli-1')!.interrupted_at);
+    assert.ok(launcher.hosts.get('eli-1')!.received.some((f) => f.t === 'interrupt'));
+
+    clock.advance(5 * 60_000);
+    await hq.shifts.pingAll();
+    await hq.watchdog.sweep();
+    await until(() => launcher.launches.some((l) => l.shiftId === 'eli-2'), 3000, 'new shift');
+    assert.equal(launcher.launches.at(-1)!.resume, false);
+  } finally { await env.cleanup(); }
+});
+
+test('watchdog rests an idle non-resident shift after 20 min; residents stay', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, clock } = env;
+    hq.mailbox.tell({ msg_id: 'r-1', to: 'eli', body: 'א' });
+    hq.mailbox.tell({ msg_id: 'r-2', to: 'yoav', body: 'ב' });
+    await until(() => hq.mailbox.get('r-1')!.state === 'delivered' && hq.mailbox.get('r-2')!.state === 'delivered');
+    hq.mailbox.markHandled('r-1'); hq.mailbox.markHandled('r-2');
+    hq.watchdog.procCheck = (pid) => hq.store.db.prepare('SELECT proc_start FROM shifts WHERE pid = ? LIMIT 1').pluck().get(pid) as string;
+    clock.advance(21 * 60_000);
+    await hq.shifts.pingAll();
+    await hq.watchdog.sweep();
+    assert.equal(hq.shifts.get('eli-1')!.state, 'ended');
+    assert.equal(hq.shifts.get('eli-1')!.end_reason, 'rest');
+    assert.equal(hq.shifts.get('yoav-1')!.state, 'live');
+    const eli = hq.board().find((b) => b.id === 'eli')!;
+    assert.equal(eli.status, 'resting');
+    assert.equal(eli.status_symbol, '💤');
+  } finally { await env.cleanup(); }
+});
+
+test('liveness (bet 4): claude not answering pings → ⚠ "לא עונה" on the board, then interrupt → fresh process', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    hq.mailbox.tell({ msg_id: 'l-1', to: 'eli', body: 'א' });
+    await until(() => hq.mailbox.get('l-1')!.state === 'delivered');
+    hq.watchdog.procCheck = () => hq.shifts.get('eli-1')!.proc_start;
+    await hq.shifts.pingAll();
+    let eli = hq.board().find((b) => b.id === 'eli')!;
+    assert.notEqual(eli.blocked_on, 'לא עונה');
+    assert.ok(eli.last_seen_at && eli.derived_at >= eli.last_seen_at, 'freshness stamp');
+
+    clock.advance(16_000); // > 3 × 5s without a ping answer
+    eli = hq.board().find((b) => b.id === 'eli')!;
+    assert.equal(eli.status, 'stuck');
+    assert.equal(eli.blocked_on, 'לא עונה');
+
+    clock.advance(2 * 60_000);
+    assert.equal((await hq.watchdog.sweep())['eli-1'], 'stuck');
+    assert.ok(launcher.hosts.get('eli-1')!.received.some((f) => f.t === 'interrupt'));
+    clock.advance(61_000);
+    await hq.watchdog.sweep();
+    await until(() => launcher.launches.length === 2, 3000, 'relaunch');
+    assert.equal(launcher.launches[1]!.resume, true, 'same session, fresh process');
+  } finally { await env.cleanup(); }
+});
+
+test('reboot: shifts the store believed live but whose host and pid are gone are relaunched (bet 3)', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    const ins = hq.store.db.prepare(`INSERT INTO shifts (id, identity, shift_no, state, kind, pid, proc_start, socket_path, task_id, started_at)
+      VALUES (?, ?, ?, 'live', ?, 999999, 'x', ?, ?, ?)`);
+    // these shifts ran before the reboot (they have log frames)
+    ins.run('yoav-3', 'yoav', 3, 'resident', join(env.cfg.stateDir, 'shifts', 'yoav-3.sock'), null, clock.t);
+    ins.run('agent-company-t9-1', 'ac-ceo', 1, 'work', join(env.cfg.stateDir, 'shifts', 'agent-company-t9-1.sock'), 9, clock.t);
+    hq.store.db.prepare(`UPDATE shifts SET host_seq = 7, run_start_seq = 1`).run();
+    const restored = await hq.shifts.restoreLost(() => null);
+    assert.deepEqual(restored, ['yoav']);
+    assert.equal(hq.shifts.get('agent-company-t9-1')!.state, 'dead', 'task shift: left to the scheduler');
+    assert.equal(launcher.launches[0]!.shiftId, 'yoav-3');
+    assert.equal(launcher.launches[0]!.resume, true);
+  } finally { await env.cleanup(); }
+});
+
+test('residents are kept up by the scheduler sweep (B.2: יואב always runs)', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    await hq.scheduler.sweep();
+    await until(() => hq.shifts.get('yoav-1')?.state === 'live', 3000, 'yoav up');
+    assert.equal(hq.shifts.get('yoav-1')!.kind, 'resident');
+    await hq.scheduler.sweep();
+    assert.equal(launcher.launches.filter((l) => l.identity === 'yoav').length, 1, 'once');
+    assert.equal(hq.scheduler.slots().running, 0, 'residents do not take work slots');
+  } finally { await env.cleanup(); }
+});
+
+test('a failing launch does not spin the scheduler (backoff per task)', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    launcher.fail = true;
+    hq.store.setToggle('scheduler', false);
+    hq.scheduler.addTask({ title: 'א', project: 'agent-company' });
+    hq.store.setToggle('scheduler', true);
+    await hq.scheduler.fill();
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(launcher.launches.length, 1, 'one attempt, no refill storm');
+    await hq.scheduler.fill();
+    assert.equal(launcher.launches.length, 1, 'backoff window');
+    clock.advance(61_000);
+    launcher.fail = false;
+    await hq.scheduler.fill();
+    assert.equal(launcher.launches.length, 2);
+  } finally { await env.cleanup(); }
+});
+
+test('task lifecycle: rest parks the task (no restart loop), a message wakes it, status{done} closes it', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    const t = hq.scheduler.addTask({ title: 'טיקט', project: 'agent-company' });
+    const sid = `agent-company-t${t.id}-1`;
+    await until(() => hq.shifts.get(sid)?.state === 'live', 3000, 'task shift live');
+    hq.watchdog.procCheck = () => hq.shifts.get(sid)!.proc_start;
+    hq.store.db.prepare(`UPDATE messages SET state = 'handled' WHERE to_identity = ?`).run(`agent-company-t${t.id}`);
+    clock.advance(21 * 60_000);
+    await hq.shifts.pingAll();
+    await hq.watchdog.sweep();
+    assert.equal(hq.shifts.get(sid)!.end_reason, 'rest');
+    assert.equal(hq.scheduler.task(t.id)!.state, 'resting');
+    await hq.scheduler.fill();
+    assert.equal(launcher.launches.length, 1, 'not restarted by the scheduler');
+
+    hq.mailbox.tell({ msg_id: 'wake-1', from: 'ac-ceo', to: `agent-company-t${t.id}`, body: 'יש review' });
+    await until(() => hq.scheduler.task(t.id)!.state === 'running', 3000, 'woken by mail');
+    assert.equal(launcher.launches[1]!.resume, true);
+    assert.equal(hq.shifts.get(sid)!.task_id, t.id);
+
+    hq.ingest.op({ id: `${sid}:done`, v: 1, ts: '', identity: `agent-company-t${t.id}`, shift: sid, sessionId: null, op: 'status', args: { state: 'done' } });
+    await until(() => hq.scheduler.task(t.id)!.state === 'done', 3000, 'done');
+    await until(() => hq.shifts.get(sid)!.state === 'ended', 3000, 'shift ended');
+    assert.equal(hq.shifts.get(sid)!.end_reason, 'task_done');
+    assert.equal(hq.board().find((b) => b.id === `agent-company-t${t.id}`)!.status, 'done');
+  } finally { await env.cleanup(); }
+});

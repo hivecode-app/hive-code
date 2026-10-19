@@ -11,7 +11,7 @@
   "scripts": {
     "build": "tsc -b packages/*/tsconfig.json",
     "test": "node --test --experimental-strip-types 'packages/*/test/**/*.test.ts'",
-    "typecheck": "tsc -b packages/*/tsconfig.json --noEmit",
+    "typecheck": "tsc -b packages/*/tsconfig.json",
     "check:contract": "node scripts/check-contract.mjs",
     "test:contract": "node --test scripts/check-contract.test.mjs",
     "canary": "node scripts/canary.mjs",
@@ -20,5 +20,8 @@
   "devDependencies": {
     "typescript": "^5.9.0",
     "@types/node": "^24.0.0"
+  },
+  "allowScripts": {
+    "better-sqlite3": true
   }
 }
