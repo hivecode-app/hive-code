@@ -4,3 +4,4 @@ export type IdentityId = string;   // e.g. "yoav", "rotem", "eli"
 export type ShiftId = string;      // `${IdentityId}-${n}`
 export type MessageState = 'queued' | 'delivered' | 'read' | 'handled' | 'failed';
 export * from './shift-protocol.ts';
+export * from './company-api.ts';

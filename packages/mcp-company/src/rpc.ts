@@ -1,0 +1,121 @@
+// Minimal MCP (JSON-RPC 2.0, newline-delimited over stdio) for the `company`
+// server. Transport-free: feed it lines, it returns reply lines.
+import { randomBytes } from 'node:crypto';
+import { COMPANY_API_VERSION } from '@company/shared';
+import type { OpName, WalEntry } from '@company/shared';
+import type { RecallQuery, RecallResult } from './recall.ts';
+import { TOOL_BY_NAME, TOOLS, validateArgs } from './tools.ts';
+
+export const SERVER_NAME = 'company';
+export const SERVER_VERSION = '0.1.0';
+export const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
+export const SUPPORTED_PROTOCOL_VERSIONS: readonly string[] = ['2024-11-05', '2025-03-26', '2025-06-18'];
+
+export interface Ctx { identity: string; shift: string; sessionId: string | null }
+
+export interface ServerDeps {
+  ctx: Ctx;
+  /** Durable append; must not return before the entry is on disk. */
+  append: (entry: WalEntry) => void;
+  recall: (req: RecallQuery) => Promise<RecallResult>;
+  now?: () => Date;
+  log?: (msg: string) => void;
+}
+
+type Id = string | number | null;
+interface Req { jsonrpc?: unknown; id?: Id; method?: unknown; params?: unknown }
+
+const ok = (id: Id, result: unknown) => JSON.stringify({ jsonrpc: '2.0', id, result });
+const err = (id: Id, code: number, message: string) => JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } });
+const text = (value: unknown, isError = false) => ({
+  content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) }],
+  ...(isError ? { isError: true } : {}),
+});
+
+let seq = 0;
+export function newEntryId(shift: string, now: Date): string {
+  seq = (seq + 1) % 1296;
+  return `${shift}:${now.getTime().toString(36)}-${seq.toString(36).padStart(2, '0')}${randomBytes(4).toString('hex')}`;
+}
+
+export function createServer(deps: ServerDeps) {
+  const now = deps.now ?? (() => new Date());
+  const log = deps.log ?? (() => {});
+
+  async function callTool(params: Record<string, unknown>): Promise<unknown> {
+    const name = params.name;
+    const def = typeof name === 'string' ? TOOL_BY_NAME.get(name) : undefined;
+    if (!def) throw Object.assign(new Error(`unknown tool: ${String(name)}`), { rpcCode: -32602 });
+    const args = (params.arguments ?? {}) as Record<string, unknown>;
+    const invalid = validateArgs(def, args);
+    if (invalid) return text(`invalid arguments: ${invalid}`, true);
+
+    if (def.name === 'recall') {
+      const queries = Array.isArray(args.queries) ? (args.queries as string[]).filter((q) => q.trim()) : [];
+      const query = typeof args.query === 'string' && args.query.trim() ? args.query : queries[0];
+      if (!query) return text('invalid arguments: pass query or queries (Hebrew + English phrasings)', true);
+      const res = await deps.recall({
+        identity: deps.ctx.identity, shift: deps.ctx.shift, query,
+        ...(queries.length ? { queries } : {}),
+        ...(typeof args.scope === 'string' ? { scope: args.scope } : {}),
+        ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
+      });
+      return text(res);
+    }
+
+    const t = now();
+    const entry: WalEntry = {
+      id: newEntryId(deps.ctx.shift, t), v: COMPANY_API_VERSION, ts: t.toISOString(),
+      identity: deps.ctx.identity, shift: deps.ctx.shift, sessionId: deps.ctx.sessionId,
+      op: def.name as OpName, args,
+    };
+    try {
+      deps.append(entry);
+    } catch (e) {
+      log(`wal append failed: ${e instanceof Error ? e.message : String(e)}`);
+      return text(`לא נשמר: כתיבה ל-WAL נכשלה (WAL write failed): ${e instanceof Error ? e.message : String(e)}`, true);
+    }
+    return text({ queued: true, id: entry.id });
+  }
+
+  async function dispatch(method: string, params: Record<string, unknown>): Promise<unknown> {
+    switch (method) {
+      case 'initialize':
+        return {
+          protocolVersion: typeof params.protocolVersion === 'string' && SUPPORTED_PROTOCOL_VERSIONS.includes(params.protocolVersion)
+            ? params.protocolVersion : DEFAULT_PROTOCOL_VERSION,
+          capabilities: { tools: {} },
+          serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+        };
+      case 'ping': return {};
+      case 'tools/list': return { tools: TOOLS };
+      case 'tools/call': return callTool(params);
+      default: throw Object.assign(new Error(`method not found: ${method}`), { rpcCode: -32601 });
+    }
+  }
+
+  /** Handles one input line; returns the reply line or null (notification). */
+  async function handle(line: string): Promise<string | null> {
+    let msg: unknown;
+    try { msg = JSON.parse(line); } catch { return err(null, -32700, 'parse error'); }
+    if (typeof msg !== 'object' || msg === null || Array.isArray(msg)) return err(null, -32600, 'invalid request');
+    const m = msg as Req;
+    const hasId = 'id' in m && m.id !== undefined;
+    const id: Id = hasId ? (m.id as Id) : null;
+    if (typeof m.method !== 'string') {
+      // A response to something we never send, or garbage; ignore responses.
+      return hasId && !('result' in m || 'error' in m) ? err(id, -32600, 'invalid request') : null;
+    }
+    if (!hasId) return null; // notifications: notifications/initialized, cancelled, ...
+    const params = (typeof m.params === 'object' && m.params !== null ? m.params : {}) as Record<string, unknown>;
+    try {
+      return ok(id, await dispatch(m.method, params));
+    } catch (e) {
+      const code = (e as { rpcCode?: number }).rpcCode ?? -32603;
+      if (code === -32603) log(`internal error in ${m.method}: ${e instanceof Error ? e.stack : String(e)}`);
+      return err(id, code, e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  return { handle };
+}

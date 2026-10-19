@@ -27,10 +27,20 @@
 // - On `send`, the host generates a uuid, writes the stream-json user line
 //   `{"type":"user","uuid":<uuid>,"priority":...,"message":{...}}` to claude's
 //   stdin, logs `delivery{state:'written'}` and replies `{uuid}`.
-// - When claude echoes a user message (--replay-user-messages) with that uuid,
-//   the host logs `delivery{state:'delivered'}`. If the CLI ever stops
-//   preserving the uuid, the host falls back to matching the msgId inside the
-//   text envelope ("[... · <msgId>]"); see adapter/contract.yaml.
+// - Measured on 2.1.303 (adapter/contract.yaml rows command_lifecycle,
+//   replay_echo): the CLI emits `command_lifecycle{command_uuid, state}` with
+//   queued (on receipt, any priority) -> started (dequeued into the
+//   conversation) -> completed (its turn ended). The replay echo
+//   (isReplay:true, same uuid) arrives at dequeue time, not on receipt.
+//   So: queued => `delivered`, started or echo => `started`, completed =>
+//   `completed`. If lifecycle frames disappear (canary), echo alone still
+//   yields `started`.
+// - After a crash + --resume the CLI re-injects its own unconsumed queue as ONE
+//   user line with a NEW uuid (bet 2). The host keeps those deliveries as
+//   `delivered` (reinjected:true) instead of failing them, and matches the new
+//   echo by content; hq must not resend them.
+// - Command replies (ping/status/usage/context) are never logged: full
+//   get_context_usage pings bloated the bet 4 log.
 // - `send` is idempotent on msgId within a log: a repeat replies with the
 //   current `{state, uuid}` and writes nothing. `retry:true` forces a new
 //   stdin line with a fresh uuid (B.4 "no delivered within 60s -> retry").
@@ -137,7 +147,10 @@ export interface SendReply {
   state: DeliveryState;
 }
 
-export type DeliveryState = 'written' | 'delivered' | 'failed';
+/** written: on stdin. delivered: CLI accepted it (command_lifecycle queued).
+ *  started: dequeued into the conversation (lifecycle started / replay echo).
+ *  completed: its turn ended. failed: never accepted (claude died, write error). */
+export type DeliveryState = 'written' | 'delivered' | 'started' | 'completed' | 'failed';
 
 // ---------------------------------------------------------------- hq -> host
 
@@ -172,9 +185,25 @@ export type HostToHq =
   | { t: 'hello'; v: number; info: HostInfo }
   | { t: 'event'; seq: number; ts: string; ev: EngineEvent }
   | { t: 'delivery'; seq: number; ts: string; msgId: string; uuid: string;
-      state: DeliveryState; error?: string }
+      state: DeliveryState; error?: string;
+      /** Only on `written`: the exact text, so a restarted host can match the
+       *  CLI's own re-injected queue by content (bet 2). */
+      text?: string;
+      /** true when the CLI re-injected it on --resume under a new uuid. */
+      reinjected?: boolean }
   | { t: 'lifecycle'; seq: number; ts: string; state: HostState;
-      exitCode?: number | null; signal?: string | null; note?: string }
+      exitCode?: number | null; signal?: string | null; note?: string;
+      /** On `starting`: the session this claude runs (auto-resume only matches its own). */
+      sessionId?: string; resume?: boolean;
+      /** Machine-readable failure: session_id_in_use | spawn_failed | no_result | crashed */
+      error?: string;
+      /** Tools in flight when claude died. A resume may re-run them
+       *  (CLAUDE_CODE_RESUME_INTERRUPTED_TURN, bet 3): side-effect tools need an
+       *  idempotency check in the Resume Delta. */
+      interruptedTools?: Array<{ name: string; preview: string; sideEffect: boolean }>;
+      /** msgIds still `delivered`: held in the CLI's own transcript queue; a
+       *  --resume of this session delivers them, a new shift must resend. */
+      heldByCli?: string[] }
   /** End of replay; everything after is live. */
   | { t: 'live'; lastSeq: number }
   /** Streaming deltas, live only (not logged, not replayed). */

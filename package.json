@@ -2,14 +2,23 @@
   "name": "agent-company",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*"],
-  "engines": { "node": ">=22" },
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsc -b packages/*",
     "test": "node --test --experimental-strip-types 'packages/*/test/**/*.test.ts'",
     "typecheck": "tsc -b packages/* --noEmit",
     "check:contract": "node scripts/check-contract.mjs",
-    "test:contract": "node --test scripts/check-contract.test.mjs"
+    "test:contract": "node --test scripts/check-contract.test.mjs",
+    "canary": "node scripts/canary.mjs",
+    "smoke": "node scripts/smoke-shift-host.mjs"
   },
-  "devDependencies": { "typescript": "^5.9.0", "@types/node": "^24.0.0" }
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0"
+  }
 }

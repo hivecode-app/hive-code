@@ -1,0 +1,27 @@
+# One shift = one instance: company-shift@<shift>.service (e.g. company-shift@yoav-3).
+# Persistent template, NOT systemd-run: transient units do not survive a reboot
+# (bet 3). hq writes ~/.local/state/agent-company/shifts/<shift>/host-args.json,
+# then `systemctl --user enable --now company-shift@<shift>`; `enable` makes the
+# shift come back at boot (linger is on for ran). On restart the host sees its
+# own log and resumes the same session id.
+[Unit]
+Description=agent-company shift %i
+# a shift that fails the same way on every start stops after 5 tries in 5 minutes
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+Environment=DISABLE_AUTOUPDATER=1
+ExecStart=/usr/bin/env node %h/projects/agent-company/packages/shift-host/src/cli.ts --args-file %h/.local/state/agent-company/shifts/%i/host-args.json
+Restart=on-failure
+RestartSec=1
+# 75 = another host holds this shift; 76 = session id in use / spawn failed (needs hq);
+# 2 = bad arguments. A requested stop exits 0. None of these may loop.
+RestartPreventExitStatus=75 76 2
+# mixed: SIGTERM to the host only (it closes claude's stdin gracefully), SIGKILL to the rest on timeout
+KillMode=mixed
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,423 @@
+# Claude Code internals the company depends on (B.6), one row per internal.
+# Source: research/05 §8 (adopted as is) + B.6 extensions + findings on 2.1.303.
+#
+# Fields
+#   id          stable key; scripts/canary.mjs reports by it
+#   internal    what we touch
+#   use         what breaks for us if it changes
+#   stability   high | medium | low (research/05 §5)
+#   canary      how a break is detected
+#   check       canary.mjs check id(s); "-" = not automated yet
+#   fast        true = part of the ~30s haiku subset (hq startup); else nightly/candidate only
+#   disables    capability that is turned off when this row fails (B.6: fail only the dependent capability)
+#   evidence    where it was last observed
+#
+# Run: node scripts/canary.mjs [--bin <claude>] [--model haiku] [--json]
+# Pinned binary: ~/.local/share/agent-company/claude/<ver>/claude (current -> 2.1.303).
+
+version: 1
+pinned: "2.1.303"
+verified_on: ["2.1.303"]
+
+rows:
+  - id: stream_json
+    internal: "-p --input-format/--output-format stream-json (stdin user, result, system/init)"
+    use: control channel of every shift
+    stability: high
+    canary: 'send "Reply OK"; expect system/init.session_id == --session-id and result.subtype=="success"'
+    check: [init_session_id, result_success]
+    fast: true
+    disables: shifts
+    evidence: research/05 exp.1-4; probe 2.1.303
+
+  - id: midturn_user
+    internal: "user line on stdin mid-turn (priority now|next|later)"
+    use: add an instruction to a working worker
+    stability: high
+    canary: "exp.2 shortened: 8s tool, message at t=3, both tokens in the same result, num_turns>=2"
+    check: "-"
+    fast: false
+    disables: priority delivery
+    evidence: research/05 exp.2
+
+  - id: interrupt
+    internal: "control_request interrupt"
+    use: stop a worker without killing the process
+    stability: high
+    canary: 'interrupt during Bash sleep -> control_response success, result.subtype=="error_during_execution" within 2s'
+    check: [interrupt]
+    fast: true
+    disables: stop button
+    evidence: research/05 exp.2
+
+  - id: get_usage
+    internal: "control_request get_usage"
+    use: per-account quota before dispatch (B.7)
+    stability: medium
+    canary: "rate_limits.five_hour.utilization and seven_day.utilization numeric (percent)"
+    check: [get_usage]
+    fast: true
+    disables: account placement by quota
+    evidence: research/05 exp.2; probe 2.1.303 (codename keys still present - read only five_hour/seven_day/limits[])
+
+  - id: rate_limit_event
+    internal: "rate_limit_event.rate_limit_info.unifiedWindows"
+    use: continuous quota from every stream
+    stability: medium
+    canary: "at least one event per stream with five_hour.utilization in 0..1"
+    check: [rate_limit_event]
+    fast: true
+    disables: live quota display
+    evidence: probe 2.1.303
+
+  - id: get_context_usage
+    internal: "control_request get_context_usage"
+    use: proactive rotation threshold (B.2)
+    stability: medium
+    canary: "totalTokens>0, maxTokens>0"
+    check: [get_context_usage]
+    fast: true
+    disables: proactive rotation (auto-compact remains the net)
+    evidence: probe 2.1.303 (maxTokens 1000000 on haiku-5-5)
+
+  - id: statusline_json
+    internal: "statusline stdin JSON (rate_limits, context_window)"
+    use: HUD for the owner's personal sessions (B.8)
+    stability: high
+    canary: "statusline relay logs and alerts if rate_limits missing after first response on Max"
+    check: "-"
+    fast: false
+    disables: personal-session board rows
+    evidence: research/05 §2.4
+
+  - id: session_start_context
+    internal: "SessionStart command hook -> hookSpecificOutput.additionalContext (source startup|resume|compact|fork)"
+    use: inject L2 handoff + L1 delta (company hook SessionStart reads prime.json)
+    stability: high
+    canary: "company hook SessionStart with a codeword in prime.json; the model quotes it; after /compact source==compact quotes the fresh value"
+    check: [session_start_context]
+    fast: true
+    disables: handoff injection (shift starts cold)
+    evidence: research/05 exp.1
+
+  - id: pre_post_compact
+    internal: "PreCompact / PostCompact (compact_summary)"
+    use: shift journal around compaction
+    stability: high
+    canary: "/compact -> PostCompact spool line has non-empty compact_summary"
+    check: "-"
+    fast: false
+    disables: compact journal
+    evidence: research/05 exp.1
+
+  - id: async_rewake
+    internal: "asyncRewake hooks"
+    use: wake an idle worker on an external event
+    stability: medium
+    canary: "hook exits 2 after 5s -> new turn on an idle session"
+    check: "-"
+    fast: false
+    disables: event wake (stdin wake remains)
+    evidence: research/05 §2.2
+
+  - id: session_id_resume_fork
+    internal: "--session-id, --resume, --fork-session"
+    use: deterministic shift id, continue a shift, seance
+    stability: medium
+    canary: "resume answers a fact from a prior turn; fork gives a new id and a file whose sessionId fields are all new; summary kept after compact"
+    check: "-"
+    fast: false
+    disables: resume (new shift + handoff instead)
+    evidence: research/05 exp.3
+
+  - id: session_id_collision
+    internal: '--session-id <uuid> of an existing transcript -> "Session ID ... is already in use", exit != 0'
+    use: deterministic ids must never silently reuse a shift (B.2); adapter classifies stderr as session_id_in_use
+    stability: medium
+    canary: "second -p with the canary's session id fails with 'already in use' and a non-zero exit"
+    check: [session_id_collision]
+    fast: true
+    disables: none (shift numbers come from the store; a hit is a store bug)
+    evidence: "bet 1: a reused shift number collided and the shift 'ran' doing nothing"
+
+  - id: prompt_after_dashdash
+    internal: "positional prompt after `--` (variadic --tools/--add-dir/--disallowedTools swallow it otherwise)"
+    use: fork / seance / one-shot -p calls
+    stability: high
+    canary: "covered by session_id_collision call (prompt after --); a turn without `result` is a failure"
+    check: [session_id_collision]
+    fast: true
+    disables: seance
+    evidence: "bet 1: --tools swallowed the prompt; the session ended right after the hook, only stderr showed it"
+
+  - id: system_prompt_snapshot
+    internal: "--system-prompt-snapshot"
+    use: know whether a role change reaches a resumed shift
+    stability: low
+    canary: "resume with a different --append-system-prompt; expect the old one (snapshot on)"
+    check: "-"
+    fast: false
+    disables: role edits on resume (forces new shift)
+    evidence: research/05 §3.2
+
+  - id: transcript_jsonl
+    internal: "transcript JSONL (compact_boundary, parentUuid/logicalParentUuid, last-prompt.leafUuid, isCompactSummary, subagents/)"
+    use: archive, search, seance input
+    stability: medium
+    canary: "tolerant parser on a fresh session: 0 bad lines; alert on new record types or missing compact_boundary after /compact"
+    check: [transcript_reader]
+    fast: true
+    disables: archive/recall over transcripts
+    evidence: research/05 §1.2
+
+  - id: sessions_registry
+    internal: "~/.claude/sessions/<pid>.json (sessionId, status, messagingSocketPath, procStart)"
+    use: discover live sessions (ours and the owner's)
+    stability: medium
+    canary: "-p session -> file exists with sessionId matching init; gone on exit"
+    check: [sessions_registry]
+    fast: true
+    disables: foreign-session discovery
+    evidence: research/05 §1.3
+
+  - id: messaging_socket
+    internal: 'messaging socket /tmp/cc-socks/<pid>.sock + envelope <cross-session-message ... from-mode="bypass">'
+    use: injectForeign into sessions we do not hold
+    stability: low
+    canary: "inject with envelope -> turn starts and returns token; no peer_message_hold"
+    check: [socket_inject]
+    fast: true
+    disables: injectForeign only
+    evidence: research/05 exp.4d
+
+  - id: list_send_agents
+    internal: "ListAgents / SendMessage tools"
+    use: worker-to-worker without scripts (mirrored to mailbox by PostToolUse)
+    stability: medium
+    canary: "A SendMessage to B by name -> B receives <cross-session-message from=...>"
+    check: "-"
+    fast: false
+    disables: native SendMessage (company tell remains)
+    evidence: research/05 §3.5
+
+  - id: remote_control
+    internal: "claude remote-control + bridge-spawn/ + --sdk-url"
+    use: legacy hosts until bet 7 passes (not used by the company runtime)
+    stability: low
+    canary: "after restart of claude-remote@X: env active in GET /v1/environments; child ps has --sdk-url and stream-json"
+    check: "-"
+    fast: false
+    disables: none (legacy)
+    evidence: research/05 §3.3
+
+  - id: config_dir_accounts
+    internal: "CLAUDE_CONFIG_DIR per account + symlinked projects"
+    use: fallback multi-account path (B.7)
+    stability: medium
+    canary: "auth status --json per dir shows the right configDirectory and a DIFFERENT account; cross-dir resume answers"
+    check: "-"
+    fast: false
+    disables: config-dir accounts
+    evidence: research/05 §4 (failed: same account in both dirs)
+
+  - id: credentials_expiry
+    internal: ".credentials.json expiresAt / refreshTokenExpiresAt"
+    use: warn before an account drops
+    stability: medium
+    canary: "daily job reads only these fields; alert < 3 days to refresh expiry"
+    check: "-"
+    fast: false
+    disables: expiry warnings
+    evidence: research/05 §1.6
+
+  - id: oauth_token_env
+    internal: "CLAUDE_CODE_OAUTH_TOKEN (setup-token)"
+    use: headless workers on a chosen account (B.7)
+    stability: high
+    canary: "-p with env only: get_usage works and profile shows the expected email"
+    check: "-"
+    fast: false
+    disables: token accounts (config-dir path instead)
+    evidence: B.7 small check 5 (pending)
+
+  - id: purge
+    internal: "claude purge <path>"
+    use: clean a temporary workspace
+    stability: medium
+    canary: "purge on a lab dir -> no projects/<slug> and no .claude.json entry"
+    check: "-"
+    fast: false
+    disables: lab cleanup
+    evidence: research/05
+
+  - id: pinned_binary
+    internal: "DISABLE_AUTOUPDATER + private prefix install"
+    use: control churn
+    stability: high
+    canary: "all canaries run on a candidate in its own prefix before `current` moves"
+    check: [binary_version]
+    fast: true
+    disables: upgrades
+    evidence: 2.1.303 installed with npm --prefix ~/.local/share/agent-company/claude/2.1.303 (global 2.1.289 untouched)
+
+  # ---- B.6 extensions
+
+  - id: replay_echo
+    internal: "--replay-user-messages echo (isReplay:true, same uuid)"
+    use: delivery state `started` (B.4)
+    stability: medium
+    canary: "send user with uuid -> echo with the same uuid and isReplay:true"
+    check: [replay_echo]
+    fast: true
+    disables: started-state (lifecycle remains)
+    evidence: "probe 2.1.303 + bet 2: echo arrives when the message is DEQUEUED (p95 25.6s over 100 msgs), not on receipt. It is the `started` signal only"
+
+  - id: command_lifecycle
+    internal: "command_lifecycle {command_uuid, state: queued|started|completed} (capability msg_lifecycle_v1)"
+    use: delivery state `delivered` = queued (on receipt, any priority); `completed` = its turn ended
+    stability: low
+    canary: "send user with uuid -> lifecycle queued then started then completed for that command_uuid"
+    check: [command_lifecycle]
+    fast: true
+    disables: delivered-state falls back to replay echo
+    evidence: "probe 2.1.303; bet 2: queued p95 0.11s over 100 messages (max 1.19s), delivered = queued"
+
+  - id: queue_reinject_on_resume
+    internal: "CLI persists its input queue (queue-operation enqueue/dequeue with content) and re-injects unconsumed items on --resume as ONE user line with a NEW uuid"
+    use: no lost and no duplicated messages after a crash (shift-host keeps them delivered/heldByCli and matches the echo by content)
+    stability: low
+    canary: "kill -9 with 2 queued messages; --resume -> both answered exactly once; transcript enqueue content matches"
+    check: "-"
+    fast: false
+    disables: crash dedup (falls back to fail + hq resend -> possible duplicate)
+    evidence: "bet 2 run 1/2 (w4 on ci-host: 2 queued messages answered after resume)"
+
+  - id: queued_command_attachment
+    internal: 'mid-turn messages are recorded as attachment{type:"queued_command", prompt}, not as user lines'
+    use: counting deliveries / consumption from the transcript (pendingQueued)
+    stability: low
+    canary: "message during a tool -> transcript has queued_command with the text"
+    check: "-"
+    fast: false
+    disables: transcript-based dedup
+    evidence: bet 2
+
+  - id: resume_interrupted_turn
+    internal: "CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1"
+    use: NOT set by the company (buildEnv). If enabled, the interrupted tool RE-RUNS: side-effect tools (push, deploy, pay) need idempotency; the host reports interruptedTools{sideEffect} for the Resume Delta
+    stability: medium
+    canary: "kill -9 mid sleep tool; resume with the env -> task_started again"
+    check: "-"
+    fast: false
+    disables: none
+    evidence: bet 3
+
+  - id: transient_units_reboot
+    internal: "systemd --user units"
+    use: shifts survive reboot only as enabled instances of the persistent template company-shift@.service (systemd-run transient units do not)
+    stability: high
+    canary: "planned reboot approved by the owner: enabled shifts return with the same session id"
+    check: "-"
+    fast: false
+    disables: restore at boot
+    evidence: "bet 3: CAN'T-TEST (reboot is a forbidden class); Linger=yes"
+
+  - id: http_hooks_forbidden
+    internal: "hook type http"
+    use: never used; buildSettings throws on any non-command hook
+    stability: high
+    canary: "unit test: buildSettings rejects non-command hooks"
+    check: "-"
+    fast: false
+    disables: none
+    evidence: "bet 3: stuck hq (SIGSTOP) -> every tool call +30s with an http PostToolUse; command->spool unaffected"
+
+  - id: setting_sources
+    internal: "--setting-sources project,local + claudeMdExcludes [~/.claude/CLAUDE.md] in --settings"
+    use: no global CLAUDE.md / OMC instructions for company workers
+    stability: medium
+    canary: "transcript instructions attachments include nothing under ~/.claude/"
+    check: [setting_sources]
+    fast: true
+    disables: shifts (would load the owner's global instructions)
+    evidence: "canary 2.1.303: --setting-sources ALONE FAILS. For any cwd under $HOME the ancestor walk finds /home/owner/.claude/CLAUDE.md and loads it as type Project. Fixed by claudeMdExcludes (absolute path) in the generated --settings; PASS after"
+
+  - id: auto_memory_off
+    internal: "autoMemoryEnabled:false via --settings"
+    use: no memory pollution (B.3)
+    stability: medium
+    canary: '"Remember X" creates no file under projects/<slug>/memory/'
+    check: "-"
+    fast: false
+    disables: none (pollution alert)
+    evidence: research/05 §2.1
+
+  - id: l1_authority
+    internal: "L1 Authority section in append-system-prompt"
+    use: behavior per the owner's ruling
+    stability: high
+    canary: '"what are you not allowed to do?" -> exactly the five classes'
+    check: "-"
+    fast: false
+    disables: none (alert)
+    evidence: B.3
+
+  - id: disallow_ask_user
+    internal: "--disallowedTools AskUserQuestion"
+    use: questions only through company ask
+    stability: high
+    canary: "AskUserQuestion absent from init.tools (attempt appears in permission_denials)"
+    check: [disallow_ask_user]
+    fast: true
+    disables: shifts (questions would vanish)
+    evidence: probe 2.1.303
+
+  - id: cross_session_inbound
+    internal: "crossSessionInbound: accept via --settings"
+    use: native messages are not held in headless
+    stability: low
+    canary: "socket envelope delivered; no peer_message_hold"
+    check: [socket_inject]
+    fast: true
+    disables: native inbound
+    evidence: research/05 §3.5
+
+  - id: partial_messages
+    internal: "stream_event (--include-partial-messages)"
+    use: streaming in chat
+    stability: high
+    canary: "text_delta arrives before assistant"
+    check: [partial_messages]
+    fast: true
+    disables: streaming (whole messages remain)
+    evidence: probe 2.1.303
+
+  - id: fork_subagents_p
+    internal: "fork subagents in -p (default since 2.1.302)"
+    use: know what runs, restrict reviewers
+    stability: low
+    canary: "count subagents in transcript; reviewer disallowedTools applies to them"
+    check: "-"
+    fast: false
+    disables: reviewer isolation guarantee
+    evidence: B.6
+
+  - id: hook_concurrency_cap
+    internal: "12 concurrent hooks cap (2.1.302)"
+    use: spool never blocks
+    stability: medium
+    canary: "20 fast tools in a row: every PostToolUse spooled"
+    check: "-"
+    fast: false
+    disables: none (alert)
+    evidence: B.6
+
+  - id: hooks_fail_closed
+    internal: "hooks fail-closed (2.1.288, 2.1.295 onFailure)"
+    use: hq down must not block a turn
+    stability: medium
+    canary: "hq down -> a tool with a PostToolUse company hook passes and the spool line exists"
+    check: [hooks_spool]
+    fast: true
+    disables: shifts (would block on hq)
+    evidence: B.5

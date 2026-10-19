@@ -1,2 +1,5 @@
 { "name": "@company/hooks", "version": "0.0.0", "private": true, "type": "module",
-  "main": "dist/index.js", "types": "dist/index.d.ts" }
+  "exports": { ".": { "types": "./src/index.ts", "default": "./src/index.ts" } },
+  "main": "src/index.ts", "types": "src/index.ts",
+  "bin": { "company-hook": "src/cli.ts" },
+  "dependencies": { "@company/shared": "*" } }
