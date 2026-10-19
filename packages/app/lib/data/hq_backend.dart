@@ -127,6 +127,43 @@ class HqBackend extends Backend {
     for (final i in inbox) {
       if (i['ref'] != null) _askToInbox[i['ref'] as String] = i['id'] as int;
     }
+    unawaited(_loadLastLines());
+  }
+
+  /// Last line and time per conversation, newest first, Yoav pinned (APP-SPEC §4.3).
+  Future<void> _loadLastLines() async {
+    final d = _data;
+    if (d == null) return;
+    try {
+      final res = await _get('/api/messages?identity=owner&limit=200');
+      final seen = <String>{};
+      for (final m in (res['messages'] as List).cast<Map<String, dynamic>>()) {
+        final other = m['from_identity'] == 'owner' ? m['to_identity'] as String : m['from_identity'] as String;
+        if (!seen.add(other)) continue;
+        final i = d.conversations.indexWhere((c) => c.identityId == other);
+        final c = ConversationSummary(
+          identityId: other,
+          lastLine: (m['from_identity'] == 'owner' ? 'את/ה: ' : '') + (m['body'] as String).split('\n').first,
+          time: _hm(m['created_at'] as int),
+          lastIsMine: m['from_identity'] != 'owner',
+          unread: m['to_identity'] == 'owner' && m['state'] != 'handled' ? 1 : 0,
+          pinned: other == 'yoav',
+        );
+        if (i >= 0) {
+          d.conversations[i] = c;
+        } else {
+          d.conversations.add(c);
+        }
+      }
+      // Recent first, then the rest; Yoav stays pinned in the list widget.
+      final order = [for (final m in (res['messages'] as List)) (m['from_identity'] == 'owner' ? m['to_identity'] : m['from_identity']) as String];
+      int rank(ConversationSummary c) {
+        final r = order.indexOf(c.identityId);
+        return r < 0 ? 1 << 20 : r;
+      }
+      d.conversations.sort((a, b) => rank(a).compareTo(rank(b)));
+      notifyListeners();
+    } catch (_) {}
   }
 
   void _refreshSoon() {
@@ -216,11 +253,13 @@ class HqBackend extends Backend {
     }
     if (type == 'message.new') {
       final m = (e['data'] as Map).cast<String, dynamic>();
-      if (m['to_identity'] == 'owner' && m['kind'] == 'tell') {
+      if (m['to_identity'] == 'owner' && m['kind'] != 'system') {
         final from = m['from_identity'] as String;
         final chat = d.chats.putIfAbsent(from, () => Conversation(identityId: from, items: []));
         if (!chat.items.any((i) => i.id == 'msg:${m['id']}')) {
           chat.items.add(TextMsg(id: 'msg:${m['id']}', ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int), text: m['body'] as String));
+          if (openIdentity == from) unawaited(_send('POST', '/api/messages/${Uri.encodeComponent(m['id'] as String)}/handled'));
+          _bumpConversation(from, m['body'] as String, m['created_at'] as int);
           notifyListeners();
         }
       }
@@ -232,14 +271,37 @@ class HqBackend extends Backend {
         () => EngineModel(items: chat.items, gender: _data!.who(identity).gender, onLive: (l) => chat.live = l),
       );
 
+  /// The conversation on screen (read = handled for what arrives while it is open).
+  String? openIdentity;
+
+  void _bumpConversation(String id, String line, int ts) {
+    final d = _data;
+    if (d == null) return;
+    final i = d.conversations.indexWhere((c) => c.identityId == id);
+    final c = ConversationSummary(
+      identityId: id,
+      lastLine: line.split('\n').first,
+      time: _hm(ts),
+      lastIsMine: true,
+      unread: openIdentity == id ? 0 : 1,
+      pinned: i >= 0 && d.conversations[i].pinned,
+    );
+    if (i >= 0) {
+      d.conversations[i] = c;
+    } else {
+      d.conversations.add(c);
+    }
+  }
+
   @override
   Future<void> openConversation(String identityId) async {
+    openIdentity = identityId;
     final d = _data;
     if (d == null) return;
     try {
       final res = await Future.wait([
         _get('/api/messages?identity=${Uri.encodeQueryComponent(identityId)}&limit=200'),
-        _get('/api/events?identity=${Uri.encodeQueryComponent(identityId)}&after=0&limit=2000'),
+        _get('/api/events?identity=${Uri.encodeQueryComponent(identityId)}&after=${_seq > 20000 ? _seq - 20000 : 0}&limit=2000'),
       ]);
       final chat = Conversation(identityId: identityId, items: [], draft: d.chats[identityId]?.draft ?? '');
       final eng = EngineModel(items: chat.items, gender: d.who(identityId).gender, onLive: (l) => chat.live = l);
@@ -256,8 +318,22 @@ class HqBackend extends Backend {
             delivery: mapDelivery(m['state'] as String?),
             priority: Priority.values.byName((m['priority'] as String?) ?? 'next'),
           ));
-        } else if (m['to_identity'] == 'owner' && m['kind'] == 'tell') {
-          chat.items.add(TextMsg(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String));
+        } else if (m['to_identity'] == 'owner') {
+          if (m['kind'] == 'system') {
+            chat.items.add(EventLine(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String));
+          } else {
+            chat.items.add(TextMsg(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String));
+          }
+          // He read it: mark it handled so the worker's mailbox closes the loop (B.4).
+          if (m['state'] != 'handled') unawaited(_send('POST', '/api/messages/${Uri.encodeComponent(m['id'] as String)}/handled'));
+        } else {
+          final body = (m['body'] as String).replaceAll('\n', ' ');
+          chat.items.add(EventLine(
+            id: 'msg:${m['id']}',
+            ts: ts,
+            icon: 'forward',
+            text: '${d.who(m['from_identity'] as String).name} ← ${d.who(m['to_identity'] as String).name}: ${body.length > 90 ? '${body.substring(0, 90)}…' : body}',
+          ));
         }
       }
       for (final a in d.waiting.where((w) => w.from == identityId && w.askId != null)) {
@@ -395,6 +471,7 @@ CompanyData mapSnapshot({
   required List<Map<String, dynamic>> toggles,
   CompanyData? previous,
 }) {
+  const teamNames = {'mgmt': 'הנהלה', 'management': 'הנהלה', 'monitor': 'ניטור', 'monitoring': 'ניטור', 'personal': 'הצוות האישי', 'improve': 'מחלקת השיפור', 'improvement': 'מחלקת השיפור', 'lumo': 'לומו', 'tikibot': 'טיקיבוט', 'voice': 'voice-bot', 'agent-company': 'החברה'};
   const teamSymbols = {'mgmt': 'explore', 'monitor': 'shield', 'personal': 'folder_shared', 'improve': 'build', 'lumo': 'local_shipping', 'tikibot': 'smart_toy', 'voice': 'graphic_eq'};
   final teams = <String, Team>{};
   final ids = <String, Identity>{};
@@ -403,9 +480,9 @@ CompanyData mapSnapshot({
     final id = b['id'] as String;
     final team = (b['team'] as String?) ?? 'company';
     final symbol = (b['symbol'] as String?)?.isNotEmpty == true && RegExp(r'^[a-z_]+$').hasMatch(b['symbol'] as String) ? b['symbol'] as String : (teamSymbols[team] ?? 'build');
-    teams.putIfAbsent(team, () => Team(id: team, name: team, symbol: symbol, permanent: b['team_kind'] == 'permanent'));
+    teams.putIfAbsent(team, () => Team(id: team, name: teamNames[team] ?? team, symbol: symbol, permanent: b['team_kind'] == 'permanent'));
     if (b['lifecycle'] == 'lead' && teams[team]!.leadId == null) {
-      teams[team] = Team(id: team, name: team, symbol: teams[team]!.symbol, leadId: id, permanent: teams[team]!.permanent);
+      teams[team] = Team(id: team, name: teams[team]!.name, symbol: teams[team]!.symbol, leadId: id, permanent: teams[team]!.permanent);
     }
     final gender = (b['gender'] as String?) == 'f' ? Gender.f : Gender.m;
     ids[id] = Identity(
@@ -490,7 +567,7 @@ CompanyData mapSnapshot({
         identityId: b['id'] as String,
         lastLine: ((b['task'] as Map?)?['title'] as String?) ?? (ids[b['id']]?.title ?? ''),
         time: b['last_seen_at'] is int ? _hm(b['last_seen_at'] as int) : '',
-        pinned: b['lifecycle'] == 'resident' || b['id'] == 'yoav',
+        pinned: b['id'] == 'yoav',
       ),
   ];
 

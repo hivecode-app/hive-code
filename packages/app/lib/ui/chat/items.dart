@@ -85,7 +85,7 @@ class _WithMeta extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Stack(children: [
         Padding(padding: const EdgeInsets.only(bottom: 2), child: child),
-        PositionedDirectional(end: -2, bottom: 0, child: meta),
+        PositionedDirectional(end: 0, bottom: 0, child: meta),
       ]);
 }
 
@@ -194,6 +194,7 @@ class _TextBubbleState extends State<TextBubble> {
     final long = !m.streaming && lines > 40 && !expanded;
     final text = long ? m.text.split('\n').take(30).join('\n') : m.text;
     final wide = m.text.length > 60 || m.text.contains('```');
+    final multi = parseMarkdown(text).length > 1;
     return Bubble(
       out: false,
       wide: wide,
@@ -201,7 +202,10 @@ class _TextBubbleState extends State<TextBubble> {
         meta: Meta(time: hm(m.ts)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
           if (m.author != null) Text(m.author!, style: TextStyle(fontFamily: kFont, fontSize: 13, fontWeight: FontWeight.w700, color: p.text)),
-          Markdown(text, trailerWidth: Meta.widthFor(null), caret: m.streaming),
+          // One paragraph: the time rides on its last line (WhatsApp). Rich multi-block text: the
+          // time gets its own corner line so it can never sit on top of a list or code.
+          Markdown(text, trailerWidth: multi ? 0 : Meta.widthFor(null), caret: m.streaming),
+          if (multi) const SizedBox(height: 14),
           if (long)
             GestureDetector(
               onTap: () => setState(() => expanded = true),

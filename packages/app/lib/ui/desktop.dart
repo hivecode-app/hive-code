@@ -50,8 +50,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
       return KeyEventResult.handled;
     }
     if (ctrl && k == PhysicalKeyboardKey.period) {
-      final id = store.selectedConversation;
-      if (id != null) store.stop(id);
+      store.stop(store.currentConversation);
       return KeyEventResult.handled;
     }
     if (k == PhysicalKeyboardKey.escape) {
@@ -80,7 +79,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
     }
     if (k == PhysicalKeyboardKey.keyJ || k == PhysicalKeyboardKey.keyK) {
       final list = store.data?.conversations.map((c) => c.identityId).toList() ?? [];
-      final i = list.indexOf(store.selectedConversation ?? '');
+      final i = list.indexOf(store.currentConversation);
       final n = (i + (k == PhysicalKeyboardKey.keyJ ? 1 : -1)).clamp(0, list.length - 1);
       if (list.isNotEmpty) {
         store.selectedConversation = list[n];
@@ -92,7 +91,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
     const digits = [PhysicalKeyboardKey.digit1, PhysicalKeyboardKey.digit2, PhysicalKeyboardKey.digit3, PhysicalKeyboardKey.digit4];
     final di = digits.indexOf(k);
     if (di >= 0) {
-      final chat = store.data?.chats[store.selectedConversation];
+      final chat = store.data?.chats[store.currentConversation];
       final ask = chat?.items.whereType<AskCard>().where((a) => a.state == AskState.open && a is! GoCard).lastOrNull;
       final opts = ask?.options.where((o) => o.id != 'q').toList() ?? [];
       if (ask != null && di < opts.length) store.answerCard(ask, opts[di]);
@@ -188,7 +187,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
     final d = store.data;
     final p = context.p;
     final ctxCol = widget.width >= 1280;
-    final selected = store.selectedConversation ?? 'ido';
+    final selected = store.currentConversation;
 
     Widget list;
     Widget main;

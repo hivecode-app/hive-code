@@ -38,7 +38,13 @@ class AppStore extends ChangeNotifier {
   PendingAnswer? pending(String key) => _pending[key];
 
   /// Desktop: which conversation is open in the main column.
-  String? selectedConversation = 'ido';
+  String? selectedConversation;
+
+  /// Desktop selection with a default: the first conversation with something unread, else Yoav.
+  String get currentConversation {
+    final convs = data?.conversations ?? const [];
+    return selectedConversation ?? (convs.where((c) => c.unread > 0).firstOrNull ?? convs.where((c) => c.pinned).firstOrNull ?? convs.firstOrNull)?.identityId ?? 'yoav';
+  }
 
   /// Last error to show as a dismissable bar ("הבנתי"), never a self-hiding snackbar (design-taste E16).
   String? error;

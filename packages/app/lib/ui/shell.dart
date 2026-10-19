@@ -12,6 +12,7 @@ import 'desktop.dart';
 import 'home/home_screen.dart';
 import 'nav.dart';
 import 'org/org_screen.dart';
+import 'system_bar.dart';
 
 class Shell extends StatelessWidget {
   const Shell({super.key});
@@ -23,7 +24,9 @@ class Shell extends StatelessWidget {
     return LayoutBuilder(builder: (context, c) {
       nav.wide = c.maxWidth >= 800;
       final p = context.p;
-      final body = nav.wide
+      final body = store.data == null
+          ? const _FirstLoad()
+          : nav.wide
           ? DesktopFrame(width: c.maxWidth)
           : Column(children: [
               Expanded(
@@ -182,5 +185,28 @@ class NavItem extends StatelessWidget {
         ]),
       ),
     );
+  }
+}
+
+/// First start before any data (no cache yet): the screen is up at once with a spinner and a
+/// word, and the system strip turns it into a sentence after 10s (APP-SPEC §7.5).
+class _FirstLoad extends StatelessWidget {
+  const _FirstLoad();
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Column(children: [
+      const TopBar(title: 'החברה'),
+      const SystemBar(),
+      Expanded(
+        child: Center(
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Spin(child: Ic('progress_activity', size: 20, color: p.text2)),
+            const SizedBox(width: 8),
+            Text('מתעדכן', style: T.secondary.copyWith(color: p.text2)),
+          ]),
+        ),
+      ),
+    ]);
   }
 }

@@ -54,7 +54,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
             child: ListView(padding: EdgeInsets.zero, children: [
               for (final (i, c) in list.indexed) ...[
                 if (i > 0) Padding(padding: const EdgeInsetsDirectional.only(start: 62), child: Container(height: 1, color: p.line)),
-                ConversationRow(c: c, compact: true, selected: store.selectedConversation == c.identityId),
+                ConversationRow(c: c, compact: true, selected: store.currentConversation == c.identityId),
               ],
             ]),
           ),

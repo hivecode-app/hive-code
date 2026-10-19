@@ -29,7 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     SharedPreferences.getInstance().then((p) {
       if (!mounted) return;
-      url.text = p.getString(kHqUrl) ?? defaultHqUrl();
+      url.text = p.getString(kHqUrl) ?? gatewayUrl();
       token.text = p.getString(kHqToken) ?? '';
       setState(() {});
     });
@@ -55,6 +55,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final p = await SharedPreferences.getInstance();
         await p.setString(kHqUrl, url.text.trim());
         await p.setString(kHqToken, token.text.trim());
+        await p.remove(kDemo);
       }
       setState(() => note = ok ? 'מחובר. האפליקציה תעבור לשרת בפתיחה הבאה.' : 'השרת לא ענה. כדאי לבדוק את הכתובת ואת הטוקן.');
     } finally {
@@ -67,6 +68,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final p = await SharedPreferences.getInstance();
     await p.remove(kHqUrl);
     await p.remove(kHqToken);
+    await p.setBool(kDemo, true);
     setState(() => note = 'בפתיחה הבאה האפליקציה תציג את ההדגמה.');
   }
 
@@ -110,7 +112,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 12),
                     Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
                       Btn(busy ? 'בודק…' : 'חיבור', kind: BtnKind.primary, onTap: busy ? null : _connect),
-                      Btn('חזרה להדגמה', onTap: _demo),
+                      Btn('הדגמה', onTap: _demo),
+                      Btn('חברה אמיתית', onTap: () async {
+                        final p = await SharedPreferences.getInstance();
+                        await p.remove(kDemo);
+                        await p.remove(kHqUrl);
+                        await p.remove(kHqToken);
+                        setState(() => note = 'בפתיחה הבאה האפליקציה תתחבר לחברה.');
+                      }),
                     ]),
                     if (note != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(note!, style: T.secondary.copyWith(color: p.text))),
                   ]),
