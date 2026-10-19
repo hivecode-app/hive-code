@@ -4,6 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'data/backend.dart';
 import 'data/backend_select.dart';
 import 'data/store.dart';
+import 'native/native_glue.dart';
 import 'theme/theme.dart';
 import 'theme/tokens.dart';
 import 'ui/nav.dart';
@@ -32,6 +33,21 @@ class CompanyApp extends StatefulWidget {
 
 class _CompanyAppState extends State<CompanyApp> {
   final nav = AppNav();
+  final navigatorKey = GlobalKey<NavigatorState>();
+  late final glue = NativeGlue(widget.store, navigatorKey);
+
+  @override
+  void initState() {
+    super.initState();
+    kGlue = glue;
+    glue.start();
+  }
+
+  @override
+  void dispose() {
+    glue.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +56,7 @@ class _CompanyAppState extends State<CompanyApp> {
       child: NavScope(
         nav: nav,
         child: MaterialApp(
+          navigatorKey: navigatorKey,
           title: 'החברה',
           debugShowCheckedModeBanner: false,
           theme: buildTheme(Palette.light),

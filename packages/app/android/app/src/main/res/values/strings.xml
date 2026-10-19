@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_title">מחכה לך</string>
+    <string name="widget_description">כמה דברים מחכים לך, ומה הראשון שבהם</string>
+    <string name="tile_focus">פוקוס</string>
+    <string name="tile_night">לילה</string>
+</resources>

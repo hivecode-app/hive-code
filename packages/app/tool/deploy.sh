@@ -22,8 +22,9 @@ if [[ "$what" == web || "$what" == all ]]; then
   rm -rf build/web
 fi
 if [[ "$what" == apk || "$what" == all ]]; then
-  "$flutter" build apk --release
-  cp build/app/outputs/flutter-apk/app-release.apk "$dest/agent-company.apk"
+  # One APK per ABI keeps the download small; the owner's phone (OnePlus 13) is arm64.
+  "$flutter" build apk --release --split-per-abi --dart-define=HQ_URL="https://app.hq.example.com/$secret/hq"
+  cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "$dest/agent-company.apk"
   rm -rf build/app/intermediates build/app/tmp
 fi
 chmod -R a+rX /var/www/hq-app 2>/dev/null || sudo -n chmod -R a+rX /var/www/hq-app

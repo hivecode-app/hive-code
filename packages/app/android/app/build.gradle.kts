@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -18,7 +20,8 @@ android {
         applicationId = "app.hivecode"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // 26: adaptive icons, notification channels and createWithAdaptiveBitmap are all baseline.
+        minSdk = maxOf(26, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
@@ -30,7 +33,7 @@ android {
 
     // Release key lives outside the repo: ~/.local/state/agent-company/android/key.properties
     // (override with AGENT_COMPANY_KEY_PROPERTIES). Without it, release falls back to the debug key.
-    val keyProps = java.util.Properties()
+    val keyProps = Properties()
     val keyFile = file(System.getenv("AGENT_COMPANY_KEY_PROPERTIES")
         ?: "${System.getProperty("user.home")}/.local/state/agent-company/android/key.properties")
     if (keyFile.exists()) keyFile.inputStream().use { keyProps.load(it) }
@@ -61,4 +64,13 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    implementation("androidx.core:core-ktx:1.17.0")
+    // WebSocket + REST to hq from the service and receivers, without the Flutter engine.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    testImplementation("junit:junit:4.13.2")
+    // android.jar ships org.json as stubs; the real one lets parsers run in JVM unit tests.
+    testImplementation("org.json:json:20250517")
 }

@@ -9,6 +9,8 @@ import '../../data/store.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import '../org/org_screen.dart';
+import '../../native/native_bridge.dart';
+import '../../native/native_glue.dart';
 
 const kVersion = '0.1.0';
 
@@ -56,6 +58,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         await p.setString(kHqUrl, url.text.trim());
         await p.setString(kHqToken, token.text.trim());
         await p.remove(kDemo);
+        // The Android link service and the notification actions call hq without the app open.
+        await kGlue?.syncConfig();
       }
       setState(() => note = ok ? 'מחובר. האפליקציה תעבור לשרת בפתיחה הבאה.' : 'השרת לא ענה. כדאי לבדוק את הכתובת ואת הטוקן.');
     } finally {
@@ -69,6 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await p.remove(kHqUrl);
     await p.remove(kHqToken);
     await p.setBool(kDemo, true);
+    await kGlue?.syncConfig();
     setState(() => note = 'בפתיחה הבאה האפליקציה תציג את ההדגמה.');
   }
 
@@ -118,6 +123,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         await p.remove(kDemo);
                         await p.remove(kHqUrl);
                         await p.remove(kHqToken);
+                        await kGlue?.syncConfig();
                         setState(() => note = 'בפתיחה הבאה האפליקציה תתחבר לחברה.');
                       }),
                     ]),
@@ -128,6 +134,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Section('התראות'),
               ListBlock(inset: 16, children: [
                 pair('פוקוס', Toggle(on: d?.focus ?? false, label: 'פוקוס', onTap: store.toggleFocus)),
+                if (NativeBridge.instance.supported)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    child: Wrap(spacing: 8, runSpacing: 8, children: [
+                      Btn('הרשאת התראות', onTap: () => NativeBridge.instance.requestNotificationPermission()),
+                      Btn('התראות לדוגמה', onTap: () async {
+                        final ok = await NativeBridge.instance.showDemoNotifications();
+                        if (!ok) await NativeBridge.instance.requestNotificationPermission();
+                      }),
+                      Btn('פטור מחיסכון בסוללה', onTap: () => NativeBridge.instance.requestBatteryExemption()),
+                    ]),
+                  ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 11, 16, 11),
                   child: Text('בפוקוס ההתראות נאספות בשקט, ותקלה דחופה בפרודקשן עוברת בכל מקרה.', style: T.small.copyWith(color: p.text2)),

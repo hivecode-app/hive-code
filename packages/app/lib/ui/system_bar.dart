@@ -7,6 +7,8 @@ import '../data/store.dart';
 import '../model/models.dart';
 import '../theme/tokens.dart';
 import 'common.dart';
+import '../native/native_bridge.dart';
+import '../native/native_glue.dart';
 
 class SystemBar extends StatefulWidget {
   const SystemBar({super.key});
@@ -47,7 +49,7 @@ class _SystemBarState extends State<SystemBar> {
         ('cloud_off', 'אין חיבור לשרת${st.since != null ? ' מ-${st.since}' : ''}. ההתראות הדחופות ממשיכות בטלגרם.', false),
       LinkState.reconnected => ('check', 'מחובר · עודכנו ${st.updated} אירועים', false),
     };
-    if (text == null) return const SizedBox.shrink();
+    if (text == null) return const _NotificationsOff();
     Widget ic = Ic(icon!, size: 17, color: p.text2);
     if (spin) ic = Spin(child: ic);
     return Semantics(
@@ -62,6 +64,40 @@ class _SystemBarState extends State<SystemBar> {
           Expanded(child: Text(text, style: T.meta.copyWith(color: p.text2))),
         ]),
       ),
+    );
+  }
+}
+
+/// "ההתראות כבויות" (APP-SPEC §4.1): blocking questions would not arrive, so say it and offer the fix.
+class _NotificationsOff extends StatelessWidget {
+  const _NotificationsOff();
+  @override
+  Widget build(BuildContext context) {
+    final g = kGlue;
+    if (g == null) return const SizedBox.shrink();
+    final p = context.p;
+    return ValueListenableBuilder<bool>(
+      valueListenable: g.notificationsOff,
+      builder: (context, off, _) => !off
+          ? const SizedBox.shrink()
+          : Container(
+              width: double.infinity,
+              padding: const EdgeInsetsDirectional.fromSTEB(16, 4, 8, 4),
+              color: p.surface2,
+              child: Row(children: [
+                Ic('notifications_off', size: 17, color: p.text2),
+                const SizedBox(width: 6),
+                Expanded(child: Text('ההתראות כבויות, ולכן שאלות חוסמות לא יגיעו.', style: T.meta.copyWith(color: p.text2))),
+                TextButton(
+                  onPressed: () async {
+                    final ok = await NativeBridge.instance.requestNotificationPermission();
+                    if (!ok) await NativeBridge.instance.openNotificationSettings();
+                    g.notificationsOff.value = !(await NativeBridge.instance.notificationsEnabled());
+                  },
+                  child: Text('הפעלה', style: T.meta.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+                ),
+              ]),
+            ),
     );
   }
 }

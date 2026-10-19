@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Direct Share: each worker's long-lived shortcut (NotificationPoster) carries this category,
+     so the share sheet offers the worker directly and MainActivity gets EXTRA_SHORTCUT_ID. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="app.hivecode.MainActivity">
+        <data android:mimeType="text/plain" />
+        <data android:mimeType="image/*" />
+        <category android:name="app.hivecode.category.WORKER" />
+    </share-target>
+</shortcuts>
