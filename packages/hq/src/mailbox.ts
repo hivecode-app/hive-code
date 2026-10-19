@@ -63,7 +63,7 @@ export class Mailbox {
   /** The stdin envelope (B.4): the worker knows who it's from and replies with `ref`. */
   envelope(m: Pick<MessageRow, 'id' | 'from_identity' | 'urgency' | 'body' | 'kind' | 'ref'>): string {
     const ref = m.ref ? ` · ref: ${m.ref}` : '';
-    return `[הודעה מ-${this.label(m.from_identity)} · דחיפות: ${URGENCY_HE[m.urgency]} · ${m.id}${ref}]\n${m.body}`;
+    return `[הודעה מ-${this.label(m.from_identity)} (${m.from_identity}) · דחיפות: ${URGENCY_HE[m.urgency]} · ${m.id}${ref}]\n${m.body}`;
   }
 
   get(id: string): MessageRow | undefined {
@@ -132,6 +132,11 @@ export class Mailbox {
     if (!m || m.state !== 'queued') return;
     this.store.db.prepare('UPDATE messages SET attempts = attempts + 1, last_attempt_at = ? WHERE id = ?').run(this.store.now(), id);
 
+    if (m.to_identity === 'hq') {
+      // hq is not a worker: a reply to a system notice is recorded and closed, never delivered to a shift.
+      this.setState(id, 'handled');
+      return;
+    }
     if (m.to_identity === OWNER) {
       // The app is his channel: the message is in his conversation the moment it's stored.
       this.setState(id, 'delivered');

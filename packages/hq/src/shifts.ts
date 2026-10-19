@@ -10,6 +10,8 @@ import { HostClient, type HostConnection } from './host-client.ts';
 import { procStart, sessionIdFor } from './proc.ts';
 import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
+import { getIdentity, type IdentityRow } from './org.ts';
+import { buildSystemPrompt, writeSystemPrompt } from './system-prompt.ts';
 
 export type ShiftKind = 'work' | 'resident' | 'foreign';
 
@@ -28,6 +30,8 @@ export interface LaunchSpec {
   kind: ShiftKind; cwd: string; socketPath: string; taskId: number | null;
   /** systemd unit: company-shift@<shift>.service (the template instance). */
   unit: string;
+  /** L0 + L1 (B.3), passed as --append-system-prompt-file. */
+  systemPromptFile?: string;
 }
 
 /** Starts a shift-host process. Default: systemd-run --user (B.5); tests inject a fake. */
@@ -72,6 +76,7 @@ export function hostArgs(spec: LaunchSpec, stateDir: string): Record<string, str
   return {
     identity: spec.identity, shift: spec.shiftId, 'shift-no': String(spec.shiftNo), 'session-id': spec.sessionId,
     cwd: spec.cwd, 'state-dir': stateDir, resume: spec.resume,
+    ...(spec.systemPromptFile ? { 'append-system-prompt-file': spec.systemPromptFile } : {}),
   };
 }
 
@@ -243,9 +248,10 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
           WHERE to_identity = ? AND state = 'delivered' AND held_by_cli = 1`).run(identity);
       }
       this.writePrime(shiftId, identity);
+      const systemPromptFile = this.writeSystem(shiftId, identity);
       await this.launcher.launch({
         shiftId, identity, shiftNo, sessionId, resume, kind, socketPath, taskId, unit,
-        cwd: opts.cwd ?? this.cfg.defaultCwd,
+        cwd: opts.cwd ?? this.cfg.defaultCwd, systemPromptFile,
       });
     } catch (e) {
       this.markEnded(shiftId, 'dead', stage);
@@ -505,6 +511,16 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     }
   }
 
+  /** L0 + L1 from the contract, rewritten on every (re)start so a merged contract change applies at the next run. */
+  writeSystem(shiftId: string, identity: string): string {
+    const row = getIdentity(this.store, identity);
+    if (!row) {
+      // Never launch bare: an unknown identity still learns how to reply, and the board shows why.
+      this.store.emit('shift.no_identity', identity, { shift: shiftId });
+    }
+    return writeSystemPrompt(shiftDir(this.paths, shiftId), buildSystemPrompt(this.cfg.companyDir, row ?? unknownIdentity(identity), this.cfg.managerId));
+  }
+
   /** Memory lookup for prime.json (set by hq: ingest recall over memory/). */
   primeRecall: ((identity: string, query: string) => { top?: { ref: string; body: string }; others: string[] }) | null = null;
 
@@ -580,6 +596,11 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       if (this.closed) return;}); c.close(); }
     this.conns.clear();
   }
+}
+
+function unknownIdentity(id: string): IdentityRow {
+  return { id, name: id, title: '', symbol: '', team: null, team_kind: null, project: null, reports_to: null,
+    lifecycle: 'dormant', source: 'unknown', active: 1, data: '{}', updated_at: 0 };
 }
 
 function handoffYaml(a: Record<string, unknown>): string {

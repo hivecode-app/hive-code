@@ -105,3 +105,29 @@ test('host-args.json for the template unit: shift and shift-no come from the sto
   assert.deepEqual(args, { identity: 'yoav', shift: 'yoav-3', 'shift-no': '3', 'session-id': sessionIdFor('yoav', 3), cwd: '/w', 'state-dir': '/state', resume: true });
   assert.equal(shiftUnit('yoav-3'), 'company-shift@yoav-3.service');
 });
+
+test('system prompt (L0+L1): dossier, how to reply, Authority, charter; task workers get the task-team rules', async () => {
+  const { buildSystemPrompt } = await import('../src/system-prompt.ts');
+  const { join } = await import('node:path');
+  const companyDir = join(import.meta.dirname, '..', '..', '..', 'company');
+  const base = { symbol: '', team: null, team_kind: 'permanent', project: null, reports_to: null, lifecycle: 'resident', source: 'org', active: 1, data: '{}', updated_at: 0 };
+  const yoav = buildSystemPrompt(companyDir, { ...base, id: 'yoav', name: 'יואב', title: 'מנהל החברה' }, 'yoav');
+  assert.match(yoav, /אתה יואב, מנהל החברה/);
+  assert.match(yoav, /# יואב · מנהל החברה/);                    // the dossier itself
+  assert.match(yoav, /The complete list of things you may not do/); // Authority, verbatim (directives.md)
+  assert.match(yoav, /`tell`/);
+  assert.match(yoav, /ה-identity של רן הוא `owner`/);
+  const worker = buildSystemPrompt(companyDir, { ...base, id: 'agent-company-t7', name: 't7', title: 'fix typo', team_kind: 'task',
+    project: 'agent-company', reports_to: 'adi', lifecycle: 'ephemeral', source: 'runtime' }, 'yoav');
+  assert.match(worker, /צוות משימה/);
+  assert.match(worker, /gh pr merge --squash/);
+  assert.match(worker, /# אמנת agent-company/);                  // project charter
+  assert.match(worker, /מדווח ל-`adi`/);
+});
+
+test('host-args.json carries the system prompt file when there is one', async () => {
+  const { hostArgs, shiftUnit } = await import('../src/shifts.ts');
+  const args = hostArgs({ shiftId: 'yoav-3', identity: 'yoav', shiftNo: 3, sessionId: sessionIdFor('yoav', 3), resume: false,
+    kind: 'resident', cwd: '/w', socketPath: '/s', taskId: null, unit: shiftUnit('yoav-3'), systemPromptFile: '/state/shifts/yoav-3/system.md' }, '/state');
+  assert.equal(args['append-system-prompt-file'], '/state/shifts/yoav-3/system.md');
+});

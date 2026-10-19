@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync, lstatSync, chmodSync, rmSync } f
 import { execFile } from 'node:child_process';
 import { join, relative } from 'node:path';
 import {
-  COMPANY_API_VERSION, type OpAck, type OpName, type Priority, type RecallItem, type RecallRequest, type RecallResponse,
+  COMPANY_API_VERSION, OWNER, type OpAck, type OpName, type Priority, type RecallItem, type RecallRequest, type RecallResponse,
   type Urgency, type WalEntry,
 } from '@company/shared';
 import type { Hq } from './hq.ts';
@@ -72,7 +72,21 @@ export class Ingest {
         // mcp-company's `urgency` is the delivery priority (now|next|later); map it onto both axes.
         const pr = (['now', 'next', 'later'] as const).includes(a.urgency as Priority) ? (a.urgency as Priority) : 'next';
         const urgency: Urgency = pr === 'now' ? 'urgent' : pr === 'later' ? 'low' : 'normal';
-        const m = mailbox.tell({ msg_id: e.id, from: e.identity, to: need('to'), body: need('body'), priority: pr, urgency, ref: s(a.ref) });
+        const to = need('to');
+        // A display name ("יואב") instead of an id would wake a shift for an identity that doesn't exist.
+        if (to !== OWNER && to !== 'hq' && !this.hq.identityExists(to)) {
+          const why = `tell: unknown identity ${to} (use the id, e.g. yoav, or ${OWNER} for רן)`;
+          // MCP writes are acked locally ({queued:true}), so a 400 alone never reaches the worker. Tell it,
+          // after this transaction rolls back.
+          queueMicrotask(() => {
+            try {
+              mailbox.tell({ msg_id: `${e.id}-rejected`, from: 'hq', to: e.identity, kind: 'system', priority: 'now', ref: e.id,
+                body: `ההודעה שלך ל-"${to}" לא נשלחה: אין identity כזה. שלח שוב עם ה-id (מה שבסוגריים בכותרת ההודעה), למשל yoav, או ${OWNER} לרן.` });
+            } catch { /* best effort */ }
+          });
+          throw new IngestError(400, why);
+        }
+        const m = mailbox.tell({ msg_id: e.id, from: e.identity, to, body: need('body'), priority: pr, urgency, ref: s(a.ref) });
         return { ok: true, id: e.id, ref: m.id };
       }
       case 'ask': {

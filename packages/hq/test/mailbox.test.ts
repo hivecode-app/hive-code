@@ -13,7 +13,7 @@ test('tell to a resting identity wakes a shift, delivers, then seen → handled 
     assert.equal(launcher.launches[0]!.resume, false);
     assert.equal(launcher.launches[0]!.shiftId, 'eli-1');
     const host = launcher.hosts.get('eli-1')!;
-    assert.match(host.sent[0]!.text, /^\[הודעה מ-רן · דחיפות: רגילה · m-1\]\nתבדוק את הביטוח$/);
+    assert.match(host.sent[0]!.text, /^\[הודעה מ-רן \(owner\) · דחיפות: רגילה · m-1\]\nתבדוק את הביטוח$/);
     assert.equal(host.sent[0]!.priority, 'next');
 
     host.event({ kind: 'text', text: 'בודק' });

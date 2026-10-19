@@ -61,6 +61,13 @@ test('ingest socket: 0600, ops are idempotent on id, tell/ask/request_go land wh
     assert.equal((await post(sock, '/v1/ops', { ...entry('tell', {}, 'x'), v: 2 })).status, 400);
     assert.equal((await post(sock, '/v1/ops', entry('tell', { to: 'rotem' }, 'eli-1:03'))).status, 400, 'missing body = permanent reject');
     assert.equal((await post(sock, '/v1/ops', { ...entry('tell', {}, 'eli-1:04'), op: 'rm_rf' })).status, 400);
+    assert.equal((await post(sock, '/v1/ops', entry('tell', { to: 'יואב', body: 'שם במקום id' }, 'eli-1:05'))).status, 400, 'unknown identity = permanent reject');
+    assert.equal((await post(sock, '/v1/ops', entry('tell', { to: 'owner', body: 'לרן' }, 'eli-1:06'))).status, 200);
+    await until(() => !!hq.mailbox.get('eli-1:05-rejected'), 2000, 'the sender hears its tell was rejected');
+    assert.equal(hq.mailbox.get('eli-1:05-rejected')!.to_identity, 'eli');
+    await post(sock, '/v1/ops', entry('tell', { to: 'hq', body: 'תודה' }, 'eli-1:07'));
+    assert.equal(hq.mailbox.get('eli-1:07')!.state, 'handled', 'a reply to hq is closed, not delivered');
+    assert.ok(!hq.shifts.current('hq'), 'no shift for hq');
     assert.equal(hq.store.db.prepare(`SELECT 1 FROM ops WHERE id = 'eli-1:03'`).get(), undefined, 'rejected ops are not stored');
   } finally { await env.cleanup(); }
 });
