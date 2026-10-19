@@ -19,6 +19,7 @@ journalctl --user -u agent-company-hq -f
 - **גיבוי ידני:** `node packages/hq/src/main.ts backup`. בנוסף hq מגבה כל שעה לבד, ושומר 48 אחרונים.
 - **הגדרות:** `~/.local/state/agent-company/hq.config.json` דורס ברירות מחדל (פורט, טיימרים, RSS לנוסחת הקיבולת, פקודת ה-launch של shift-host). למשל `{"healthListen": "0.0.0.0:7421"}` פותח listener נוסף שמגיש רק `/health`.
 - **כתובת ציבורית:** `deploy/caddy/hq.caddy` מוסיף את `api.hq.example.com` ל-Caddy. מוסיפים אותו רק אחרי ש-hq רץ.
+- **הכתבה באפליקציה:** `deploy/caddy/app-dictate.caddy` מוסיף את `/<path>/dictate/*` לבלוק של האפליקציה, עם הטוקן של dictate-server. בלי זה כפתור המיקרופון מציג שגיאה בעברית.
 
 ## heartbeat חיצוני מ-ci-host (B.17)
 

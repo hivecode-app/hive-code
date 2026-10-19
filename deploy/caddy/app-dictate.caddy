@@ -1,0 +1,13 @@
+# Dictation for the app (#27): goes inside the app.hq.example.com block in
+# /etc/caddy/Caddyfile, next to the /<path>/hq/* handle and before the catch-all. Replace <path> with
+# ~/.local/state/agent-company/app-path and <token> with DICTATE_TOKEN of dictate-server.service.
+# Caddy adds the token so it never ships inside the app; dictate-server listens on 127.0.0.1:8790.
+# Then `sudo systemctl reload caddy`. Remove the handle to retire (the mic shows a Hebrew error).
+	handle_path /<path>/dictate/* {
+		request_body {
+			max_size 25MB
+		}
+		reverse_proxy 127.0.0.1:8790 {
+			header_up Authorization "Bearer <token>"
+		}
+	}

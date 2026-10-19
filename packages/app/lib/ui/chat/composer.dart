@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../data/dictation.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
@@ -34,8 +35,13 @@ class _ComposerState extends State<Composer> {
     if (_portal.isShowing) _portal.hide();
   }
   bool recording = false;
+  bool transcribing = false;
+  bool _starting = false;
   int recSeconds = 0;
   Timer? _rec;
+
+  /// A short dictation; past this the recording stops by itself and goes to transcription.
+  static const maxRecSeconds = 120;
 
   @override
   void initState() {
@@ -47,6 +53,7 @@ class _ComposerState extends State<Composer> {
   void dispose() {
     widget.controller.removeListener(_changed);
     _rec?.cancel();
+    if (recording) Dictation.instance.recorder.cancel();
     super.dispose();
   }
 
@@ -66,21 +73,87 @@ class _ComposerState extends State<Composer> {
     widget.onSent?.call();
   }
 
-  void _toggleRecording() {
-    // Dictation goes to dictate-server and lands in the field for editing (never sent by itself).
-    // The recorder is not wired yet; until it is, the keyboard's own mic works as usual.
-    if (recording) {
-      _rec?.cancel();
-      setState(() => recording = false);
-      StoreScope.read(context).error = 'ההכתבה עוד לא מחוברת. אפשר להכתיב דרך המיקרופון שבמקלדת.';
-      StoreScope.read(context).touch();
+  void _fail(String message) {
+    final s = StoreScope.read(context);
+    s.error = message;
+    s.touch();
+  }
+
+  // Dictation goes to dictate-server and lands in the field for editing (never sent by itself).
+  Future<void> _toggleRecording() async {
+    if (transcribing || _starting) return;
+    final dict = Dictation.instance;
+    if (recording) return _stopAndTranscribe();
+    if (dict.client == null) return _fail('ההכתבה לא מחוברת בגרסה הזו. אפשר להכתיב דרך המיקרופון שבמקלדת.');
+    // Starting waits on the permission prompt; taps meanwhile must not start a second recording.
+    _starting = true;
+    try {
+      await dict.recorder.start();
+    } on DictationError catch (e) {
+      if (mounted) _fail(e.message);
       return;
+    } catch (_) {
+      if (mounted) _fail(kMicFailed);
+      return;
+    } finally {
+      _starting = false;
     }
+    if (!mounted) return dict.recorder.cancel();
+    _rec?.cancel();
     setState(() {
       recording = true;
       recSeconds = 0;
     });
-    _rec = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => recSeconds++));
+    _rec = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => recSeconds++);
+      if (recSeconds >= maxRecSeconds) _stopAndTranscribe();
+    });
+  }
+
+  Future<void> _stopAndTranscribe() async {
+    if (!recording) return;
+    final dict = Dictation.instance;
+    _rec?.cancel();
+    setState(() {
+      recording = false;
+      transcribing = true;
+    });
+    try {
+      final pcm = await dict.recorder.stop();
+      if (pcm.length < kDictateRate * 2 ~/ 4) throw const DictationError('ההקלטה קצרה מדי. אפשר ללחוץ, לדבר, ואז ללחוץ שוב.');
+      final text = await dict.client!.transcribe(wavFromPcm(pcm));
+      if (!mounted) return;
+      _insert(text);
+    } on DictationError catch (e) {
+      if (mounted) _fail(e.message);
+    } catch (_) {
+      if (mounted) _fail(kMicFailed);
+    } finally {
+      if (mounted) setState(() => transcribing = false);
+    }
+  }
+
+  void _cancelRecording() {
+    _rec?.cancel();
+    Dictation.instance.recorder.cancel();
+    setState(() => recording = false);
+  }
+
+  /// Puts the dictated text at the cursor (or the end), ready for editing.
+  void _insert(String text) {
+    final c = widget.controller;
+    final sel = c.selection;
+    final at = sel.isValid ? sel.start : c.text.length;
+    final end = sel.isValid ? sel.end : c.text.length;
+    final before = c.text.substring(0, at);
+    final pad = before.isEmpty || before.endsWith(' ') || before.endsWith('\n') ? '' : ' ';
+    final ins = '$pad$text';
+    c.value = TextEditingValue(
+      text: before + ins + c.text.substring(end),
+      selection: TextSelection.collapsed(offset: at + ins.length),
+    );
+    widget.focus.requestFocus();
   }
 
   void _attach() {
@@ -121,20 +194,27 @@ class _ComposerState extends State<Composer> {
       constraints: const BoxConstraints(minHeight: 46),
       decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(23), boxShadow: p.hairShadow),
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: recording
+      child: transcribing
+          ? SizedBox(
+              height: 46,
+              child: Row(children: [
+                const SizedBox(width: 12),
+                SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: p.accent)),
+                const SizedBox(width: 10),
+                Text('מתמלל את ההקלטה…', style: T.body.copyWith(color: p.text2)),
+              ]),
+            )
+          : recording
           ? SizedBox(
               height: 46,
               child: Row(children: [
                 const SizedBox(width: 12),
                 Ic('mic', size: 20, fill: true, color: p.urgent),
                 const SizedBox(width: 8),
-                Text('0:${recSeconds.toString().padLeft(2, '0')}', style: T.body.copyWith(color: p.text)),
+                Text('${recSeconds ~/ 60}:${(recSeconds % 60).toString().padLeft(2, '0')}', style: T.body.copyWith(color: p.text)),
                 const Spacer(),
                 TextButton(
-                  onPressed: () {
-                    _rec?.cancel();
-                    setState(() => recording = false);
-                  },
+                  onPressed: _cancelRecording,
                   child: Text('ביטול', style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
                 ),
               ]),
@@ -173,7 +253,7 @@ class _ComposerState extends State<Composer> {
 
     final round = Semantics(
       button: true,
-      label: hasText ? 'שליחה' : (recording ? 'עצירת ההקלטה' : 'הכתבה'),
+      label: hasText ? 'שליחה' : (recording ? 'עצירת ההקלטה' : (transcribing ? 'מתמלל' : 'הכתבה')),
       child: GestureDetector(
         onLongPress: hasText && busy ? _openMenu : null,
         child: Material(
