@@ -334,11 +334,14 @@ String? imageMime(Uint8List b) {
 }
 
 class TextMsg extends ChatItem {
-  TextMsg({required super.id, required super.ts, required this.text, this.streaming = false, this.author, super.seq});
+  TextMsg({required super.id, required super.ts, required this.text, this.streaming = false, this.author, this.attachments = const [], super.seq});
 
   /// Markdown (subset): paragraphs, lists, **bold**, `code`, ``` blocks ```, > quotes.
   String text;
   bool streaming;
+
+  /// Images the worker sent with the message (hq ids). Added to a streamed bubble when its stored copy lands.
+  List<Attachment> attachments;
 
   /// Set only when another participant writes (e.g. יואב joins).
   final String? author;

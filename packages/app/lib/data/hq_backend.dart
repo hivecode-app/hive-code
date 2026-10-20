@@ -509,8 +509,11 @@ class HqBackend extends Backend {
         if (_buffer(from, e)) return;
         final chat = d.chats.putIfAbsent(from, () => Conversation(identityId: from, items: []));
         if (!chat.items.any((i) => i.id == 'msg:${m['id']}')) {
-          if (!streamedAlready(chat.items, m)) {
-            chat.items.add(TextMsg(id: 'msg:${m['id']}', ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int), text: m['body'] as String));
+          final streamed = streamedAs(chat.items, m);
+          if (streamed == null) {
+            chat.items.add(TextMsg(id: 'msg:${m['id']}', ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int), text: m['body'] as String, attachments: attachmentsOf(m)));
+          } else if (streamed.attachments.isEmpty) {
+            streamed.attachments = attachmentsOf(m);
           }
           if (openIdentity == from) {
             unawaited(_send('POST', '/api/messages/${Uri.encodeComponent(m['id'] as String)}/handled'));
@@ -553,7 +556,11 @@ class HqBackend extends Backend {
     }
     if (m['to_identity'] == 'owner') {
       if (m['kind'] == 'system') return EventLine(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String);
-      return streamedAlready(existing, m) ? null : TextMsg(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String);
+      final streamed = streamedAs(existing, m);
+      if (streamed == null) return TextMsg(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String, attachments: attachmentsOf(m));
+      // The text already streamed in; the images exist only in the stored copy.
+      if (streamed.attachments.isEmpty) streamed.attachments = attachmentsOf(m);
+      return null;
     }
     final body = withoutIds((m['body'] as String).replaceAll('\n', ' '));
     return EventLine(
@@ -1057,9 +1064,12 @@ Delivery mapDelivery(String? s) => switch (s) {
 
 /// A reply hq stored from the worker's own text (chat.md §2.3א) is the bubble that already streamed in:
 /// `text_ref` is that text's engine messageId. One item, never two.
-bool streamedAlready(List<ChatItem> items, Map<String, dynamic> m) {
+bool streamedAlready(List<ChatItem> items, Map<String, dynamic> m) => streamedAs(items, m) != null;
+
+/// That streamed bubble, or null.
+TextMsg? streamedAs(List<ChatItem> items, Map<String, dynamic> m) {
   final ref = m['text_ref'] as String?;
-  return ref != null && items.any((i) => i is TextMsg && i.id == 't:$ref');
+  return ref == null ? null : items.whereType<TextMsg>().where((i) => i.id == 't:$ref').firstOrNull;
 }
 
 WorkerStatus mapStatus(String? s) => switch (s) {

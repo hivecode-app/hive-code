@@ -383,7 +383,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Object? _rowSig(ChatItem it, String? hitId) => switch (it) {
-        TextMsg() => (it.text, it.streaming, it.author, selected == it.id, hitId == it.id),
+        TextMsg() => (it.text, it.streaming, it.author, it.attachments.length, selected == it.id, hitId == it.id),
         UserMsg() => (it.text, it.delivery, it.priority, it.replyTo?.text, selected == it.id, hitId == it.id),
         _ => null,
       };

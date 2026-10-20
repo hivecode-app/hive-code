@@ -111,6 +111,21 @@ void main() {
     expect(paths.skip(1), ['/api/uploads', '/api/messages/tell']);
   });
 
+  testWidgets('a worker\'s message shows its images in a grid; a tap opens them full screen, a swipe moves on', (tester) async {
+    final msg = TextMsg(id: 'msg:m-mock', ts: DateTime(2026, 10, 20), text: 'המוקאפ', attachments: [for (var i = 1; i <= 7; i++) image('$i.png').uploaded('u-$i')]);
+    await pumpApp(tester, home: Scaffold(body: Center(child: TextBubble(msg: msg))));
+    expect(find.descendant(of: find.byType(TextBubble), matching: find.byType(AttachmentImage)), findsNWidgets(7));
+    expect(find.textContaining('המוקאפ', findRichText: true), findsWidgets);
+
+    await tester.tap(find.byType(AttachmentImage).at(2));
+    await tester.pumpAndSettle();
+    expect(find.byType(ImageViewer), findsOneWidget);
+    expect(find.text('3 מתוך 7'), findsOneWidget);
+    await tester.fling(find.byType(PageView), const Offset(-400, 0), 1000);
+    await tester.pumpAndSettle();
+    expect(find.text('3 מתוך 7'), findsNothing, reason: 'a swipe moves to a neighbouring image');
+  });
+
   test('history: a stored message brings its images back, and an image alone is "תמונה" in the list', () {
     final m = {'body': '', 'attachments': [{'id': 'u-1', 'name': 'a.png', 'mime': 'image/png', 'bytes': 10}]};
     expect(attachmentsOf(m).single.id, 'u-1');

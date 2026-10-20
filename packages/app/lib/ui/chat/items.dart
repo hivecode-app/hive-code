@@ -135,7 +135,7 @@ class UserBubble extends StatelessWidget {
 }
 
 /// The images of a message, WhatsApp style: one fills the bubble, more make a grid of squares.
-/// A tap opens one full screen.
+/// A tap opens it full screen, where a swipe moves between the message's images.
 class BubbleImages extends StatelessWidget {
   const BubbleImages({super.key, required this.images, this.uploading = false});
   final List<Attachment> images;
@@ -144,12 +144,12 @@ class BubbleImages extends StatelessWidget {
   final bool uploading;
   @override
   Widget build(BuildContext context) {
-    Widget one(Attachment a, {double? side}) => uploading ? _uploading(a, side) : _open(context, a, side);
+    Widget one(int i, {double? side}) => uploading ? _uploading(images[i], side) : _open(context, i, side);
     if (images.length == 1) {
       // widthFactor 1: the bubble is as wide as the image, not the whole row.
-      return Align(alignment: AlignmentDirectional.centerStart, widthFactor: 1, child: one(images.single));
+      return Align(alignment: AlignmentDirectional.centerStart, widthFactor: 1, child: one(0));
     }
-    return Wrap(spacing: 4, runSpacing: 4, children: [for (final a in images) one(a, side: 128)]);
+    return Wrap(spacing: 4, runSpacing: 4, children: [for (var i = 0; i < images.length; i++) one(i, side: 128)]);
   }
 
   Widget _image(Attachment a, double? side) => ClipRRect(
@@ -170,13 +170,13 @@ class BubbleImages extends StatelessWidget {
         ),
       ]);
 
-  Widget _open(BuildContext context, Attachment a, double? side) => GestureDetector(
+  Widget _open(BuildContext context, int i, double? side) => GestureDetector(
           onTap: () => Navigator.of(context).push(PageRouteBuilder(
             opaque: false,
-            pageBuilder: (_, _, _) => ImageViewer(attachment: a),
+            pageBuilder: (_, _, _) => ImageViewer(images: images, initial: i),
             transitionsBuilder: (_, anim, _, child) => FadeTransition(opacity: anim, child: child),
           )),
-          child: _image(a, side),
+          child: _image(images[i], side),
         );
 }
 
@@ -224,10 +224,26 @@ class _AttachmentImageState extends State<AttachmentImage> {
   }
 }
 
-/// One image full screen, zoomable; a tap on the dark around it or the × closes it.
-class ImageViewer extends StatelessWidget {
-  const ImageViewer({super.key, required this.attachment});
-  final Attachment attachment;
+/// A message's images full screen, from the one tapped: zoomable, a swipe moves to the next;
+/// a tap on the dark around it or the × closes it.
+class ImageViewer extends StatefulWidget {
+  const ImageViewer({super.key, required this.images, this.initial = 0});
+  final List<Attachment> images;
+  final int initial;
+  @override
+  State<ImageViewer> createState() => _ImageViewerState();
+}
+
+class _ImageViewerState extends State<ImageViewer> {
+  late final _pages = PageController(initialPage: widget.initial);
+  late int _at = widget.initial;
+
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
         backgroundColor: const Color(0xF0000000),
@@ -236,9 +252,20 @@ class ImageViewer extends StatelessWidget {
             Positioned.fill(
               child: GestureDetector(
                 onTap: () => Navigator.pop(context),
-                child: InteractiveViewer(maxScale: 5, child: Center(child: AttachmentImage(attachment: attachment, fit: BoxFit.contain))),
+                child: PageView.builder(
+                  controller: _pages,
+                  itemCount: widget.images.length,
+                  onPageChanged: (i) => setState(() => _at = i),
+                  itemBuilder: (_, i) => InteractiveViewer(maxScale: 5, child: Center(child: AttachmentImage(attachment: widget.images[i], fit: BoxFit.contain))),
+                ),
               ),
             ),
+            if (widget.images.length > 1)
+              PositionedDirectional(
+                top: 16,
+                end: 16,
+                child: Text('${_at + 1} מתוך ${widget.images.length}', style: const TextStyle(fontFamily: kFont, fontSize: 14, color: Colors.white)),
+              ),
             PositionedDirectional(
               top: 4,
               start: 4,
@@ -333,6 +360,23 @@ class _TextBubbleState extends State<TextBubble> {
     final text = long ? m.text.split('\n').take(30).join('\n') : m.text;
     final wide = m.text.length > 60 || m.text.contains('```');
     final multi = parseMarkdown(text).length > 1;
+    final images = m.attachments.where((a) => a.isImage).toList();
+    final body = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+      if (m.author != null) Text(m.author!, style: TextStyle(fontFamily: kFont, fontSize: 13, fontWeight: FontWeight.w700, color: p.text)),
+      if (images.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 4), child: BubbleImages(images: images)),
+      // One paragraph: the time rides on its last line (WhatsApp). Rich multi-block text: the
+      // time gets its own corner line so it can never sit on top of a list or code.
+      if (text.isNotEmpty || images.isEmpty) Markdown(text, trailerWidth: multi ? 0 : Meta.widthFor(null), caret: m.streaming),
+      if (multi || (text.isEmpty && images.isNotEmpty)) const SizedBox(height: 14),
+      if (long)
+        GestureDetector(
+          onTap: () => setState(() => expanded = true),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('המשך קריאה (עוד ${lines - 30} שורות)', style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+          ),
+        ),
+    ]);
     return Bubble(
       out: false,
       wide: wide,
@@ -340,21 +384,7 @@ class _TextBubbleState extends State<TextBubble> {
         meta: Meta(time: hm(m.ts)),
         // Folded: the bottom row is the "continue reading" link on the right, so the time stays left.
         end: long ? TextDirection.rtl : markdownEndDirection(text),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-          if (m.author != null) Text(m.author!, style: TextStyle(fontFamily: kFont, fontSize: 13, fontWeight: FontWeight.w700, color: p.text)),
-          // One paragraph: the time rides on its last line (WhatsApp). Rich multi-block text: the
-          // time gets its own corner line so it can never sit on top of a list or code.
-          Markdown(text, trailerWidth: multi ? 0 : Meta.widthFor(null), caret: m.streaming),
-          if (multi) const SizedBox(height: 14),
-          if (long)
-            GestureDetector(
-              onTap: () => setState(() => expanded = true),
-              child: Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text('המשך קריאה (עוד ${lines - 30} שורות)', style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
-              ),
-            ),
-        ]),
+        child: images.isEmpty ? body : IntrinsicWidth(child: body), // as wide as the images (or the text), like UserBubble
       ),
     );
   }

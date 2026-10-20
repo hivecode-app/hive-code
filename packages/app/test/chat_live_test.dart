@@ -122,6 +122,27 @@ void main() {
     expect(texts.single.streaming, isFalse);
   }, timeout: const Timeout(Duration(seconds: 20)));
 
+  test('a worker message to the owner keeps its images: from history, live, and when its text already streamed', () async {
+    final (b, hq) = await up();
+    final seven = [for (var i = 1; i <= 7; i++) {'id': 'u-$i', 'name': 'mock-$i.png', 'mime': 'image/png', 'bytes': 10}];
+    hq.messages = [{'id': 'm-mock', 'from_identity': 'yoav', 'to_identity': 'owner', 'kind': 'tell', 'body': 'המוקאפ', 'attachments': seven, 'created_at': 2000, 'state': 'delivered'}];
+    await b.openConversation('yoav');
+    TextMsg item(String id) => b.data!.chats['yoav']!.items.whereType<TextMsg>().singleWhere((t) => t.id == id);
+    expect(item('msg:m-mock').attachments.map((a) => a.id), ['u-1', 'u-2', 'u-3', 'u-4', 'u-5', 'u-6', 'u-7']);
+
+    hq.send({'seq': 0, 'type': 'message.new', 'data': {...msgNew('live', 'yoav', 'owner', 'עוד')['data'] as Map, 'attachments': seven.take(2).toList()}});
+    await until(() => ids(b).contains('msg:live'));
+    expect(item('msg:live').attachments.length, 2);
+
+    b.showConversation('yoav');
+    hq.send({'seq': 300, 'ts': 6000, 'type': 'engine.text', 'identity': 'yoav', 'data': {'shift': 'yoav-4', 'seq': 9, 'ev': {'kind': 'text', 'text': 'הנה', 'messageId': 'msg_img'}}});
+    await until(() => ids(b).contains('t:msg_img'));
+    hq.send({'seq': 301, 'type': 'message.new', 'data': {'id': 'm-img', 'from_identity': 'yoav', 'to_identity': 'owner', 'kind': 'tell', 'body': 'הנה', 'text_ref': 'msg_img', 'attachments': seven, 'created_at': 6001, 'state': 'delivered'}});
+    await until(() => item('t:msg_img').attachments.isNotEmpty);
+    expect(item('t:msg_img').attachments.length, 7, reason: 'the streamed bubble takes the stored copy\'s images');
+    expect(ids(b), isNot(contains('msg:m-img')));
+  }, timeout: const Timeout(Duration(seconds: 20)));
+
   test('a question asked while the chat is open appears; one answered elsewhere closes', () async {
     final (b, hq) = await up();
     b.showConversation('yoav'); // as ChatScreen does
