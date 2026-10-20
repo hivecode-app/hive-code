@@ -22,7 +22,11 @@ class Shell extends StatelessWidget {
     final nav = NavScope.of(context);
     final store = StoreScope.of(context);
     return LayoutBuilder(builder: (context, c) {
-      nav.wide = c.maxWidth >= 800;
+      // A phone on its side (up to ~930 x 430dp) stays a phone, the way WhatsApp does, instead of
+      // squeezing three columns into 411dp of height. A short but wide window (a laptop browser
+      // made short) is still a desktop. The keyboard can't flip this: it never shrinks these
+      // constraints (it only sets viewInsets).
+      nav.wide = c.maxWidth >= 800 && (c.maxHeight >= 560 || c.maxWidth >= 1100);
       final p = context.p;
       final body = store.data == null
           ? const _FirstLoad()
@@ -45,9 +49,16 @@ class Shell extends StatelessWidget {
           statusBarColor: Colors.transparent,
           systemNavigationBarColor: nav.wide ? p.bg : p.surface,
         ),
-        child: Scaffold(
-          backgroundColor: p.bg,
-          body: SafeArea(bottom: true, child: Stack(children: [body, if (store.error != null) _ErrorBar(store.error!)])),
+        // Android back on another tab goes to home first, then leaves the app (as WhatsApp does).
+        child: PopScope(
+          canPop: nav.wide || nav.tab == AppTab.home,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) nav.go(AppTab.home);
+          },
+          child: Scaffold(
+            backgroundColor: p.bg,
+            body: SafeArea(bottom: true, child: Stack(children: [body, if (store.error != null) _ErrorBar(store.error!)])),
+          ),
         ),
       );
     });
