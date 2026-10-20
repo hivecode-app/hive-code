@@ -18,8 +18,7 @@ const dark = args.includes('--dark');
 const local = args.find((a) => a.startsWith('--url='))?.slice(6);
 fs.mkdirSync(out, { recursive: true });
 
-const appPath = fs.readFileSync(path.join(os.homedir(), '.local/state/agent-company/app-path'), 'utf8').trim();
-const base = local || `https://app.hq.example.com/${appPath}/`;
+const base = local || 'https://app.hq.example.com/';
 const url = base + (demo ? '?demo' : '');
 const vp = desktop ? { width: 1440, height: 900 } : { width: 412, height: 915 };
 
@@ -48,14 +47,6 @@ if (process.env.PROFILE) {
 await ctx.addInitScript(() => {
   try { delete window.PublicKeyCredential; } catch {}
 });
-// QA_HQ=gateway: a session that talks to the real hq through the app's gateway (Caddy adds hq's
-// token there), for a QA copy (tool/qa/publish_qa.sh) while the live hq has no sign-in API.
-if (process.env.QA_HQ === 'gateway') {
-  await ctx.addInitScript((url) => {
-    localStorage.setItem('flutter.hq.url', JSON.stringify(url));
-    localStorage.setItem('flutter.hq.token', JSON.stringify('gateway'));
-  }, `https://app.hq.example.com/${appPath}/hq`);
-}
 const p = await ctx.newPage();
 const logs = [];
 p.on('console', (m) => logs.push(`${m.type()}: ${m.text()}`));

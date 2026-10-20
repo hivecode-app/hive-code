@@ -1,6 +1,0 @@
-# Tab handoff (B.9, #50): the phone page for browser_ask_user. Replaces the bet6 spike's block in
-# /etc/caddy/Caddyfile, then `sudo systemctl reload caddy`. hq serves only /h/<token> and /ws/<token> on
-# this listener (cfg.tab.listen, default 127.0.0.1:7422); nothing else of hq is reachable through it.
-tab.hq.example.com {
-	reverse_proxy 127.0.0.1:7422
-}

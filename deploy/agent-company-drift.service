@@ -1,0 +1,11 @@
+# noga/drift-check (company/org.yaml): compares the live production surface with the repo and puts
+# any difference in the owner's inbox. Installed by `scripts/deploy.sh hq`; the timer runs it nightly.
+[Unit]
+Description=agent-company drift check (live config vs repo)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/agent-company
+ExecStart=/usr/bin/bash %h/projects/agent-company/scripts/drift-check.sh --report
+Nice=10
+TimeoutStartSec=5min

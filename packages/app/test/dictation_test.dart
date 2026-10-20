@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:agent_company/data/auth_client.dart';
 import 'package:agent_company/data/dictation.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
@@ -99,6 +100,30 @@ void main() {
       expect(await err(client((_) => http.Response('openai 500', 502))), contains('לא הצליח לתמלל'));
       expect(await err(client((_) => http.Response('{"text":"  "}', 200))), contains('לא נשמע דיבור'));
       expect(await err(client((_) => http.Response('<html>', 200))), contains('לא צפויה'));
+    });
+
+    test('through hq: posts to <hq>/api/dictate/transcribe with the device token', () async {
+      late http.Request seen;
+      final c = DictateClient.viaHq(
+        () async => const Session('https://app.example/hq', 'dev-token'),
+        client: MockClient((r) async {
+          seen = r;
+          return http.Response('{"text":"שלום"}', 200, headers: {'content-type': 'application/json; charset=utf-8'});
+        }),
+      );
+      expect(await c.transcribe(wavFromPcm(Uint8List(4))), 'שלום');
+      expect(seen.url.toString(), 'https://app.example/hq/api/dictate/transcribe');
+      expect(seen.headers['authorization'], 'Bearer dev-token');
+    });
+
+    test('through hq: no session or a revoked device is a Hebrew error, nothing is sent without a session', () async {
+      var sent = 0;
+      final none = DictateClient.viaHq(() async => null, client: MockClient((_) async { sent++; return http.Response('', 200); }));
+      expect(await err(none), contains('ממכשיר מחובר'));
+      expect(sent, 0);
+      final revoked = DictateClient.viaHq(() async => const Session('https://app.example/hq', 'old'),
+          client: MockClient((_) async => http.Response('{"error":"unauthorized"}', 401)));
+      expect(await err(revoked), contains('להתחבר מחדש'));
     });
   });
 

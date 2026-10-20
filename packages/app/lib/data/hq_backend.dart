@@ -4,7 +4,7 @@
 //   POST /api/asks/:id/answer  /api/inbox/:id/{done,dismiss,ack}  /api/messages/tell  /api/shifts/:id/interrupt
 //   PUT  /api/toggles/:key
 //   WS   /ws?after=<seq>  (replay, then {type:'live'}, then live events; deltas have seq 0)
-// The app reaches hq through Caddy at <base>/hq (see tool/deploy.sh).
+// The app reaches hq through Caddy at <base>/hq (deploy/caddy/agent-company.caddy).
 import 'dart:async';
 import 'dart:convert';
 

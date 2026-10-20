@@ -1,9 +1,7 @@
-# company hq (B.1) — one process on hq-host. systemd --user unit; linger is on for ran.
-# Install (not enabled yet):
-#   ln -sf ~/projects/agent-company/deploy/agent-company-hq.service ~/.config/systemd/user/
-#   systemctl --user daemon-reload && systemctl --user enable --now agent-company-hq
-# Shift-hosts run as their own transient units (systemd-run --user --unit=shift-<id>), outside this
-# unit's cgroup, so restarting hq never kills a shift (B.5).
+# company hq (B.1): one process on hq-host, a systemd --user unit (linger is on for ran).
+# Installed by `scripts/deploy.sh hq` as a symlink in ~/.config/systemd/user to this file in ~/projects/agent-company.
+# Shift-hosts run as their own units (company-shift@<shift>), outside this unit's cgroup, so
+# restarting hq never kills a shift (B.5).
 [Unit]
 Description=agent-company hq (store, mailboxes, inbox, scheduler, watchdog, probes, API)
 After=network-online.target
@@ -14,9 +12,12 @@ Type=simple
 WorkingDirectory=%h/projects/agent-company
 ExecStart=/usr/bin/node %h/projects/agent-company/packages/hq/src/main.ts
 Environment=NODE_ENV=production
+# Server-side secrets, outside git, mode 600: DICTATE_TOKEN (dictate-server's token, packages/hq/src/dictate.ts).
+# Written by `scripts/deploy.sh hq` from dictate-server's own .env. "-": hq still starts without it (the mic answers 503).
+EnvironmentFile=-%h/.config/agent-company/hq.env
 # Everything hq writes (db, backups, tokens, sockets) is owner-only.
 UMask=0077
-# State lives under ~/.local/state/agent-company (B.11) — never /tmp.
+# State lives under ~/.local/state/agent-company (B.11), never /tmp.
 Restart=always
 RestartSec=2
 TimeoutStopSec=20

@@ -1,7 +1,7 @@
 // HTTP + WebSocket API on 127.0.0.1 (B.8). Token auth on everything except GET /health (heartbeat) and
 // /api/auth/* (getting a device token: passkey or pairing code, auth.ts). A token is either hq's own
 // api-token (stays on the server) or a device token. The app uses this through Caddy; mcp-company and
-// hooks use it for writes (idempotent by msg_id).
+// hooks use it for writes (idempotent by msg_id). POST /api/dictate/transcribe streams to dictate-server (dictate.ts).
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Hq } from './hq.ts';
 import { AuthError, type Caller } from './auth.ts';
+import { proxyDictate } from './dictate.ts';
 import { OWNER } from '@company/shared';
 
 export function loadOrCreateToken(stateDir: string): string {
@@ -318,6 +319,7 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
       }
       const c = caller(req, url);
       if (!c) return json(res, 401, { error: 'unauthorized' });
+      if (req.method === 'POST' && url.pathname === '/api/dictate/transcribe') return await proxyDictate(hq.cfg.dictate, req, res);
       if (await hq.ingest.handle(req, res, () => readBody(req))) return;
       if (await dispatch(routes, req, res, url, c)) return;
       return json(res, 404, { error: 'not found' });

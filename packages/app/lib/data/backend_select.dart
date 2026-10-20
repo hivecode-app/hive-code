@@ -22,6 +22,7 @@ const kBuiltInHqUrl = String.fromEnvironment('HQ_URL');
 Future<Backend?> selectBackend() async {
   try {
     final p = await SharedPreferences.getInstance();
+    await followGateway(p);
     final url = p.getString(kHqUrl), token = p.getString(kHqToken);
     if (url != null && url.isNotEmpty && token != null && token.isNotEmpty) return HqBackend(baseUrl: url, token: token);
     if (p.getBool(kDemo) == true || Uri.base.queryParameters.containsKey('demo')) return FakeBackend();
@@ -32,9 +33,25 @@ Future<Backend?> selectBackend() async {
 /// The saved session, if this device is signed in.
 Future<Session?> savedSession() async {
   final p = await SharedPreferences.getInstance();
+  await followGateway(p);
   final url = p.getString(kHqUrl), token = p.getString(kHqToken);
   return url != null && url.isNotEmpty && token != null && token.isNotEmpty ? Session(url, token) : null;
 }
+
+/// A session saved under the old secret path (`/<32 hex>/hq`, before 20/10/2026, #54) on the same
+/// host moves to the hq address this build uses, so the device keeps its token and nothing keeps
+/// calling a path that is going away. Anything else (another host, the QA copy) is left alone.
+@visibleForTesting
+Future<void> followGateway(SharedPreferences p, [String? gateway]) async {
+  final saved = p.getString(kHqUrl), gw = gateway ?? gatewayUrl();
+  if (saved == null || saved.isEmpty || gw.isEmpty || saved == gw) return;
+  final a = Uri.tryParse(saved), b = Uri.tryParse(gw);
+  if (a == null || b == null || a.host.isEmpty || a.host != b.host) return;
+  if (!_oldSecretPath.hasMatch(a.path)) return;
+  await p.setString(kHqUrl, gw);
+}
+
+final _oldSecretPath = RegExp(r'^/[0-9a-f]{32}/hq/?$');
 
 Future<void> saveSession(Session s) async {
   final p = await SharedPreferences.getInstance();
@@ -56,7 +73,7 @@ String gatewayUrl() {
   return defaultHqUrl();
 }
 
-/// On the web build the hq API sits next to the app: `<app path>/hq` (Caddy, tool/deploy.sh).
+/// On the web build the hq API sits next to the app: `<app path>/hq` (Caddy, deploy/caddy/agent-company.caddy).
 String defaultHqUrl() {
   final b = Uri.base;
   if (b.scheme != 'https' && b.scheme != 'http') return '';

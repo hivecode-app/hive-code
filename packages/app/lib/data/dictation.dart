@@ -5,9 +5,9 @@
 //
 // Where the app reaches it:
 //   1. DICTATE_URL (+ DICTATE_TOKEN) baked in at build time: straight to the service.
-//   2. Otherwise the app's gateway, next to hq's: `<app path>/dictate` on the web, HQ_URL with
-//      `/hq` -> `/dictate` on Android. Caddy adds the service's token there, the same way it does
-//      for hq (deploy/caddy/app-dictate.caddy), so the token never ships inside the app.
+//   2. Otherwise through hq: POST <hq>/api/dictate/transcribe with this device's own token (#54).
+//      hq checks it like on every route and forwards to dictate-server with its own credential, so no
+//      dictate-server token ships inside the app and a device that is not paired gets 401.
 // The text lands in the composer for editing; nothing here sends a message.
 import 'dart:async';
 import 'dart:convert';
@@ -16,6 +16,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 
+import 'auth_client.dart';
 import 'backend_select.dart';
 
 const kDictateUrl = String.fromEnvironment('DICTATE_URL');
@@ -118,39 +119,57 @@ Uint8List wavFromPcm(Uint8List pcm, {int rate = kDictateRate}) {
       .takeBytes();
 }
 
-/// Through the app's gateway Caddy puts dictate-server's own token on the request (deploy/caddy/app-dictate.caddy);
-/// any non-empty value works here, and no real token ships inside the app.
-const _gatewayToken = 'gateway';
-
 class DictateClient {
-  DictateClient({required this.baseUrl, required this.token, http.Client? client, this.engine = 'openai'}) : _http = client ?? http.Client();
+  DictateClient({required this.baseUrl, required this.token, http.Client? client, this.engine = 'openai'})
+      : _http = client ?? http.Client(),
+        _session = null;
+
+  /// Through hq with this device's own token. The saved session is read on every recording, so a
+  /// device that signs in or out after the app started is picked up.
+  DictateClient.viaHq(Future<Session?> Function() session, {http.Client? client, this.engine = 'openai'})
+      : baseUrl = '',
+        token = '',
+        _http = client ?? http.Client(),
+        _session = session;
 
   final String baseUrl;
   final String token;
   final String engine;
   final http.Client _http;
+  final Future<Session?> Function()? _session;
 
   /// The configured service, or null when this build has no way to reach it.
   static DictateClient? configured() {
     if (kDictateUrl.isNotEmpty) return DictateClient(baseUrl: kDictateUrl, token: kDictateToken);
-    final gw = gatewayUrl();
-    if (!gw.endsWith('/hq')) return null;
-    return DictateClient(baseUrl: '${gw.substring(0, gw.length - 3)}/dictate', token: _gatewayToken);
+    if (gatewayUrl().isEmpty) return null;
+    return DictateClient.viaHq(savedSession);
+  }
+
+  /// Where to post and with which token: the build's service, or `<hq>/api/dictate` with the device token.
+  Future<(String, String)> _target() async {
+    final get = _session;
+    if (get == null) return (baseUrl, token);
+    final s = await get();
+    if (s == null) throw const DictationError('ההכתבה עובדת רק ממכשיר מחובר. צריך להתחבר קודם.');
+    final hq = s.baseUrl.endsWith('/') ? s.baseUrl.substring(0, s.baseUrl.length - 1) : s.baseUrl;
+    return ('$hq/api/dictate', s.token);
   }
 
   /// Sends the WAV and returns the Hebrew text. Throws [DictationError].
   Future<String> transcribe(Uint8List wav) async {
+    final (url, bearer) = await _target();
     final http.Response r;
     try {
-      final base = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+      final base = url.endsWith('/') ? url.substring(0, url.length - 1) : url;
       final req = http.MultipartRequest('POST', Uri.parse('$base/transcribe'))
-        ..headers['authorization'] = 'Bearer $token'
+        ..headers['authorization'] = 'Bearer $bearer'
         ..fields['engine'] = engine
         ..files.add(http.MultipartFile.fromBytes('audio', wav, filename: 'audio.wav'));
       r = await http.Response.fromStream(await _http.send(req).timeout(const Duration(seconds: 45)));
     } catch (_) {
       throw const DictationError('אין חיבור לשירות ההכתבה, ולכן ההקלטה לא תומללה. אפשר לנסות שוב.');
     }
+    if (r.statusCode == 401 && _session != null) throw const DictationError('המכשיר הזה כבר לא מחובר, ולכן ההקלטה לא תומללה. צריך להתחבר מחדש.');
     if (r.statusCode == 401) throw const DictationError('שירות ההכתבה לא קיבל את הטוקן, ולכן ההקלטה לא תומללה.');
     if (r.statusCode != 200) throw const DictationError('שירות ההכתבה לא הצליח לתמלל את ההקלטה. אפשר לנסות שוב.');
     final String text;

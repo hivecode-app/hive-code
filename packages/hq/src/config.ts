@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { TabConfig } from './tab/handoffs.ts';
+import type { DictateConfig } from './dictate.ts';
 
 export interface HqConfig {
   stateDir: string;
@@ -54,6 +55,8 @@ export interface HqConfig {
     appUrl: string | null;
     pairCodeMs: number;
   };
+  /** dictate-server for the app's mic (dictate.ts). token: DICTATE_TOKEN from hq.env; null = the mic shows an error. */
+  dictate: DictateConfig;
   /** B.7: the accounts the company runs on. managed=false is the CLI's own ~/.claude login, never touched
    *  (dir-0016); managed=true gets its own config dir under state/accounts/<name>. */
   accounts: AccountDef[];
@@ -113,9 +116,10 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       rpName: 'החברה',
       // The APK's origin is the sha256 of its release signing cert (public; tool/make_keystore.sh).
       origins: ['https://app.hq.example.com', 'android:apk-key-hash:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'],
-      appUrl: defaultAppUrl(stateDir),
+      appUrl: 'https://app.hq.example.com/',
       pairCodeMs: 10 * 60_000,
     },
+    dictate: { url: 'http://127.0.0.1:8790', token: process.env.DICTATE_TOKEN || null },
     accounts: [
       { name: 'owner-account', label: 'החשבון הראשי', expect: 'owner-account@example.com', managed: false },
       { name: 'hive-owner', label: 'hive-owner', expect: 'hive-owner', managed: true },
@@ -132,17 +136,10 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     capacity: { ...base.capacity, ...fromFile.capacity, ...overrides.capacity },
     auth: { ...base.auth, ...fromFile.auth, ...overrides.auth },
     tab: { ...base.tab, ...fromFile.tab, ...overrides.tab },
+    dictate: { ...base.dictate, ...fromFile.dictate, ...overrides.dictate },
   };
   if (!overrides.dbPath && !fromFile.dbPath) cfg.dbPath = join(cfg.stateDir, 'hq.db');
   if (process.env.HQ_PORT) cfg.port = Number(process.env.HQ_PORT);
   if (process.env.HQ_HOST) cfg.host = process.env.HQ_HOST;
   return cfg;
-}
-
-/** The app is served under the secret path tool/deploy.sh keeps in $STATE/app-path. */
-function defaultAppUrl(stateDir: string): string | null {
-  const f = join(stateDir, 'app-path');
-  if (!existsSync(f)) return null;
-  const path = readFileSync(f, 'utf8').trim();
-  return path ? `https://app.hq.example.com/${path}/` : null;
 }

@@ -18,16 +18,15 @@ host="${QA_HOST:-laptop}"
 port=5584 # this run's emulator: adb serial emulator-5584
 out="$HOME/.local/state/agent-company/qa/emu/$name"
 mkdir -p "$out"
-secret="$(cat "$HOME/.local/state/agent-company/app-path")"
 apk=build/app/outputs/flutter-apk/app-profile.apk
 if [[ "$build" != --no-build ]]; then
   "${FLUTTER:-$HOME/flutter/bin/flutter}" build apk --profile --target-platform android-x64 \
-    --dart-define=HQ_URL="https://app.hq.example.com/$secret/hq" >/dev/null
+    --dart-define=HQ_URL="https://app.hq.example.com/hq" >/dev/null
 fi
 run="/tmp/agent-company-qa-run-$name-$$" # this run's own folder on the laptop
 cleanup() { ssh "$host" "rm -rf $run" || true; }
 trap cleanup EXIT
-ssh "$host" "mkdir -m 700 -p $run" # the APK inside carries the app path
+ssh "$host" "mkdir -m 700 -p $run"
 scp -q "$apk" "$host:$run/app.apk"
 scp -q "$steps" "$host:$run/steps"
 ssh "$host" "cat > $run/session.sh" <<'EOF'

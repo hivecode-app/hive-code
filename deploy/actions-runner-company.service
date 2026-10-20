@@ -1,7 +1,6 @@
 # GitHub Actions runner for hivecode-app/hive-code (label "company"), as a user unit on hq-host.
-# Runs .github/workflows/company-ci.yml. Install:
-#   cp ~/projects/agent-company/deploy/actions-runner-company.service ~/.config/systemd/user/ && systemctl --user daemon-reload
-#   systemctl --user enable --now actions-runner-company
+# Runs .github/workflows/company-ci.yml. `scripts/deploy.sh hq` links it into ~/.config/systemd/user and
+# reloads systemd; a changed unit takes effect at the next runner restart (never during a job).
 [Unit]
 Description=GitHub Actions runner (hivecode-app/hive-code, company-ci)
 After=network-online.target
