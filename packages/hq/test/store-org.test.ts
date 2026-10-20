@@ -247,14 +247,14 @@ test('task workers that carry a standing identity\'s name get another one, and k
       VALUES ('dana', 'דנה', 'מנכ"לית לומו', '', 'lumo', 'project', 'lumo', 'yoav', 'lead', 'org', 1, '{}', 0)`).run();
     ensureRuntimeIdentity(store, { id: 'lumo-t22', name: 'דנה', title: 'מפתחת', project: 'lumo', reports_to: 'dana' });
     ensureRuntimeIdentity(store, { id: 'company-t9', name: 'דנה ב׳', title: 'עוזרת אישית', project: null, reports_to: 'eli' });
-    ensureRuntimeIdentity(store, { id: 'lumo-t23', name: 'קרן', title: 'מפתחת', project: 'lumo', reports_to: 'dana' });
+    ensureRuntimeIdentity(store, { id: 'lumo-t23', name: 'אורית', title: 'מפתחת', project: 'lumo', reports_to: 'dana' });
     assert.equal(renameTaskWorkers(store), 2);
     const row = (id: string) => store.db.prepare('SELECT name, title FROM identities WHERE id = ?').get(id) as { name: string; title: string };
     assert.notEqual(row('lumo-t22').name, 'דנה');
     assert.match(row('lumo-t22').title, /^מפתח/);
     assert.doesNotMatch(row('company-t9').name, /^דנה/);
     assert.match(row('company-t9').title, /^עוזר/);
-    assert.equal(row('lumo-t23').name, 'קרן', 'a name no standing identity has stays');
+    assert.equal(row('lumo-t23').name, 'אורית', 'a name no standing identity has stays');
     assert.equal(renameTaskWorkers(store), 0, 'idempotent');
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
