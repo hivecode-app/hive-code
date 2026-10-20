@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ADDITIONAL_CONTEXT_CAP, PRIME_BUDGETS } from '@company/shared';
@@ -27,6 +27,16 @@ function runCli(args: string[], stdin: string, env: Record<string, string>): Pro
     child.on('error', reject);
     child.on('close', (code) => resolve({ code, stdout, stderr, ms: performance.now() - t0 }));
     child.stdin.end(stdin);
+  });
+}
+
+/** Wall-clock of a bare node on a tiny .ts file: the spawn + type-strip floor the hook pays too. */
+function runNode(file: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const t0 = performance.now();
+    const child = spawn(process.execPath, [file], { stdio: 'ignore' });
+    child.on('error', reject);
+    child.on('close', () => resolve(performance.now() - t0));
   });
 }
 
@@ -124,18 +134,39 @@ test('total is hard-capped at ADDITIONAL_CONTEXT_CAP, cut from the end', () => {
   assert.equal(truncate('short', 100), 'short');
 });
 
+// A hook runs on every tool call, so the CLI must stay a cheap spool write: no network, no heavy
+// imports. Wall-clock on a loaded box (#72: load 6.7, SessionStart 878ms) slows every process
+// spawn, so the budget is relative to a bare node that starts in the same run, interleaved with the
+// hooks so both see the same load. A heavy import still fails; the cap below cli.ts's 3s guard
+// keeps a hang (network) failing however loaded the box is.
+const median = (xs: number[]): number => [...xs].sort((a, b) => a - b)[xs.length >> 1]!;
+const hookBudget = (base: number): number => Math.min(2500, Math.max(500, base * 6));
+
+test('latency budget is relative to the baseline, with a floor', () => {
+  assert.equal(hookBudget(40), 500); // quiet box: the absolute budget
+  assert.equal(hookBudget(300), 1800); // loaded box (#72): every spawn is slower
+  assert.equal(hookBudget(800), 2500); // capped below the 3s guard: a hang always fails
+  assert.equal(median([5, 1, 9, 3, 7]), 5);
+});
+
 test('CLI latency (spool only)', async () => {
   const root = tmpState();
   const env = { COMPANY_STATE_DIR: root, COMPANY_SHIFT: 'lat-1' };
-  await runCli(['hook', 'PreToolUse'], '{}', env); // warm the fs cache
-  const times: number[] = [];
-  for (let i = 0; i < 5; i++) times.push((await runCli(['hook', 'PreToolUse'], '{"tool_name":"Bash"}', env)).ms);
+  const bare = join(root, 'bare.ts');
+  writeFileSync(bare, 'const x: number = 0; export default x;\n');
   writePrimeFile(root, 'lat-1', prime({ handoff: 'h'.repeat(3000) }));
-  const ss = (await runCli(['hook', 'SessionStart'], '{"source":"startup"}', env)).ms;
-  const median = times.sort((a, b) => a - b)[2]!;
-  console.log(`hook CLI latency: median ${median.toFixed(1)}ms (runs ${times.map((t) => t.toFixed(0)).join(',')}), SessionStart ${ss.toFixed(1)}ms`);
-  assert.ok(median < 500, `median ${median}ms`);
-  assert.ok(ss < 500, `SessionStart ${ss}ms`);
+  await runCli(['hook', 'PreToolUse'], '{}', env); // warm the fs cache
+  const base: number[] = []; const pre: number[] = []; const ss: number[] = [];
+  for (let i = 0; i < 7; i++) {
+    base.push(await runNode(bare));
+    pre.push((await runCli(['hook', 'PreToolUse'], '{"tool_name":"Bash"}', env)).ms);
+    ss.push((await runCli(['hook', 'SessionStart'], '{"source":"startup"}', env)).ms);
+  }
+  const fmt = (xs: number[]): string => `${median(xs).toFixed(0)}ms (${xs.map((t) => t.toFixed(0)).join(',')})`;
+  const budget = hookBudget(median(base));
+  console.log(`hook CLI latency: bare node ${fmt(base)}, PreToolUse ${fmt(pre)}, SessionStart ${fmt(ss)}, budget ${budget.toFixed(0)}ms`);
+  assert.ok(median(pre) < budget, `PreToolUse median ${median(pre).toFixed(0)}ms, budget ${budget.toFixed(0)}ms`);
+  assert.ok(median(ss) < budget, `SessionStart median ${median(ss).toFixed(0)}ms, budget ${budget.toFixed(0)}ms`);
 });
 
 test('Stop: an English reply is blocked once, Hebrew and code pass (#51)', async () => {
