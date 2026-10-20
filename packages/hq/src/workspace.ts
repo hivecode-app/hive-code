@@ -13,6 +13,12 @@ export interface Checkout {
   path: string;           // absolute, ~ expanded
   defaultBranch: string;
   repo: string | null;    // GitHub owner/name
+  /**
+   * What this checkout sets for itself instead of the charter's top level (a project with several repos, e.g.
+   * lumo and its bot): `commands` (replaces the whole map), `ci_check` (null = no check), `merge_instructions`
+   * (`default` = the company's own review and merge steps). A key that is absent (or empty, except ci_check) inherits.
+   */
+  own?: { commands?: Record<string, string>; ciCheck?: string | null; mergeInstructions?: string[] | null };
 }
 
 export interface Charter {
@@ -54,16 +60,37 @@ export function readCharter(companyDir: string, project: string): Charter | null
     const o = (c ?? {}) as Record<string, unknown>;
     const path = s(o.path);
     if (!path) continue;
+    const own: NonNullable<Checkout['own']> = {};
+    if (o.commands != null) own.commands = cmds(o.commands);
+    if ('ci_check' in o) own.ciCheck = s(o.ci_check);
+    if (o.merge_instructions != null) own.mergeInstructions = o.merge_instructions === 'default' ? null : steps(o.merge_instructions);
     checkouts.push({ name: s(o.name) ?? project, path: expand(path), defaultBranch: s(o.default_branch) ?? 'main',
-      repo: s(o.repo) ?? (checkouts.length === 0 ? s(fm.repo) : null) });
+      repo: s(o.repo) ?? (checkouts.length === 0 ? s(fm.repo) : null), ...(Object.keys(own).length ? { own } : {}) });
   }
-  const commands: Record<string, string> = {};
-  if (fm.commands && typeof fm.commands === 'object') for (const [k, v] of Object.entries(fm.commands)) if (s(v)) commands[k] = v as string;
+  const commands = cmds(fm.commands);
   return {
     project, status: s(fm.status) ?? 'active', machine: s(fm.machine), checkouts,
     worktreeDir: s(fm.worktree_dir) ?? '.worktrees', commands, ciCheck: s(fm.ci_check),
     mergeInstructions: steps(fm.merge_instructions),
   };
+}
+
+/** The charter as it holds in one checkout: the checkout's own commands, CI check and merge steps win. */
+export function forCheckout(ch: Charter, c: Checkout | null | undefined): Charter {
+  const o = c?.own;
+  if (!o) return ch;
+  return {
+    ...ch,
+    commands: o.commands ?? ch.commands,
+    ciCheck: o.ciCheck !== undefined ? o.ciCheck : ch.ciCheck,
+    mergeInstructions: o.mergeInstructions !== undefined ? o.mergeInstructions : ch.mergeInstructions,
+  };
+}
+
+function cmds(v: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) if (typeof x === 'string' && x) out[k] = x;
+  return out;
 }
 
 /** A string or a list of strings → non-empty steps, or null. */
@@ -128,9 +155,10 @@ export class Workspaces {
    * a worker's is in it yet; with keepBranch, the branch and its commits stay for the next try) and it throws.
    */
   private async runSetup(ch: Charter, c: Checkout, path: string, keepBranch: boolean): Promise<void> {
-    if (!ch.commands.worktree_setup) return;
+    const setup = forCheckout(ch, c).commands.worktree_setup;
+    if (!setup) return;
     try {
-      await this.setup(path, ch.commands.worktree_setup, c.path);
+      await this.setup(path, setup, c.path);
     } catch (e) {
       const r = await this.close(path, c.defaultBranch, keepBranch);
       throw new Error(`${(e as Error).message}${r.removed ? '' : ` (and the worktree was not removed: ${r.error})`}`);
