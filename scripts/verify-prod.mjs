@@ -14,9 +14,11 @@
 //     URLs checked here are its auth.appUrl, apiUrl and tab.baseUrl (env VERIFY_*_URL override them).
 //   - COMPANY_HOME: hq and every live worker read the contract and memory from it, not from this engine repo
 //     (scripts/company-home-check.mjs).
-// --install: a server set up by scripts/install.sh, one public origin with hq under /hq. Only what every
-// install has: COMPANY_HOME, hq's health and auth, pairing, the WebSocket, /pair and assetlinks.json. It skips
-// what only hq-host has: hq.config.json in git, dictation, the web app and APK release, tab.hq, the old path.
+// Every install has COMPANY_HOME, hq's health and auth, pairing, the WebSocket, /pair and assetlinks.json. The rest runs
+// only where this install's settings say it is there (scripts/verify-plan.mjs): hq.config.json in git, dictation
+// (dictate.url), the web app, the APK and its in-app update (appReleaseDir), tab.hq (tab.baseUrl), the old path (the
+// engine's Caddy file serves this app's host). What does not apply prints as a skip with its reason, not a failure.
+// --install is still accepted (older installers pass it) and changes nothing: the settings decide.
 // Prints one Hebrew line per check; exit 1 when any check fails.
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -26,15 +28,16 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import WebSocket from 'ws';
 import { resolveCompanyHome } from '../packages/shared/src/company-home.ts';
-import { companyLocation } from '../packages/hq/src/config.ts';
+import { companyLocation, loadConfig } from '../packages/hq/src/config.ts';
 import { companyHomeFindings, liveReaders, procEnv } from './company-home-check.mjs';
+import { verifyPlan } from './verify-plan.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const install = process.argv.includes('--install');
-const LOCAL = 'http://127.0.0.1:7420';
 const state = process.env.COMPANY_STATE ?? join(homedir(), '.local/state/agent-company');
 const liveCfgText = existsSync(join(state, 'hq.config.json')) ? readFileSync(join(state, 'hq.config.json'), 'utf8') : null;
 const liveCfg = liveCfgText ? JSON.parse(liveCfgText) : {};
+const cfg = loadConfig({ stateDir: state });
+const LOCAL = `http://127.0.0.1:${cfg.port}`;
 const noSlash = (u) => (typeof u === 'string' && u ? u.replace(/\/+$/, '') : null);
 const APP = process.env.VERIFY_APP_URL ?? noSlash(liveCfg.auth?.appUrl);
 const API = process.env.VERIFY_API_URL ?? noSlash(liveCfg.apiUrl);
@@ -43,8 +46,8 @@ if (!APP || !API) {
   process.exit(1);
 }
 const admin = readFileSync(join(state, 'api-token'), 'utf8').trim();
-const site = readFileSync(join(repo, 'deploy/caddy/agent-company.caddy'), 'utf8');
-const legacy = /handle_path \/([0-9a-f]{32})\/hq\/\*/.exec(site)?.[1] ?? null;
+const siteFile = join(repo, 'deploy/caddy/agent-company.caddy');
+const site = existsSync(siteFile) ? readFileSync(siteFile, 'utf8') : '';
 const apkKeyHash = /android:apk-key-hash:([A-Za-z0-9_-]+)/.exec(readFileSync(join(repo, 'packages/hq/src/config.ts'), 'utf8'))?.[1];
 const apksigner = process.env.APKSIGNER ?? '/opt/android-sdk/build-tools/36.0.0/apksigner';
 
@@ -52,6 +55,10 @@ const results = [];
 const ok = (line) => { results.push(true); console.log(`✓ ${line}`); };
 const bad = (line) => { results.push(false); console.log(`✗ ${line}`); };
 const expect = (cond, good, fail) => (cond ? ok(good) : bad(fail));
+let skipped = 0;
+const skip = (what, why) => { skipped++; console.log(`– דילוג: ${what}: ${why}`); };
+/** Runs the group when this install has it (plan[key].run), else prints why it is skipped. */
+const when = async (key, what, fn) => (plan[key].run ? fn() : skip(what, plan[key].why));
 
 async function req(url, init = {}) {
   try {
@@ -91,6 +98,9 @@ const dictate = (url, token) => {
 
 // ── COMPANY_HOME: hq and the workers read the company from it, not from the engine repo ──
 const companyHome = resolveCompanyHome({ stateRoot: state, fallback: repo });
+const plan = verifyPlan({ fromFile: liveCfgText ? liveCfg : null, cfg, companyHome, engine: repo,
+  appUrl: APP, site, env: process.env, apksigner, exists: existsSync });
+const legacy = plan.legacy;
 {
   let hqEnv = {};
   try {
@@ -102,12 +112,12 @@ const companyHome = resolveCompanyHome({ stateRoot: state, fallback: repo });
 }
 
 // ── hq.config.json: this company's values, exactly as in git ─────────────────
-if (!install) {
+await when('configInGit', 'hq.config.json מה-git של החברה', () => {
   const src = join(companyHome, 'company/hq.config.json');
   const want = existsSync(src) ? readFileSync(src, 'utf8') : null;
   expect(want != null && liveCfgText === want, `hq.config.json של hq זהה ל-${src}`,
     !want ? `אין ${src}` : liveCfgText == null ? `אין ${join(state, 'hq.config.json')}: hq רץ עם ברירות מחדל גנריות` : `hq.config.json של hq שונה מ-${src}`);
-}
+});
 
 // ── api.hq: health, and nothing else without a token ─────────────────────────
 {
@@ -120,13 +130,13 @@ if (!install) {
   const w = await ws(`${APP.replace(/^http/, 'ws')}/hq/ws`);
   expect(w === 'HTTP 401', 'WebSocket בלי טוקן נחסם (401)', `WebSocket בלי טוקן: ${w}, ציפיתי ל-401`);
 }
-if (!install) {
+await when('dictation', 'הכתבה', async () => {
   const d = await dictate(`${APP}/hq/api/dictate/transcribe`);
   expect(d.status === 401, 'הכתבה בלי מכשיר מצומד נחסמת (401)', `הכתבה בלי טוקן ענתה ${d.status}, ציפיתי ל-401`);
   const open = await dictate(`${APP}/dictate/transcribe`);
   const text = open.status === 200 ? await open.text() : '';
   expect(!(open.status === 200 && text.includes('"text"')), 'אין יותר הכתבה פתוחה ב-/dictate', `/dictate/transcribe עדיין מתמלל בלי התחברות (${open.status})`);
-}
+});
 
 // ── pairing → device token → board, WS, dictation → revoke ───────────────────
 {
@@ -145,7 +155,7 @@ if (!install) {
       expect(b.status === 200, 'עם token של מכשיר /api/board עונה 200', `/api/board עם token של מכשיר ענה ${b.status}`);
       const w = await ws(`${APP.replace(/^http/, 'ws')}/hq/ws?token=${encodeURIComponent(device.token)}`);
       expect(w === 'open', 'WebSocket עם token של מכשיר נפתח', `WebSocket עם token של מכשיר: ${w}`);
-      const d = install ? null : await dictate(`${APP}/hq/api/dictate/transcribe`, device.token);
+      const d = plan.dictation.run ? await dictate(`${APP}/hq/api/dictate/transcribe`, device.token) : null;
       const body = d?.status === 200 ? await d.json().catch(() => ({})) : {};
       if (d) expect(d.status === 200 && typeof body.text === 'string', 'הכתבה עם token של מכשיר עוברת דרך hq ל-dictate-server', `הכתבה עם token של מכשיר ענתה ${d.status}`);
     }
@@ -159,13 +169,13 @@ if (!install) {
 }
 
 // ── the app at the root, assetlinks, the APK ─────────────────────────────────
-if (!install) {
+await when('webApp', 'האפליקציה ל-web', async () => {
   const root = await req(`${APP}/`);
   const html = root.status === 200 ? await root.text() : '';
   expect(root.status === 200 && html.includes('<base href="/">'), 'האפליקציה נטענת בשורש', `השורש ענה ${root.status}${html && !html.includes('<base href="/">') ? ' בלי <base href="/">' : ''}`);
   const js = await req(`${APP}/main.dart.js`, { method: 'HEAD' });
   expect(js.status === 200, 'main.dart.js נטען', `main.dart.js ענה ${js.status}`);
-}
+});
 {
   const al = await req(`${APP}/.well-known/assetlinks.json`);
   const alText = al.status === 200 ? await al.text() : '';
@@ -176,13 +186,13 @@ if (!install) {
   const ppText = pp.status === 200 ? await pp.text() : '';
   expect(ppText.includes('TEST-CODE'), 'דף הצימוד /pair מוגש', `/pair ענה ${pp.status}`);
 }
-if (!install) {
-
+await when('apk', 'ה-APK והעדכון באפליקציה', async () => {
   const apk = await req(`${APP}/agent-company.apk`);
   const bytes = apk.status === 200 ? Buffer.from(await apk.arrayBuffer()) : Buffer.alloc(0);
   const mb = (bytes.length / 1048576).toFixed(1);
   expect(bytes.length > 5 * 1048576, `ה-APK להורדה (${mb} MB)`, `ה-APK ענה ${apk.status}, ${mb} MB`);
-  if (bytes.length && existsSync(apksigner) && apkKeyHash) {
+  if (bytes.length && !plan.apkSignature.run) skip('חתימת ה-APK', plan.apkSignature.why);
+  else if (bytes.length && apkKeyHash) {
     const dir = mkdtempSync(join(tmpdir(), 'verify-apk-'));
     try {
       writeFileSync(join(dir, 'a.apk'), bytes);
@@ -194,7 +204,7 @@ if (!install) {
       bad(`apksigner דחה את ה-APK: ${(e).message.split('\n')[0]}`);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   } else if (bytes.length) {
-    bad(`אין apksigner (${apksigner}), ולכן החתימה לא נבדקה`);
+    bad('אין ב-packages/hq/src/config.ts מפתח שחרור (android:apk-key-hash), ולכן החתימה לא נבדקה');
   }
   if (bytes.length) console.log(`  sha256 של ה-APK: ${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}…`);
 
@@ -205,10 +215,10 @@ if (!install) {
   expect(latest?.sha256 === sum && latest?.bytes === bytes.length,
     `hq מציע לאפליקציה את הגרסה הזו לעדכון (versionCode ${latest?.version_code})`,
     lr.status !== 200 ? `‏/api/app/latest ענה ${lr.status}` : latest ? `hq מציע APK אחר (${latest.sha256?.slice(0, 16)}…)` : 'hq לא מציע גרסה לעדכון');
-}
+});
 
 // ── tab.hq: hq's handoff listener answers, and only for /h/ and /ws/ ─────────
-if (!install) {
+await when('tab', 'tab.hq', async () => {
   const TAB = process.env.VERIFY_TAB_URL ?? noSlash(liveCfg.tab?.baseUrl) ?? 'http://127.0.0.1:7422';
   // A token no handoff has: hq answers 410 (expired page), which proves Caddy reaches hq's listener.
   const fake = Array.from({ length: 32 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
@@ -216,16 +226,17 @@ if (!install) {
   expect(h.status === 410, 'tab.hq: מסירת הטאב של hq עונה (410 לקישור שלא קיים)', `tab.hq: /h/<token> ענה ${h.status}, ציפיתי ל-410 מ-hq`);
   const r = await req(`${TAB}/api/board`);
   expect(r.status === 404, 'tab.hq: שום דבר אחר של hq לא נגיש דרכו', `tab.hq: /api/board ענה ${r.status}, ציפיתי ל-404`);
-}
+});
 
 // ── the old secret path, while it is still in the Caddy file ─────────────────
-if (legacy && !install) {
+await when('legacyPath', 'הנתיב הסודי הישן', async () => {
   const r = await req(`${APP}/${legacy}/`);
   expect(r.status === 301 && r.headers.get('location') === '/', 'הנתיב הסודי הישן מפנה לשורש (301)', `הנתיב הישן ענה ${r.status} → ${r.headers.get('location')}`);
   const h = await req(`${APP}/${legacy}/hq/health`);
   expect(h.status === 200, 'APK ישן עדיין מגיע ל-hq בנתיב הישן (עד מועד ההסרה)', `hq בנתיב הישן ענה ${h.status}`);
-}
+});
 
 const failed = results.filter((x) => !x).length;
-console.log(failed ? `\n${failed} בדיקות נכשלו מתוך ${results.length}.` : `\nכל ${results.length} הבדיקות עברו.`);
+const skips = skipped ? ` (${skipped} דולגו: לא רלוונטיות להתקנה הזו)` : '';
+console.log(failed ? `\n${failed} בדיקות נכשלו מתוך ${results.length}${skips}.` : `\nכל ${results.length} הבדיקות עברו${skips}.`);
 process.exit(failed ? 1 : 0);

@@ -1,5 +1,5 @@
 // scripts/install.sh: what can run here without installing anything. The full run (an Ubuntu 24.04 container with
-// systemd, up to the QR and a green verify-prod --install) is manual: the PR that changes the installer says how.
+// systemd, up to the QR and a green verify-prod) is manual: the PR that changes the installer says how.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';

@@ -16,7 +16,7 @@
 #   6. the public address: Caddy (own domain), Cloudflare Tunnel, or Tailscale Funnel; all of them go
 #      through a user Caddy on 127.0.0.1:7480 that serves hq under /hq, /pair and assetlinks.json
 #   7. hq.config.json, linger, the units, hq up; a pairing code and its QR in the terminal
-#   8. scripts/verify-prod.mjs --install against the public address
+#   8. scripts/verify-prod.mjs against the public address (it skips what this install does not have)
 #
 # Units this script writes carry the line "$MARK" (below). It never overwrites a unit without it, so on a
 # server set up by hand (hq-host) it stops instead of replacing anything.
@@ -573,7 +573,7 @@ step 8 "בדיקה מבחוץ"
 if [ "$address" = tunnel ] || [ "$address" = domain ]; then
   for _ in $(seq 30); do curl -fsS "$origin/hq/health" >/dev/null 2>&1 && break; sleep 2; done
 fi
-if out="$(node "$ENGINE/scripts/verify-prod.mjs" --install 2>&1)"; then
+if out="$(node "$ENGINE/scripts/verify-prod.mjs" 2>&1)"; then
   printf '%s\n' "$out" | sed 's/^/  /'
   printf '\n\033[1mהחברה מותקנת וזמינה ב-%s. סורקים את ה-QR, והמנהל מחכה לך באפליקציה.\033[0m\n' "$origin"
   # From this server the ts.net name may resolve inside the tailnet, so the check above need not cross Funnel.
