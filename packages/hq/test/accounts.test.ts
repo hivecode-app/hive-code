@@ -42,8 +42,14 @@ function fakes() {
   return { claudeHome, profiles, usage, logins, deps, setNext: (p: Profile) => { nextProfile = p; } };
 }
 
+// The two accounts hq-host runs on (company/hq.config.json); the generic default is the global login only.
+const ACCOUNTS = [
+  { name: 'owner-account', label: 'החשבון הראשי', expect: 'owner-account@example.com', managed: false },
+  { name: 'hive-owner', label: 'hive-owner', expect: 'hive-owner', managed: true },
+];
+
 async function env(f = fakes()) {
-  const e = await makeEnv({ cfg: { claudeHome: f.claudeHome }, deps: { accounts: f.deps } });
+  const e = await makeEnv({ cfg: { claudeHome: f.claudeHome, accounts: ACCOUNTS }, deps: { accounts: f.deps } });
   e.hq.store.setToggle('yoav/accounts', true);
   // The identity check at start runs in the background: let it land before a test edits the rows.
   await until(() => e.hq.accounts.get('owner-account')!.health === 'ok' && !!e.hq.accounts.get('hive-owner')!.note, 2000, 'start verify');

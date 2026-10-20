@@ -130,7 +130,7 @@ final _incident = <String, dynamic>{
 
 CompanyData _data({bool earlierWaiting = false, bool burning = false, bool summaries = false}) {
   final board = _json('board');
-  final d = mapSnapshot(
+  final d = mapSnapshot(manager: 'yoav', 
     board: (board['identities'] as List).cast<Map<String, dynamic>>(),
     inbox: [if (burning) _incident, ...(earlierWaiting ? _list('inbox-earlier', 'items') : _list('inbox', 'items'))],
     asks: _list('asks', 'asks'),

@@ -160,7 +160,6 @@ const COLOUR_WORDS = new Set(['red', 'green', 'blue', 'yellow', 'orange', 'purpl
 const KINDS = ['permanent', 'project', 'task'];
 const LIFECYCLES = ['always-on', 'dormant', 'ephemeral'];
 const PROJECT_STATUS = ['active', 'dormant'];
-const MACHINES = ['hq-host', 'ci-host', 'laptop'];   // memory/company/machines.md
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 
 function checkSymbol(owner, sym, where) {
@@ -267,6 +266,19 @@ export function main() {
     const teamById = new Map(teams.map((t) => [t.id, t]));
     const byId = new Map(identities.map((p) => [p.id, p]));
 
+    // The machines workers run on (home, checkouts). Without the list any name goes.
+    let machines = null;
+    if (org.machines != null) {
+      if (!Array.isArray(org.machines) || !org.machines.length || org.machines.some((m) => typeof m !== 'string' || !m)) err(`${W}: "machines" must be a non-empty list of names`);
+      else machines = org.machines;
+    }
+    const machineOk = (m) => typeof m === 'string' && m !== '' && (!machines || machines.includes(m));
+    const machineList = machines ? `one of ${machines.join('|')}` : 'a machine name';
+    // hq reads these two (packages/hq/src/config.ts): who gets escalations and who gets probe anomalies.
+    for (const k of ['manager', 'monitoring_lead']) {
+      if (org[k] != null && !identityIds.has(org[k])) err(`${W}: "${k}" "${org[k]}" is not an identity`);
+    }
+
     for (const t of teams) {
       const who = `team "${t.id}"`;
       if (!t.name) err(`${W}: ${who} has no name`);
@@ -291,7 +303,7 @@ export function main() {
       checkSymbol(who, p.symbol, W);
       for (const f of ['name', 'title']) if (typeof p[f] === 'string' && EMOJI.test(p[f])) err(`${W}: ${who} ${f} contains an emoji`);
       if (p.phase != null && !Number.isInteger(p.phase)) err(`${W}: ${who} phase must be a whole number`);
-      if (p.home != null && !MACHINES.includes(p.home)) err(`${W}: ${who} home "${p.home}" is not one of ${MACHINES.join('|')}`);
+      if (p.home != null && !machineOk(p.home)) err(`${W}: ${who} home "${p.home}" is not ${machineList}`);
       if (p.monogram != null && !MONOGRAM.test(String(p.monogram))) err(`${W}: ${who} monogram "${p.monogram}" must be two Hebrew letters`);
       const team = teamById.get(p.team);
       if (!team) err(`${W}: ${who} team "${p.team}" does not exist`);
@@ -362,7 +374,7 @@ export function main() {
       if (fm.checkouts != null) {
         if (!Array.isArray(fm.checkouts)) err(`${rel(charter)}: "checkouts" must be a list`);
         else {
-          if (!MACHINES.includes(fm.machine)) err(`${rel(charter)}: "checkouts" needs "machine", one of ${MACHINES.join('|')}`);
+          if (!machineOk(fm.machine)) err(`${rel(charter)}: "checkouts" needs "machine", ${machineList}`);
           const names = new Set();
           for (const c of fm.checkouts) {
             if (!isObj(c) || [c.name, c.path, c.default_branch].some((v) => typeof v !== 'string' || !v)) { err(`${rel(charter)}: every checkout needs name, path and default_branch (strings; quote a numeric branch)`); continue; }

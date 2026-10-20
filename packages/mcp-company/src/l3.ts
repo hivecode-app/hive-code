@@ -336,16 +336,15 @@ export function renderSnippet(r: L3Record, budget = 300): string {
   return (r.description ? `${r.description}\n${r.body}` : r.body).slice(0, budget);
 }
 
-/** The bet-9 corpus (spikes/bet9-memory/l3.py SOURCES): the owner's Claude memory dirs. Read-only. */
-export function bet9Sources(home = homedir()): L3Source[] {
-  const p = `${home}/.claude/projects`;
-  return [
-    { domain: 'personal', dir: `${home}/.claude/memory-shared` },
-    { domain: 'personal', dir: `${p}/-home-ran-projects/memory` },
-    { domain: 'lumo', dir: `${p}/-home-ran-new-lumo-application/memory` },
-    { domain: 'voice-bot', dir: `${p}/-home-ran-projects-voice-bot/memory` },
-    { domain: 'easy', dir: `${p}/-home-ran-projects-tiki-bot-go/memory` },
-  ];
+/** The bet-9 corpus: the owner's own Claude memory dirs, read-only. Which dirs is configuration, not code:
+ *  `memoryImport` in <stateRoot>/hq.config.json (hq-host: company/hq.config.json). None configured = none. */
+export function bet9Sources(stateRoot = defaultStateRoot()): L3Source[] {
+  try {
+    const cfg = JSON.parse(readFileSync(join(stateRoot, 'hq.config.json'), 'utf8')) as { memoryImport?: unknown };
+    const list = Array.isArray(cfg.memoryImport) ? cfg.memoryImport as Partial<L3Source>[] : [];
+    return list.filter((s): s is L3Source => typeof s?.dir === 'string' && typeof s.domain === 'string')
+      .map((s) => ({ domain: s.domain, dir: s.dir.replace(/^~(?=\/|$)/, homedir()) }));
+  } catch { return []; }
 }
 
 export interface OpenOptions { repo?: string; stateRoot?: string; extraSources?: L3Source[]; env?: NodeJS.ProcessEnv }

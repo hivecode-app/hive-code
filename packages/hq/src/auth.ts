@@ -207,7 +207,7 @@ export class Auth {
     const c = this.validCode(code, client);
     const existing = this.store.db.prepare('SELECT id, transports FROM passkeys WHERE revoked_at IS NULL').all() as { id: string; transports: string | null }[];
     const options = await generateRegistrationOptions({
-      rpName: this.cfg.rpName, rpID: this.cfg.rpId, userID: USER_ID, userName: 'ran', userDisplayName: 'רן',
+      rpName: this.cfg.rpName, rpID: this.cfg.rpId, userID: USER_ID, userName: this.cfg.userName, userDisplayName: this.cfg.userDisplayName,
       attestationType: 'none', timeout: CHALLENGE_MS,
       excludeCredentials: existing.map((p) => ({ id: p.id, transports: p.transports ? JSON.parse(p.transports) as AuthenticatorTransportFuture[] : undefined })),
       authenticatorSelection: { residentKey: 'required', userVerification: 'required' },

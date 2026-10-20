@@ -28,11 +28,11 @@ export interface ParsedAutomation { key: string; identity: string; enabled: bool
  *  - the contract (company/org.yaml): `teams[]` with `lead: <id>`, `members: [<id>]`, plus `identities[]`;
  *  - the B.1 sketch: people inline in teams (`lead: {id, name, …}`).
  * Lifecycle in the store: resident (resident:true, B.2) | lead (always-on) | dormant | ephemeral.
- * `reports_to` of the owner (ran) is stored as null: the top of the chain.
+ * `reports_to` of the owner (org.yaml `owner`) is stored as null: the top of the chain.
  */
 export function parseOrg(text: string, residents: string[], managerId: string): { identities: ParsedIdentity[]; automations: ParsedAutomation[] } {
   const org = (parse(text) ?? {}) as OrgFile;
-  const owner = org.owner ?? 'ran';
+  const owner = org.owner ?? 'owner';
   const manager = org.manager ?? managerId;
   const teams = org.teams ?? [];
   const idOf = (x: string | OrgPerson | undefined) => (typeof x === 'string' ? x : x?.id);

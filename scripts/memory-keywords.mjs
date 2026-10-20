@@ -6,7 +6,8 @@
 //   node scripts/memory-keywords.mjs [--bet9] [--repo DIR] [--state DIR]
 //        [--batch 10] [--concurrency 3] [--force] [--dry-run]
 //
-// Sources: --bet9 = the bet-9 corpus (owner's Claude memory dirs); else
+// Sources: --bet9 = the bet-9 corpus (owner's Claude memory dirs, `memoryImport` in
+// <state>/hq.config.json); else
 // <repo>/memory (--repo, COMPANY_REPO or cwd) + COMPANY_L3_EXTRA_SOURCES.
 import { spawn } from 'node:child_process';
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
@@ -35,7 +36,7 @@ const LAB = join(HOME, '.local/state/agent-company/lab/keywords');
 const stateRoot = opt.state ?? defaultStateRoot();
 const cachePath = keywordCachePath(stateRoot);
 const sources = opt.bet9
-  ? bet9Sources(HOME)
+  ? bet9Sources(stateRoot)
   : [{ dir: join(opt.repo ?? process.env.COMPANY_REPO ?? process.cwd(), 'memory') }, ...extraSourcesFromEnv()];
 
 const cache = loadKeywordCache(stateRoot);

@@ -6,7 +6,8 @@ import { request } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export interface DictateConfig {
-  url: string;
+  /** dictate-server's address; null = no dictation on this hq (the mic answers 503). */
+  url: string | null;
   token: string | null;
 }
 
@@ -24,6 +25,7 @@ export function proxyDictate(cfg: DictateConfig, req: IncomingMessage, res: Serv
       res.end(JSON.stringify({ error }));
       resolve();
     };
+    if (!cfg.url) return fail(503, 'dictation is not configured on this hq (dictate.url)');
     if (!cfg.token) return fail(503, 'dictation is not configured on this hq (DICTATE_TOKEN)');
     if (Number(req.headers['content-length'] ?? 0) > DICTATE_MAX_BYTES) { req.resume(); return fail(413, 'recording too large'); }
     const headers: Record<string, string> = { authorization: `Bearer ${cfg.token}` };

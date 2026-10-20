@@ -2,8 +2,8 @@
 # The one way to put agent-company into production on hq-host (#54). Nothing is edited by hand on
 # the server: everything below comes from this repo at origin/main.
 #
-#   scripts/deploy.sh hq      hq + its user units (and hq.env), safe restart: live shifts survive
-#   scripts/deploy.sh app     the app: web at https://app.hq.example.com/ and the APK
+#   scripts/deploy.sh hq      hq + its user units, hq.env and hq.config.json, safe restart: live shifts survive
+#   scripts/deploy.sh app     the app: web at the appUrl of company/hq.config.json, and the APK
 #   scripts/deploy.sh caddy   deploy/caddy/agent-company.caddy -> /etc/caddy/sites/, validate, reload
 #   scripts/deploy.sh all     hq, app, caddy, in that order
 #
@@ -22,7 +22,10 @@ repo="$(cd "$(dirname "$0")/.." && pwd -P)"
 STATE="$HOME/.local/state/agent-company"
 DSTATE="$STATE/deploy"
 WWW=/var/www/hq-app
-APP_URL=https://app.hq.example.com
+# This company's own values (domains, names, accounts): company/hq.config.json, read after the preflight.
+HQ_CONFIG_SRC=company/hq.config.json
+APP_URL=""
+API_URL=""
 FLUTTER="${FLUTTER:-$HOME/flutter/bin/flutter}"
 APKSIGNER="${APKSIGNER:-/opt/android-sdk/build-tools/36.0.0/apksigner}"
 AAPT2="${AAPT2:-/opt/android-sdk/build-tools/36.0.0/aapt2}"
@@ -44,7 +47,7 @@ say() { summary+=("$1"); echo "• $1"; }
 step() { echo; echo "── $1"; }
 
 # What this run changed, for the rollback.
-prev_sha=""; sha=""; moved_checkout=0; lock_changed=1; hq_restarted=0; app_swapped=0; prev_release=""; caddy_changed=0
+prev_sha=""; sha=""; moved_checkout=0; lock_changed=1; hq_restarted=0; app_swapped=0; prev_release=""; caddy_changed=0; config_changed=0
 
 finish() {
   local rc=$1
@@ -74,6 +77,15 @@ rollback() {
     else
       sudo -n rm -f "$WWW/current"
       say "האפליקציה: אין release קודם, current הוסר"
+    fi
+  fi
+  if ((config_changed)); then
+    if [[ -f "$DSTATE/hq.config.prev.json" ]]; then
+      install -m600 "$DSTATE/hq.config.prev.json" "$STATE/hq.config.json"
+      say "hq.config.json חזר לקודם"
+    else
+      rm -f "$STATE/hq.config.json"
+      say "hq.config.json הוסר (לא היה לפני הפריסה)"
     fi
   fi
   if ((moved_checkout)); then
@@ -130,6 +142,12 @@ if [[ -d node_modules && ! -f "$DSTATE/npm-lock.sha256" ]] && git diff --quiet "
   lock_changed=0
   echo "$lock_hash" >"$DSTATE/npm-lock.sha256"
 fi
+# The URLs come from the checked-out company/hq.config.json (the one this run installs).
+cfg_get() { node -e 'const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const v = process.argv[2].split(".").reduce((o, k) => o?.[k], c); if (typeof v === "string" && v) console.log(v.replace(/\/+$/, ""))' "$HQ_CONFIG_SRC" "$1"; }
+[[ -f "$HQ_CONFIG_SRC" ]] || fail "אין $HQ_CONFIG_SRC: בלי הערכים של החברה hq רץ עם ברירות מחדל גנריות"
+APP_URL="$(cfg_get auth.appUrl)" || fail "$HQ_CONFIG_SRC לא JSON תקין"
+API_URL="$(cfg_get apiUrl)"
+[[ -n "$APP_URL" && -n "$API_URL" ]] || fail "חסרים auth.appUrl או apiUrl ב-$HQ_CONFIG_SRC"
 if ((moved_checkout)); then say "ה-checkout עודכן מ-${prev_sha:0:7} ל-${sha:0:7} ($(git log -1 --format=%s | cut -c1-60))"; else say "ה-checkout כבר ב-origin/main (${sha:0:7})"; fi
 
 # ── checks ───────────────────────────────────────────────────────────────────
@@ -166,6 +184,19 @@ deploy_hq() {
   printf '# Written by scripts/deploy.sh hq. Do not edit; the source is %s.\nDICTATE_TOKEN=%s\n' "$DICTATE_ENV" "$tok" >"$env"
   chmod 600 "$env"
   if cmp -s "$env" "$HOME/.config/agent-company/hq.env"; then rm -f "$env"; else mv -f "$env" "$HOME/.config/agent-company/hq.env"; say "hq.env נכתב (600)"; fi
+
+  # hq.config.json: this company's values (names, domains, accounts, Telegram), from git. Without it
+  # hq starts with the generic defaults, so it is in place before the restart.
+  if cmp -s "$HQ_CONFIG_SRC" "$STATE/hq.config.json"; then
+    say "hq.config.json תואם ל-$HQ_CONFIG_SRC"
+  else
+    rm -f "$DSTATE/hq.config.prev.json"
+    if [[ -f "$STATE/hq.config.json" ]]; then install -m600 "$STATE/hq.config.json" "$DSTATE/hq.config.prev.json"; fi
+    config_changed=1
+    install -m600 "$HQ_CONFIG_SRC" "$STATE/.hq.config.json.new"
+    mv -f "$STATE/.hq.config.json.new" "$STATE/hq.config.json"
+    say "hq.config.json נכתב מ-$HQ_CONFIG_SRC (600)"
+  fi
 
   # User units: symlinks to this checkout, so there is one copy and nothing to drift.
   mkdir -p "$UNITS"
@@ -287,7 +318,7 @@ deploy_caddy() {
   rm -rf "$stage"
   sudo -n systemctl reload caddy || fail "systemctl reload caddy נכשל"
   sleep 2
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' https://api.hq.example.com/health)" == 200 ]] || fail "api.hq לא עונה אחרי reload"
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' "$API_URL/health")" == 200 ]] || fail "$API_URL לא עונה אחרי reload"
   say "Caddy: /etc/caddy/sites/agent-company.caddy מ-${sha:0:7}, validate עבר, reload"
 }
 

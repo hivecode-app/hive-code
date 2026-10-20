@@ -65,7 +65,7 @@ class SoftAuthenticator {
 }
 
 async function authEnv() {
-  const env = await makeEnv({ noStart: true, cfg: { auth: { rpId: RP_ID, rpName: 'החברה', origins: [ORIGIN], appUrl: `${ORIGIN}/p/`, pairCodeMs: 10 * 60_000 } } });
+  const env = await makeEnv({ noStart: true, cfg: { auth: { rpId: RP_ID, rpName: 'החברה', origins: [ORIGIN], appUrl: `${ORIGIN}/p/`, pairCodeMs: 10 * 60_000, userName: 'ran', userDisplayName: 'רן' } } });
   await env.hq.start({ listen: true, timers: false });
   const admin = readFileSync(join(env.cfg.stateDir, 'api-token'), 'utf8').trim();
   const base = `http://127.0.0.1:${env.hq.port}`;
@@ -82,6 +82,8 @@ async function authEnv() {
     code ??= await pairCode();
     const opts = await call('POST', '/api/auth/register/options', { code }, null);
     assert.equal(opts.status, 200, JSON.stringify(opts.json));
+    // The passkey's user comes from the config (hq.config.json), not from code.
+    assert.deepEqual([(opts.json as { user: { name: string; displayName: string } }).user.name, (opts.json as { user: { displayName: string } }).user.displayName], ['ran', 'רן']);
     return call('POST', '/api/auth/register', { name, credential: auth.create(opts.json as { challenge: string }) }, null);
   };
   const login = async (auth: SoftAuthenticator, name: string, origin = ORIGIN) => {

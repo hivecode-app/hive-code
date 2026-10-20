@@ -32,7 +32,11 @@ class CompanyData {
     this.awaiting = const [],
     this.asked = const [],
     this.home,
+    this.managerId = '',
   });
+
+  /// The company's manager (hq's `manager`, from org.yaml): pinned first in the conversations. '' = an hq that does not say.
+  final String managerId;
 
   final Map<String, Team> teams;
   final Map<String, Identity> identities;

@@ -35,6 +35,7 @@ scripts/deploy.sh all          # או hq | app | caddy
 - **טוקן ל-API:** `node packages/hq/src/main.ts token`.
 - **גיבוי ידני:** `node packages/hq/src/main.ts backup`. בנוסף hq מגבה כל שעה לבד, ושומר 48 אחרונים.
 - **הגדרות:** `~/.local/state/agent-company/hq.config.json` דורס ברירות מחדל (פורט, טיימרים, RSS לנוסחת הקיבולת, פקודת ה-launch של shift-host). למשל `{"healthListen": "0.0.0.0:7421"}` פותח listener נוסף שמגיש רק `/health`.
+- **הערכים של החברה** (דומיינים, שם המשתמש ב-passkey, חשבונות Claude, טלגרם, dictate, תיקיית העבודה, ייבוא זיכרון) לא בקוד. ברירות המחדל בקוד גנריות, והערכים של hq-host נמצאים ב-`company/hq.config.json`. `scripts/deploy.sh hq` מתקין אותו ל-`~/.local/state/agent-company/hq.config.json` (600) לפני ה-restart, `verify-prod` בודק שהוא זהה, ו-`drift-check` מתריע על סטייה. מי המנהל, ראש הניטור, אזור הזמן והמכונות: `manager`, `monitoring_lead`, `timezone` ו-`machines` ב-`company/org.yaml`. שינוי ערך: PR ל-`company/hq.config.json`, ואז פריסה. לא עורכים את הקובץ בשרת.
 - **מסירת טאב (B.9):** hq מאזין גם על `127.0.0.1:7422` (`tab.listen` ב-`hq.config.json`, `null` מכבה) ומגיש שם רק את דף הטלפון (`/h/<token>`, `/ws/<token>`). הבלוק `tab.hq` ב-`deploy/caddy/agent-company.caddy` מחבר אליו את `tab.hq.example.com`. ה-CDP של ה-Chrome המשותף: `tab.cdpUrl` (ברירת מחדל `http://127.0.0.1:9222`). `browser_ask_user` של browser-memory יוצר מסירה דרך `hq.sock`.
 
 ## סודות

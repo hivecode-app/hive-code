@@ -105,7 +105,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   // awaiting: "מה לבדוק" (#108), finished tasks that wait for a deploy or for him to check (awaiting.ts).
   // asked: "ביקשת" (#118), his requests to workers still waiting for an answer, and answers he hasn't read (asked.ts).
   route('GET', '/api/board', () => ({ identities: hq.board(), tasks: hq.scheduler.tasks(), awaiting: hq.awaiting.list(), asked: hq.home.asked(), projects: hq.projects(),
-    slots: hq.scheduler.slots(), probes: hq.probes.summary(), timezone: hq.clock() }));
+    slots: hq.scheduler.slots(), probes: hq.probes.summary(), timezone: hq.clock(), manager: hq.cfg.managerId }));
 
   // The head of the conversations screen (home.ts): the recipe in force, and a new one. The app says
   // ?opened=1 when he is looking at it (start, back to the front): that releases what was held for the morning.

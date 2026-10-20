@@ -15,6 +15,7 @@ const QUESTIONS = JSON.parse(readFileSync(new URL('./fixtures/bet9-questions.jso
 
 test('bet9: src record ranks in top 5 for >= 18/20 questions', (t) => {
   const sources = bet9Sources();
+  if (!sources.length) { t.skip('no memoryImport in hq.config.json'); return; }
   const missing = sources.filter((s) => !existsSync(s.dir)).map((s) => s.dir);
   if (missing.length) { t.skip(`bet9 corpus absent (${missing.join(', ')})`); return; }
   const noKw = process.env.BET9_NO_KEYWORDS === '1';

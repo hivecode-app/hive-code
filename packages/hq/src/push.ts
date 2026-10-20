@@ -13,11 +13,11 @@ import { pushWorthy, type Inbox } from './inbox.ts';
 
 export interface VapidKeys { publicKey: string; privateKey: string; subject: string }
 
-export function loadOrCreateVapid(stateDir: string): VapidKeys {
+export function loadOrCreateVapid(stateDir: string, subject: string): VapidKeys {
   const file = join(stateDir, 'vapid.json');
   if (existsSync(file)) return JSON.parse(readFileSync(file, 'utf8')) as VapidKeys;
   const k = webpush.generateVAPIDKeys();
-  const keys: VapidKeys = { ...k, subject: 'mailto:owner-account@example.com' };
+  const keys: VapidKeys = { ...k, subject };
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(keys, null, 2) + '\n', { mode: 0o600 });
   return keys;
@@ -29,6 +29,7 @@ export type WebPushSend = (sub: PushSubscriptionJSON, payload: string) => Promis
 export type TelegramSend = (text: string) => Promise<void>;
 
 export function telegramVia(cmd: string, chat: string): TelegramSend {
+  if (!chat) return async () => { throw new Error('telegram is not configured on this hq (telegramChat)'); };
   return (text) => new Promise((resolve, reject) => {
     execFile(cmd, ['-t', chat, '-m', text], { timeout: 30_000 }, (err, _out, stderr) => {
       if (err) reject(new Error(`telegram-send: ${(stderr || err.message).trim().slice(0, 300)}`));

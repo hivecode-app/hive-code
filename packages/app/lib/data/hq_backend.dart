@@ -204,7 +204,7 @@ class HqBackend extends Backend {
     // org.yaml `timezone` (#121): before the mapping, so "today" and every hour in it are his.
     company_time.CompanyTime.apply(results[0]['timezone']);
     final prev = _data;
-    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), awaiting: _list(results[0], 'awaiting'), asked: _list(results[0], 'asked'), previous: prev);
+    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), awaiting: _list(results[0], 'awaiting'), asked: _list(results[0], 'asked'), manager: (results[0]['manager'] as String?) ?? '', previous: prev);
     // Order and last lines from the last messages fetch, right away: without them the list showed
     // board order, then jumped into recency order when the messages came back (on every event).
     final lines = _lastLines;
@@ -359,7 +359,7 @@ class HqBackend extends Backend {
             : st != null
                 ? st['unread'] as int? ?? 0
                 : (m['to_identity'] == 'owner' && m['state'] != 'handled' ? 1 : 0),
-        pinned: other == 'yoav',
+        pinned: other == d.managerId,
         muted: st?['muted_until'] != null,
       );
       if (i >= 0) {
@@ -390,7 +390,8 @@ class HqBackend extends Backend {
       List<Map<String, dynamic>> list(String k, String f) => ((c[k] as Map)[f] as List).cast<Map<String, dynamic>>();
       company_time.CompanyTime.apply((c['board'] as Map)['timezone']);
       _data = mapSnapshot(board: list('board', 'identities'), inbox: list('inbox', 'items'), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'),
-          tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'), awaiting: _list(c['board'], 'awaiting'), asked: _list(c['board'], 'asked'));
+          tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'), awaiting: _list(c['board'], 'awaiting'), asked: _list(c['board'], 'asked'),
+          manager: ((c['board'] as Map)['manager'] as String?) ?? '');
       if (c['home'] is Map) {
         try {
           _data!.home = HomeRecipe.fromJson((c['home'] as Map).cast<String, dynamic>());
@@ -1207,6 +1208,7 @@ CompanyData mapSnapshot({
   List<Map<String, dynamic>> projects = const [],
   List<Map<String, dynamic>> awaiting = const [],
   List<Map<String, dynamic>> asked = const [],
+  String manager = '',
   CompanyData? previous,
   DateTime? now,
 }) {
@@ -1325,7 +1327,7 @@ CompanyData mapSnapshot({
       headline: headline == null || headline.isEmpty ? null : headline,
       ref: i['ref'] as String?,
       kind: kind,
-      from: (i['from_identity'] as String?) ?? 'yoav',
+      from: (i['from_identity'] as String?) ?? manager,
       time: _hm(i['created_at'] as int),
       createdAt: DateTime.fromMillisecondsSinceEpoch(i['created_at'] as int),
       kicker: kickerFor(i),
@@ -1358,7 +1360,7 @@ CompanyData mapSnapshot({
         // Nothing said yet: no second line (it used to repeat the title right above it).
         lastLine: ((b['task'] as Map?)?['title'] as String?) ?? '',
         time: b['last_seen_at'] is int ? _hm(b['last_seen_at'] as int) : '',
-        pinned: b['id'] == 'yoav',
+        pinned: b['id'] == manager,
       ),
   ];
 
@@ -1478,6 +1480,7 @@ CompanyData mapSnapshot({
   final doneToday = tickets.where((t) => t.doneAt != null && !t.doneAt!.isBefore(company_time.dayStart(clock))).length;
 
   return CompanyData(
+    managerId: manager,
     teams: teams,
     identities: ids,
     presence: presence,

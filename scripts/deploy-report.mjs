@@ -13,11 +13,11 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const PROJECT = 'agent-company';
-export const REPO = 'hivecode-app/hive-code';
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const LOOKBACK = 100;
 
 /** Which deployed parts a changed path needs: hq | app | caddy, or none (docs). */
@@ -57,7 +57,7 @@ export function tasksOf(prs, merged) {
 }
 
 function git(...args) {
-  return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
 }
 
 async function main() {
@@ -78,8 +78,9 @@ async function main() {
   const prs = deployedPrs(commits, (part, c) => !!liveSha[part] && contains(liveSha[part], c));
   let tasks = [];
   try {
-    const merged = JSON.parse(execFileSync('gh', ['pr', 'list', '--repo', REPO, '--state', 'merged', '--limit', String(LOOKBACK),
-      '--json', 'number,headRefName'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000 }));
+    // The GitHub repo is the one this checkout's origin points at (gh reads it from the git remote).
+    const merged = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'merged', '--limit', String(LOOKBACK),
+      '--json', 'number,headRefName'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000 }));
     tasks = tasksOf(prs, merged);
   } catch { /* gh missing or offline: PR numbers alone still match tasks that gave theirs */ }
   const token = process.env.HQ_TOKEN ?? read(join(state, 'api-token'));

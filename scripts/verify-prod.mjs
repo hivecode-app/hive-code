@@ -10,6 +10,8 @@
 //     signed with the release key that hq trusts (packages/hq/src/config.ts); hq's /api/app/latest
 //     offers that same APK for the in-app update.
 //   - the old secret path, while deploy/caddy/agent-company.caddy still has it: 301 to the root.
+//   - hq.config.json: the one hq runs with is company/hq.config.json from this checkout; the public
+//     URLs checked here are its auth.appUrl, apiUrl and tab.baseUrl (env VERIFY_*_URL override them).
 // Prints one Hebrew line per check; exit 1 when any check fails.
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -20,10 +22,17 @@ import { createHash } from 'node:crypto';
 import WebSocket from 'ws';
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
-const APP = process.env.VERIFY_APP_URL ?? 'https://app.hq.example.com';
-const API = process.env.VERIFY_API_URL ?? 'https://api.hq.example.com';
 const LOCAL = 'http://127.0.0.1:7420';
 const state = process.env.COMPANY_STATE ?? join(homedir(), '.local/state/agent-company');
+const liveCfgText = existsSync(join(state, 'hq.config.json')) ? readFileSync(join(state, 'hq.config.json'), 'utf8') : null;
+const liveCfg = liveCfgText ? JSON.parse(liveCfgText) : {};
+const noSlash = (u) => (typeof u === 'string' && u ? u.replace(/\/+$/, '') : null);
+const APP = process.env.VERIFY_APP_URL ?? noSlash(liveCfg.auth?.appUrl);
+const API = process.env.VERIFY_API_URL ?? noSlash(liveCfg.apiUrl);
+if (!APP || !API) {
+  console.log(`✗ אין כתובות לבדיקה: חסרים auth.appUrl או apiUrl ב-${join(state, 'hq.config.json')}`);
+  process.exit(1);
+}
 const admin = readFileSync(join(state, 'api-token'), 'utf8').trim();
 const site = readFileSync(join(repo, 'deploy/caddy/agent-company.caddy'), 'utf8');
 const legacy = /handle_path \/([0-9a-f]{32})\/hq\/\*/.exec(site)?.[1] ?? null;
@@ -70,6 +79,14 @@ const dictate = (url, token) => {
   f.set('audio', new Blob([wav()]), 'audio.wav');
   return req(url, { method: 'POST', headers: token ? bearer(token) : {}, body: f });
 };
+
+// ── hq.config.json: this company's values, exactly as in git ─────────────────
+{
+  const src = join(repo, 'company/hq.config.json');
+  const want = existsSync(src) ? readFileSync(src, 'utf8') : null;
+  expect(want != null && liveCfgText === want, 'hq.config.json של hq זהה ל-company/hq.config.json',
+    !want ? 'אין company/hq.config.json ב-checkout' : liveCfgText == null ? `אין ${join(state, 'hq.config.json')}: hq רץ עם ברירות מחדל גנריות` : 'hq.config.json של hq שונה מ-company/hq.config.json');
+}
 
 // ── api.hq: health, and nothing else without a token ─────────────────────────
 {
@@ -160,7 +177,7 @@ const dictate = (url, token) => {
 
 // ── tab.hq: hq's handoff listener answers, and only for /h/ and /ws/ ─────────
 {
-  const TAB = process.env.VERIFY_TAB_URL ?? 'https://tab.hq.example.com';
+  const TAB = process.env.VERIFY_TAB_URL ?? noSlash(liveCfg.tab?.baseUrl) ?? 'http://127.0.0.1:7422';
   // A token no handoff has: hq answers 410 (expired page), which proves Caddy reaches hq's listener.
   const fake = Array.from({ length: 32 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
   const h = await req(`${TAB}/h/${fake}`, { headers: { 'sec-fetch-mode': 'navigate', 'user-agent': 'Mozilla/5.0 deploy-check' } });

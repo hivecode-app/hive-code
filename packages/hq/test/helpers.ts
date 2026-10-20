@@ -255,6 +255,8 @@ export class FakeTabBrowser implements TabBrowser {
 export const ORG_YAML = `
 version: 1
 owner: ran
+manager: yoav
+monitoring_lead: rotem
 teams:
   - {id: management, kind: permanent, symbol: account_tree, lead: yoav, members: []}
   - {id: monitoring, kind: permanent, symbol: monitor_heart, lead: rotem, members: []}

@@ -519,6 +519,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
   ];
 
   return CompanyData(
+    managerId: 'yoav',
     teams: teams,
     identities: ids,
     presence: presence,

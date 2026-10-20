@@ -69,7 +69,7 @@ final _awaiting = [
 
 CompanyData _data({List<Map<String, dynamic>> inbox = const []}) {
   final board = _json('$_dir/board.json');
-  return mapSnapshot(
+  return mapSnapshot(manager: 'yoav', 
     board: (board['identities'] as List).cast<Map<String, dynamic>>(),
     inbox: inbox,
     asks: _list('asks', 'asks'),

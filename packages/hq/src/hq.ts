@@ -106,7 +106,7 @@ export class Hq {
     this.accounts = new AccountManager(this.store, cfg, this.shifts, this.mailbox, this.inbox, deps.accounts);
     this.watchdog = new Watchdog(this.store, cfg, this.shifts, this.mailbox, this.inbox);
     this.probes = new ProbeRunner(this.store, cfg, this.mailbox);
-    this.pusher = new Pusher(this.store, this.inbox, cfg, loadOrCreateVapid(cfg.stateDir),
+    this.pusher = new Pusher(this.store, this.inbox, cfg, loadOrCreateVapid(cfg.stateDir, cfg.pushContact),
       deps.telegram ?? telegramVia(cfg.telegramCmd, cfg.telegramChat), deps.webPush);
     // The CDP connection is opened on first use, so an hq with no handoff never touches Chrome.
     this.tab = new TabHandoffs(this.store, this.inbox, this.mailbox, cfg.tab, deps.tabBrowser ?? new CdpTabBrowser(cfg.tab.cdpUrl, tabLog));

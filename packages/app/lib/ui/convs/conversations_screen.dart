@@ -153,11 +153,11 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   /// message still shows here, so nothing he hasn't read hides behind a count.
   Widget _mainList(BuildContext context, CompanyData d, AppStore store) {
     final shown = [for (final c in d.conversations) if (!d.who(c.identityId).temp || c.unread > 0) c];
-    final yoav = shown.where((c) => c.identityId == 'yoav').firstOrNull;
+    final yoav = shown.where((c) => c.identityId == d.managerId).firstOrNull;
     final working = nowWorking(d);
     final others = [
       for (final c in shown)
-        if (c.identityId != 'yoav' && (working.containsKey(c.identityId) || c.lastLine.isNotEmpty || c.unread > 0)) c,
+        if (c.identityId != d.managerId && (working.containsKey(c.identityId) || c.lastLine.isNotEmpty || c.unread > 0)) c,
     ];
     // A finished task worker with unread lines goes below every live conversation (#40).
     final rest = [...others.where((c) => !d.isDone(c.identityId)), ...others.where((c) => d.isDone(c.identityId))];
@@ -512,7 +512,7 @@ class UnreadPill extends StatelessWidget {
 Map<String, List<String>> nowWorking(CompanyData d) {
   final out = <String, List<String>>{};
   for (final who in d.identities.values) {
-    if (who.temp || who.id == 'yoav') continue;
+    if (who.temp || who.id == d.managerId) continue;
     final pr = d.presence[who.id];
     if (pr == null || pr.status == WorkerStatus.resting || pr.status == WorkerStatus.done || pr.status == WorkerStatus.free) continue;
     final task = pr.currentTask ?? pr.activity;

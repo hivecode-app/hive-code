@@ -9,7 +9,7 @@
 #
 # Checks: the production checkout (clean main == origin/main), hq and the app running what main has,
 # the Caddy files (ours in /etc/caddy/sites, and only one import line of ours in the main Caddyfile),
-# the user units, hq.env, the old secret path past its removal date, and leftovers of hand edits.
+# the user units, hq.env, hq.config.json, the old secret path past its removal date, and leftovers of hand edits.
 set -uo pipefail
 
 PROD="${AGENT_COMPANY_PROD:-$HOME/projects/agent-company}" # override only to try this script from another checkout
@@ -80,6 +80,8 @@ for u in vscode-workspace.service vscode-workspace.timer; do
   cmp -s "deploy/$u" "$UNITS/$u" || d "היחידה $u המותקנת שונה מה-repo"
 done
 systemctl --user is-enabled -q agent-company-drift.timer || d "agent-company-drift.timer לא מופעל"
+git show "$main:company/hq.config.json" 2>/dev/null | cmp -s - "$STATE/hq.config.json" \
+  || d "$STATE/hq.config.json שונה מ-company/hq.config.json ב-main (או חסר: אז hq רץ עם ברירות מחדל גנריות)"
 envf="$HOME/.config/agent-company/hq.env"
 if [[ ! -f "$envf" ]]; then
   d "אין $envf (הטוקן של dictate-server בשביל hq)"
