@@ -142,7 +142,13 @@ class HqBackend extends Backend {
     // On data from the device cache, "since" is when that data was current, not when the link failed.
     _downSince ??= _fromCache ?? DateTime.now();
     final t = _downSince!;
-    _status = SystemStatus(LinkState.offline, since: '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}');
+    final now = DateTime.now();
+    final hm = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    // Calendar days, in UTC so a daylight-saving night isn't 23 hours.
+    final daysAgo = DateTime.utc(now.year, now.month, now.day).difference(DateTime.utc(t.year, t.month, t.day)).inDays;
+    // Cached data can be days old: "אתמול 22:10" or "18/10 22:10", never a bare time that reads as today.
+    final since = switch (daysAgo) { 0 => hm, 1 => 'אתמול $hm', _ => '${t.day}/${t.month} $hm' };
+    _status = SystemStatus(LinkState.offline, since: since);
   }
 
   void _scheduleRetry() {
@@ -529,7 +535,7 @@ class HqBackend extends Backend {
       // So the next reload doesn't put back the older line.
       final list = [...(kept['messages'] as List).cast<Map<String, dynamic>>()]
         ..removeWhere((m) => (m['from_identity'] == 'owner' ? m['to_identity'] : m['from_identity']) == id)
-        ..insert(0, {'from_identity': id, 'to_identity': 'owner', 'body': line.split('\n').first, 'created_at': ts, 'state': openIdentity == id ? 'handled' : 'delivered'});
+        ..insert(0, {'from_identity': id, 'to_identity': 'owner', 'body': line.split('\n').first, 'created_at': ts, 'state': openIdentity == id || (_skipEngineReplay && _replaying) ? 'handled' : 'delivered'});
       _lastLines = {'messages': list};
     }
     final i = d.conversations.indexWhere((c) => c.identityId == id);
@@ -653,7 +659,7 @@ class HqBackend extends Backend {
   /// An answer, a GO or a retry taken on what the cache showed waits for the fresh snapshot, and
   /// goes out only if the item is still open there: otherwise "already handled", never a silent
   /// no-op that looks like success.
-  Future<CommandResult?> _stale(String? askId, int? inboxId) async {
+  Future<CommandResult?> _stale(String? askId, int? inboxId, {bool answer = true}) async {
     if (_fresh.isCompleted) return null; // taken on fresh data: as usual
     try {
       await _fresh.future.timeout(const Duration(seconds: 10));
@@ -662,7 +668,8 @@ class HqBackend extends Backend {
     }
     final d = _data;
     final open = d != null && d.waiting.any((w) => (askId != null && w.askId == askId) || (inboxId != null && w.inboxId == inboxId));
-    return open ? null : const CommandResult.fail('הפריט כבר טופל, ולכן התשובה לא נשלחה.');
+    if (open) return null;
+    return CommandResult.fail(answer ? 'הפריט כבר טופל, ולכן התשובה לא נשלחה.' : 'הפריט כבר טופל, ולכן הפעולה לא נשלחה.');
   }
 
   @override
@@ -696,11 +703,11 @@ class HqBackend extends Backend {
 
   @override
   Future<CommandResult> retry(WaitItem item) async =>
-      await _stale(null, item.inboxId) ?? await _send('POST', '/api/inbox/${item.inboxId}/done', {'note': 'retry'}).then(_after);
+      await _stale(null, item.inboxId, answer: false) ?? await _send('POST', '/api/inbox/${item.inboxId}/done', {'note': 'retry'}).then(_after);
 
   @override
   Future<CommandResult> handoffDone(WaitItem item) async =>
-      await _stale(null, item.inboxId) ?? await _send('POST', '/api/inbox/${item.inboxId}/done', {'note': 'done'}).then(_after);
+      await _stale(null, item.inboxId, answer: false) ?? await _send('POST', '/api/inbox/${item.inboxId}/done', {'note': 'done'}).then(_after);
 
   @override
   Future<AccountsView?> accounts() async {

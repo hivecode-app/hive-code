@@ -51,9 +51,15 @@ class Shell extends StatelessWidget {
         ),
         // Android back on another tab goes to home first, then leaves the app (as WhatsApp does).
         child: PopScope(
-          canPop: nav.wide || nav.tab == AppTab.home,
+          canPop: (nav.wide || nav.tab == AppTab.home) && nav.backHandler == null,
           onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) nav.go(AppTab.home);
+            if (didPop) return;
+            final close = nav.backHandler;
+            if (close != null) {
+              close(); // an open search closes first
+            } else {
+              nav.go(AppTab.home);
+            }
           },
           child: Scaffold(
             backgroundColor: p.bg,

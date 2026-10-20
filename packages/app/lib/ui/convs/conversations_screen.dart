@@ -26,6 +26,35 @@ class ConversationsScreen extends StatefulWidget {
 class _ConversationsScreenState extends State<ConversationsScreen> {
   bool searching = false;
   String q = '';
+
+  // Android back closes the search before it leaves the tab (Shell asks NavScope for this).
+  void _openSearch() {
+    setState(() => searching = true);
+    NavScope.read(context).setBackHandler(_closeSearch);
+  }
+
+  AppNav? _nav;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _nav = NavScope.read(context);
+  }
+
+  @override
+  void dispose() {
+    final nav = _nav;
+    if (nav != null && nav.backHandler == _closeSearch) nav.backHandler = null;
+    super.dispose();
+  }
+
+  void _closeSearch() {
+    setState(() {
+      searching = false;
+      q = '';
+    });
+    NavScope.read(context).setBackHandler(null);
+  }
   bool showClosed = false;
 
   bool _match(CompanyData d, ConversationSummary c) {
@@ -77,10 +106,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
             ? SizedBox(
                 height: 56,
                 child: Row(children: [
-                  IBtn('arrow_forward', tip: 'סגירת החיפוש', onTap: () => setState(() {
-                        searching = false;
-                        q = '';
-                      })),
+                  IBtn('arrow_forward', tip: 'סגירת החיפוש', onTap: _closeSearch),
                   Expanded(
                     child: TextField(
                       autofocus: true,
@@ -92,7 +118,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                 ]),
               )
             : TopBar(title: 'שיחות', showLink: true, actions: [
-                IBtn('search', tip: 'חיפוש', onTap: () => setState(() => searching = true)),
+                IBtn('search', tip: 'חיפוש', onTap: _openSearch),
                 IBtn('more_vert', tip: 'עוד', onTap: () => Nav.settings(context)),
               ]),
         const SystemBar(),
@@ -237,6 +263,7 @@ class ConversationRow extends StatelessWidget {
       if (c.diffStat != null) ...[const SizedBox(width: 6), DiffStat(c.diffStat!)],
       if (c.extra != null && !compact) ...[const SizedBox(width: 6), Text(c.extra!, style: T.small.copyWith(color: p.text2))],
     ]);
+    final draft = (d.chats[c.identityId]?.draft ?? '').trim();
     return Semantics(
       button: true,
       label: '${who.name}, ${who.title}, ${statusWord(pr.status, who.gender)}',
@@ -258,7 +285,24 @@ class ConversationRow extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(c.time, style: T.meta.copyWith(color: p.text3)),
                   ]),
-                  if (!compact && c.lastLine.isNotEmpty)
+                  // A draft left in the chat shows instead of the last line, as in WhatsApp.
+                  if (!compact && draft.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text.rich(
+                        TextSpan(children: [
+                          TextSpan(text: 'טיוטה: ', style: TextStyle(color: p.accent, fontWeight: FontWeight.w700)),
+                          // Isolated, so an English draft keeps its own punctuation where it belongs.
+                          const TextSpan(text: kFSI),
+                          ...Rich.spans(context, draft.split('\n').first, TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text2)),
+                          const TextSpan(text: kPDI),
+                        ]),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text2),
+                      ),
+                    )
+                  else if (!compact && c.lastLine.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Row(children: [

@@ -50,6 +50,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   bool _opened = false;
   Backend? _backend;
+  AppStore? _store;
   Conversation? _seenChat;
 
   @override
@@ -60,6 +61,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // to the first time only: doing it here every time refetched in a loop, dropped messages just
     // sent and kept the CPU busy.
     _backend = store.backend;
+    _store = store;
     if (!_opened) {
       _opened = true;
       final chat = store.data?.chats[widget.identityId];
@@ -96,6 +98,9 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _backend?.closeConversation(widget.identityId);
+    // Typing doesn't notify the store; leaving the chat does, so the list shows the draft.
+    final store = _store;
+    if (store != null) Future.microtask(store.touch);
     controller.dispose();
     focus.dispose();
     scroll.dispose();

@@ -18,7 +18,22 @@ class AppNav extends ChangeNotifier {
   String? ticket;
 
   void go(AppTab t) {
+    // Leaving a tab closes what its back handler would have closed (an open search), so it can't
+    // be found still open, with nothing behind back, on return.
+    final h = backHandler;
+    if (t != tab && h != null) {
+      backHandler = null;
+      h();
+    }
     tab = t;
+    notifyListeners();
+  }
+
+  /// Something on the current tab that Android back should close first (an open search).
+  VoidCallback? backHandler;
+  void setBackHandler(VoidCallback? h) {
+    if (backHandler == h) return;
+    backHandler = h;
     notifyListeners();
   }
 }

@@ -35,6 +35,38 @@ void main() {
     expect(nav.tab, AppTab.convs);
   });
 
+  testWidgets('back with search open closes the search first, then goes home', (tester) async {
+    await pumpApp(tester);
+    await tester.tap(find.text('שיחות').last);
+    await tester.pump();
+    await tester.tap(find.byTooltip('חיפוש'));
+    await tester.pump();
+    expect(find.byTooltip('סגירת החיפוש'), findsOneWidget);
+    final nav = NavScope.read(tester.element(find.byType(Shell)));
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(find.byTooltip('סגירת החיפוש'), findsNothing);
+    expect(nav.tab, AppTab.convs);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(nav.tab, AppTab.home);
+  });
+
+  testWidgets('leaving the tab closes its search, so back never finds it open with nothing behind', (tester) async {
+    await pumpApp(tester);
+    await tester.tap(find.text('שיחות').last);
+    await tester.pump();
+    await tester.tap(find.byTooltip('חיפוש'));
+    await tester.pump();
+    await tester.tap(find.text('בית').last);
+    await tester.pump();
+    await tester.tap(find.text('שיחות').last);
+    await tester.pump();
+    expect(find.byTooltip('סגירת החיפוש'), findsNothing);
+    final nav = NavScope.read(tester.element(find.byType(Shell)));
+    expect(nav.backHandler, isNull);
+  });
+
   testWidgets('a short but wide window is still a desktop', (tester) async {
     await pumpApp(tester, size: const Size(1280, 520));
     expect(find.byType(DesktopFrame), findsOneWidget);

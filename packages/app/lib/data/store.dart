@@ -61,6 +61,7 @@ class AppStore extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     for (final p in _pending.values) {
       p.timer?.cancel();
     }
@@ -142,8 +143,13 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  /// Local UI-only change (e.g. an undo of "לא עכשיו") that screens must redraw for.
-  void touch() => notifyListeners();
+  /// Local UI-only change (e.g. an undo of "לא עכשיו") that screens must redraw for. A no-op once
+  /// disposed (a chat leaving the screen during sign-out asks for one).
+  void touch() {
+    if (!_disposed) notifyListeners();
+  }
+
+  bool _disposed = false;
 
   void clearError() {
     error = null;
