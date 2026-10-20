@@ -50,6 +50,15 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
             </intent-filter>
+            <!-- The pairing link (hq's /pair page, packages/hq/src/pairing.ts): agentcompany://pair?url=<link>.
+                 A custom scheme: Android can only verify https links for hosts known at build time, and
+                 the app works with any server. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="agentcompany" android:host="pair" />
+            </intent-filter>
             <!-- Direct Share targets (the per-worker conversation shortcuts). -->
             <meta-data
                 android:name="android.app.shortcuts"

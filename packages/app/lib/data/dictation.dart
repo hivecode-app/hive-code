@@ -141,7 +141,7 @@ class DictateClient {
   /// The configured service, or null when this build has no way to reach it.
   static DictateClient? configured() {
     if (kDictateUrl.isNotEmpty) return DictateClient(baseUrl: kDictateUrl, token: kDictateToken);
-    if (gatewayUrl().isEmpty) return null;
+    // Through the hq this device is signed in to, whichever server that is (_target says so when none).
     return DictateClient.viaHq(savedSession);
   }
 

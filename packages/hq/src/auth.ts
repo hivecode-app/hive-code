@@ -12,6 +12,7 @@ import {
 } from '@simplewebauthn/server';
 import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
+import { pairLink } from './pairing.ts';
 
 export class AuthError extends Error {
   public status: number;
@@ -101,7 +102,7 @@ export class Auth {
       .run(sha256(raw), by.kind === 'admin' ? 'admin' : by.id, now, expires);
     const code = `${raw.slice(0, 4)}-${raw.slice(4)}`;
     this.store.emit('device.pair_code', null, { by: by.kind === 'admin' ? 'admin' : by.id, expires_at: expires });
-    return { code, expires_at: expires, link: this.cfg.appUrl ? `${this.cfg.appUrl}?pair=${code}` : null };
+    return { code, expires_at: expires, link: pairLink(this.cfg.appUrl, code) };
   }
 
   /** A usable code (not used, not expired), normalized; throws otherwise and counts the miss against [client]. */

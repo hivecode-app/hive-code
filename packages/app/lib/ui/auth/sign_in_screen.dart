@@ -1,14 +1,18 @@
 // Sign-in (#23): fingerprint with a passkey, or a pairing code from a device that is already in
 // (settings → devices, or a link with ?pair=). Every device gets its own token, revocable there.
+// The app has no server built in (docs/generic/PLAN.md §2): with [askServer] the screen starts with
+// the server's address, filled from a pairing link or the last server, and checks that hq is there.
 import 'package:flutter/material.dart';
 
 import '../../data/auth_client.dart';
+import '../../data/backend_select.dart';
 import '../../data/passkey.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 
 class SignInScreen extends StatefulWidget {
-  const SignInScreen({super.key, required this.client, required this.onSignedIn, this.note, this.pairCode});
+  const SignInScreen(
+      {super.key, required this.client, required this.onSignedIn, this.note, this.pairCode, this.askServer = false, this.server, this.current, this.onCancel});
   final AuthClient client;
   final ValueChanged<Session> onSignedIn;
   /// Why we are here, e.g. "המכשיר הזה נותק".
@@ -17,12 +21,23 @@ class SignInScreen extends StatefulWidget {
   /// From the pairing link.
   final String? pairCode;
 
+  /// The app (not the web build): which server is part of signing in.
+  final bool askServer;
+
+  /// The server to start with: an hq address or an origin.
+  final String? server;
+
+  /// Switching servers: the host this device is still signed in to, until the new one works.
+  final String? current;
+  final VoidCallback? onCancel;
+
   @override
   State<SignInScreen> createState() => _SignInScreenState();
 }
 
 class _SignInScreenState extends State<SignInScreen> {
   late final code = TextEditingController(text: widget.pairCode ?? '');
+  late final server = TextEditingController(text: widget.server == null || widget.server!.isEmpty ? '' : serverHost(widget.server!));
   String? error;
   bool busy = false;
 
@@ -32,7 +47,32 @@ class _SignInScreenState extends State<SignInScreen> {
   @override
   void dispose() {
     code.dispose();
+    server.dispose();
     super.dispose();
+  }
+
+  /// A whole pairing link pasted into the address: the host stays there, the code goes to its field.
+  /// Typing a path by hand (`app.example.com/hq`) is left alone; _useServer reads it as it is.
+  void _serverChanged(String v) {
+    if (!v.contains('://') && !v.contains('?')) return;
+    final t = parseServer(v);
+    if (t == null) return;
+    if (t.code != null) code.text = t.code!;
+    server.value = TextEditingValue(text: t.host, selection: TextSelection.collapsed(offset: t.host.length));
+  }
+
+  /// Points the client at the typed server and checks that hq answers there.
+  Future<void> _useServer() async {
+    if (!widget.askServer) return;
+    final t = parseServer(server.text);
+    if (t == null) {
+      throw AuthFailure(server.text.trim().isEmpty
+          ? 'צריך את הכתובת של השרת, מה-QR או מהקישור שקיבלת.'
+          : 'הכתובת לא נראית כמו כתובת של שרת. למשל app.example.com.');
+    }
+    if (t.code != null && code.text.trim().isEmpty) code.text = t.code!;
+    widget.client.baseUrl = t.hqUrl;
+    await widget.client.probe();
   }
 
   Future<void> _run(Future<Session> Function() f) async {
@@ -41,6 +81,7 @@ class _SignInScreenState extends State<SignInScreen> {
       error = null;
     });
     try {
+      await _useServer();
       final s = await f();
       if (mounted) widget.onSignedIn(s);
     } on AuthFailure catch (e) {
@@ -83,12 +124,50 @@ class _SignInScreenState extends State<SignInScreen> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                const BigTitle('החברה', sub: 'כניסה במכשיר הזה'),
+                BigTitle('החברה', sub: widget.current != null ? 'החלפת שרת' : 'כניסה במכשיר הזה'),
                 if (widget.note != null)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                     child: Text(widget.note!, style: T.secondary.copyWith(color: p.text)),
                   ),
+                if (widget.current != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Text('המכשיר מחובר עכשיו ל-${widget.current}, ונשאר מחובר אליו עד שהכניסה לשרת החדש מצליחה.',
+                        style: T.secondary.copyWith(color: p.text)),
+                  ),
+                if (widget.askServer) ...[
+                  const Section('שרת', top: 8),
+                  ListBlock(inset: 16, children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        Text('הכתובת מה-QR או מהקישור שקיבלת. אפשר גם להדביק כאן את הקישור כולו.', style: T.small.copyWith(color: p.text2)),
+                        const SizedBox(height: 8),
+                        TextField(
+                          key: const Key('server-address'),
+                          controller: server,
+                          textDirection: TextDirection.ltr,
+                          keyboardType: TextInputType.url,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          onChanged: _serverChanged,
+                          style: T.mono(15).copyWith(color: p.text),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            hintText: 'app.example.com',
+                            hintTextDirection: TextDirection.ltr,
+                            hintStyle: T.mono(15).copyWith(color: p.text3),
+                            filled: true,
+                            fillColor: p.surface2,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ]),
+                  const SizedBox(height: 24),
+                ],
                 if (hasPasskeys) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -139,6 +218,11 @@ class _SignInScreenState extends State<SignInScreen> {
                       const SizedBox(width: 6),
                       Expanded(child: Text(error!, style: T.secondary.copyWith(color: p.text))),
                     ]),
+                  ),
+                if (widget.onCancel != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+                    child: Align(alignment: AlignmentDirectional.centerStart, child: Btn('ביטול', onTap: busy ? null : widget.onCancel)),
                   ),
               ]),
             ),

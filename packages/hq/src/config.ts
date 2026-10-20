@@ -56,7 +56,7 @@ export interface HqConfig {
     rpName: string;
     /** Accepted clientData origins: the web app, plus `android:apk-key-hash:<b64url sha256>` for the APK. */
     origins: string[];
-    /** Where a pairing link points (`<appUrl>?pair=<code>`); null = code only. */
+    /** The web app. Its origin hosts the pairing link (`<origin>/pair?code=…`, pairing.ts); null = code only. */
     appUrl: string | null;
     pairCodeMs: number;
     /** The passkey's user, as the phone's password manager shows it. */

@@ -6,7 +6,7 @@
 //     device token over the public URL; with it /api/board is 200 and the WebSocket opens; then the
 //     test device is revoked and its token is refused. The device is revoked even when a step fails.
 //   - dictation: only through hq and only with a device token; the old open /dictate route is gone.
-//   - the app: the root loads, assetlinks.json is there, the APK is downloadable, big enough, and
+//   - the app: the root loads, assetlinks.json and hq's pairing page are there, the APK is downloadable, big enough, and
 //     signed with the release key that hq trusts (packages/hq/src/config.ts); hq's /api/app/latest
 //     offers that same APK for the in-app update.
 //   - the old secret path, while deploy/caddy/agent-company.caddy still has it: 301 to the root.
@@ -145,6 +145,11 @@ const dictate = (url, token) => {
   const al = await req(`${APP}/.well-known/assetlinks.json`);
   const alText = al.status === 200 ? await al.text() : '';
   expect(alText.includes('"package_name"'), 'assetlinks.json מוגש (passkeys באנדרואיד)', `assetlinks.json ענה ${al.status}`);
+  // The pairing link's page (packages/hq/src/pairing.ts), from hq itself: api.hq passes everything to hq,
+  // so this holds after `deploy.sh hq` alone too. A made-up code: the page never checks or spends it.
+  const pp = await req(`${API}/pair?code=TEST-CODE`);
+  const ppText = pp.status === 200 ? await pp.text() : '';
+  expect(ppText.includes('TEST-CODE'), 'דף הצימוד /pair מוגש', `/pair ענה ${pp.status}`);
 
   const apk = await req(`${APP}/agent-company.apk`);
   const bytes = apk.status === 200 ? Buffer.from(await apk.arrayBuffer()) : Buffer.alloc(0);

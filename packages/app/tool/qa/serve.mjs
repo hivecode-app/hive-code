@@ -1,6 +1,6 @@
 // Serves a web build with hq next to it, like Caddy does in production: the files at /, and /hq/*
 // (HTTP and the WebSocket) passed to an hq on this machine (a QA sandbox: packages/hq/test/qa-sandbox.mts).
-// Listen on 127.0.0.2: the app treats localhost/127.0.0.1 as "use HQ_URL", any other host as "<origin>/hq".
+// Listen on 127.0.0.2: the web build treats localhost/127.0.0.1 as "use the dev HQ_URL", any other host as "<origin>/hq".
 // Usage: node tool/qa/serve.mjs <build/web dir> [port=8099] [hq port=7499]
 import http from 'node:http';
 import net from 'node:net';

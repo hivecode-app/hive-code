@@ -59,6 +59,7 @@ class NativeBridge {
   final StreamController<String> _routes = StreamController<String>.broadcast();
   final StreamController<SharedPayload> _shared = StreamController<SharedPayload>.broadcast();
   final StreamController<Map<String, Object?>> _update = StreamController<Map<String, Object?>>.broadcast();
+  final StreamController<String> _pair = StreamController<String>.broadcast();
   bool _listening = false;
 
   void _listen() {
@@ -72,6 +73,9 @@ class NativeBridge {
         case 'shared':
           final p = SharedPayload.fromMap(call.arguments);
           if (p != null) _shared.add(p);
+        case 'pair':
+          final link = call.arguments as String?;
+          if (link != null && link.isNotEmpty) _pair.add(link);
         case 'update':
           final e = call.arguments;
           if (e is Map) _update.add(e.cast<String, Object?>());
@@ -92,6 +96,15 @@ class NativeBridge {
     return _shared.stream;
   }
 
+  /// A pairing link (`https://<host>/pair?code=…`) opened while the app runs (hq's pairing page).
+  Stream<String> get onPairLink {
+    _listen();
+    return _pair.stream;
+  }
+
+  /// The pairing link the app was opened with, once.
+  Future<String?> getPairLink() => _call<String>('getPairLink');
+
   /// Progress of the in-app update (AppUpdater.kt): {state: downloading, received, total},
   /// {state: installing | cancelled | aborted}, {state: failed, reason}.
   Stream<Map<String, Object?>> get onUpdate {
@@ -109,7 +122,7 @@ class NativeBridge {
     }
   }
 
-  /// Stores the hq base URL (e.g. `https://app.hq.example.com/<secret>/hq`) and token in native
+  /// Stores the hq base URL (e.g. `https://app.hq.example.com/hq`) and token in native
   /// storage and (re)starts the background link, so notifications work without the app open.
   Future<void> configure({required String baseUrl, required String token}) =>
       _call<void>('configure', {'baseUrl': baseUrl, 'token': token});

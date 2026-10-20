@@ -231,14 +231,15 @@ deploy_app() {
   step "app"
   # A new dir per build (sha + time): a rerun at the same commit never touches the live release.
   local rel="$WWW/releases/$sha-$(date +%Y%m%d%H%M%S)" apk size hex got want build code name
-  # One APK per ABI keeps the download small; the owner's phone (OnePlus 13) is arm64.
+  # No hq address goes into the APK: one app for every server, which it learns from a pairing link or
+  # its sign-in screen (packages/app/lib/data/backend_select.dart). One APK per ABI keeps the download small; the owner's phone (OnePlus 13) is arm64.
   # The build number is the commit count of main, so every deploy has a higher versionCode than the
   # one before (Android adds 1000 x ABI on top); the in-app update compares exactly that number.
   [[ "$(git rev-parse --is-shallow-repository)" == false ]] || fail "ה-checkout רדוד, ולכן מספר ה-build לא אמין"
   build="$(git rev-list --count HEAD)"
   (cd packages/app \
     && "$FLUTTER" build web --release --base-href / --no-web-resources-cdn >/dev/null \
-    && "$FLUTTER" build apk --release --split-per-abi --build-number="$build" --dart-define=HQ_URL="$APP_URL/hq" >/dev/null) || fail "flutter build"
+    && "$FLUTTER" build apk --release --split-per-abi --build-number="$build" >/dev/null) || fail "flutter build"
   apk=packages/app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
   size="$(stat -c %s "$apk")"
   ((size > 5 * 1024 * 1024)) || fail "ה-APK קטן מדי ($size bytes)"

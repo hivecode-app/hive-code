@@ -100,7 +100,7 @@ test('auth: pair code + passkey gives a device its own token; passkey login give
     assert.equal((await call('GET', '/api/board', undefined, null)).status, 401);
     const pc = await call('POST', '/api/devices/pair', {});
     assert.match(pc.json.code, /^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
-    assert.equal(pc.json.link, `${ORIGIN}/p/?pair=${pc.json.code}`);
+    assert.equal(pc.json.link, `${ORIGIN}/pair?code=${pc.json.code}`);
 
     const phone = new SoftAuthenticator();
     const reg = await env.register(phone, 'OnePlus 13', pc.json.code.toLowerCase().replace('-', ' '));

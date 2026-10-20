@@ -1,4 +1,5 @@
-// HTTP + WebSocket API on 127.0.0.1 (B.8). Token auth on everything except GET /health (heartbeat) and
+// HTTP + WebSocket API on 127.0.0.1 (B.8). Token auth on everything except GET /health (heartbeat), the
+// pairing page GET /pair and GET /.well-known/assetlinks.json (pairing.ts), and
 // /api/auth/* (getting a device token: passkey or pairing code, auth.ts). A token is either hq's own
 // api-token (stays on the server) or a device token. The app uses this through Caddy; mcp-company and
 // hooks use it for writes (idempotent by msg_id). POST /api/dictate/transcribe streams to dictate-server (dictate.ts).
@@ -15,6 +16,7 @@ import { MUTE_FOR } from './conversations.ts';
 import { readRaw, UploadError } from './uploads.ts';
 import { OWNER } from '@company/shared';
 import { HomeError } from './home.ts';
+import { assetLinks, pairPage } from './pairing.ts';
 
 export function loadOrCreateToken(stateDir: string): string {
   if (process.env.HQ_TOKEN) return process.env.HQ_TOKEN;
@@ -431,6 +433,17 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
       if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/healthz')) {
         const h = health(hq);
         return json(res, h.ok ? 200 : 503, h);
+      }
+      // The pairing link's page and the APK's key for this domain (pairing.ts): open, like /health.
+      if (req.method === 'GET' && url.pathname === '/pair') {
+        const { status, html } = pairPage(req, url, hq.cfg.auth.appUrl);
+        res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
+          'x-frame-options': 'DENY', 'x-robots-tag': 'noindex, nofollow' });
+        return res.end(html);
+      }
+      if (req.method === 'GET' && url.pathname === '/.well-known/assetlinks.json') {
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'max-age=300' });
+        return res.end(JSON.stringify(assetLinks(hq.cfg.auth.origins), null, 2));
       }
       if (url.pathname.startsWith('/api/auth/')) {
         if (await dispatch(authRoutes, req, res, url, null)) return;

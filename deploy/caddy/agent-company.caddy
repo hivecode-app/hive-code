@@ -12,7 +12,7 @@ api.hq.example.com {
 	}
 }
 
-# The app (packages/app): web build, APK and assetlinks.json from /var/www/hq-app/current, a release
+# The app (packages/app): web build and APK from /var/www/hq-app/current, a release
 # dir per commit (scripts/deploy.sh app). hq under /hq, dictation included (/hq/api/dictate/transcribe,
 # device token only). Sign-in is a passkey or a pairing code (#23).
 app.hq.example.com {
@@ -22,6 +22,13 @@ app.hq.example.com {
 		reverse_proxy 127.0.0.1:7420 {
 			flush_interval -1
 		}
+	}
+
+	# The pairing link's page and the APK's key for this domain come from hq itself
+	# (packages/hq/src/pairing.ts), the same on every server. Passkeys in the APK need assetlinks.json here.
+	@pairing path /pair /.well-known/assetlinks.json
+	handle @pairing {
+		reverse_proxy 127.0.0.1:7420
 	}
 
 	# Old secret path, until 27/10/2026 (docs/RUNBOOK.md, "המעבר לשורש"). Clients built before

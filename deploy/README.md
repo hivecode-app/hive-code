@@ -15,7 +15,7 @@ scripts/deploy.sh all          # או hq | app | caddy
 2. **בדיקות.** `npm ci`, ‏contract, ‏`test:deploy`, ‏typecheck ו-`npm test`. ל-`app` ול-`all` גם `flutter analyze` ו-`flutter test`.
 3. **פריסה** של היעד:
    - **`hq`:** כותב את `~/.config/agent-company/hq.env` (הרשאות 600) מתוך `.env` של dictate-server. מקשר ל-`~/.config/systemd/user` את `agent-company-hq`, ‏`actions-runner-company` ו-`agent-company-drift` (service ו-timer), ומתקין עותק של vscode-workspace. אחרי זה `daemon-reload` ו-restart ל-hq. בסוף בודק ש-`/health` חזר, ושכל יחידות `company-shift@` שרצו לפני ה-restart עדיין רצות.
-   - **`app`:** בונה web בשורש ו-APK ‏(arm64, עם `HQ_URL=https://app.hq.example.com/hq`). בודק את הגודל ואת חתימת השחרור, ואז כותב release ב-`/var/www/hq-app/releases/<sha>/` (web, ‏`agent-company.apk`, ‏`.well-known/assetlinks.json`). ההחלפה היא symlink אטומי `current`. נשמרים ה-release הנוכחי, הקודם ושלושת האחרונים.
+   - **`app`:** בונה web בשורש ו-APK ‏(arm64, בלי כתובת שרת: האפליקציה לומדת אותה מקישור הצימוד או ממסך הכניסה). בודק את הגודל ואת חתימת השחרור, ואז כותב release ב-`/var/www/hq-app/releases/<sha>/` (web, ‏`agent-company.apk`, ‏`.well-known/assetlinks.json`). ההחלפה היא symlink אטומי `current`. נשמרים ה-release הנוכחי, הקודם ושלושת האחרונים.
    - **`caddy`:** מתקין את `deploy/caddy/agent-company.caddy` ל-`/etc/caddy/sites/agent-company.caddy`. ב-Caddyfile הראשי הוא מוודא שיש שורת `import sites/*.caddy` אחת ואין אף בלוק של החברה (`scripts/caddy-main.mjs`). בלוקים של אתרים אחרים (desk, ‏dictate, ‏calltr, ‏k8s) נשארים כמו שהם. ההגדרה נבדקת ב-`caddy validate` לפני ההתקנה, ואחרי זה `reload`.
 4. **אימות מקצה לקצה** (`scripts/verify-prod.mjs`), מבחוץ כמו טלפון:
    - `/health` עונה.

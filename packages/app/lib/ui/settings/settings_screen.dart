@@ -1,5 +1,6 @@
-// "עוד" → settings (APP-SPEC §4.8): server and sign-out, devices, focus, appearance, version. Stripe-style pairs.
+// "עוד" → settings (APP-SPEC §4.8): the server (switching to another, sign-out), devices, focus, appearance, version. Stripe-style pairs.
 // Signing in is a passkey or a pairing code (#23); hq's own token is never entered on a device.
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -97,13 +98,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 rest: 'ביטול וצימוד',
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DevicesScreen())),
               ),
-              const Section('שרת'),
+              const Section('חיבור לשרת'),
               ListBlock(inset: 16, children: [
-                pair('כתובת', Text(store.backend.label, textDirection: TextDirection.ltr, style: T.row2.copyWith(color: p.text))),
+                pair('שרת', Text(store.backend.label, key: const Key('server-host'), textDirection: TextDirection.ltr, style: T.row2.copyWith(color: p.text))),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Align(alignment: AlignmentDirectional.centerStart, child: Btn('יציאה מהמכשיר הזה', onTap: busy || note != null ? null : _leave)),
+                    // The web build belongs to its own server; the app can move to another one.
+                    if (!kIsWeb) ...[
+                      Text('לשרת אחר צריך קישור צימוד או QR ממנו. המכשיר נשאר מחובר לשרת הזה עד שהכניסה לחדש מצליחה.',
+                          style: T.small.copyWith(color: p.text2)),
+                      const SizedBox(height: 10),
+                    ],
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      if (!kIsWeb) Btn('החלפת שרת', icon: 'dns', onTap: busy || note != null ? null : () => kSwitchServer?.call()),
+                      Btn('יציאה מהמכשיר הזה', onTap: busy || note != null ? null : _leave),
+                    ]),
                     if (note != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(note!, style: T.secondary.copyWith(color: p.text))),
                   ]),
                 ),

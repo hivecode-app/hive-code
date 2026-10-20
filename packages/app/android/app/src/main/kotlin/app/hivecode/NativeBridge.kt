@@ -43,6 +43,7 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
     private val main = Handler(Looper.getMainLooper())
     private var initialRoute: String? = null
     private var initialShare: Intent? = null
+    private var initialPair: String? = null
     private var permissionResult: MethodChannel.Result? = null
     private val passkeys by lazy { Passkeys(activity) }
 
@@ -51,6 +52,7 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
         intent ?: return
         initialRoute = trustedRoute(intent)
         if (isShare(intent)) initialShare = intent
+        initialPair = pairLink(intent)
         ackIfAsked(intent)
     }
 
@@ -58,6 +60,7 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
     fun onNewIntent(intent: Intent) {
         ackIfAsked(intent)
         trustedRoute(intent)?.let { channel.invokeMethod("route", it) }
+        pairLink(intent)?.let { channel.invokeMethod("pair", it) }
         if (isShare(intent)) {
             thread(name = "company-share") {
                 val payload = sharedPayload(activity, intent)
@@ -102,6 +105,10 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
             "getInitialRoute" -> {
                 result.success(initialRoute)
                 initialRoute = null
+            }
+            "getPairLink" -> {
+                result.success(initialPair)
+                initialPair = null
             }
             "getSharedPayload" -> {
                 val intent = initialShare
@@ -236,6 +243,17 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
         private const val REQ_NOTIFICATIONS = 7301
 
         fun isShare(intent: Intent) = intent.action == Intent.ACTION_SEND
+
+        /**
+         * `agentcompany://pair?url=<https://host/pair?code=…>`, from hq's pairing page (pairing.ts). Any app
+         * can send this, so it only fills the sign-in screen: the address is shown and nothing connects
+         * until the owner taps.
+         */
+        fun pairLink(intent: Intent): String? {
+            val data = intent.data ?: return null
+            if (intent.action != Intent.ACTION_VIEW || data.scheme != "agentcompany" || data.host != "pair") return null
+            return data.getQueryParameter("url")?.takeIf { it.startsWith("https://") && it.length < 2048 }
+        }
 
         /**
          * {text?, imagePath?, identityId?}. The image is copied into the app cache, because the

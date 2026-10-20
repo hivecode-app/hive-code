@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:agent_company/data/auth_client.dart';
 import 'package:agent_company/data/backend_select.dart';
+import 'package:agent_company/data/fake_backend.dart';
 import 'package:agent_company/data/hq_backend.dart';
 import 'package:agent_company/data/passkey.dart';
 import 'package:agent_company/main.dart';
@@ -49,6 +50,7 @@ class FakePasskeys implements Passkeys {
 /// A tiny hq: the auth and devices endpoints, recording what was called.
 class FakeHq {
   final requests = <String>[];
+  final hosts = <String>[];
   final bodies = <String, Map<String, dynamic>>{};
   var devices = <Map<String, dynamic>>[
     {'id': 'dev_a', 'name': 'OnePlus 13', 'via': 'register', 'passkey_id': 'cred-1', 'created_at': t0, 'last_seen_at': t1, 'current': true},
@@ -56,11 +58,15 @@ class FakeHq {
   ];
 
   late final client = MockClient((r) async {
-    final path = r.url.path.replaceFirst('/p/hq', '');
+    final path = r.url.path.replaceFirst(RegExp(r'^(/p)?/hq'), '');
     requests.add('${r.method} $path');
+    hosts.add(r.url.host);
     if (r.body.isNotEmpty) bodies[path] = (jsonDecode(r.body) as Map).cast<String, dynamic>();
     final authed = r.headers['authorization'] == 'Bearer tok-a';
     http.Response j(Object v, [int s = 200]) => http.Response(jsonEncode(v), s, headers: {'content-type': 'application/json'});
+    if (path == '/health') {
+      return r.url.host.startsWith('not-hq') ? http.Response('<html></html>', 200) : j({'ok': true, 'schema': 30});
+    }
     switch (path) {
       case '/api/auth/login/options':
         return j({'challenge': 'ch-login', 'rpId': 'app.example'});
@@ -104,6 +110,7 @@ Future<void> pumpScreen(WidgetTester tester, Widget screen, {Size size = const S
 }
 
 void main() {
+  group('server', serverTests);
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   test('login: options → passkey → token, with this device\'s name', () async {
@@ -241,5 +248,125 @@ void main() {
     }
     expect(hq.unauthorized, isTrue);
     hq.dispose();
+  });
+}
+
+void serverTests() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('the app asks for the server: a pasted link fills the address and the code, then pairs there', (tester) async {
+    final hq = FakeHq();
+    Session? got;
+    await pumpScreen(tester, SignInScreen(
+        askServer: true, client: AuthClient('', client: hq.client, passkeys: FakePasskeys(supported: false)), onSignedIn: (s) => got = s));
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/sign_in_server_light.png'));
+    await tester.enterText(find.byKey(const Key('server-address')), 'https://box.example.net/pair?code=good-code');
+    await tester.pump();
+    expect(find.text('box.example.net'), findsOneWidget);
+    expect(find.text('GOOD-CODE'), findsOneWidget);
+    await tester.tap(find.text('צימוד'));
+    await tester.pumpAndSettle();
+    expect(got?.baseUrl, 'https://box.example.net/hq');
+    expect(got?.token, 'tok-paired');
+    expect(hq.requests, ['GET /health', 'POST /api/auth/pair']);
+    expect(hq.hosts.toSet(), {'box.example.net'});
+  });
+
+  testWidgets('an address without hq behind it, or none at all, says so in one sentence', (tester) async {
+    final hq = FakeHq();
+    Session? got;
+    await pumpScreen(tester, SignInScreen(askServer: true, client: AuthClient('', client: hq.client, passkeys: FakePasskeys()), onSignedIn: (s) => got = s));
+    await tester.tap(find.text('כניסה עם טביעת אצבע'));
+    await tester.pumpAndSettle();
+    expect(find.text('צריך את הכתובת של השרת, מה-QR או מהקישור שקיבלת.'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('server-address')), 'not-hq.example.com');
+    await tester.tap(find.text('כניסה עם טביעת אצבע'));
+    await tester.pumpAndSettle();
+    expect(find.text('לא נמצא שרת של החברה בכתובת הזו. כדאי לבדוק את הכתובת ולנסות שוב.'), findsOneWidget);
+    expect(got, isNull);
+    expect(hq.requests, ['GET /health'], reason: 'no passkey prompt for a server that is not there');
+  });
+
+  testWidgets('opened from a pairing link: sign-in starts with that server and code', (tester) async {
+    await loadFonts();
+    final link = 'agentcompany://pair?url=${Uri.encodeComponent('https://box.example.net/pair?code=GOOD-CODE')}';
+    await tester.pumpWidget(AuthGate(initial: null, hqUrl: '', askServer: true, pairLink: link,
+        client: AuthClient('', client: FakeHq().client, passkeys: FakePasskeys(supported: false))));
+    await tester.pumpAndSettle();
+    expect(find.text('box.example.net'), findsOneWidget);
+    expect(find.text('GOOD-CODE'), findsOneWidget);
+    await tester.tap(find.text('צימוד'));
+    await tester.pump();
+    await tester.pump();
+    expect((await savedSession())?.baseUrl, 'https://box.example.net/hq');
+    expect((await SharedPreferences.getInstance()).getString(kHqServer), 'https://box.example.net');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a device that was signed out starts sign-in with its last server', (tester) async {
+    await loadFonts();
+    await tester.pumpWidget(AuthGate(initial: null, hqUrl: 'https://app.hq.example.com/hq', askServer: true,
+        client: AuthClient('', client: FakeHq().client, passkeys: FakePasskeys())));
+    await tester.pumpAndSettle();
+    expect(find.text('app.hq.example.com'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('switching servers keeps the current one until the new one lets the device in, then leaves the old one', (tester) async {
+    await loadFonts();
+    SharedPreferences.setMockInitialValues({kHqUrl: 'https://old.example.net/hq', kHqToken: 'tok-a'});
+    final hq = FakeHq();
+    await tester.pumpWidget(AuthGate(initial: FakeBackend(simulate: false), hqUrl: 'https://old.example.net/hq', askServer: true,
+        client: AuthClient('', client: hq.client, passkeys: FakePasskeys(supported: false))));
+    await tester.pumpAndSettle();
+    expect(find.byType(SignInScreen), findsNothing);
+
+    // Settings → "החלפת שרת", then cancel: back in the app, nothing changed.
+    kSwitchServer!();
+    await tester.pumpAndSettle();
+    expect(find.text('החלפת שרת'), findsOneWidget);
+    expect(find.textContaining('המכשיר מחובר עכשיו ל-'), findsOneWidget);
+    await tester.tap(find.text('ביטול'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SignInScreen), findsNothing);
+    expect((await savedSession())?.token, 'tok-a');
+
+    // A pairing link for another server: the new session replaces the old, whose device is revoked there.
+    kSwitchServer!('https://new.example.net/pair?code=GOOD-CODE');
+    await tester.pumpAndSettle();
+    expect(find.text('new.example.net'), findsOneWidget);
+    await tester.tap(find.text('צימוד'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SignInScreen), findsNothing);
+    final s = await savedSession();
+    expect(s?.baseUrl, 'https://new.example.net/hq');
+    expect(s?.token, 'tok-paired');
+    expect(hq.requests, containsAllInOrder(['GET /health', 'POST /api/auth/pair', 'GET /api/devices', 'POST /api/devices/dev_a/revoke']));
+    expect(hq.hosts.last, 'old.example.net');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('opened from a pairing link for another server while signed in: an offer to switch, and the app stays', (tester) async {
+    await loadFonts();
+    SharedPreferences.setMockInitialValues({kHqUrl: 'https://old.example.net/hq', kHqToken: 'tok-a'});
+    await tester.pumpWidget(AuthGate(initial: FakeBackend(simulate: false), hqUrl: 'https://old.example.net/hq', askServer: true,
+        pairLink: 'agentcompany://pair?url=${Uri.encodeComponent('https://new.example.net/pair?code=GOOD-CODE')}',
+        client: AuthClient('', client: FakeHq().client, passkeys: FakePasskeys(supported: false))));
+    await tester.pumpAndSettle();
+    expect(find.text('החלפת שרת'), findsOneWidget);
+    expect(find.text('new.example.net'), findsOneWidget);
+    expect(find.text('GOOD-CODE'), findsOneWidget);
+    await tester.tap(find.text('ביטול'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SignInScreen), findsNothing);
+    expect((await savedSession())?.token, 'tok-a');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('typing a path by hand keeps it as typed', (tester) async {
+    await pumpScreen(tester, SignInScreen(askServer: true, client: AuthClient('', client: FakeHq().client, passkeys: FakePasskeys()), onSignedIn: (_) {}));
+    await tester.enterText(find.byKey(const Key('server-address')), 'app.example.com/hq');
+    await tester.pump();
+    expect(find.text('app.example.com/hq'), findsOneWidget);
   });
 }

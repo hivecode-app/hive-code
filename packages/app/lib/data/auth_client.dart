@@ -1,6 +1,6 @@
 // Getting and managing device tokens (#23, packages/hq/src/auth.ts). Each device has its own
 // token, which settings → devices can revoke; hq's own token never leaves the server.
-//   open:   POST /api/auth/login/options, /api/auth/login, /api/auth/register/options,
+//   open:   GET /health (is hq there), POST /api/auth/login/options, /api/auth/login, /api/auth/register/options,
 //           /api/auth/register, /api/auth/pair
 //   device: GET /api/devices, POST /api/devices/pair, /api/devices/:id/revoke, /api/passkeys/:id/revoke
 import 'dart:convert';
@@ -68,12 +68,38 @@ class PairCode {
 class AuthClient {
   AuthClient(this.baseUrl, {http.Client? client, Passkeys? passkeys})
       : _http = client ?? http.Client(),
-        _passkeys = passkeys ?? Passkeys.instance;
-  final String baseUrl;
+        _passkeys = passkeys ?? Passkeys.instance,
+        _ownsHttp = true;
+
+  /// The same HTTP client and passkeys, another hq (switching servers: leaving the old one).
+  AuthClient.at(this.baseUrl, AuthClient other)
+      : _http = other._http,
+        _passkeys = other._passkeys,
+        _ownsHttp = false;
+  final bool _ownsHttp;
+  /// The hq this client talks to. The sign-in screen points it at the server typed or linked there.
+  String baseUrl;
   final http.Client _http;
   final Passkeys _passkeys;
 
   bool get passkeysSupported => _passkeys.supported;
+
+  /// Is there an hq at [baseUrl]? Its open GET /health answers JSON with the store's schema (503 too:
+  /// hq is there, only its scheduler is late).
+  Future<void> probe() async {
+    const missing = AuthFailure('לא נמצא שרת של החברה בכתובת הזו. כדאי לבדוק את הכתובת ולנסות שוב.');
+    final http.Response r;
+    try {
+      r = await _http.get(Uri.parse('$baseUrl/health')).timeout(const Duration(seconds: 10));
+    } catch (_) {
+      throw const AuthFailure('אין חיבור לשרת בכתובת הזו. כדאי לבדוק את הכתובת ואת החיבור לאינטרנט.');
+    }
+    try {
+      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      if ((r.statusCode == 200 || r.statusCode == 503) && j is Map && j.containsKey('schema')) return;
+    } catch (_) {}
+    throw missing;
+  }
 
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body,
       {String? token, String otherwise = 'השרת לא אישר את הכניסה. אפשר לנסות שוב.'}) async {
@@ -157,7 +183,9 @@ class AuthClient {
   Future<void> revokePasskey(String token, String id) =>
       _post('/api/passkeys/${Uri.encodeComponent(id)}/revoke', {}, token: token, otherwise: 'ההסרה לא עברה. ייתכן שה-passkey כבר הוסר.');
 
-  void close() => _http.close();
+  void close() {
+    if (_ownsHttp) _http.close();
+  }
 }
 
 /// A name for this device in the devices list ("Android", "Chrome · Linux"…).

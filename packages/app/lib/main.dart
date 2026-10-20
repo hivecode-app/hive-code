@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -19,20 +22,30 @@ import 'ui/shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(AuthGate(initial: await selectBackend(), hqUrl: gatewayUrl()));
+  runApp(AuthGate(initial: await selectBackend(), hqUrl: await initialServer(), pairLink: await NativeBridge.instance.getPairLink()));
 }
 
 /// Sign-in or the app (#23). A device without a token signs in; a device whose token hq refuses
-/// (revoked in settings → devices) forgets it and comes back here.
+/// (revoked in settings → devices) forgets it and comes back here. Switching servers (settings, or a
+/// pairing link for another server) shows the sign-in screen while the current session stays, and
+/// drops that session only once the new server let this device in.
 class AuthGate extends StatefulWidget {
-  const AuthGate({super.key, required this.initial, required this.hqUrl, this.client});
+  const AuthGate({super.key, required this.initial, required this.hqUrl, this.client, this.pairLink, this.askServer = !kIsWeb});
 
   /// null: sign in first.
   final Backend? initial;
+
+  /// The server sign-in starts with ('' = none yet: the app asks for it).
   final String hqUrl;
 
   /// Tests pass one with a fake HTTP client and passkeys.
   final AuthClient? client;
+
+  /// The pairing link the app was opened with (hq's pairing page → agentcompany://pair).
+  final String? pairLink;
+
+  /// The app asks for the server; the web build always uses its own origin.
+  final bool askServer;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -43,13 +56,46 @@ class _AuthGateState extends State<AuthGate> {
   AppStore? store;
   String? note;
 
+  /// Shown instead of the app while switching servers; the session of [store] stays meanwhile.
+  bool switching = false;
+
+  /// What the sign-in screen starts with: a server and maybe a code, from a link. [_screen] renews it.
+  late ServerTarget? target = widget.pairLink == null ? null : parseServer(widget.pairLink!);
+  int _screen = 0;
+  StreamSubscription<String>? _links;
+
   @override
   void initState() {
     super.initState();
     kSignOut = (note) {
       if (mounted && store != null) _signOut(note);
     };
-    if (widget.initial != null) _open(widget.initial!);
+    kSwitchServer = ([link]) {
+      if (mounted && store != null) _offer(link == null ? null : parseServer(link), always: true);
+    };
+    _links = NativeBridge.instance.onPairLink.listen((l) => _offer(parseServer(l)));
+    if (widget.initial != null) {
+      _open(widget.initial!);
+      // Opened from a pairing link while signed in: for another server that is an offer to switch.
+      if (target != null) {
+        final t = target;
+        target = null;
+        _offer(t);
+      }
+    }
+  }
+
+  /// A pairing link (or "החלפת שרת"): the sign-in screen with it. While signed in to that same server
+  /// a link changes nothing.
+  void _offer(ServerTarget? t, {bool always = false}) {
+    if (t == null && !always) return;
+    final s = store;
+    if (s != null && !always && s.backend.label == Uri.parse(t!.origin).host) return;
+    setState(() {
+      target = t;
+      _screen++;
+      if (s != null) switching = true;
+    });
   }
 
   void _open(Backend b) {
@@ -64,22 +110,36 @@ class _AuthGateState extends State<AuthGate> {
     if (b is HqBackend && b.unauthorized) _signOut();
   }
 
-  Future<void> _signOut([String note = 'המכשיר הזה נותק מהחברה. אפשר להיכנס שוב.']) async {
-    final s = store!;
+  /// Closes the running app's store and backend (after the frame that stops showing them).
+  void _close(AppStore s) {
     s.backend.removeListener(_watch);
-    setState(() {
-      store = null;
-      this.note = note;
-    });
-    await clearSession();
-    await NativeBridge.instance.clearConfig();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       s.dispose();
       s.backend.dispose();
     });
   }
 
+  Future<void> _signOut([String note = 'המכשיר הזה נותק מהחברה. אפשר להיכנס שוב.']) async {
+    final s = store!;
+    setState(() {
+      store = null;
+      switching = false;
+      this.note = note;
+    });
+    _close(s);
+    await clearSession();
+    await NativeBridge.instance.clearConfig();
+  }
+
   Future<void> _signedIn(Session session) async {
+    final old = store;
+    if (old != null) {
+      // Switched: the old token is revoked where it lives (best effort, like "יציאה"; also when it was the
+      // same server again), and its data goes.
+      final prev = await savedSession();
+      if (prev != null && prev.token != session.token) unawaited(_leave(prev));
+      await clearSession();
+    }
     try {
       await saveSession(session);
     } catch (e) {
@@ -88,12 +148,32 @@ class _AuthGateState extends State<AuthGate> {
       debugPrint('saveSession failed: $e');
     }
     if (!mounted) return;
-    setState(() => _open(HqBackend(baseUrl: session.baseUrl, token: session.token)));
+    setState(() {
+      if (old != null) _close(old);
+      switching = false;
+      note = null;
+      _open(HqBackend(baseUrl: session.baseUrl, token: session.token));
+    });
+  }
+
+  /// Revokes this device's token on a server it no longer uses.
+  Future<void> _leave(Session s) async {
+    final c = AuthClient.at(s.baseUrl, client);
+    try {
+      final me = (await c.devices(s.token)).devices.where((d) => d.current).firstOrNull;
+      if (me != null) await c.revokeDevice(s.token, me.id);
+    } on AuthFailure {
+      // Offline: that server's devices screen can revoke it later.
+    } finally {
+      c.close();
+    }
   }
 
   @override
   void dispose() {
     kSignOut = null;
+    kSwitchServer = null;
+    _links?.cancel();
     final s = store;
     if (s != null) {
       s.backend.removeListener(_watch);
@@ -107,12 +187,17 @@ class _AuthGateState extends State<AuthGate> {
   @override
   Widget build(BuildContext context) {
     final s = store;
-    if (s != null) return CompanyApp(key: ObjectKey(s), store: s);
+    if (s != null && !switching) return CompanyApp(key: ObjectKey(s), store: s);
     return _Frame(
       home: SignInScreen(
+        key: ValueKey(_screen),
         client: client,
         note: note,
-        pairCode: note == null ? pairCodeFromUrl() : null, // after a sign-out the link's code is spent
+        askServer: widget.askServer,
+        server: switching ? target?.origin : (target?.origin ?? widget.hqUrl),
+        pairCode: target?.code ?? (note == null ? pairCodeFromUrl() : null), // after a sign-out the link's code is spent
+        current: switching ? s?.backend.label : null,
+        onCancel: switching ? () => setState(() => switching = false) : null,
         onSignedIn: _signedIn,
       ),
     );
