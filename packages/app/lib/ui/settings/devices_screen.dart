@@ -116,7 +116,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     }
   }
 
-  String _when(DateTime t) => '${t.day}/${t.month} ${hm(t)}';
+  String _when(DateTime t) => '${dm(t)} ${hm(t)}';
 
   String _via(DeviceInfo d) => switch (d.via) {
         'passkey' => 'נכנס עם טביעת אצבע',

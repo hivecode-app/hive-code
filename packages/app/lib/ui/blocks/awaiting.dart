@@ -108,12 +108,12 @@ class _Row extends StatelessWidget {
     final word = deploy ? 'מחכה לפריסה' : 'לבדוק';
     final action = deploy ? 'נפרס' : 'בדקתי';
     final who = x.who == null || d == null ? null : d.who(x.who!).name;
-    final today = DateTime(now.year, now.month, now.day);
-    final when = !x.at.isBefore(today)
+    final ago = daysAgo(x.at, now);
+    final when = ago <= 0
         ? hm(x.at)
-        : !x.at.isBefore(today.subtract(const Duration(days: 1)))
+        : ago == 1
             ? 'אתמול'
-            : '${x.at.day}/${x.at.month}';
+            : dm(x.at);
     final second = T.small.copyWith(color: p.text2);
     final canOpen = x.who != null && d != null && d.canChat(x.who!) && d.identities.containsKey(x.who);
     void done() => store.checked(x.task);

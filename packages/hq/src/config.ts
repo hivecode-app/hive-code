@@ -21,8 +21,7 @@ export interface HqConfig {
   shiftTemplate: string;
   /** Extra listener serving only GET /health (for the ci-host heartbeat), e.g. "0.0.0.0:7421". Off by default. */
   healthListen: string | null;
-  timeZone: string;              // his time zone: "לילה עד 7" and what "morning" means (B.16)
-  morningFromHour: number;       // night mode ends on his first message from this hour (until noon)
+  morningFromHour: number;       // night mode ends on his first message from this hour (org.yaml `timezone`)
   timers: {
     deliveryTimeoutMs: number;   // B.4: 60s without `delivered` → retry with resurrection → visible failure
     watchdogMs: number;          // B.5: 15s
@@ -96,7 +95,6 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     defaultCwd: resolve(import.meta.dirname, '..', '..', '..'),
     shiftTemplate: resolve(import.meta.dirname, '..', '..', 'shift-host', 'systemd', 'company-shift@.service'),
     healthListen: null,
-    timeZone: 'Asia/Jerusalem',
     morningFromHour: 5,
     timers: {
       deliveryTimeoutMs: 60_000,

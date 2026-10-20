@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../model/company_time.dart' as company_time;
 import '../model/models.dart';
 import 'backend.dart';
 
@@ -321,8 +322,7 @@ class AppStore extends ChangeNotifier {
 
   Future<void> toggleAutomation(Automation a) async {
     final on = !a.enabled;
-    final now = DateTime.now();
-    final hm = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    final hm = company_time.hm(DateTime.now());
     if (!on) {
       a.prevMeta = a.meta;
       a.meta = 'כובתה ידנית · $hm';

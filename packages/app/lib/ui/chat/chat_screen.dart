@@ -340,14 +340,15 @@ class _ChatScreenState extends State<ChatScreen> {
   // when the list itself changes (not when a streaming bubble grows).
   List<_Entry> _entries(Conversation chat) {
     final items = chat.items;
-    final sig = (items.length, items.firstOrNull?.id, items.lastOrNull?.id);
+    // The zone too: day separators follow org.yaml's `timezone` once hq sends it (#121).
+    final sig = (items.length, items.firstOrNull?.id, items.lastOrNull?.id, CompanyTime.offset);
     if (identical(items, _entryItems) && _entrySig == sig && _entryCache != null) return _entryCache!;
     final out = <_Entry>[];
     // Row keys of our own start with \u0000, so they can never equal an item id.
     if (items.isEmpty) out.add(const _Entry('\u0000empty'));
     DateTime? day;
     for (final it in items) {
-      final dd = DateTime(it.ts.year, it.ts.month, it.ts.day);
+      final dd = dayStart(it.ts);
       if (day != dd) {
         day = dd;
         // Unique even when items arrive out of order and a day shows up twice.
@@ -488,12 +489,11 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   static String _dayLabel(DateTime d) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    if (d == today) return 'היום';
-    if (d == today.subtract(const Duration(days: 1))) return 'אתמול';
+    final ago = daysAgo(d, DateTime.now());
+    if (ago == 0) return 'היום';
+    if (ago == 1) return 'אתמול';
     const days = ['ב\'', 'ג\'', 'ד\'', 'ה\'', 'ו\'', 'ש\'', 'א\''];
-    return '${days[d.weekday - 1]} ${d.day}/${d.month}';
+    return '${days[wall(d).weekday - 1]} ${dm(d)}';
   }
 }
 

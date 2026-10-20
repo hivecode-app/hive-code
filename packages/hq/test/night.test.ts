@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeEnv, until, type TestEnv } from './helpers.ts';
+import { makeEnv, ORG_YAML, until, type TestEnv } from './helpers.ts';
 import { parseNightTrigger, priorityOf, type Issue } from '../src/night.ts';
 
 const CHARTER = (status = 'active') => `---\nproject: agent-company\nstatus: ${status}\nrepo: hivecode-app/hive-code\nnight_weight: 3\n---\n\n# x\n`;
@@ -15,6 +15,7 @@ async function nightEnv(issues: Issue[], opts: { summary?: boolean; scheduler?: 
   const open = new Map(issues.map((i) => [i.number, i]));
   const calls: string[] = [];
   const env = await makeEnv({
+    org: `${ORG_YAML}timezone: Asia/Jerusalem\n`,
     projects: { 'agent-company': CHARTER(), lumo: CHARTER('dormant').replace('agent-company', 'lumo') },
     deps: { issues: async (repo) => { calls.push(repo); return [...open.values()]; } },
   });
@@ -164,21 +165,22 @@ test('a night with an hour set ends at that hour, not on his messages; the note 
 
 test('parseNightTrigger and priorityOf', () => {
   const P = ['agent-company', 'lumo', 'voice-bot'];
+  const IL = 'Asia/Jerusalem';
   const now = new Date(2026, 9, 20, 23, 0).getTime();
-  assert.deepEqual(parseNightTrigger('לילה', P, now), { scope: null, note: null, until: null });
-  assert.deepEqual(parseNightTrigger('  לילה.  ', P, now), { scope: null, note: null, until: null });
-  assert.deepEqual(parseNightTrigger('לילה, רק לומו', P, now), { scope: ['lumo'], note: null, until: null });
-  assert.deepEqual(parseNightTrigger('לילה רק lumo ו-voice-bot', P, now)?.scope, ['lumo', 'voice-bot']);
-  assert.deepEqual(parseNightTrigger('לילה בלי פריסות', P, now), { scope: null, note: 'בלי פריסות', until: null });
+  assert.deepEqual(parseNightTrigger('לילה', P, now, IL), { scope: null, note: null, until: null });
+  assert.deepEqual(parseNightTrigger('  לילה.  ', P, now, IL), { scope: null, note: null, until: null });
+  assert.deepEqual(parseNightTrigger('לילה, רק לומו', P, now, IL), { scope: ['lumo'], note: null, until: null });
+  assert.deepEqual(parseNightTrigger('לילה רק lumo ו-voice-bot', P, now, IL)?.scope, ['lumo', 'voice-bot']);
+  assert.deepEqual(parseNightTrigger('לילה בלי פריסות', P, now, IL), { scope: null, note: 'בלי פריסות', until: null });
   const il23 = Date.UTC(2026, 9, 20, 20, 0); // 23:00 in Israel (IDT, UTC+3)
-  assert.equal(parseNightTrigger('לילה עד 7', P, il23)?.until, Date.UTC(2026, 9, 21, 4, 0), '07:00 Israel time, tomorrow');
-  assert.deepEqual(parseNightTrigger('לילה, רק לומו בלי פריסות', P, now), { scope: ['lumo'], note: 'בלי פריסות', until: null });
-  assert.deepEqual(parseNightTrigger('לילה רק לומו עד 7', P, il23), { scope: ['lumo'], note: null, until: Date.UTC(2026, 9, 21, 4, 0) });
-  assert.deepEqual(parseNightTrigger('לילה רק לומו, voice-bot', P, now)?.scope, ['lumo', 'voice-bot']);
-  assert.deepEqual(parseNightTrigger('לילה רק דברים קטנים', P, now), { scope: null, note: 'רק דברים קטנים', until: null });
-  assert.equal(parseNightTrigger('לילה טוב', P, now), null);
-  assert.equal(parseNightTrigger('לילהלה', P, now), null);
-  assert.equal(parseNightTrigger('מה עם הלילה?', P, now), null);
+  assert.equal(parseNightTrigger('לילה עד 7', P, il23, IL)?.until, Date.UTC(2026, 9, 21, 4, 0), '07:00 Israel time, tomorrow');
+  assert.deepEqual(parseNightTrigger('לילה, רק לומו בלי פריסות', P, now, IL), { scope: ['lumo'], note: 'בלי פריסות', until: null });
+  assert.deepEqual(parseNightTrigger('לילה רק לומו עד 7', P, il23, IL), { scope: ['lumo'], note: null, until: Date.UTC(2026, 9, 21, 4, 0) });
+  assert.deepEqual(parseNightTrigger('לילה רק לומו, voice-bot', P, now, IL)?.scope, ['lumo', 'voice-bot']);
+  assert.deepEqual(parseNightTrigger('לילה רק דברים קטנים', P, now, IL), { scope: null, note: 'רק דברים קטנים', until: null });
+  assert.equal(parseNightTrigger('לילה טוב', P, now, IL), null);
+  assert.equal(parseNightTrigger('לילהלה', P, now, IL), null);
+  assert.equal(parseNightTrigger('מה עם הלילה?', P, now, IL), null);
   assert.equal(priorityOf(['bug', 'p0']), 0);
   assert.equal(priorityOf(['priority:p3']), 3);
   assert.equal(priorityOf([]), 2);

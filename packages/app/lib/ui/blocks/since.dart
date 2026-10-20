@@ -9,10 +9,10 @@ import 'parts.dart';
 
 /// "מאז 19:00", "מאז אתמול 22:10", "מאז 18/10".
 String sinceLabel(DateTime since, DateTime now) {
-  final day = DateTime(now.year, now.month, now.day);
-  if (!since.isBefore(day)) return 'מאז ${hm(since)}';
-  if (!since.isBefore(day.subtract(const Duration(days: 1)))) return 'מאז אתמול ${hm(since)}';
-  return 'מאז ${since.day}/${since.month}';
+  final ago = daysAgo(since, now);
+  if (ago <= 0) return 'מאז ${hm(since)}';
+  if (ago == 1) return 'מאז אתמול ${hm(since)}';
+  return 'מאז ${dm(since)}';
 }
 
 /// "מאז שהיית פה": one folded line, the newest sentence and how many more; a tap opens every sentence

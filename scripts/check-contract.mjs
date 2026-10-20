@@ -233,6 +233,12 @@ export function main() {
     catch (e) { err(`${W}: ${e.message}`); }
     if (!isObj(org)) { if (parsed) err(`${W}: top level must be a non-empty mapping`); org = null; }
     else if (typeof org.owner !== 'string' || !org.owner) err(`${W}: "owner" must be set (the id everyone reports to)`);
+    // #121: the one time zone of the company (night, home, the hours in the app). An IANA name.
+    if (org) {
+      let tzOk = typeof org.timezone === 'string' && !!org.timezone;
+      if (tzOk) { try { new Intl.DateTimeFormat('en-US', { timeZone: org.timezone }); } catch { tzOk = false; } }
+      if (!tzOk) err(`${W}: "timezone" must be an IANA time zone (e.g. Asia/Bangkok), got ${JSON.stringify(org.timezone)}`);
+    }
   }
 
   if (org) {

@@ -163,7 +163,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     final rest = [...others.where((c) => !d.isDone(c.identityId)), ...others.where((c) => d.isDone(c.identityId))];
     ConversationSummary conv(String id) => d.conversations.where((c) => c.identityId == id).firstOrNull ?? ConversationSummary(identityId: id, lastLine: '', time: '');
     final now = ConversationsScreen.clock();
-    final since = store.chatsSeenAt ?? DateTime(now.year, now.month, now.day);
+    final since = store.chatsSeenAt ?? dayStart(now);
     final head = HeadData.of(d, since: since);
     final listed = {for (final c in rest) c.identityId};
     final rows = <Widget>[

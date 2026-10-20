@@ -26,10 +26,10 @@ class ProjectBlock extends StatelessWidget {
     final second = T.small.copyWith(color: p.text2);
     final today = now ?? DateTime.now();
     String when(DateTime t) {
-      final day = DateTime(today.year, today.month, today.day), at = DateTime(t.year, t.month, t.day);
-      if (at == day) return hm(t);
-      if (at == DateTime(today.year, today.month, today.day - 1)) return 'אתמול';
-      return '${t.day}/${t.month}';
+      final ago = daysAgo(t, today);
+      if (ago == 0) return hm(t);
+      if (ago == 1) return 'אתמול';
+      return dm(t);
     }
     final TextSpan line;
     String end = '';

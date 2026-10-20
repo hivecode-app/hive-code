@@ -17,6 +17,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../model/company_time.dart' as company_time;
 import '../model/home_recipe.dart';
 import '../model/models.dart';
 import '../theme/icons.dart';
@@ -161,12 +162,9 @@ class HqBackend extends Backend {
     // On data from the device cache, "since" is when that data was current, not when the link failed.
     _downSince ??= _fromCache ?? DateTime.now();
     final t = _downSince!;
-    final now = DateTime.now();
-    final hm = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-    // Calendar days, in UTC so a daylight-saving night isn't 23 hours.
-    final daysAgo = DateTime.utc(now.year, now.month, now.day).difference(DateTime.utc(t.year, t.month, t.day)).inDays;
+    final hm = company_time.hm(t);
     // Cached data can be days old: "אתמול 22:10" or "18/10 22:10", never a bare time that reads as today.
-    final since = switch (daysAgo) { 0 => hm, 1 => 'אתמול $hm', _ => '${t.day}/${t.month} $hm' };
+    final since = switch (company_time.daysAgo(t, DateTime.now())) { 0 => hm, 1 => 'אתמול $hm', _ => '${company_time.dm(t)} $hm' };
     _status = SystemStatus(LinkState.offline, since: since);
   }
 
@@ -203,6 +201,8 @@ class HqBackend extends Backend {
     final inbox = (results[1]['items'] as List).cast<Map<String, dynamic>>();
     final asks = (results[2]['asks'] as List).cast<Map<String, dynamic>>();
     final toggles = (results[3]['toggles'] as List).cast<Map<String, dynamic>>();
+    // org.yaml `timezone` (#121): before the mapping, so "today" and every hour in it are his.
+    company_time.CompanyTime.apply(results[0]['timezone']);
     final prev = _data;
     _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), awaiting: _list(results[0], 'awaiting'), previous: prev);
     // Order and last lines from the last messages fetch, right away: without them the list showed
@@ -388,6 +388,7 @@ class HqBackend extends Backend {
       final c = jsonDecode(raw) as Map<String, dynamic>;
       if (c['url'] != baseUrl) return;
       List<Map<String, dynamic>> list(String k, String f) => ((c[k] as Map)[f] as List).cast<Map<String, dynamic>>();
+      company_time.CompanyTime.apply((c['board'] as Map)['timezone']);
       _data = mapSnapshot(board: list('board', 'identities'), inbox: list('inbox', 'items'), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'),
           tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'), awaiting: _list(c['board'], 'awaiting'));
       if (c['home'] is Map) {
@@ -1187,10 +1188,7 @@ WorkerStatus mapStatus(String? s) => switch (s) {
       _ => WorkerStatus.free,
     };
 
-String _hm(int ms) {
-  final t = DateTime.fromMillisecondsSinceEpoch(ms);
-  return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-}
+String _hm(int ms) => company_time.hm(DateTime.fromMillisecondsSinceEpoch(ms));
 
 /// hq DTOs -> the app's model. Pure, unit-tested (test/hq_mapping_test.dart).
 CompanyData mapSnapshot({
@@ -1359,7 +1357,7 @@ CompanyData mapSnapshot({
   // The tasks hq is running (the board, APP-SPEC §4.5, and the project teams in org). Finished ones
   // leave both. What finished in the last week stays (doneAt), for "מאז הביקור הקודם" after a day away (#53).
   final clock = now ?? DateTime.now();
-  final today = DateTime(clock.year, clock.month, clock.day).millisecondsSinceEpoch;
+  final today = company_time.dayStart(clock).millisecondsSinceEpoch;
   final tickets = <Ticket>[];
   final taskOf = <String, String>{}; // worker -> the task it works on
   for (final t in tasks) {
@@ -1469,7 +1467,7 @@ CompanyData mapSnapshot({
   final live = presence.entries.where((e) => e.value.status != WorkerStatus.done && (teamKind[ids[e.key]?.teamId] != 'task' || taskOf.containsKey(e.key)));
   final active = live.where((e) => e.value.status != WorkerStatus.resting).length;
   final open = tickets.where((t) => t.group != TicketGroup.doneToday).length;
-  final doneToday = tickets.where((t) => t.doneAt != null && !t.doneAt!.isBefore(DateTime(clock.year, clock.month, clock.day))).length;
+  final doneToday = tickets.where((t) => t.doneAt != null && !t.doneAt!.isBefore(company_time.dayStart(clock))).length;
 
   return CompanyData(
     teams: teams,

@@ -15,6 +15,7 @@ import type { Store } from './store.ts';
 import type { Scheduler, TaskRow } from './scheduler.ts';
 import type { Mailbox, MessageRow } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
+import { hhmm as localHHMM, nextLocal, readTimeZone } from './timezone.ts';
 
 export interface Issue { number: number; title: string; body: string; labels: string[]; createdAt: string }
 /** Open issues of a repo. Injected in tests; default is the gh CLI. */
@@ -58,22 +59,6 @@ export function priorityOf(labels: string[]): number {
 
 export interface NightTrigger { scope: string[] | null; note: string | null; until: number | null }
 
-/** Offset of `tz` from UTC at `ts`, in ms (DST-aware, through Intl). */
-function tzOffsetMs(ts: number, tz: string): number {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit',
-    day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(ts).map((x) => [x.type, x.value]));
-  return Date.UTC(+p.year!, +p.month! - 1, +p.day!, +p.hour!, +p.minute!, +p.second!) - Math.floor(ts / 1000) * 1000;
-}
-
-/** The next time it is HH:MM in `tz`, after `now`. */
-export function nextLocal(now: number, h: number, m: number, tz: string): number {
-  const off = tzOffsetMs(now, tz);
-  const l = new Date(now + off);
-  let t = Date.UTC(l.getUTCFullYear(), l.getUTCMonth(), l.getUTCDate(), h, m) - off;
-  if (t <= now) t += 86_400_000;
-  return t;
-}
-
 const PUNCT = /^[\s,.:;!-]+|[\s,.:;!-]+$/g;
 
 /**
@@ -81,7 +66,7 @@ const PUNCT = /^[\s,.:;!-]+|[\s,.:;!-]+$/g;
  * `רק <p>[ ו<p>]` becomes the scope filter on the queue; `עד HH[:MM]` the end hour (in `tz`); the rest is a note to every task.
  * Not a trigger: anything that does not start with the word לילה ("לילה טוב" is a goodnight, not an order).
  */
-export function parseNightTrigger(body: string, projects: string[], now: number, tz = 'Asia/Jerusalem'): NightTrigger | null {
+export function parseNightTrigger(body: string, projects: string[], now: number, tz: string): NightTrigger | null {
   const m = /^לילה(?=$|[\s,.:;!-])[\s,.:;!-]*(.*)$/s.exec(body.trim());
   if (!m) return null;
   let rest = m[1]!.trim();
@@ -167,6 +152,9 @@ export class Night {
     });
   }
 
+  /** org.yaml `timezone` (#121): "לילה עד 7" and when the morning is. */
+  private timeZone(): string { return readTimeZone(this.cfg.companyDir); }
+
   get schedulerKey() { return `${this.cfg.managerId}/night-scheduler`; }
   get summaryKey() { return `${this.cfg.managerId}/morning-summary`; }
 
@@ -185,7 +173,7 @@ export class Night {
   private onMessage(m: MessageRow): void {
     if (m.from_identity !== OWNER || m.kind !== 'tell') return;
     const now = this.store.now();
-    const trig = parseNightTrigger(m.body, loadCharters(this.cfg.companyDir).map((c) => c.project), now, this.cfg.timeZone);
+    const trig = parseNightTrigger(m.body, loadCharters(this.cfg.companyDir).map((c) => c.project), now, this.timeZone());
     const cur = this.current();
     if (trig) {
       if (!cur) this.store.bg(this.start({ ...trig, by: m.to_identity }), 'night.start');
@@ -201,7 +189,7 @@ export class Night {
 
   /** Morning = a `morningFromHour` o'clock (his time zone) has passed since the night started, and at least an hour of night. */
   private isMorning(n: NightRow, now: number): boolean {
-    return now - n.started_at >= 60 * 60_000 && nextLocal(n.started_at, this.cfg.morningFromHour, 0, this.cfg.timeZone) <= now;
+    return now - n.started_at >= 60 * 60_000 && nextLocal(n.started_at, this.cfg.morningFromHour, 0, this.timeZone()) <= now;
   }
 
   /** Start the night. Idempotent: a running night is returned as is. */
@@ -419,14 +407,14 @@ export class Night {
 
     const out: Omit<NightSummary, 'text'> = { night: nightId, started_at: night.started_at, ended_at: end, minutes: min(end - night.started_at),
       done, waiting, skipped, empty };
-    return { ...out, text: summaryText(out, night) };
+    return { ...out, text: summaryText(out, night, this.timeZone()) };
   }
 }
 
 const KIND_HE: Record<string, string> = { go: 'GO', ask: 'שאלה', login: 'כניסה לאתר', incident: 'תקלה' };
 
-function summaryText(s: Omit<NightSummary, 'text'>, night: NightRow): string {
-  const hhmm = (t: number) => new Date(t).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
+function summaryText(s: Omit<NightSummary, 'text'>, night: NightRow, tz: string): string {
+  const hhmm = (t: number) => localHHMM(t, tz);
   const lines: string[] = [];
   const scope = night.scope ? ` · רק ${(JSON.parse(night.scope) as string[]).join(', ')}` : '';
   lines.push(`לילה ${hhmm(s.started_at)} עד ${hhmm(s.ended_at)} (${Math.round(s.minutes)} דקות)${scope}`);

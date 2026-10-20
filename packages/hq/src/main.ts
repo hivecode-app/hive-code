@@ -12,6 +12,7 @@ import { backupOnce } from './backup.ts';
 import { loadOrCreateToken } from './api.ts';
 import { Store } from './store.ts';
 import { Auth } from './auth.ts';
+import { hhmm, readTimeZone } from './timezone.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -38,7 +39,7 @@ if (args[0] === 'pair') {
   const store = new Store(cfg.dbPath);
   const p = new Auth(store, cfg.auth).createPairCode({ kind: 'admin' });
   store.close();
-  console.log(`code: ${p.code}  (valid until ${new Date(p.expires_at).toLocaleTimeString('he-IL')})`);
+  console.log(`code: ${p.code}  (valid until ${hhmm(p.expires_at, readTimeZone(cfg.companyDir))})`);
   if (p.link) console.log(`link: ${p.link}`);
   process.exit(0);
 }

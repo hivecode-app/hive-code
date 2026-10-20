@@ -149,10 +149,10 @@ class _Grid extends CustomPainter {
     final hard = Paint()
       ..color = line
       ..strokeWidth = 1;
-    var h = DateTime(data.from.year, data.from.month, data.from.day, data.from.hour + 1);
+    var h = hourStart(data.from, 1);
     while (h.isBefore(data.now)) {
       final dx = x(h);
-      canvas.drawLine(Offset(dx, 0), Offset(dx, size.height), h.hour % every == 0 ? hard : soft);
+      canvas.drawLine(Offset(dx, 0), Offset(dx, size.height), wall(h).hour % every == 0 ? hard : soft);
       h = h.add(const Duration(hours: 1));
     }
     canvas.drawLine(Offset(_kGutter, mid), Offset(size.width, mid), Paint()
@@ -215,7 +215,7 @@ class _LaneRow extends StatelessWidget {
     String name(String? id) => id == null || d == null ? '' : d.who(id).name;
     String works(String? id) => id != null && d?.who(id).gender == Gender.f ? 'עובדת' : 'עובד';
     // A date when it is not today (an incident from yesterday sits at the axis' edge).
-    String when(DateTime t) => t.year == data.now.year && t.month == data.now.month && t.day == data.now.day ? hm(t) : '${t.day}/${t.month} ${hm(t)}';
+    String when(DateTime t) => daysAgo(t, data.now) == 0 ? hm(t) : '${dm(t)} ${hm(t)}';
     final runs = lane.running.length;
     // The dots' track, then a track per running task under it: bars never hide what finished.
     final height = _kRow + runs * (_kBar + _kBarGap);
@@ -478,12 +478,12 @@ class _Axis extends StatelessWidget {
     final style = T.meta.copyWith(fontSize: 10.5, color: p.text3, fontFeatures: kTabular);
     final every = _every(data, width);
     final labels = <Widget>[];
-    var h = DateTime(data.from.year, data.from.month, data.from.day, data.from.hour + 1);
+    var h = hourStart(data.from, 1);
     final nowX = x(data.now);
     while (h.isBefore(data.now)) {
-      final dx = x(h);
-      if (h.hour % every == 0 && dx - nowX > 34 && dx < width - 8) {
-        labels.add(Positioned(left: dx - 14, width: 28, top: 0, child: Text(h.hour.toString().padLeft(2, '0'), textAlign: TextAlign.center, style: style, textScaler: TextScaler.noScaling)));
+      final dx = x(h), hour = wall(h).hour;
+      if (hour % every == 0 && dx - nowX > 34 && dx < width - 8) {
+        labels.add(Positioned(left: dx - 14, width: 28, top: 0, child: Text(hour.toString().padLeft(2, '0'), textAlign: TextAlign.center, style: style, textScaler: TextScaler.noScaling)));
       }
       h = h.add(const Duration(hours: 1));
     }

@@ -29,6 +29,7 @@ import { AccountManager, type AccountDeps } from './accounts.ts';
 import { TabHandoffs } from './tab/handoffs.ts';
 import { CdpTabBrowser, type TabBrowser } from './tab/browser.ts';
 import { startTabServer, type TabServer } from './tab/server.ts';
+import { clockOf, readTimeZone } from './timezone.ts';
 
 /** The phone view's own diagnostics go to the journal, not the event log (frames and taps are not events). */
 const tabLog = (msg: string, data?: unknown) => console.log(`tab: ${msg}${data === undefined ? '' : ` ${JSON.stringify(data)}`}`);
@@ -123,7 +124,13 @@ export class Hq {
     });
   }
 
-  board() { return board(this.store, this.cfg.timers.livenessMs * 3); }
+  /** The company's time zone, org.yaml `timezone` (#121). Everything that knows what hour it is for him reads this. */
+  timeZone(): string { return readTimeZone(this.cfg.companyDir); }
+
+  /** For the app: the zone and its offset now. */
+  clock() { return clockOf(this.timeZone(), this.store.now()); }
+
+  board() { return board(this.store, this.cfg.timers.livenessMs * 3, this.timeZone()); }
 
   teams() {
     // A project's team shows the owner's name for the project (org.yaml `projects[].name`), or null.

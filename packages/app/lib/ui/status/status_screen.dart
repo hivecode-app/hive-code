@@ -27,7 +27,7 @@ class StatusScreen extends StatelessWidget {
     if (d == null) return const SizedBox.shrink();
     final waiting = [for (final w in d.waiting) if (w.state == WaitState.open || w.state == WaitState.pending) w];
     final now = clock();
-    final since = store.statusSeenAt ?? DateTime(now.year, now.month, now.day);
+    final since = store.statusSeenAt ?? dayStart(now);
     final done = [for (final t in d.tickets) if (t.doneAt != null && t.assigneeId != null && t.doneAt!.isAfter(since)) t]..sort((a, b) => b.doneAt!.compareTo(a.doneAt!));
     return Column(children: [
       const TopBar(title: 'סטטוס', showLink: true),
@@ -69,9 +69,9 @@ class StatusScreen extends StatelessWidget {
   }
 
   static String _since(DateTime since, DateTime now) {
-    final today = DateTime(now.year, now.month, now.day);
-    if (!since.isBefore(today)) return hm(since);
-    return since.isAfter(today.subtract(const Duration(days: 1))) ? 'אתמול ${hm(since)}' : '${since.day}/${since.month}';
+    final ago = daysAgo(since, now);
+    if (ago <= 0) return hm(since);
+    return ago == 1 ? 'אתמול ${hm(since)}' : dm(since);
   }
 }
 

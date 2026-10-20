@@ -7,12 +7,9 @@
 // The composer (the identity that owns the `compose-home` automation in org.yaml, today עדי) is woken to
 // compose again on what matters, at most once per 3 minutes; during night mode only for an incident or a new
 // "waiting for you", the rest is kept for one composition in the morning (07:00, or when he opens the app).
-import { parse } from 'yaml';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { HqEvent } from '@company/shared';
 import type { Hq } from './hq.ts';
-import { nextLocal } from './night.ts';
+import { hhmm, nextLocal } from './timezone.ts';
 
 export const BLOCK_TYPES = ['headline', 'alert', 'waiting', 'awaiting', 'lanes', 'project', 'people', 'since', 'note'] as const;
 export type BlockType = (typeof BLOCK_TYPES)[number];
@@ -397,14 +394,7 @@ export class Home {
     }
   }
 
-  private tz(): string {
-    const file = join(this.hq.cfg.companyDir, 'org.yaml');
-    try {
-      const tz = existsSync(file) ? (parse(readFileSync(file, 'utf8')) as { timezone?: unknown } | null)?.timezone : undefined;
-      if (typeof tz === 'string' && tz) { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; }
-    } catch { /* fall back */ }
-    return 'Asia/Jerusalem';
-  }
+  private tz(): string { return this.hq.timeZone(); }
 
   /** Night mode, before 07:00 of the morning after it started, and he hasn't opened the app since. */
   quiet(): boolean {
@@ -436,9 +426,7 @@ export class Home {
     return true;
   }
 
-  private hhmm(ts: number): string {
-    return new Intl.DateTimeFormat('he-IL', { timeZone: this.tz(), hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(ts);
-  }
+  private hhmm(ts: number): string { return hhmm(ts, this.tz()); }
 
   /** Everything the composer needs in one message: what happened, what the screen shows now, what it may point at. */
   wakeBody(pending: PendingEvent[]): string {

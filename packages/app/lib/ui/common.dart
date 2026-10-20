@@ -13,6 +13,8 @@ import '../theme/tokens.dart';
 import 'bidi.dart';
 import 'system_bar.dart';
 
+export '../model/company_time.dart' show CompanyTime, wall, dayStart, hourStart, daysAgo, hm, dm;
+
 export 'bidi.dart';
 
 /// `.ms`: a Material Symbols Rounded glyph. [fill] = FILL 1 (active state, APP-SPEC §7.6).
@@ -630,9 +632,6 @@ Future<void> openLink(String url) async {
     await openExternalUrl(u.toString());
   } catch (_) {}
 }
-
-/// Fixed-time formatting used by every list ("14:02").
-String hm(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
 /// Top app bar of the main screens (`.tbar`).
 class TopBar extends StatelessWidget {

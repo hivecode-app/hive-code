@@ -5,6 +5,7 @@ import type { Store } from './store.ts';
 import type { IdentityRow } from './org.ts';
 import { listIdentities } from './org.ts';
 import type { ShiftRow } from './shifts.ts';
+import { FALLBACK_TIME_ZONE, hhmm } from './timezone.ts';
 
 export interface BoardEntry {
   id: string; name: string; title: string; symbol: string; team: string | null; team_kind: string | null; project: string | null;
@@ -22,13 +23,13 @@ export interface BoardEntry {
 }
 
 export function deriveStatus(i: IdentityRow, s: ShiftRow | undefined, f: {
-  openAsks: number; taskState: string | null; now: number; hadEarlierShift: boolean; unresponsiveAfterMs?: number;
+  openAsks: number; taskState: string | null; now: number; hadEarlierShift: boolean; unresponsiveAfterMs?: number; tz?: string;
 }): { status: DerivedStatus; blocked_on: string | null } {
   if (i.lifecycle === 'ephemeral' && f.taskState === 'done') return { status: 'done', blocked_on: null };
   if (f.openAsks > 0) return { status: 'waiting_for_you', blocked_on: null };
   if (s) {
     if (s.rate_limited_until && s.rate_limited_until > f.now) {
-      return { status: 'blocked', blocked_on: `מכסה, חוזר ב-${new Date(s.rate_limited_until).toISOString().slice(11, 16)}` };
+      return { status: 'blocked', blocked_on: `מכסה, חוזר ב-${hhmm(s.rate_limited_until, f.tz ?? FALLBACK_TIME_ZONE)}` };
     }
     if (s.stuck_since) return { status: 'stuck', blocked_on: null };
     // Unresponsive ≠ dead (bet 4): claude stopped answering control pings. Shown as `warning` with the reason.
@@ -44,7 +45,7 @@ export function deriveStatus(i: IdentityRow, s: ShiftRow | undefined, f: {
   return { status: 'resting', blocked_on: null };
 }
 
-export function board(store: Store, unresponsiveAfterMs?: number): BoardEntry[] {
+export function board(store: Store, unresponsiveAfterMs?: number, tz?: string): BoardEntry[] {
   const now = store.now();
   const shiftQ = store.db.prepare(`SELECT * FROM shifts WHERE identity = ? ORDER BY shift_no DESC, started_at DESC LIMIT 2`);
   const askQ = store.db.prepare(`SELECT COUNT(*) n FROM asks WHERE from_identity = ? AND state IN ('open','escalated')`);
@@ -62,7 +63,7 @@ export function board(store: Store, unresponsiveAfterMs?: number): BoardEntry[] 
     const hadEarlierShift = !!live && (older != null || endedQ.get(i.id) != null);
     const openAsks = (askQ.get(i.id) as { n: number }).n;
     const task = taskQ.get(i.id) as BoardEntry['task'] | undefined;
-    const d = deriveStatus(i, live, { openAsks, taskState: task?.state ?? null, now, hadEarlierShift, unresponsiveAfterMs });
+    const d = deriveStatus(i, live, { openAsks, taskState: task?.state ?? null, now, hadEarlierShift, unresponsiveAfterMs, tz });
     return {
       id: i.id, name: i.name, title: i.title, symbol: i.symbol, team: i.team, team_kind: i.team_kind, project: i.project,
       reports_to: i.reports_to, lifecycle: i.lifecycle, status: d.status, status_symbol: STATUS_SYMBOL[d.status], blocked_on: d.blocked_on,

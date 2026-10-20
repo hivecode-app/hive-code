@@ -1,6 +1,7 @@
 // The data each home block shows. Every block takes only its own object: built from what the app already has
 // ([of]), or handed over by the recipe hq composes ([fromJson]; times are epoch milliseconds).
 import '../../data/backend.dart';
+import '../../model/company_time.dart';
 import '../../model/models.dart';
 
 DateTime _ms(Object? v) => DateTime.fromMillisecondsSinceEpoch((v as num).toInt());
@@ -132,7 +133,7 @@ class LanesData {
     final list = [for (final p in projectsByActivity(d)) if (projects == null || projects.contains(p.id)) p];
     // From the hour of the day's first activity, so nothing is cut and nothing is empty; at most 16 hours
     // back, at least two (an early morning still reads as a day). No activity today: from 08:00.
-    final day = DateTime(now.year, now.month, now.day);
+    final day = dayStart(now);
     DateTime? first;
     for (final t in d.tickets) {
       if (projects != null && !projects.contains(t.project)) continue;
@@ -140,7 +141,7 @@ class LanesData {
         if (at != null && !at.isBefore(day) && (first == null || at.isBefore(first))) first = at;
       }
     }
-    var start = from ?? (first == null ? DateTime(now.year, now.month, now.day, 8) : DateTime(first.year, first.month, first.day, first.hour));
+    var start = from ?? (first == null ? day.add(const Duration(hours: 8)) : hourStart(first));
     if (from == null) {
       final longest = now.subtract(const Duration(hours: 16)), shortest = now.subtract(const Duration(hours: 2));
       if (start.isBefore(longest)) start = longest;
