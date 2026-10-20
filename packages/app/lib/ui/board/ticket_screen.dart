@@ -7,6 +7,7 @@ import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import '../nav.dart';
+import 'board_screen.dart';
 
 class TicketScreen extends StatefulWidget {
   const TicketScreen({super.key, required this.number, this.embedded = false});
@@ -27,6 +28,7 @@ class _TicketScreenState extends State<TicketScreen> {
     final detail = d.ticketDetails[widget.number];
     if (t == null) return const SizedBox.shrink();
     final who = d.identities.values.where((i) => i.name == t.assignee).firstOrNull;
+    final (word, icon) = ticketStatus(t, who?.gender ?? Gender.m);
     final pairs = detail?.pairs ?? [('עובד', t.assignee), ('פרויקט', t.projectName)];
 
     final body = ListView(padding: EdgeInsets.zero, children: [
@@ -42,8 +44,8 @@ class _TicketScreenState extends State<TicketScreen> {
             child: Rich(t.title, style: TextStyle(fontFamily: kFont, fontSize: 23, height: 1.3, fontWeight: FontWeight.w700, color: p.text)),
           ),
           Badge2(
-            label: detail?.statusLine ?? statusWord(t.status, who?.gender ?? Gender.m),
-            icon: statusIcon(t.status),
+            label: detail?.statusLine ?? word,
+            icon: icon,
             kind: t.status == WorkerStatus.waiting ? BadgeKind.dark : BadgeKind.plain,
           ),
           const SizedBox(height: 14),

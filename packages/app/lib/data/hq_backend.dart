@@ -175,6 +175,9 @@ class HqBackend extends Backend {
 
   // ── snapshot ─────────────────────────────────────────────────────────────
 
+  /// A list field that an older hq (or an older cached snapshot) may not have.
+  static List<Map<String, dynamic>> _list(dynamic m, String k) => m is Map && m[k] is List ? (m[k] as List).cast<Map<String, dynamic>>() : const [];
+
   Future<void> _load() async {
     final results = await Future.wait([_get('/api/board'), _get('/api/inbox'), _get('/api/asks'), _get('/api/toggles')]);
     final board = (results[0]['identities'] as List).cast<Map<String, dynamic>>();
@@ -182,7 +185,7 @@ class HqBackend extends Backend {
     final asks = (results[2]['asks'] as List).cast<Map<String, dynamic>>();
     final toggles = (results[3]['toggles'] as List).cast<Map<String, dynamic>>();
     final prev = _data;
-    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, previous: prev);
+    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), previous: prev);
     // Order and last lines from the last messages fetch, right away: without them the list showed
     // board order, then jumped into recency order when the messages came back (on every event).
     final lines = _lastLines;
@@ -269,7 +272,8 @@ class HqBackend extends Backend {
       final c = jsonDecode(raw) as Map<String, dynamic>;
       if (c['url'] != baseUrl) return;
       List<Map<String, dynamic>> list(String k, String f) => ((c[k] as Map)[f] as List).cast<Map<String, dynamic>>();
-      _data = mapSnapshot(board: list('board', 'identities'), inbox: list('inbox', 'items'), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'));
+      _data = mapSnapshot(board: list('board', 'identities'), inbox: list('inbox', 'items'), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'),
+          tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'));
       final lines = c['messages'] as Map<String, dynamic>?;
       if (lines != null) {
         try {
@@ -427,7 +431,7 @@ class HqBackend extends Backend {
     final d = _data;
     if (d == null) return;
 
-    if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'toggle.changed' || type.startsWith('watchdog.')) {
+    if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'task.new' || type == 'task.state' || type == 'toggle.changed' || type.startsWith('watchdog.')) {
       _refreshSoon();
     }
     // The first replay is history the snapshot and openConversation already cover: building chats
@@ -832,7 +836,10 @@ CompanyData mapSnapshot({
   required List<Map<String, dynamic>> inbox,
   required List<Map<String, dynamic>> asks,
   required List<Map<String, dynamic>> toggles,
+  List<Map<String, dynamic>> tasks = const [],
+  List<Map<String, dynamic>> projects = const [],
   CompanyData? previous,
+  DateTime? now,
 }) {
   const teamNames = {'mgmt': 'הנהלה', 'management': 'הנהלה', 'monitor': 'ניטור', 'monitoring': 'ניטור', 'personal': 'הצוות האישי', 'improve': 'מחלקת השיפור', 'improvement': 'מחלקת השיפור', 'lumo': 'לומו', 'tikibot': 'טיקיבוט', 'voice': 'voice-bot', 'agent-company': 'החברה'};
   // The team badge on every monogram. By team id first (hq's real ids and the older short ones),
@@ -945,16 +952,103 @@ CompanyData mapSnapshot({
       ),
   ];
 
-  final orgTeams = [
-    for (final t in teams.values)
-      OrgTeam(
+  // The tasks hq is running (the board, APP-SPEC §4.5, and the project teams in org). Finished ones
+  // leave both; the board keeps what finished today, folded at the end.
+  final clock = now ?? DateTime.now();
+  final today = DateTime(clock.year, clock.month, clock.day).millisecondsSinceEpoch;
+  final tickets = <Ticket>[];
+  final taskOf = <String, String>{}; // worker -> the task it works on
+  for (final t in tasks) {
+    final state = t['state'] as String? ?? 'queued';
+    final updated = t['updated_at'] as int? ?? 0;
+    // `closed`: the issue closed in GitHub. Nobody works on it and it is not done by us.
+    if (state == 'closed' || (state == 'done' && updated < today)) continue;
+    final idn = t['identity'] as String?;
+    final who = idn == null ? null : ids[idn];
+    final title = t['title'] as String? ?? '';
+    if (state != 'done' && idn != null) taskOf.putIfAbsent(idn, () => title);
+    // A running task has a worker on it; a resting one has a worker waiting for a reply (it wakes on a
+    // message), often the owner's: both show the worker's own state. Every other open state (queued,
+    // night_wait, open, interrupted, and any state this app does not know yet) waits for a slot: "בתור".
+    final withWorker = state == 'running' || state == 'resting';
+    final status = state == 'done' ? WorkerStatus.done : (withWorker ? (presence[idn]?.status ?? WorkerStatus.free) : WorkerStatus.free);
+    final group = switch ((state, status)) {
+      ('done', _) => TicketGroup.doneToday,
+      _ when !withWorker => TicketGroup.queued,
+      (_, WorkerStatus.waiting) => TicketGroup.waiting,
+      (_, WorkerStatus.blocked || WorkerStatus.stuck) => TicketGroup.attention,
+      _ => TicketGroup.working,
+    };
+    final project = t['project'] as String? ?? '';
+    final started = t['started_at'] as int?;
+    tickets.add(Ticket(
+      number: 't${t['id']}',
+      title: title,
+      project: project,
+      projectName: project,
+      group: group,
+      assignee: who?.name ?? '',
+      sub: who == null || who.title.isEmpty ? null : who.title,
+      status: status,
+      endLine: state == 'done' ? 'הסתיים ${_hm(updated)}' : (started != null ? 'התחיל ${_hm(started)}' : null),
+    ));
+  }
+
+  final projectList = [
+    for (final p in projects)
+      if (p['id'] is String) ProjectInfo(id: p['id'] as String, active: p['status'] == 'active'),
+  ];
+
+  // Org (APP-SPEC §4.6): the permanent teams, then each project's team: its lead, then the workers
+  // on its open tasks with the task as the second line. A task team is not a team of its own here,
+  // and one whose task closed is gone.
+  final teamKind = {for (final b in board) (b['team'] as String?) ?? 'company': b['team_kind'] as String?};
+  final orgTeams = <OrgTeam>[];
+  for (final t in teams.values) {
+    final kind = teamKind[t.id];
+    if (kind == 'task') continue;
+    final lead = t.leadId != null ? ids[t.leadId] : null;
+    if (kind == 'project') {
+      final project = board.where((b) => b['team'] == t.id).map((b) => b['project'] as String?).firstWhere((p) => p != null, orElse: () => t.id);
+      final workers = [
+        for (final b in board)
+          if (b['team_kind'] == 'task' && b['project'] == project && taskOf.containsKey(b['id'])) b['id'] as String,
+      ];
+      orgTeams.add(OrgTeam(
         teamId: t.id,
-        line: '${t.leadId != null ? ids[t.leadId]!.name : ''}${t.leadId != null ? ' · ' : ''}${ids.values.where((i) => i.teamId == t.id).length} עובדים',
+        line: [if (lead != null) lead.name, workers.isEmpty ? 'אין משימות פתוחות' : (workers.length == 1 ? 'משימה פתוחה אחת' : '${workers.length} משימות פתוחות')].join(' · '),
         statusIcon: '',
         statusWord: '',
-        members: [for (final i in ids.values.where((i) => i.teamId == t.id)) OrgMember(identityId: i.id, line: i.title)],
-      ),
-  ];
+        members: [
+          if (lead != null) OrgMember(identityId: lead.id, line: lead.title),
+          for (final w in workers) OrgMember(identityId: w, line: taskOf[w]!),
+        ],
+      ));
+      continue;
+    }
+    final members = ids.values.where((i) => i.teamId == t.id).toList();
+    orgTeams.add(OrgTeam(
+      teamId: t.id,
+      line: [if (lead != null) lead.name, members.length == 1 ? 'עובד אחד' : '${members.length} עובדים'].join(' · '),
+      statusIcon: '',
+      statusWord: '',
+      members: [for (final i in members) OrgMember(identityId: i.id, line: i.title)],
+    ));
+  }
+  // Permanent teams first, management on top (the order of company.md); project teams after them.
+  const permanentOrder = ['management', 'mgmt', 'monitoring', 'monitor', 'personal', 'improvement', 'improve'];
+  int rank(OrgTeam t) {
+    if (teamKind[t.teamId] == 'project') return 200;
+    final i = permanentOrder.indexOf(t.teamId);
+    return i < 0 ? 100 : i;
+  }
+  orgTeams.sort((a, b) => rank(a) - rank(b));
+
+  // Counted over the workers that exist now: a closed task's worker is neither active nor resting.
+  final live = presence.entries.where((e) => e.value.status != WorkerStatus.done && (teamKind[ids[e.key]?.teamId] != 'task' || taskOf.containsKey(e.key)));
+  final active = live.where((e) => e.value.status != WorkerStatus.resting).length;
+  final open = tickets.where((t) => t.group != TicketGroup.doneToday).length;
+  final doneToday = tickets.length - open;
 
   return CompanyData(
     teams: teams,
@@ -967,11 +1061,12 @@ CompanyData mapSnapshot({
     activity: const [],
     conversations: convs,
     chats: previous?.chats ?? {},
-    tickets: const [],
+    tickets: tickets,
     ticketDetails: const {},
-    boardSubtitle: 'כל החברה',
+    boardSubtitle: ['כל החברה', open == 1 ? 'משימה פתוחה אחת' : '$open משימות פתוחות', if (doneToday > 0) (doneToday == 1 ? 'אחת הושלמה היום' : '$doneToday הושלמו היום')].join(' · '),
     orgTeams: orgTeams,
-    orgSubtitle: '${presence.values.where((p) => p.status != WorkerStatus.resting).length} עובדים פעילים · ${presence.values.where((p) => p.status == WorkerStatus.resting).length} נחים',
+    orgSubtitle: '$active עובדים פעילים · ${live.length - active} נחים',
+    projects: projectList,
     capacity: const [],
     automations: automations,
     focus: focus,

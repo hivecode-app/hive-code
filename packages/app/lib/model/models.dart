@@ -526,6 +526,16 @@ class Ticket {
   final String? diffStat;
 }
 
+/// A project from org.yaml (`projects:`) with its charter's status; the board's filter chips.
+class ProjectInfo {
+  const ProjectInfo({required this.id, required this.active, String? name}) : name = name ?? id;
+  final String id;
+  final String name;
+
+  /// The charter says `active`. A dormant project has no workers yet (it moves to the company later).
+  final bool active;
+}
+
 class TimelineEntry {
   const TimelineEntry({required this.icon, required this.text, required this.time, this.link, this.filled = false});
   final String icon;

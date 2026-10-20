@@ -25,6 +25,7 @@ const Map<String, IconData> kIcons = {
   'block': Symbols.block_rounded,
   'autorenew': Symbols.autorenew_rounded,
   'bedtime': Symbols.bedtime_rounded,
+  'play_arrow': Symbols.play_arrow_rounded,
   'check': Symbols.check_rounded,
   'expand_more': Symbols.expand_more_rounded,
   'history': Symbols.history_rounded,

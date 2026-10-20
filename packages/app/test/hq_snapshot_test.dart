@@ -40,7 +40,8 @@ void main() {
       tester.view.physicalSize = size * 2;
       tester.view.devicePixelRatio = 2;
       addTearDown(tester.view.reset);
-      final d = mapSnapshot(board: _load('board', 'identities'), inbox: _load('inbox', 'items'), asks: _load('asks', 'asks'), toggles: _load('toggles', 'toggles'));
+      final d = mapSnapshot(board: _load('board', 'identities'), inbox: _load('inbox', 'items'), asks: _load('asks', 'asks'), toggles: _load('toggles', 'toggles'),
+          tasks: _load('board', 'tasks'), projects: _load('board', 'projects'));
       final store = AppStore(SnapshotBackend(d));
       await store.start();
       await tester.pumpWidget(CompanyApp(store: store, themeMode: ThemeMode.light));
@@ -51,6 +52,11 @@ void main() {
         await tester.pump();
         expect(tester.takeException(), isNull, reason: 'tab $t');
       }
+      // The board shows hq's open tasks (#t19: it was empty, with project chips written in the code).
+      NavScope.read(ctx).go(AppTab.board);
+      await tester.pump();
+      expect(find.text('העברת לומו לחברה'), findsWidgets);
+      expect(find.text('טיקיבוט'), findsNothing);
       store.selectedConversation = 'yoav';
       Nav.chat(ctx, 'yoav');
       await tester.pumpAndSettle();

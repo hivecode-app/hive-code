@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { parse } from 'yaml';
 import { HELPER_TEAM } from './system-prompt.ts';
 import type { Store } from './store.ts';
+import { readCharter } from './workspace.ts';
 
 interface OrgPerson {
   id: string; name: string; title?: string; symbol?: string; team?: string; reports_to?: string; kind?: string;
@@ -167,4 +168,26 @@ export function projectLead(store: Store, project: string): string | undefined {
   const r = store.db.prepare(`SELECT id FROM identities WHERE project = ? AND team_kind = 'project' AND lifecycle IN ('lead','resident') AND active = 1 LIMIT 1`)
     .get(project) as { id: string } | undefined;
   return r?.id;
+}
+
+export interface ProjectRow { id: string; status: string; team: string | null }
+
+/**
+ * The projects in company/org.yaml (`projects:`), in contract order, for the app's board. The status is
+ * the charter's own (company/projects/<id>.md): that is what hq acts on (dormant projects get no workers),
+ * so the board shows the same thing; org.yaml's status is the fallback when the charter is missing.
+ */
+export function listProjects(companyDir: string): ProjectRow[] {
+  const file = join(companyDir, 'org.yaml');
+  if (!existsSync(file)) return [];
+  let org: { projects?: { id?: unknown; status?: unknown; team?: unknown }[] };
+  try { org = (parse(readFileSync(file, 'utf8')) ?? {}) as typeof org; } catch { return []; }
+  const out: ProjectRow[] = [];
+  for (const p of Array.isArray(org.projects) ? org.projects : []) {
+    if (typeof p?.id !== 'string' || !p.id) continue;
+    const charter = readCharter(companyDir, p.id);
+    const status = charter?.status ?? (typeof p.status === 'string' ? p.status : 'active');
+    out.push({ id: p.id, status, team: typeof p.team === 'string' ? p.team : null });
+  }
+  return out;
 }

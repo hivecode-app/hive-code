@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/store.ts';
-import { ensureRuntimeIdentity, parseOrg, renameLegacyTaskWorkers, syncOrg, taskWorkerName } from '../src/org.ts';
+import { ensureRuntimeIdentity, listProjects, parseOrg, renameLegacyTaskWorkers, syncOrg, taskWorkerName } from '../src/org.ts';
 import { sessionIdFor, uuidv5 } from '../src/proc.ts';
 import { ORG_YAML } from './helpers.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -88,6 +88,36 @@ test('the real contract parses: company/org.yaml in this repo', () => {
   assert.equal(by.yoav?.lifecycle, 'resident');
   assert.equal(by.rotem?.reports_to, 'yoav');
   assert.ok(automations.some((a) => a.key === 'rotem/prod-probes'));
+});
+
+test('projects for the board: org.yaml order, the charter\'s status wins, no charter falls back to org.yaml', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hq-projects-'));
+  try {
+    assert.deepEqual(listProjects(dir), [], 'no org.yaml');
+    mkdirSync(join(dir, 'projects'));
+    writeFileSync(join(dir, 'org.yaml'), [
+      'projects:',
+      '  - id: co', '    status: dormant', '    team: co',
+      '  - id: shop', '    status: dormant',
+      '  - id: lost', '    status: active',
+      '  - status: active',
+    ].join('\n'));
+    writeFileSync(join(dir, 'projects', 'co.md'), '---\nproject: co\nstatus: active\n---\n# co\n');
+    writeFileSync(join(dir, 'projects', 'shop.md'), '---\nproject: shop\nstatus: dormant\n---\n# shop\n');
+    assert.deepEqual(listProjects(dir), [
+      { id: 'co', status: 'active', team: 'co' },
+      { id: 'shop', status: 'dormant', team: null },
+      { id: 'lost', status: 'active', team: null },
+    ]);
+    writeFileSync(join(dir, 'org.yaml'), 'projects: [');
+    assert.deepEqual(listProjects(dir), [], 'a broken org.yaml is an empty list, not a crash');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the real contract lists its projects with their charter status', () => {
+  const projects = listProjects(join(import.meta.dirname, '..', '..', '..', 'company'));
+  assert.ok(projects.some((p) => p.id === 'agent-company' && p.status === 'active'));
+  assert.ok(projects.length >= 2);
 });
 
 test('deterministic session ids: uuidv5 (RFC 4122 vector) per identity:shift', () => {

@@ -24,6 +24,7 @@ class CompanyData {
     required this.orgSubtitle,
     required this.capacity,
     required this.automations,
+    this.projects = const [],
     this.focus = false,
     this.night,
   });
@@ -47,6 +48,9 @@ class CompanyData {
   final String orgSubtitle;
   final List<Capacity> capacity;
   final List<Automation> automations;
+
+  /// org.yaml's projects with their real status (hq `/api/board`). Empty: the board derives them from the tickets.
+  final List<ProjectInfo> projects;
   bool focus;
 
   /// "לילה · 3/3 משבצות · 7 בתור · 2 דולגו" when night mode runs.

@@ -18,7 +18,8 @@ class OrgScreen extends StatefulWidget {
 
 class _OrgScreenState extends State<OrgScreen> {
   bool autos = false;
-  final open = <String>{'lumo'};
+  /// Teams the owner opened or closed this session; a project team with workers starts open.
+  final toggled = <String>{};
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +50,7 @@ class _OrgScreenState extends State<OrgScreen> {
     for (final (i, t) in d.orgTeams.indexed) {
       final team = d.teams[t.teamId]!;
       final expandable = t.members.isNotEmpty;
-      final isOpen = open.contains(t.teamId);
+      final isOpen = toggled.contains(t.teamId) != (!team.permanent && t.members.length > 1);
       if (i > 0) rows.add(Container(color: p.surface, padding: const EdgeInsetsDirectional.only(start: 16), child: Container(height: 1, color: p.line)));
       Widget end;
       if (t.canWake) {
@@ -63,7 +64,7 @@ class _OrgScreenState extends State<OrgScreen> {
         color: p.surface,
         child: InkWell(
           onTap: expandable
-              ? () => setState(() => isOpen ? open.remove(t.teamId) : open.add(t.teamId))
+              ? () => setState(() => toggled.contains(t.teamId) ? toggled.remove(t.teamId) : toggled.add(t.teamId))
               : (team.leadId != null ? () => Nav.chat(context, team.leadId!) : null),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -120,8 +121,8 @@ class _OrgScreenState extends State<OrgScreen> {
         decoration: BoxDecoration(border: Border.symmetric(horizontal: BorderSide(color: p.line))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
       ),
-      const Section('קיבולת'),
-      ListBlock(inset: 16, children: [
+      if (d.capacity.isNotEmpty) const Section('קיבולת'),
+      if (d.capacity.isNotEmpty) ListBlock(inset: 16, children: [
         for (final c in d.capacity)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),

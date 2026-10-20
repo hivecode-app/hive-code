@@ -89,7 +89,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   const route = (method: string, path: string, h: Handler) => r.push([method, new RegExp(`^${path.replace(/:\w+/g, '([^/]+)')}$`), h]);
 
   route('GET', '/api/org', () => ({ identities: hq.board(), teams: hq.teams() }));
-  route('GET', '/api/board', () => ({ identities: hq.board(), tasks: hq.scheduler.tasks(), slots: hq.scheduler.slots(), probes: hq.probes.summary() }));
+  route('GET', '/api/board', () => ({ identities: hq.board(), tasks: hq.scheduler.tasks(), projects: hq.projects(), slots: hq.scheduler.slots(), probes: hq.probes.summary() }));
 
   route('GET', '/api/inbox', () => ({ items: hq.inbox.open() }));
   route('POST', '/api/inbox/:id/ack', ({ params }) => ({ ok: hq.inbox.ack(Number(params[0])) }));

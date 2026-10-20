@@ -5,7 +5,7 @@ import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 import type { HqConfig } from './config.ts';
 import { Store } from './store.ts';
-import { syncOrg, getIdentity, listIdentities, renameLegacyTaskWorkers } from './org.ts';
+import { syncOrg, getIdentity, listIdentities, listProjects, renameLegacyTaskWorkers } from './org.ts';
 import { Inbox } from './inbox.ts';
 import { ShiftManager, TemplateLauncher, type Launcher, type ConnectionFactory } from './shifts.ts';
 import { Mailbox, noForeignInjector, type ForeignInjector } from './mailbox.ts';
@@ -113,6 +113,9 @@ export class Hq {
     }
     return [...t.values()];
   }
+
+  /** The projects in org.yaml with their charter status (the board's filter, APP-SPEC §4.5). */
+  projects() { return listProjects(this.cfg.companyDir); }
 
   identityExists(id: string): boolean { return !!getIdentity(this.store, id); }
 
