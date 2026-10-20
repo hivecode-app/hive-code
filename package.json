@@ -21,8 +21,9 @@
     "test:deploy": "node --test scripts/caddy-main.test.mjs"
   },
   "devDependencies": {
+    "@types/node": "^24.0.0",
     "typescript": "^5.9.0",
-    "@types/node": "^24.0.0"
+    "yaml": "^2.9.1"
   },
   "allowScripts": {
     "better-sqlite3": true

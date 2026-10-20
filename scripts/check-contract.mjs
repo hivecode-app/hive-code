@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Schema check for the company contract (company/, memory/). Node 22, no dependencies.
+// Schema check for the company contract (company/, memory/). Node 22; needs `npm ci` (for `yaml`).
 // Usage: node scripts/check-contract.mjs [repoRoot]
 // Exit 0 = valid (warnings allowed), 1 = errors found.
 
@@ -8,6 +8,7 @@ import { join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
+import { parse as yamlParse } from 'yaml';
 
 const root = resolve(process.argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), '..'));
 const errors = [];
@@ -119,11 +120,23 @@ export function parseYaml(src, file = '<yaml>') {
   return doc;
 }
 
+// hq reads org.yaml and charters with the `yaml` package, and marks a file it cannot
+// parse invalid. Parse with it too, so the contract never passes what hq would reject.
+// firstLine: the file line where src starts (2 for frontmatter, after the opening ---).
+export function strictYaml(src, file, firstLine = 1) {
+  try { yamlParse(src); } catch (e) {
+    const line = e.linePos?.[0]?.line;
+    const msg = String(e.message).split('\n')[0].replace(/ at line \d+, column \d+:?$/, '');
+    throw new Error(`${file}:${line ? line + firstLine - 1 : '?'}: invalid YAML: ${msg}`);
+  }
+  return parseYaml(src, file);
+}
+
 function frontmatter(path) {
   const src = readFileSync(path, 'utf8');
   const m = src.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
   if (!m) return null;
-  return parseYaml(m[1], rel(path));
+  return strictYaml(m[1], rel(path), 2);
 }
 
 
@@ -216,7 +229,7 @@ export function main() {
   if (!existsSync(orgPath)) err(`${W} is missing`);
   else {
     let parsed = false;
-    try { org = parseYaml(readFileSync(orgPath, 'utf8'), W); parsed = true; }
+    try { org = strictYaml(readFileSync(orgPath, 'utf8'), W); parsed = true; }
     catch (e) { err(`${W}: ${e.message}`); }
     if (!isObj(org)) { if (parsed) err(`${W}: top level must be a non-empty mapping`); org = null; }
     else if (typeof org.owner !== 'string' || !org.owner) err(`${W}: "owner" must be set (the id everyone reports to)`);

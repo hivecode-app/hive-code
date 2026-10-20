@@ -63,6 +63,9 @@ const cases = [
   ['relative checkout path', 'must be absolute', (d) => edit(d, 'company/projects/lumo.md', 'path: ~/new-lumo-application', 'path: new-lumo-application')],
   ['worktree_dir outside the checkout', 'inside the checkout', (d) => edit(d, 'company/projects/lumo.md', 'worktree_dir: .worktrees', 'worktree_dir: ../wt')],
   ['required CI without a check name', 'needs "ci_check"', (d) => edit(d, 'company/projects/agent-company.md', 'ci_check: company-ci', 'ci_check: null')],
+  ['unquoted ": " in a charter value (#70)', 'company/projects/lumo.md:', (d) => edit(d, 'company/projects/lumo.md', 'worktree_dir: .worktrees', 'worktree_dir: a: b')],
+  ['charter YAML the subset accepts but yaml rejects', 'invalid YAML', (d) => edit(d, 'company/projects/lumo.md', 'worktree_dir: .worktrees', 'worktree_dir: "a" b')],
+  ['broken YAML in org.yaml', 'company/org.yaml:', (d) => edit(d, 'company/org.yaml', 'home: hq-host', 'home: hq-host: x')],
   ['merge_instructions that is not text', 'must be a string or a list', (d) => edit(d, 'company/projects/agent-company.md', 'ci_check: company-ci', 'ci_check: company-ci\nmerge_instructions: [1, 2]')],
 ];
 
@@ -79,3 +82,17 @@ for (const [name, expect, mutate] of cases) {
     }
   });
 }
+
+test('broken charter YAML is reported at its line in the file (#70)', () => {
+  const dir = copy();
+  try {
+    const file = 'company/projects/lumo.md';
+    edit(dir, file, 'worktree_dir: .worktrees', 'worktree_dir: a: b');
+    const line = readFileSync(join(dir, file), 'utf8').split('\n').findIndex((l) => l.startsWith('worktree_dir: a: b')) + 1;
+    const r = run(dir);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, new RegExp(`${file}:${line}: invalid YAML`));
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
+});
