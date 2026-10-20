@@ -1,56 +1,216 @@
-"""Interim app icon: the `front_hand` Material Symbol ("מחכה לך") on a neutral tile.
+"""App icon: the "רצף" logo (#28, docs/logo-proposals/1-relay*.svg). An open ring with a dot in the gap.
 
-Not a logo. design-taste §3 asks for an original logo, which is separate work; until then this
-glyph from the app's own icon set stands in, because Android requires a launcher icon.
-Usage: python3 tool/make_icons.py <static Material Symbols Rounded TTF with FILL=1>
+One geometry, every output: the Android adaptive icon (vector foreground and monochrome, light and
+night colors), legacy launcher PNGs, and the web favicon / apple-touch-icon / manifest icons.
+
+Proportions differ from the proposal on purpose (#28, review risk "reads like a loading spinner"):
+at 32px the proposal's dot touched the ring ends and the mark read as a closed ring. The gap is
+90 degrees instead of 60, the dot is 5.5 instead of 4.5, and the mark is drawn at 0.96 instead of
+0.84 of the canvas. Same shape, same idea.
+
+Usage: python3 tool/make_icons.py [check.png]   (needs Pillow; the optional path writes a check sheet)
 """
+import math
 import os
 import sys
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
-FONT = sys.argv[1]
 ROOT = os.path.join(os.path.dirname(__file__), '..')
-GLYPH = ''  # front_hand
-BG = (240, 240, 237, 255)  # --surface-2
-FG = (26, 27, 29, 255)  # --text
+RES = os.path.join(ROOT, 'android', 'app', 'src', 'main', 'res')
+WEB = os.path.join(ROOT, 'web')
+
+# Geometry, in the 108x108 adaptive-icon canvas (safe zone: a 66-wide circle in the middle).
+C = 54
+R = 20          # ring radius (center of the stroke)
+STROKE = 9
+GAP = 90        # degrees, centered on the upper right
+DOT = 5.5       # dot radius, centered in the gap on the ring
+SCALE = 0.96    # the mark around the canvas center
+GAP_AT = -45    # screen angles: 0 is 3 o'clock, positive is clockwise
+
+LIGHT = dict(fg='#1F6FEB', bg='#FFFFFF')
+DARK = dict(fg='#7AAEFF', bg='#121314')
 
 
-def tile(size, glyph_ratio=0.56, radius_ratio=0.0, bg=BG):
-    img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+def _pt(deg, r=R):
+    a = math.radians(deg)
+    return C + r * math.cos(a), C + r * math.sin(a)
+
+
+def _f(v):
+    return f'{v:.3f}'.rstrip('0').rstrip('.')
+
+
+def path_data():
+    """(ring, dot) as SVG path data in canvas units, before SCALE."""
+    (x0, y0), (x1, y1) = _pt(GAP_AT + GAP / 2), _pt(GAP_AT - GAP / 2)
+    large = 1 if 360 - GAP > 180 else 0
+    ring = f'M{_f(x0)},{_f(y0)} A{R},{R} 0 {large},1 {_f(x1)},{_f(y1)}'
+    dx, dy = _pt(GAP_AT)
+    dot = (f'M{_f(dx - DOT)},{_f(dy)} a{DOT},{DOT} 0 1,0 {_f(2 * DOT)},0 '
+           f'a{DOT},{DOT} 0 1,0 {_f(-2 * DOT)},0 Z')
+    return ring, dot
+
+
+# ---------- raster ----------
+
+def _rgb(h):
+    return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) + (255,)
+
+
+def render(size, fg, bg=None, view=108, shape='square', ss=8):
+    """The mark at `size` px. `view` is the width of canvas units shown, centered (108 = all of it).
+    shape: 'square' (full bleed), 'circle' or 'rounded' (a launcher-like tile), bg None = transparent."""
+    S = size * ss
+    k = S / view * SCALE
+    c = S / 2
+    img = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    if radius_ratio:
-        d.rounded_rectangle([0, 0, size - 1, size - 1], radius=int(size * radius_ratio), fill=bg)
-    else:
-        d.rectangle([0, 0, size, size], fill=bg)
-    font = ImageFont.truetype(FONT, int(size * glyph_ratio))
-    box = d.textbbox((0, 0), GLYPH, font=font)
-    w, h = box[2] - box[0], box[3] - box[1]
-    d.text(((size - w) / 2 - box[0], (size - h) / 2 - box[1]), GLYPH, font=font, fill=FG)
-    return img
+    if bg:
+        if shape == 'circle':
+            d.ellipse([0, 0, S - 1, S - 1], fill=_rgb(bg))
+        elif shape == 'rounded':
+            d.rounded_rectangle([0, 0, S - 1, S - 1], radius=int(S * 0.22), fill=_rgb(bg))
+        else:
+            d.rectangle([0, 0, S, S], fill=_rgb(bg))
+    col = _rgb(fg)
+    rr, w = R * k, STROKE * k
+    start, end = GAP_AT + GAP / 2, GAP_AT - GAP / 2 + 360
+    d.arc([c - rr - w / 2, c - rr - w / 2, c + rr + w / 2, c + rr + w / 2], start, end, fill=col,
+          width=int(round(w)))
+    for a in (start, end):
+        x, y = c + rr * math.cos(math.radians(a)), c + rr * math.sin(math.radians(a))
+        d.ellipse([x - w / 2, y - w / 2, x + w / 2, y + w / 2], fill=col)
+    x, y = c + rr * math.cos(math.radians(GAP_AT)), c + rr * math.sin(math.radians(GAP_AT))
+    dr = DOT * k
+    d.ellipse([x - dr, y - dr, x + dr, y + dr], fill=col)
+    return img.resize((size, size), Image.LANCZOS)
 
 
-def fg_only(size, glyph_ratio):
-    img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    font = ImageFont.truetype(FONT, int(size * glyph_ratio))
-    box = d.textbbox((0, 0), GLYPH, font=font)
-    w, h = box[2] - box[0], box[3] - box[1]
-    d.text(((size - w) / 2 - box[0], (size - h) / 2 - box[1]), GLYPH, font=font, fill=FG)
-    return img
+# ---------- android ----------
+
+def vector(color):
+    ring, dot = path_data()
+    return f'''<?xml version="1.0" encoding="utf-8"?>
+<!-- GENERATED by tool/make_icons.py: the "רצף" logo (#28). Edit the script, not this file. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="{SCALE}" android:scaleY="{SCALE}">
+        <path
+            android:pathData="{ring}"
+            android:strokeColor="{color}"
+            android:strokeWidth="{STROKE}"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="{dot}"
+            android:fillColor="{color}" />
+    </group>
+</vector>
+'''
 
 
-# Web
-web = os.path.join(ROOT, 'web')
-tile(32, 0.66).save(os.path.join(web, 'favicon.png'))
-for s in (192, 512):
-    tile(s).save(os.path.join(web, 'icons', f'Icon-{s}.png'))
-    tile(s, 0.42).save(os.path.join(web, 'icons', f'Icon-maskable-{s}.png'))
+def write(path, text):
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text)
 
-# Android legacy mipmaps + adaptive foreground (108dp canvas, 72dp safe zone)
-res = os.path.join(ROOT, 'android', 'app', 'src', 'main', 'res')
-for name, px in {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 192}.items():
-    d = os.path.join(res, f'mipmap-{name}')
-    os.makedirs(d, exist_ok=True)
-    tile(px, 0.56, radius_ratio=0.5).save(os.path.join(d, 'ic_launcher.png'))
-    fg_only(int(px * 108 / 48), 0.30).save(os.path.join(d, 'ic_launcher_foreground.png'))
+
+def android():
+    drawable = os.path.join(RES, 'drawable')
+    write(os.path.join(drawable, 'ic_launcher_foreground.xml'), vector('@color/ic_launcher_foreground'))
+    # Themed icons (Android 13+): the system tints this layer, so its color does not matter.
+    write(os.path.join(drawable, 'ic_launcher_monochrome.xml'), vector('#FF000000'))
+    write(os.path.join(RES, 'mipmap-anydpi-v26', 'ic_launcher.xml'), '''<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background"/>
+    <foreground android:drawable="@drawable/ic_launcher_foreground"/>
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome"/>
+</adaptive-icon>
+''')
+    # Legacy launcher PNGs (pre-adaptive launchers and tools that read mipmaps directly).
+    for name, px in {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 192}.items():
+        d = os.path.join(RES, f'mipmap-{name}')
+        os.makedirs(d, exist_ok=True)
+        render(px, LIGHT['fg'], LIGHT['bg'], view=72, shape='circle').save(os.path.join(d, 'ic_launcher.png'))
+        old = os.path.join(d, 'ic_launcher_foreground.png')
+        if os.path.exists(old):
+            os.remove(old)
+
+
+# ---------- web ----------
+
+def svg_favicon():
+    ring, dot = path_data()
+    # Tight around the mark: outer radius R + STROKE/2, plus a hair of air.
+    half = (R + STROKE / 2 + 1.5)
+    o = C - half
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="{_f(o)} {_f(o)} {_f(2 * half)} {_f(2 * half)}">
+<style>path{{color:{LIGHT['fg']}}}@media (prefers-color-scheme:dark){{path{{color:{DARK['fg']}}}}}</style>
+<path d="{ring}" fill="none" stroke="currentColor" stroke-width="{STROKE}" stroke-linecap="round"/>
+<path d="{dot}" fill="currentColor"/>
+</svg>
+'''
+
+
+def web():
+    write(os.path.join(WEB, 'favicon.svg'), svg_favicon())
+    # The tight view of the mark at SCALE: outer diameter (2R + STROKE) * SCALE, plus air.
+    tight = (2 * R + STROKE + 3) * SCALE
+    icos = [render(s, LIGHT['fg'], view=tight) for s in (16, 32, 48)]
+    icos[2].save(os.path.join(WEB, 'favicon.ico'), sizes=[(16, 16), (32, 32), (48, 48)],
+                 append_images=icos[:2])
+    # iOS draws its own rounded corners and wants an opaque square.
+    render(180, LIGHT['fg'], LIGHT['bg'], view=72).convert('RGB').save(os.path.join(WEB, 'apple-touch-icon.png'))
+    icons = os.path.join(WEB, 'icons')
+    for s in (192, 512):
+        render(s, LIGHT['fg'], LIGHT['bg'], view=72, shape='rounded').save(os.path.join(icons, f'Icon-{s}.png'))
+        # Maskable: full bleed, the mark well inside the 80% safe circle.
+        render(s, LIGHT['fg'], LIGHT['bg'], view=88).save(os.path.join(icons, f'Icon-maskable-{s}.png'))
+
+
+# ---------- check sheet ----------
+
+def check(path):
+    """Home screen at 48 and 32 (light, dark, themed monochrome) and the favicon in light and dark tabs."""
+    scale = 3
+    rows = [LIGHT, DARK]
+    sheet = Image.new('RGBA', (640, 30 + 90 * len(rows) + 90), _rgb('#F5F5F3'))
+    d = ImageDraw.Draw(sheet)
+    for i, pal in enumerate(rows):
+        wall = '#E8E8E4' if pal is LIGHT else '#212225'
+        y = 20 + i * 90
+        d.rectangle([10, y, 630, y + 80], fill=_rgb(wall))
+        x = 24
+        for s in (48, 32):
+            for _ in range(3):
+                d.ellipse([x, y + 40 - s // 2, x + s, y + 40 + s // 2], fill=_rgb('#5A5C60' if pal is DARK else '#D3D3CE'))
+                x += s + 14
+            icon = render(s, pal['fg'], pal['bg'], view=72, shape='circle')
+            sheet.alpha_composite(icon, (x, y + 40 - s // 2))
+            x += s + 30
+        for s in (48, 32):
+            mono = render(s, *(('#1D3A6E', '#D6E2FA') if pal is LIGHT else ('#D6E2FA', '#2A3550')), view=72, shape='circle')
+            sheet.alpha_composite(mono, (x, y + 40 - s // 2))
+            x += s + 14
+    y = 20 + len(rows) * 90
+    x = 24
+    for wall, fg in (('#FFFFFF', LIGHT['fg']), ('#35363A', DARK['fg'])):
+        d.rectangle([x - 6, y + 22, x + 130, y + 76], fill=_rgb(wall))
+        xx = x
+        for s in (16, 32, 48):
+            ic = render(s, fg, view=(2 * R + STROKE + 3) * SCALE)
+            sheet.alpha_composite(ic, (xx, y + 49 - s // 2))
+            xx += s + 10
+        x += 150
+    sheet = sheet.resize((sheet.width * scale, sheet.height * scale), Image.NEAREST)
+    sheet.convert('RGB').save(path)
+
+
+if __name__ == '__main__':
+    android()
+    web()
+    if len(sys.argv) > 1:
+        check(sys.argv[1])
