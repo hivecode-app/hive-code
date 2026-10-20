@@ -184,6 +184,9 @@ class QuoteStrip extends StatelessWidget {
 class TextBubble extends StatefulWidget {
   const TextBubble({super.key, required this.msg});
   final TextMsg msg;
+
+  /// Builds since the last reset, counted in debug and test builds only (test/perf_bench_test.dart).
+  static int debugBuilds = 0;
   @override
   State<TextBubble> createState() => _TextBubbleState();
 }
@@ -193,6 +196,10 @@ class _TextBubbleState extends State<TextBubble> {
 
   @override
   Widget build(BuildContext context) {
+    assert(() {
+      TextBubble.debugBuilds++;
+      return true;
+    }());
     final m = widget.msg;
     final p = context.p;
     final lines = '\n'.allMatches(m.text).length + 1;

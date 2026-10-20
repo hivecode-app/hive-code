@@ -71,6 +71,8 @@ class _ChatScreenState extends State<ChatScreen> {
       quote = ChatScreen.pendingQuote.remove(widget.identityId);
       selected = null;
       searching = false;
+      _scrolledToHit = null;
+      _rowCache.clear();
     }
   }
 
@@ -142,7 +144,12 @@ class _ChatScreenState extends State<ChatScreen> {
     final hits = query.isEmpty ? <String>[] : [for (final it in chat.items) if (_textOf(it).contains(query)) it.id];
     if (match >= hits.length) match = hits.isEmpty ? 0 : hits.length - 1;
 
-    final rows = _rows(context, chat, d, openAsk, hits.isEmpty ? null : hits[hits.length - 1 - match]);
+    final hitId = hits.isEmpty ? null : hits[hits.length - 1 - match];
+    if (hitId == null) _scrolledToHit = null;
+    // Rows are built lazily: only what is on screen. With thousands of items, building every row
+    // on each store change (every streaming token) was the main cost of a frame.
+    final rows = _entries(chat);
+    _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, openAsk, openAllTools]);
     final selectedItem = selected == null ? null : chat.items.where((i) => i.id == selected).firstOrNull;
 
     final header = selectedItem != null
@@ -207,8 +214,19 @@ class _ChatScreenState extends State<ChatScreen> {
               reverse: true,
               padding: const EdgeInsets.only(top: 6, bottom: 12),
               itemCount: rows.length,
+              // Rows keep their element (and state, like an open tool group) when new ones arrive.
+              findChildIndexCallback: (key) {
+                final i = _entryIndex[(key as ValueKey<String>).value];
+                return i == null ? null : rows.length - 1 - i;
+              },
               // Desktop keeps lines readable: messages in a 780px column (mockup `.dmain .msgs`).
-              itemBuilder: (_, i) => Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 780), child: rows[rows.length - 1 - i])),
+              itemBuilder: (context, i) {
+                final e = rows[rows.length - 1 - i];
+                return KeyedSubtree(
+                  key: ValueKey(e.key),
+                  child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 780), child: _row(context, e, chat, d, openAsk, hitId))),
+                );
+              },
             ),
             if (showJump)
               PositionedDirectional(
@@ -239,41 +257,107 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(backgroundColor: p.surface, body: SafeArea(child: body));
   }
 
-  List<Widget> _rows(BuildContext context, Conversation chat, CompanyData d, AskCard? openAsk, String? hitId) {
-    final p = context.p;
-    final out = <Widget>[];
+  // Day separators, items, then the live line at the bottom. Cheap: no widgets, and recomputed only
+  // when the list itself changes (not when a streaming bubble grows).
+  List<_Entry> _entries(Conversation chat) {
+    final items = chat.items;
+    final sig = (items.length, items.firstOrNull?.id, items.lastOrNull?.id);
+    if (identical(items, _entryItems) && _entrySig == sig && _entryCache != null) return _entryCache!;
+    final out = <_Entry>[];
+    // Row keys of our own start with \u0000, so they can never equal an item id.
+    if (items.isEmpty) out.add(const _Entry('\u0000empty'));
     DateTime? day;
-    for (final it in chat.items) {
+    for (final it in items) {
       final dd = DateTime(it.ts.year, it.ts.month, it.ts.day);
       if (day != dd) {
         day = dd;
-        out.add(ServiceLine(text: _dayLabel(dd)));
+        // Unique even when items arrive out of order and a day shows up twice.
+        out.add(_Entry('\u0000day:${dd.millisecondsSinceEpoch}:${it.id}', day: dd));
       }
-      Widget w = _item(context, it, chat, d, openAsk);
-      if (it is UserMsg || it is TextMsg) {
-        w = _Selectable(
-          selected: selected == it.id,
-          onLongPress: () => setState(() => selected = it.id),
-          onSwipe: () => _quoteItem(it, d),
-          child: w,
-        );
-      }
-      if (it.id == hitId) {
-        final k = GlobalKey();
-        w = Container(key: k, color: p.accentSoft, child: w);
+      out.add(_Entry(it.id, item: it));
+    }
+    out.add(const _Entry(_kLive));
+    _entryItems = items;
+    _entrySig = sig;
+    _entryIndex = {for (final (i, e) in out.indexed) e.key: i};
+    return _entryCache = out;
+  }
+
+  List<ChatItem>? _entryItems;
+  Object? _entrySig;
+  List<_Entry>? _entryCache;
+  Map<String, int> _entryIndex = const {};
+  String? _scrolledToHit;
+
+  // The last widget built for each text row, with what it was built from. A row whose message did
+  // not change returns the same widget object, and Flutter skips it: a streaming token rebuilds the
+  // bubble that grew and nothing else on screen.
+  final _rowCache = <String, (Object, Widget)>{};
+  List<Object?> _rowDeps = const [];
+
+  /// Anything the cached rows close over (theme, text size, the conversation and data objects):
+  /// drop them all when one of these is replaced.
+  void _checkRowDeps(List<Object?> deps) {
+    if (deps.length == _rowDeps.length && Iterable<int>.generate(deps.length).every((i) => identical(deps[i], _rowDeps[i]))) return;
+    _rowDeps = deps;
+    _rowCache.clear();
+  }
+
+  Object? _rowSig(ChatItem it, String? hitId) => switch (it) {
+        TextMsg() => (it.text, it.streaming, it.author, selected == it.id, hitId == it.id),
+        UserMsg() => (it.text, it.delivery, it.priority, it.replyTo?.text, selected == it.id, hitId == it.id),
+        _ => null,
+      };
+
+  Widget _row(BuildContext context, _Entry e, Conversation chat, CompanyData d, AskCard? openAsk, String? hitId) {
+    final p = context.p;
+    final it0 = e.item;
+    final sig = it0 == null ? null : _rowSig(it0, hitId);
+    if (sig != null) {
+      final hit = _rowCache[e.key];
+      if (hit != null && hit.$1 == sig) return hit.$2;
+      if (_rowCache.length > 400) _rowCache.clear();
+      final w = _buildRow(context, e, chat, d, openAsk, hitId, p);
+      _rowCache[e.key] = (sig, w);
+      return w;
+    }
+    return _buildRow(context, e, chat, d, openAsk, hitId, p);
+  }
+
+  Widget _buildRow(BuildContext context, _Entry e, Conversation chat, CompanyData d, AskCard? openAsk, String? hitId, Palette p) {
+    if (e.key == '\u0000empty') {
+      final who = d.who(widget.identityId);
+      return ServiceLine(text: '${who.name} · ${who.title}');
+    }
+    if (e.key == _kLive) {
+      final who = d.who(widget.identityId);
+      return LiveIndicator(live: chat.live, name: who.name, gender: who.gender);
+    }
+    if (e.day != null) return ServiceLine(text: _dayLabel(e.day!));
+    final it = e.item!;
+    Widget w = _item(context, it, chat, d, openAsk);
+    if (it is UserMsg || it is TextMsg) {
+      w = _Selectable(
+        selected: selected == it.id,
+        onLongPress: () => setState(() => selected = it.id),
+        onSwipe: () => _quoteItem(it, d),
+        child: w,
+      );
+    }
+    if (it.id == hitId) {
+      final k = GlobalKey();
+      w = Container(key: k, color: p.accentSoft, child: w);
+      // Scroll to a match once, when it becomes the match; not again on every rebuild (a
+      // streaming reply while searching used to yank the list back to the match each token).
+      if (_scrolledToHit != hitId) {
+        _scrolledToHit = hitId;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final c = k.currentContext;
           if (c != null) Scrollable.ensureVisible(c, alignment: 0.3);
         });
       }
-      out.add(KeyedSubtree(key: ValueKey(it.id), child: w));
     }
-    out.add(LiveIndicator(live: chat.live, name: d.who(widget.identityId).name, gender: d.who(widget.identityId).gender));
-    if (chat.items.isEmpty) {
-      final who = d.who(widget.identityId);
-      out.insert(0, ServiceLine(text: '${who.name} · ${who.title}'));
-    }
-    return out;
+    return w;
   }
 
   Widget _item(BuildContext context, ChatItem it, Conversation chat, CompanyData d, AskCard? openAsk) {
@@ -669,4 +753,14 @@ class _SelectableState extends State<_Selectable> {
       ),
     );
   }
+}
+
+const _kLive = '\u0000live';
+
+/// One row of the chat list: a day separator, an item, the empty-chat header or the live line.
+class _Entry {
+  const _Entry(this.key, {this.item, this.day});
+  final String key;
+  final ChatItem? item;
+  final DateTime? day;
 }

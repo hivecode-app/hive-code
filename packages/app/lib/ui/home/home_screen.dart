@@ -17,6 +17,9 @@ class HomeScreen extends StatefulWidget {
   /// Desktop list column: smaller title, no top-bar actions.
   final bool embedded;
 
+  /// Builds since the last reset, counted in debug and test builds only (test/perf_bench_test.dart).
+  static int debugBuilds = 0;
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -39,6 +42,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    assert(() {
+      HomeScreen.debugBuilds++;
+      return true;
+    }());
     final store = StoreScope.of(context);
     final d = store.data;
     final p = context.p;

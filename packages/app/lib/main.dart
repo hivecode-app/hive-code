@@ -162,7 +162,7 @@ class _CompanyAppState extends State<CompanyApp> {
 
   @override
   Widget build(BuildContext context) {
-    return StoreScope(
+    return StoreHost(
       store: widget.store,
       child: NavScope(
         nav: nav,
@@ -186,7 +186,7 @@ class _CompanyAppState extends State<CompanyApp> {
             final scale = mq.textScaler.clamp(maxScaleFactor: 1.3);
             return MediaQuery(data: mq.copyWith(textScaler: scale), child: child!);
           },
-          home: widget.home ?? const Shell(),
+          home: widget.home ?? const StoreGate(child: Shell()),
         ),
       ),
     );

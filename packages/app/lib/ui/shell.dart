@@ -30,11 +30,12 @@ class Shell extends StatelessWidget {
           ? DesktopFrame(width: c.maxWidth)
           : Column(children: [
               Expanded(
-                child: IndexedStack(index: nav.tab.index, children: const [
-                  HomeScreen(),
-                  ConversationsScreen(),
-                  BoardScreen(),
-                  OrgScreen(),
+                // Only the tab on screen follows the store; the others catch up when shown.
+                child: IndexedStack(index: nav.tab.index, children: [
+                  StoreGate(active: nav.tab == AppTab.home, child: const HomeScreen()),
+                  StoreGate(active: nav.tab == AppTab.convs, child: const ConversationsScreen()),
+                  StoreGate(active: nav.tab == AppTab.board, child: const BoardScreen()),
+                  StoreGate(active: nav.tab == AppTab.org, child: const OrgScreen()),
                 ]),
               ),
               const BottomNav(),

@@ -14,6 +14,19 @@ mkdir -p "$state"
 if [[ ! -s "$state/app-path" ]]; then openssl rand -hex 16 > "$state/app-path"; chmod 600 "$state/app-path"; fi
 secret="$(cat "$state/app-path")"
 dest="/var/www/hq-app/$secret"
+
+# This app signs in against hq (#23). If the hq that is live has no sign-in API yet, publishing
+# would lock the owner out of the app (it happened on 20/10: app deployed before hq). Deploy hq
+# first; FORCE=1 skips the check.
+if [[ -d lib/ui/auth && -z "${FORCE:-}" ]]; then
+  code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' \
+    "https://app.hq.example.com/$secret/hq/api/auth/login/options" || true)"
+  if [[ "$code" != 200 ]]; then
+    echo "The live hq has no sign-in API (login/options -> $code). Deploy hq first, then the app." >&2
+    exit 2
+  fi
+fi
+
 sudo -n mkdir -p "$dest"
 sudo -n chown "$(id -un)" "$dest"
 

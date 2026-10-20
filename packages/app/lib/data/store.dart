@@ -274,9 +274,111 @@ class AppStore extends ChangeNotifier {
   }
 }
 
-class StoreScope extends InheritedNotifier<AppStore> {
-  const StoreScope({super.key, required AppStore store, required super.child}) : super(notifier: store);
+/// The store for everything below, with a version that ticks on every change. Widgets that call
+/// [of] rebuild when the version they see changes.
+class StoreScope extends InheritedWidget {
+  const StoreScope({super.key, required this.store, required this.version, required super.child});
+  final AppStore store;
+  final int version;
 
-  static AppStore of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<StoreScope>()!.notifier!;
-  static AppStore read(BuildContext context) => context.getInheritedWidgetOfExactType<StoreScope>()!.notifier!;
+  static AppStore of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<StoreScope>()!.store;
+  static AppStore read(BuildContext context) => context.getInheritedWidgetOfExactType<StoreScope>()!.store;
+
+  @override
+  bool updateShouldNotify(StoreScope old) => old.version != version || old.store != store;
+}
+
+/// Root of the app: listens to the store and publishes a new version per change. Several changes in
+/// one frame (a burst of WebSocket events, tokens) cost one rebuild.
+class StoreHost extends StatefulWidget {
+  const StoreHost({super.key, required this.store, required this.child});
+  final AppStore store;
+  final Widget child;
+  @override
+  State<StoreHost> createState() => _StoreHostState();
+}
+
+class _StoreHostState extends State<StoreHost> {
+  int _version = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.store.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(StoreHost old) {
+    super.didUpdateWidget(old);
+    if (old.store != widget.store) {
+      old.store.removeListener(_changed);
+      widget.store.addListener(_changed);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.store.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    if (mounted) setState(() => _version++);
+  }
+
+  @override
+  Widget build(BuildContext context) => StoreScope(store: widget.store, version: _version, child: widget.child);
+}
+
+/// Holds store updates back from a part of the screen nobody can see: a tab that is not showing,
+/// or the screen under a page (a chat) pushed over it. While it is hidden the widgets below keep the
+/// version they last saw and do not rebuild; when it shows again they catch up in one rebuild.
+/// Without it every streaming token rebuilt all four tabs under the open chat. Dialogs, menus and
+/// sheets don't count as covering: what is behind them stays visible, so it stays live.
+class StoreGate extends StatefulWidget {
+  const StoreGate({super.key, this.active, required this.child});
+
+  /// Null: active unless this widget's route is fully covered by another page.
+  final bool? active;
+  final Widget child;
+  @override
+  State<StoreGate> createState() => _StoreGateState();
+}
+
+class _StoreGateState extends State<StoreGate> {
+  int? _shown;
+
+  @override
+  Widget build(BuildContext context) {
+    final outer = context.dependOnInheritedWidgetOfExactType<StoreScope>()!;
+    final active = widget.active ?? !_covered(ModalRoute.of(context));
+    if (active || _shown == null) _shown = outer.version;
+    return StoreScope(store: outer.store, version: _shown!, child: widget.child);
+  }
+
+  /// A page route pushed over ours runs our secondary animation to the end; a dialog, menu or
+  /// sheet doesn't (they are not page transitions), so the screen behind them stays live.
+  bool _covered(ModalRoute<Object?>? route) {
+    if (route == null || route.isCurrent) return false;
+    final s = route.secondaryAnimation;
+    if (s == null) return false;
+    if (!_listening) {
+      _listening = true;
+      s.addStatusListener(_coverChanged);
+      _secondary = s;
+    }
+    return s.status == AnimationStatus.completed;
+  }
+
+  bool _listening = false;
+  Animation<double>? _secondary;
+  void _coverChanged(AnimationStatus _) {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _secondary?.removeStatusListener(_coverChanged);
+    super.dispose();
+  }
 }

@@ -35,6 +35,10 @@ export PATH="$HOME/flutter/bin:$HOME/Android/Sdk/platform-tools:$PATH"
 trap 'adb -s emulator-5554 emu kill >/dev/null 2>&1 || true' EXIT
 adb wait-for-device
 until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]]; do sleep 2; done
+# Right after boot, System UI applies its theme overlays and restarts running apps, which kills the
+# isolate the driver just found. Let it settle, then unlock.
+sleep 25
+adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
 cd "$remote"
 rm -rf "/tmp/agent-company-qa-out/$name"; mkdir -p "/tmp/agent-company-qa-out/$name"
 set +e
