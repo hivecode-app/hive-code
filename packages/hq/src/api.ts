@@ -101,6 +101,16 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
 
   route('GET', '/api/inbox', () => ({ items: hq.inbox.open() }));
   route('POST', '/api/inbox/:id/ack', ({ params }) => ({ ok: hq.inbox.ack(Number(params[0])) }));
+  // "לא עכשיו" and its undo ({on:false}): kept here, so a refresh or another device doesn't bring the card back (#74).
+  route('POST', '/api/inbox/:id/snooze', async ({ params, body }) => {
+    const b = await body();
+    const id = Number(params[0]);
+    const item = hq.inbox.get(id);
+    if (!item) throw new HttpError(404, `no inbox item ${id}`);
+    if (item.state !== 'open') throw new HttpError(409, `inbox item ${id} is already handled`);
+    hq.inbox.snooze(id, b.on !== false);
+    return { item: hq.inbox.get(id) };
+  });
   // Workers (mcp-company request_go, browser-memory tab handoff) put "blocked on you" items here.
   route('POST', '/api/inbox', async ({ body }) => {
     const b = await body();

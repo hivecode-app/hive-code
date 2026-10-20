@@ -262,6 +262,6 @@ void main() {
     final items = b.data!.chats['yoav']!.items;
     expect(items.whereType<UserMsg>().map((m) => m.id), ['m-local'], reason: 'not shown twice after reopening');
     final go = items.whereType<GoCard>().single;
-    expect(go.answer, 'לא עכשיו');
+    expect(go.answer, 'נסגר');
   }, timeout: const Timeout(Duration(seconds: 20)));
 }

@@ -347,6 +347,8 @@ const MIGRATIONS: string[] = [
   ALTER TABLE asks ADD COLUMN headline TEXT;
   ALTER TABLE inbox ADD COLUMN headline TEXT;
   `,
+  // v10: "לא עכשיו" is his, kept here: the card stays down with the others he put off, on every device and refresh (#74).
+  `ALTER TABLE inbox ADD COLUMN snoozed_at INTEGER;`,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [

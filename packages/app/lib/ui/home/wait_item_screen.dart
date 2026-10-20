@@ -50,16 +50,25 @@ class WaitItemScreen extends StatelessWidget {
                 DoneLine(item.answerLine ?? item.doneLine ?? 'טופל')
               else if (pending != null)
                 UndoLine(label: pending.label, onCancel: () => store.cancelUndo(item.id))
-              else if (isAsk)
-                AnswerField(item: item, autofocus: item.options.isEmpty)
-              else
+              else ...[
+                if (isAsk) AnswerField(item: item, autofocus: item.options.isEmpty),
+                if (isAsk) const SizedBox(height: 12),
                 Wrap(spacing: 8, runSpacing: 8, children: [
-                  for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.tonal, onTap: () => store.answerWait(item, o)),
-                  Btn('לא עכשיו', onTap: () {
-                    store.notNow(item);
-                    Navigator.of(context).maybePop();
-                  }),
+                  if (!isAsk)
+                    for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.tonal, onTap: () => store.answerWait(item, o)),
+                  if (item.state != WaitState.notNow)
+                    Btn('לא עכשיו', onTap: () {
+                      store.notNow(item);
+                      Navigator.of(context).maybePop();
+                    }),
+                  // Closed without doing it; the worker who asked is told (#74).
+                  if (item.inboxId != null)
+                    Btn('סגירה', onTap: () {
+                      store.dismiss(item);
+                      Navigator.of(context).maybePop();
+                    }),
                 ]),
+              ],
             ]),
           ),
         ]),

@@ -126,7 +126,14 @@ abstract class Backend extends ChangeNotifier {
   /// Free text (and images, [UserMsg.attachments] style) as the answer to a question.
   Future<CommandResult> freeAnswer(String askId, String text, {List<Attachment> attachments = const []});
   Future<CommandResult> go(WaitItem item);
+  /// "לא עכשיו": the item stays open, below the rest, on every device and after a refresh.
   Future<CommandResult> notNow(WaitItem item);
+
+  /// Takes back a "לא עכשיו" (its "ביטול").
+  Future<CommandResult> resume(WaitItem item);
+
+  /// Closes the item without doing it; the worker who asked is told.
+  Future<CommandResult> dismiss(WaitItem item);
   Future<CommandResult> retry(WaitItem item);
 
   /// Sends a message; the backend updates [UserMsg.delivery] as acks come in.

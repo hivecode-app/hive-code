@@ -1,7 +1,7 @@
 // Backend against packages/hq (HTTP + one WebSocket, token auth, B.8). Endpoints as on the hq
 // lane's branch (packages/hq/src/api.ts):
 //   GET  /api/org /api/board /api/inbox /api/asks /api/toggles /api/messages?identity= /api/events?identity=&after=
-//   POST /api/asks/:id/answer  /api/inbox/:id/{done,dismiss,ack}  /api/messages/tell  /api/shifts/:id/interrupt
+//   POST /api/asks/:id/answer  /api/inbox/:id/{done,dismiss,snooze,ack}  /api/messages/tell  /api/shifts/:id/interrupt
 //   POST /api/uploads (raw image bytes) → {upload:{id,…}}  ·  GET /api/uploads/:id (the bytes)
 //   PUT  /api/toggles/:key
 //   WS   /ws?after=<seq>  (replay, then {type:'live'}, then live events; deltas have seq 0)
@@ -89,13 +89,21 @@ class HqBackend extends Backend {
     return jsonDecode(utf8.decode(r.bodyBytes));
   }
 
-  Future<CommandResult> _send(String method, String path, [Map<String, dynamic>? body]) async {
+  /// [onJson] gets the reply's body when hq took it (what it did: e.g. whether anyone was told).
+  Future<CommandResult> _send(String method, String path, [Map<String, dynamic>? body, void Function(Map<String, dynamic>)? onJson]) async {
     try {
       final req = http.Request(method, Uri.parse('$baseUrl$path'))
         ..headers.addAll(_headers)
         ..body = jsonEncode(body ?? {});
       final r = await http.Response.fromStream(await _http.send(req).timeout(const Duration(seconds: 10)));
-      if (r.statusCode == 200) return const CommandResult.ok();
+      if (r.statusCode == 200) {
+        if (onJson != null) {
+          try {
+            onJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+          } catch (_) {}
+        }
+        return const CommandResult.ok();
+      }
       if (r.statusCode == 401) {
         _refused();
         return const CommandResult.fail('המכשיר הזה נותק מהחברה. צריך להיכנס שוב.');
@@ -725,11 +733,40 @@ class HqBackend extends Backend {
   }
 
   @override
-  Future<CommandResult> notNow(WaitItem item) async {
-    item.state = WaitState.notNow;
+  Future<CommandResult> notNow(WaitItem item) => _snooze(item, true);
+
+  @override
+  Future<CommandResult> resume(WaitItem item) => _snooze(item, false);
+
+  /// Kept in hq (#74): a refresh or another device shows it as he left it. Shown at once; put back
+  /// when hq didn't take it.
+  Future<CommandResult> _snooze(WaitItem item, bool on) async {
+    final was = item.state;
+    item.state = on ? WaitState.notNow : WaitState.open;
     notifyListeners();
     if (item.inboxId == null) return const CommandResult.ok();
-    return _send('POST', '/api/inbox/${item.inboxId}/ack');
+    final r = await _send('POST', '/api/inbox/${item.inboxId}/snooze', {'on': on});
+    if (!r.ok && item.state == (on ? WaitState.notNow : WaitState.open)) {
+      item.state = was;
+      notifyListeners();
+    }
+    return r;
+  }
+
+  @override
+  Future<CommandResult> dismiss(WaitItem item) async {
+    if (item.inboxId == null) return const CommandResult.fail('אי אפשר לסגור את הפריט הזה.');
+    final stale = await _stale(null, item.inboxId, answer: false);
+    if (stale != null) return stale;
+    var told = false;
+    final r = await _send('POST', '/api/inbox/${item.inboxId}/dismiss', {}, (j) => told = j['message'] != null);
+    if (r.ok) {
+      item.state = WaitState.answered;
+      // Only when hq did tell someone (an incident or a system item has no one to tell).
+      final who = _data?.who(item.from);
+      item.answerLine = told ? 'נסגר · ${who?.name ?? item.from} ${who?.gender == Gender.f ? 'קיבלה' : 'קיבל'} הודעה' : 'נסגר';
+    }
+    return _after(r);
   }
 
   @override
@@ -1047,6 +1084,8 @@ CompanyData mapSnapshot({
       options: options,
       domain: kind == WaitKind.login ? (i['title'] as String?) : null,
       link: i['link'] as String?,
+      // "לא עכשיו" lives in hq (#74): it stays put across refreshes and devices.
+      state: i['snoozed_at'] != null ? WaitState.notNow : WaitState.open,
     ));
   }
 
@@ -1273,8 +1312,8 @@ AskCard? cardFor(List<ChatItem> items, String? ref) =>
     final m = re.firstMatch(body);
     if (m != null) return (m.group(1)!.trim(), false);
   }
-  // Declined ("לא עכשיו" → dismiss) or done without a note: the card's line says so.
-  if (body.startsWith('רן דחה: ')) return ('לא עכשיו', true);
+  // Closed without doing it (dismiss) or done without a note: the card's line says so.
+  if (body.startsWith('רן דחה: ') || body.startsWith('רן סגר את השאלה בלי תשובה: ')) return ('נסגר', true);
   if (body.startsWith('רן סיים: ')) return ('סיימתי', true);
   return (body, false);
 }

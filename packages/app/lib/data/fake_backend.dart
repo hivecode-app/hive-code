@@ -116,6 +116,21 @@ class FakeBackend extends Backend {
   }
 
   @override
+  Future<CommandResult> resume(WaitItem item) async {
+    item.state = WaitState.open;
+    notifyListeners();
+    return const CommandResult.ok();
+  }
+
+  @override
+  Future<CommandResult> dismiss(WaitItem item) async {
+    item.state = WaitState.answered;
+    item.answerLine = 'נסגר';
+    notifyListeners();
+    return const CommandResult.ok();
+  }
+
+  @override
   Future<CommandResult> retry(WaitItem item) async {
     item.state = WaitState.answered;
     notifyListeners();

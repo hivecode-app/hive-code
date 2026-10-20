@@ -11,7 +11,7 @@ import 'backend.dart';
 
 /// One answer waiting out its 3 seconds. The UI renders [label] in place of the buttons.
 class PendingAnswer {
-  PendingAnswer(this.key, this.to, this.isGo, this.secondsLeft, this.fire);
+  PendingAnswer(this.key, this.to, this.isGo, this.secondsLeft, this.fire, [this.text]);
   final String key;
   final String to;
   final bool isGo;
@@ -19,7 +19,10 @@ class PendingAnswer {
   final Future<void> Function() fire;
   Timer? timer;
 
-  String get label => isGo ? "GO יישלח ${toName(to)} בעוד $secondsLeft שנ'" : "יישלח ${toName(to)} בעוד $secondsLeft שנ'";
+  /// Its own line instead of "יישלח ל…" (closing a card: "ייסגר בעוד 3 שנ'").
+  final String Function(int secondsLeft)? text;
+
+  String get label => text != null ? text!(secondsLeft) : isGo ? "GO יישלח ${toName(to)} בעוד $secondsLeft שנ'" : "יישלח ${toName(to)} בעוד $secondsLeft שנ'";
 }
 
 class AppStore extends ChangeNotifier {
@@ -86,12 +89,12 @@ class AppStore extends ChangeNotifier {
 
   // ── 3s undo ──────────────────────────────────────────────────────────────
 
-  void startUndo(String key, String to, Future<CommandResult> Function() action, {bool isGo = false}) {
+  void startUndo(String key, String to, Future<CommandResult> Function() action, {bool isGo = false, String Function(int)? text}) {
     cancelUndo(key, notify: false);
     final p = PendingAnswer(key, to, isGo, undoSeconds, () async {
       final r = await action();
       if (!r.ok) error = r.error;
-    });
+    }, text);
     _pending[key] = p;
     p.timer = Timer.periodic(const Duration(seconds: 1), (t) {
       p.secondsLeft--;
@@ -150,6 +153,10 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> notNow(WaitItem item) async => _check(await backend.notNow(item));
+  Future<void> resume(WaitItem item) async => _check(await backend.resume(item));
+  /// Closing is for good and wakes the worker: it waits the same 3 seconds as any one-tap answer.
+  void dismiss(WaitItem item) =>
+      startUndo(item.id, nameOf(item.from), () => backend.dismiss(item), text: (s) => "ייסגר בעוד $s שנ'");
 
   Future<void> _check(CommandResult r) async {
     if (!r.ok) {

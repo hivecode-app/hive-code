@@ -127,6 +127,8 @@ class WaitRow extends StatelessWidget {
     Widget tail;
     if (item.state == WaitState.answered) {
       tail = DoneLine(item.answerLine ?? item.doneLine ?? 'טופל · ${hm(DateTime.now())}', top: 8);
+    } else if (pending != null) {
+      tail = UndoLine(label: pending.label, onCancel: () => store.cancelUndo(item.id));
     } else if (item.state == WaitState.notNow) {
       tail = Padding(
         padding: const EdgeInsets.only(top: 8),
@@ -134,16 +136,18 @@ class WaitRow extends StatelessWidget {
           Text('לא עכשיו', style: T.secondary.copyWith(color: p.text2)),
           const SizedBox(width: 10),
           GestureDetector(
-            onTap: () {
-              item.state = WaitState.open;
-              store.touch();
-            },
+            onTap: () => store.resume(item),
             child: Text('ביטול', style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+          ),
+          // Apart from "ביטול", so a near miss doesn't close it (and the 3 seconds still undo it).
+          const SizedBox(width: 24),
+          // Put off, then closed for good: the worker who asked is told (#74).
+          GestureDetector(
+            onTap: () => store.dismiss(item),
+            child: Text('סגירה', style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
           ),
         ]),
       );
-    } else if (pending != null) {
-      tail = UndoLine(label: pending.label, onCancel: () => store.cancelUndo(item.id));
     } else {
       final isAsk = item.kind == WaitKind.blockingAsk || item.kind == WaitKind.softAsk;
       tail = Padding(

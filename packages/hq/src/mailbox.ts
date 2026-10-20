@@ -408,10 +408,14 @@ export class Mailbox {
     const requester = item.from_identity;
     if (!requester || requester === OWNER || requester === 'hq' || !getIdentity(this.store, requester)) return { item: this.inbox.get(itemId), message: null };
     const verb = opts.declined ? 'דחה' : 'סיים';
+    // A question he closed (#74): the asker hears which one, and that no answer is coming.
+    const body = opts.declined && item.kind === 'ask'
+      ? `רן סגר את השאלה בלי תשובה: ${item.headline ?? item.body}`
+      : `רן ${verb}: ${item.title}`;
     const message = this.tell({
       msg_id: `inbox-${itemId}-${opts.declined ? 'declined' : 'done'}`, from: OWNER, to: requester, kind: 'answer',
       ref: item.ref ?? `inbox-${itemId}`, priority: 'now', urgency: item.urgency,
-      body: `רן ${verb}: ${item.title}${opts.note ? `\n${opts.note}` : ''}`,
+      body: `${body}${opts.note ? `\n${opts.note}` : ''}`,
     });
     this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, message: message.id });
     return { item: this.inbox.get(itemId), message };

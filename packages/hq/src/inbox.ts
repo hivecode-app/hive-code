@@ -18,7 +18,7 @@ export interface NewInboxItem {
 
 interface InboxRow { id: number; kind: InboxKind; title: string; body: string; from_identity: string | null; urgency: Urgency;
   blocking: number; ref: string | null; link: string | null; headline: string | null; state: InboxItemDTO['state']; created_at: number; pushed_at: number | null; acked_at: number | null;
-  telegram_at: number | null; push_error: string | null }
+  snoozed_at: number | null; telegram_at: number | null; push_error: string | null }
 
 export const URGENCY_RANK: Record<Urgency, number> = { urgent: 0, normal: 1, low: 2 };
 
@@ -64,7 +64,7 @@ export class Inbox {
 
   open(): InboxItemDTO[] {
     const rows = this.store.db.prepare(`SELECT * FROM inbox WHERE state = 'open'
-      ORDER BY blocking DESC, CASE urgency WHEN 'urgent' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at ASC, id ASC`).all() as InboxRow[];
+      ORDER BY snoozed_at IS NOT NULL, blocking DESC, CASE urgency WHEN 'urgent' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at ASC, id ASC`).all() as InboxRow[];
     return rows.map(toDTO);
   }
 
@@ -83,6 +83,19 @@ export class Inbox {
   ack(id: number): boolean {
     const r = this.store.db.prepare('UPDATE inbox SET acked_at = COALESCE(acked_at, ?) WHERE id = ?').run(this.store.now(), id);
     if (r.changes) this.store.emit('inbox.acked', null, { id });
+    return r.changes > 0;
+  }
+
+  /**
+   * "לא עכשיו" (#74): the item stays open, below the rest, until he takes it back or it closes. Putting it
+   * off counts as receipt too, so no Telegram chases it.
+   */
+  snooze(id: number, on = true): boolean {
+    const now = this.store.now();
+    const r = on
+      ? this.store.db.prepare(`UPDATE inbox SET snoozed_at = COALESCE(snoozed_at, ?), acked_at = COALESCE(acked_at, ?) WHERE id = ? AND state = 'open'`).run(now, now, id)
+      : this.store.db.prepare(`UPDATE inbox SET snoozed_at = NULL WHERE id = ? AND state = 'open'`).run(id);
+    if (r.changes) this.store.emit('inbox.snoozed', null, { id, on });
     return r.changes > 0;
   }
 
@@ -111,5 +124,6 @@ function toDTO(r: InboxRow): InboxItemDTO {
   return {
     id: r.id, kind: r.kind, title: r.title, body: r.body, from_identity: r.from_identity, urgency: r.urgency,
     blocking: r.blocking === 1, ref: r.ref, link: r.link ?? null, headline: r.headline ?? null, state: r.state, created_at: r.created_at, pushed_at: r.pushed_at, acked_at: r.acked_at,
+    snoozed_at: r.snoozed_at ?? null,
   };
 }

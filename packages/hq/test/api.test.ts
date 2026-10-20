@@ -220,3 +220,43 @@ test('boot restart that hq misses at reattach: restoreLost resumes, every older 
     assert.equal(hq2.shifts.get('eli-1')!.state, 'live');
   } finally { await env.cleanup(); }
 });
+
+test('API: "לא עכשיו" and closing a card are kept by hq, so a refresh does not bring the card back (#74)', async () => {
+  const env = await apiEnv();
+  try {
+    const { call, hq } = env;
+    hq.mailbox.ask({ msg_id: 'ask-74', from: 'eli', headline: 'הבוטים', question: 'להעביר גם את הבוטים?', blocking: true });
+    hq.mailbox.ask({ msg_id: 'ask-74b', from: 'eli', question: 'עוד שאלה', blocking: true });
+    const go = await call('POST', '/api/inbox', { kind: 'go', from: 'eli', title: 'GO: פריסה', body: 'פריסה' });
+    const items = () => call('GET', '/api/inbox').then((r) => r.json.items as Record<string, any>[]);
+    const ask = (await items()).find((i) => i.ref === 'ask-74')!;
+
+    // לא עכשיו: still open, marked and last, on a fresh read from the server; Telegram doesn't chase it.
+    const s = await call('POST', `/api/inbox/${ask.id}/snooze`, {});
+    assert.equal(s.status, 200);
+    let now = await items();
+    assert.ok(now.find((i) => i.id === ask.id)!.snoozed_at, 'kept on the server');
+    assert.equal(now.at(-1)!.id, ask.id, 'below the rest');
+    assert.ok(now.find((i) => i.id === ask.id)!.acked_at);
+    // ביטול: back with the others.
+    await call('POST', `/api/inbox/${ask.id}/snooze`, { on: false });
+    now = await items();
+    assert.equal(now.find((i) => i.id === ask.id)!.snoozed_at, null);
+    assert.notEqual(now.at(-1)!.id, ask.id);
+    await call('POST', `/api/inbox/${go.json.item.id}/snooze`, {});
+    assert.ok((await items()).find((i) => i.id === go.json.item.id)!.snoozed_at);
+
+    // Closing: gone from the inbox for good, the question cancelled, the asker told which one.
+    assert.equal((await call('POST', `/api/inbox/${ask.id}/dismiss`, {})).status, 200);
+    assert.ok(!(await items()).some((i) => i.id === ask.id), 'does not come back');
+    assert.equal(hq.inbox.get(ask.id)!.state, 'dismissed');
+    assert.equal(hq.mailbox.getAsk('ask-74')!.state, 'cancelled');
+    const told = hq.mailbox.list('eli').find((m) => m.id === `inbox-${ask.id}-declined`)!;
+    assert.equal(told.priority, 'now');
+    assert.equal(told.ref, 'ask-74');
+    assert.match(told.body, /^רן סגר את השאלה בלי תשובה: הבוטים/);
+
+    assert.equal((await call('POST', `/api/inbox/${ask.id}/snooze`, {})).status, 409, 'already handled');
+    assert.equal((await call('POST', '/api/inbox/99999/snooze', {})).status, 404);
+  } finally { await env.cleanup(); }
+});

@@ -50,6 +50,8 @@ export interface InboxItemDTO {
   created_at: number;          // epoch ms
   pushed_at: number | null;
   acked_at: number | null;
+  /** He said "לא עכשיו": still open, shown below the rest until he takes it back (#74). */
+  snoozed_at: number | null;
 }
 
 export interface AskDTO {
