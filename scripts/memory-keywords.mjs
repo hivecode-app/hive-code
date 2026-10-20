@@ -17,6 +17,7 @@ import { parseArgs } from 'node:util';
 import {
   bet9Sources, defaultStateRoot, extraSourcesFromEnv, keywordCachePath, loadKeywordCache, loadRecords,
 } from '../packages/mcp-company/src/l3.ts';
+import { DEFAULT_NAMES, loadNames } from '../packages/shared/src/index.ts';
 
 const { values: opt } = parseArgs({
   options: {
@@ -35,9 +36,13 @@ const CLAUDE = join(HOME, '.local/share/agent-company/claude/current/claude');
 const LAB = join(HOME, '.local/state/agent-company/lab/keywords');
 const stateRoot = opt.state ?? defaultStateRoot();
 const cachePath = keywordCachePath(stateRoot);
+const repo = opt.repo ?? process.env.COMPANY_REPO ?? process.cwd();
 const sources = opt.bet9
   ? bet9Sources(stateRoot)
-  : [{ dir: join(opt.repo ?? process.env.COMPANY_REPO ?? process.cwd(), 'memory') }, ...extraSourcesFromEnv()];
+  : [{ dir: join(repo, 'memory') }, ...extraSourcesFromEnv()];
+// How the prompt names the owner: org.yaml's owner id, capitalized (ran → Ran); without one, "the owner".
+const ownerId = loadNames(join(repo, 'company')).owner.id;
+const OWNER_NAME = ownerId === DEFAULT_NAMES.owner.id ? 'the owner' : ownerId[0].toUpperCase() + ownerId.slice(1);
 
 const cache = loadKeywordCache(stateRoot);
 const records = loadRecords(sources, opt.force ? {} : cache)
@@ -51,10 +56,10 @@ if (opt['dry-run'] || !records.length) process.exit(0);
 function prompt(batch) {
   const items = batch.map((r) => ({ id: r.id, name: r.name, description: r.description, body: r.body.slice(0, 1500) }));
   return [
-    'You index memory records of a solo business owner (Ran, Hebrew speaker) for a bilingual keyword search.',
+    `You index memory records of a solo business owner (${OWNER_NAME}, Hebrew speaker) for a bilingual keyword search.`,
     'For EACH record below produce search keywords:',
     '- "he": 8-15 Hebrew keywords/short phrases: Hebrew translations of the key terms, synonyms, and the words',
-    '  Ran would use when asking a question in Hebrew that this record answers (e.g. "ביטוח בריאות", "מרכאות").',
+    `  ${OWNER_NAME} would use when asking a question in Hebrew that this record answers (e.g. "ביטוח בריאות", "מרכאות").`,
     '- "en": 8-15 English keywords/short phrases: key terms, synonyms, and how one would ask about it in English.',
     'Include proper nouns (products, services, banks, tools) as they are written. No sentences.',
     'Reply with ONLY strict JSON, no prose, no code fences: {"<id>": {"he": [...], "en": [...]}, ...} with every id below.',

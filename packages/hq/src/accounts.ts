@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import type { LoggedFrame, UsageReply } from '@company/shared';
+import { g, type LoggedFrame, type UsageReply } from '@company/shared';
 import type { AccountDef, HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import type { AccountChoice, ShiftManager, ShiftRow } from './shifts.ts';
@@ -186,7 +186,8 @@ export class AccountManager {
     if (!pin || row.kind === 'foreign' || (row.account ?? this.primary) === pin || row.state !== 'live') return;
     const r = this.get(pin);
     if (!r || !this.usable(r) || this.blocked(r)) return;
-    await this.move(row, pin, `רן העביר את כולם לחשבון ${r.label}.`);
+    const o = this.mailbox.names.owner;
+    await this.move(row, pin, `${o.name} ${g(o, 'העביר', 'העבירה')} את כולם לחשבון ${r.label}.`);
   }
 
   // ── automatic switch ─────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, relative, sep } from 'node:path';
+import { DEFAULT_NAMES, loadNames } from '@company/shared';
 
 export interface L3Source {
   /** Fixed domain for every record in dir; omit for a repo memory/ tree
@@ -49,7 +50,14 @@ const STOP = new Set(`the a an and or of to in on for is are was were what how w
 we he she it its this that these those with from by at be been as not no my me your his her our their there here if then
 so than into about up out any all also just only via per vs etc
 מה איך למה מתי מי של על את עם זה זו זאת יש אין הוא היא הם הן אני אתה את אנחנו לי לו לה להם כל גם אם או אבל רק עוד
-כמה איפה האם צריך מותר אפשר לפני אחרי שלו שלי שלה שלנו רן ran 2026 כן לא אל עד כדי כי אז ה ו ב ל מ ש כ`.split(/\s+/));
+כמה איפה האם צריך מותר אפשר לפני אחרי שלו שלי שלה שלנו 2026 כן לא אל עד כדי כי אז ה ו ב ל מ ש כ`.split(/\s+/));
+
+/** The owner's name and id (org.yaml): on nearly every record, so they say nothing about which one is meant. */
+export function addNameStopWords(companyDir: string): void {
+  const { owner } = loadNames(companyDir);
+  const own = [owner.name, owner.id].filter((w) => w !== DEFAULT_NAMES.owner.name && w !== DEFAULT_NAMES.owner.id);
+  for (const w of own) for (const t of w.toLowerCase().split(/\s+/)) if (t) STOP.add(t);
+}
 
 const HE_PREFIX1 = new Set('הובלמשכ');
 const HE_PREFIX2 = new Set(['וה', 'שה', 'מה', 'לה', 'בה', 'כה', 'וב', 'ול', 'ומ', 'וש', 'וכ', 'כש', 'שב', 'של', 'שמ', 'מש']);
@@ -357,7 +365,7 @@ const INDEX_TTL_MS = 30_000;
 export function openL3(opts: OpenOptions = {}): L3Index {
   const env = opts.env ?? process.env;
   const sources: L3Source[] = [];
-  if (opts.repo) sources.push({ dir: join(opts.repo, 'memory') });
+  if (opts.repo) { sources.push({ dir: join(opts.repo, 'memory') }); addNameStopWords(join(opts.repo, 'company')); }
   sources.push(...(opts.extraSources ?? extraSourcesFromEnv(env)));
   const stateRoot = opts.stateRoot ?? defaultStateRoot(env);
   let kwMtime = 0;

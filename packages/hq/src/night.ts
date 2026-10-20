@@ -9,7 +9,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parse } from 'yaml';
-import { OWNER } from '@company/shared';
+import { OWNER, pre } from '@company/shared';
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import type { Scheduler, TaskRow } from './scheduler.ts';
@@ -138,7 +138,7 @@ export class Night {
     this.inbox = inbox;
     this.issues = issues;
     scheduler.scope = () => { const n = this.current(); return n?.scope ? (JSON.parse(n.scope) as string[]) : null; };
-    scheduler.promptNote = () => { const n = this.current(); return n?.note ? `הנחיית לילה של רן: ${n.note}` : null; };
+    scheduler.promptNote = () => { const n = this.current(); return n?.note ? `הנחיית לילה של ${mailbox.names.owner.name}: ${n.note}` : null; };
     scheduler.afterFill = () => this.observe();
     store.onEvent((e) => {
       if (e.type === 'message.new') this.onMessage(e.data as MessageRow);
@@ -336,7 +336,7 @@ export class Night {
     this.store.emit('night.ended', null, { night: night.id, reason, empty_pct: summary.empty.pct });
     if (this.store.toggle(this.summaryKey)) {
       this.mailbox.tell({ msg_id: `night-summary-${night.id}`, from: 'hq', to: this.cfg.managerId, priority: 'next',
-        body: `סיכום בוקר ללילה ${night.id}, מתוך ה-store. תעביר לרן כמו שהוא, אפשר לקצר:\n\n${summary.text}` });
+        body: `סיכום בוקר ללילה ${night.id}, מתוך ה-store. תעביר ${pre('ל', this.mailbox.names.owner.name)} כמו שהוא, אפשר לקצר:\n\n${summary.text}` });
     }
     return summary;
   }

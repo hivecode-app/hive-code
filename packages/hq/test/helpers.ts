@@ -255,6 +255,8 @@ export class FakeTabBrowser implements TabBrowser {
 export const ORG_YAML = `
 version: 1
 owner: ran
+owner_name: רן
+owner_gender: male
 manager: yoav
 monitoring_lead: rotem
 teams:

@@ -7,7 +7,7 @@
 // The composer (the identity that owns the `compose-home` automation in org.yaml, today עדי) is woken to
 // compose again on what matters, at most once per 3 minutes; during night mode only for an incident or a new
 // "waiting for you", the rest is kept for one composition in the morning (07:00, or when he opens the app).
-import { OWNER, type HqEvent } from '@company/shared';
+import { g, OWNER, pre, type HqEvent } from '@company/shared';
 import type { Hq } from './hq.ts';
 import { hhmm, nextLocal } from './timezone.ts';
 import { askedList, type AskedItem } from './asked.ts';
@@ -458,7 +458,7 @@ export class Home {
       }
       case 'inbox.new': {
         const kind = d.kind === 'incident' ? 'incident' : 'inbox';
-        this.add({ kind, text: `${kind === 'incident' ? 'תקלה' : 'מחכה לרן'}: ${String(d.headline ?? d.title ?? '')} (inbox ${String(d.id)})` });
+        this.add({ kind, text: `${kind === 'incident' ? 'תקלה' : `מחכה ${pre('ל', this.hq.mailbox.names.owner.name)}`}: ${String(d.headline ?? d.title ?? '')} (inbox ${String(d.id)})` });
         return;
       }
       case 'probe.anomaly': this.add({ kind: 'incident', text: `תקלה בניטור: ${String(d.probe ?? '')}` }); return;
@@ -467,7 +467,10 @@ export class Home {
       case 'hq.started': this.add({ kind: 'deploy', text: 'hq עלה מחדש (פריסה או אתחול)' }); return;
       case 'inbox.completed': {
         const item = typeof d.id === 'number' ? this.hq.inbox.get(d.id) : undefined;
-        if (item?.kind === 'go' && !d.declined) this.add({ kind: 'deploy', text: `רן אישר GO: ${item.headline ?? item.title}` });
+        if (item?.kind === 'go' && !d.declined) {
+          const o = this.hq.mailbox.names.owner;
+          this.add({ kind: 'deploy', text: `${o.name} ${g(o, 'אישר', 'אישרה')} GO: ${item.headline ?? item.title}` });
+        }
         return;
       }
     }
@@ -517,7 +520,7 @@ export class Home {
     const asked = this.asked().map((a) => `${a.id}: ${this.hq.mailbox.label(a.identity)} · ${a.state === 'answered' ? 'ענו' : 'מחכה'} · ${a.body.replace(/\s+/g, ' ').slice(0, 60)}`);
     const inbox = this.hq.inbox.open().map((i) => `${i.id}: ${i.kind}${i.blocking ? ' · חוסם' : ''}${i.snoozed_at ? ' · נדחה' : ''} · ${i.headline ?? i.title}`);
     return [
-      `להרכיב מחדש את ראש מסך השיחות של רן (\`compose_home\`). מאז ההרכבה הקודמת${row ? ` (${this.hhmm(row.composed_at)})` : ''}:`,
+      `להרכיב מחדש את ראש מסך השיחות של ${this.hq.mailbox.names.owner.name} (\`compose_home\`). מאז ההרכבה הקודמת${row ? ` (${this.hhmm(row.composed_at)})` : ''}:`,
       ...pending.map((p) => `- ${this.hhmm(p.at)} ${p.text}`),
       '',
       `מה מוצג עכשיו (${cur.source === 'agent' ? `מתכון ${cur.version}` : `ברירת המחדל${cur.fallback && cur.fallback !== 'none' ? `, ${cur.fallback}` : ''}`}):`,

@@ -2,6 +2,7 @@
 //  - fills every free work slot from the queue immediately, in B.16 order, with no quota-percentage gate;
 //  - escalates unanswered blocking asks to the manager (A.4: 10 min by day, immediately at night);
 //  - lets night.ts (B.16) scope the queue, add the night note and measure empty slots after every fill.
+import { g, pre } from '@company/shared';
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import { waitingLine, type Mailbox } from './mailbox.ts';
@@ -452,7 +453,7 @@ export class Scheduler {
       const last = this.finishing.get(id)!;
       if (waiting.length) {
         this.mailbox.tell({ msg_id: `${last.opId}-waiting`, from: 'hq', to: identity, kind: 'system', priority: 'now', ref: waiting.at(-1)!.id,
-          body: `המשימה לא נסגרה: ${waitingLine(waiting)}. ענה לו ב-\`tell\` ל-\`owner\`, ואז \`status\` עם \`state: "done"\` שוב.` });
+          body: `המשימה לא נסגרה: ${waitingLine(waiting, this.mailbox.names.owner.name)}. ענה ${g(this.mailbox.names.owner, 'לו', 'לה')} ב-\`tell\` ל-\`owner\`, ואז \`status\` עם \`state: "done"\` שוב.` });
         this.store.emit('task.close_waiting', identity, { id, messages: waiting.map((m) => m.id) });
         return 'waiting';
       }
@@ -607,7 +608,7 @@ export class Scheduler {
       this.mailbox.tell({ msg_id: msgId, from: 'hq', to: r.id, kind: 'system', priority: 'next',
         body: [
           `קמת לראשונה: נוספת ל-\`org.yaml\` בתור ${r.title || 'ראש צוות'}, ו-hq העיר אותך אחרי שנטען.`,
-          'כתוב לרן ב-`tell` (`to: "owner"`) משפט-שניים: שקמת, מי אתה ומה הצוות שלך עושה. אחר כך המשך לפי התיק שלך.',
+          `כתוב ${pre('ל', this.mailbox.names.owner.name)} ב-\`tell\` (\`to: "owner"\`) משפט-שניים: שקמת, מי אתה ומה הצוות שלך עושה. אחר כך המשך לפי התיק שלך.`,
         ].join('\n') });
       this.store.emit('scheduler.lead_woken', r.id, { msg: msgId });
       woke.push(r.id);

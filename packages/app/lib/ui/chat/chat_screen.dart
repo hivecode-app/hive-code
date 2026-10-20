@@ -634,7 +634,7 @@ class _ChatBar extends StatelessWidget {
     final pr = presence;
     final rows = <(String, String)>[
       ('צוות', team?.name ?? '—'),
-      ('ממונה', team?.leadId != null && team!.leadId != who.id ? d.who(team!.leadId!).name : 'יואב'),
+      ('ממונה', team?.leadId != null && team!.leadId != who.id ? d.who(team!.leadId!).name : companyNames.manager),
       if (who.taskRef != null) ('משימה', '`${who.taskRef}`'),
       if (pr.shift != null) ('משמרת', '${pr.shift}${pr.shiftSince != null ? ' · מ-${pr.shiftSince}' : ''}'),
       if (pr.contextPct != null) ('הקשר', '${pr.contextPct}%'),

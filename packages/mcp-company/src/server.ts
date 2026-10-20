@@ -2,11 +2,13 @@
 // `company-mcp`: stdio MCP server, one per shift. stdout carries protocol
 // only; every log line goes to stderr.
 import { homedir } from 'node:os';
-import { ENV, LineSplitter, shiftDir, statePaths } from '@company/shared';
+import { join } from 'node:path';
+import { ENV, LineSplitter, loadNames, shiftDir, statePaths } from '@company/shared';
 import { postJson } from './hq-client.ts';
 import type { HqTarget } from './hq-client.ts';
 import { recall } from './recall.ts';
 import { createServer } from './rpc.ts';
+import { buildTools } from './tools.ts';
 import { Wal } from './wal.ts';
 
 const OPS_TIMEOUT_MS = 10_000;
@@ -26,13 +28,16 @@ const wal = new Wal({
 if (wal.pending().length) log(`replaying ${wal.pending().length} pending WAL entries`);
 wal.start();
 
+const repo = env[ENV.repo] || process.cwd();
 const server = createServer({
   ctx: { identity, shift, sessionId: env[ENV.sessionId] || null },
+  // The names in the tool descriptions (the owner, the manager) come from the company's org.yaml.
+  tools: buildTools(loadNames(join(repo, 'company'))),
   append: (e) => wal.append(e),
   waitSettled: (id, ms) => wal.waitSettled(id, ms),
   recall: (req) => recall(req, {
     transport: (r, timeoutMs) => postJson(target, '/v1/recall', r, timeoutMs),
-    repo: env[ENV.repo] || process.cwd(),
+    repo,
     stateRoot: paths.root,
     log,
   }),

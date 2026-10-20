@@ -278,6 +278,13 @@ export function main() {
     for (const k of ['manager', 'monitoring_lead']) {
       if (org[k] != null && !identityIds.has(org[k])) err(`${W}: "${k}" "${org[k]}" is not an identity`);
     }
+    // The names in texts (packages/shared/src/names.ts): a misspelt gender would quietly bend every text to male.
+    if (org.owner_name != null && (typeof org.owner_name !== 'string' || !org.owner_name.trim())) err(`${W}: "owner_name" must be a non-empty name`);
+    const GENDERS = ['male', 'female'];
+    if (org.owner_gender != null && !GENDERS.includes(org.owner_gender)) err(`${W}: "owner_gender" "${org.owner_gender}" is not one of ${GENDERS.join('|')}`);
+    for (const p of org.identities ?? []) {
+      if (p?.gender != null && !GENDERS.includes(p.gender)) err(`${W}: identity "${p.id}" gender "${p.gender}" is not one of ${GENDERS.join('|')}`);
+    }
 
     for (const t of teams) {
       const who = `team "${t.id}"`;

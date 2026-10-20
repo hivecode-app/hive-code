@@ -3,6 +3,7 @@
 // (frontmatter `monitoring:` from the B.17 example is accepted too). Phase 1 runs `http` probes;
 // other kinds are listed as unsupported, never silently dropped.
 // `fail_after` consecutive failures → one `now` message to רותם with the evidence; recovery → one note.
+import { pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parse } from 'yaml';
@@ -165,7 +166,7 @@ export class ProbeRunner {
           `${fails} כישלונות ברצף (fail_after=${p.failAfter}). תקין לאחרונה: ${lastOk}.`,
           'ראיות:',
           ...recent.map((r) => `- ${new Date(r.ts).toISOString()} status=${r.status ?? '—'} latency=${r.latency_ms ?? '—'}ms ${r.error ?? ''}`.trim()),
-          'שלב 1: observe-only. חקרי, ושלחי לרן ask דחוף עם השערה והצעה. פעולה על הפרודקשן רק עם grant באמנה.',
+          `שלב 1: observe-only. חקרי, ושלחי ${pre('ל', this.mailbox.names.owner.name)} ask דחוף עם השערה והצעה. פעולה על הפרודקשן רק עם grant באמנה.`,
         ].join('\n') });
       this.store.emit('probe.anomaly', this.cfg.monitoringLeadId, { probe: p.key, fails });
     } else if (o.ok && open) {

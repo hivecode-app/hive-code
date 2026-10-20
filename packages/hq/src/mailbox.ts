@@ -4,7 +4,7 @@
 // No `delivered` in 60s → one retry with resurrection → visible failure in the sender's inbox and the owner's.
 // msg_id is the idempotency key end to end (API, host `send`, retries after crash).
 import { randomUUID } from 'node:crypto';
-import { OWNER, type AskDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency } from '@company/shared';
+import { g, loadNames, OWNER, pre, type CompanyNames, type AskDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency } from '@company/shared';
 import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
 import type { Inbox } from './inbox.ts';
@@ -71,8 +71,11 @@ export class Mailbox {
   /** hq's own asks (account login): the answer goes straight here, in process: never the store, never the WS. */
   onHqAnswer: ((askId: string, answer: string) => void) | null = null;
 
+  /** The owner's and the manager's names in texts, from org.yaml (re-read when it changes). */
+  get names(): CompanyNames { return loadNames(this.cfg.companyDir, this.cfg.managerId); }
+
   label(id: string): string {
-    if (id === OWNER) return 'רן';
+    if (id === OWNER) return this.names.owner.name;
     if (id === 'hq') return 'hq';
     const i = getIdentity(this.store, id);
     return i ? i.name : id; // symbols are icon names (Material Symbols), not text
@@ -412,7 +415,7 @@ export class Mailbox {
       // The sender learns too, through its own mailbox. Never fails into a loop: system notes are not re-reported.
       if (m.kind !== 'system') {
         this.tell({ msg_id: `${m.id}-failed`, from: 'hq', to: m.from_identity, kind: 'system', ref: m.id, priority: 'next',
-          body: `ההודעה שלך ${m.id} ל-${this.label(m.to_identity)} לא נמסרה${why}. היא מופיעה אצל רן ב"מחכה לך".` });
+          body: `ההודעה שלך ${m.id} ל-${this.label(m.to_identity)} לא נמסרה${why}. היא מופיעה אצל ${this.names.owner.name} ב"מחכה לך".` });
       }
     }
   }
@@ -440,11 +443,12 @@ export class Mailbox {
     }
     const requester = item.from_identity;
     if (!requester || requester === OWNER || requester === 'hq' || !getIdentity(this.store, requester)) return { item: this.inbox.get(itemId), message: null };
-    const verb = opts.declined ? 'דחה' : 'סיים';
+    const o = this.names.owner;
+    const verb = opts.declined ? g(o, 'דחה', 'דחתה') : g(o, 'סיים', 'סיימה');
     // A question he closed (#74): the asker hears which one, and that no answer is coming.
     const body = opts.declined && item.kind === 'ask'
-      ? `רן סגר את השאלה בלי תשובה: ${item.headline ?? item.body}`
-      : `רן ${verb}: ${item.title}`;
+      ? `${o.name} ${g(o, 'סגר', 'סגרה')} את השאלה בלי תשובה: ${item.headline ?? item.body}`
+      : `${o.name} ${verb}: ${item.title}`;
     const message = this.tell({
       msg_id: `inbox-${itemId}-${opts.declined ? 'declined' : 'done'}`, from: OWNER, to: requester, kind: 'answer',
       ref: item.ref ?? `inbox-${itemId}`, priority: 'now', urgency: item.urgency,
@@ -482,7 +486,7 @@ export class Mailbox {
     const message = this.tell({
       msg_id: `inbox-${itemId}-reply`, from: OWNER, to: requester, kind: 'answer', ref: item.ref ?? `inbox-${itemId}`,
       priority: 'now', urgency: item.urgency, attachments,
-      body: `תשובה של רן ${what} "${item.headline ?? item.title}": ${text}`,
+      body: `תשובה של ${this.names.owner.name} ${what} "${item.headline ?? item.title}": ${text}`,
     });
     this.store.emit('inbox.completed', requester, { id: itemId, declined: false, message: message.id });
     return { item: this.inbox.get(itemId), message };
@@ -534,10 +538,10 @@ export class Mailbox {
     if (fromHq) this.onHqAnswer?.(id, answer);
     const from = by === 'owner' ? OWNER : this.cfg.managerId;
     if (!fromHq) this.tell({ msg_id: `${id}-answer`, from, to: a.from_identity, kind: 'answer', ref: id, urgency: a.urgency, priority: 'now',
-      body: by === 'owner' ? `תשובה לשאלה ${id}: ${answer}` : `יואב החליט במקום רן (${id}): ${answer}${why ? `, כי ${why}` : ''}`, attachments });
+      body: by === 'owner' ? `תשובה לשאלה ${id}: ${answer}` : `${this.names.manager.name} ${g(this.names.manager, 'החליט', 'החליטה')} במקום ${this.names.owner.name} (${id}): ${answer}${why ? `, כי ${why}` : ''}`, attachments });
     if (by === 'manager') {
       // "החלטתי במקומך: X, כי Y" — informational, never pushed.
-      this.inbox.add({ kind: 'escalation_note', title: `${this.label(this.cfg.managerId)} החליט במקומך`, from_identity: this.cfg.managerId,
+      this.inbox.add({ kind: 'escalation_note', title: `${this.label(this.cfg.managerId)} ${g(this.names.manager, 'החליט', 'החליטה')} במקומך`, from_identity: this.cfg.managerId,
         body: `${a.question}\n→ ${answer}${why ? `, כי ${why}` : ''}`, ref: id, urgency: 'low', dedupe_key: `escalation_note:${id}` });
     }
     const out = this.getAsk(id)!;
@@ -551,10 +555,10 @@ export class Mailbox {
     this.store.db.prepare(`UPDATE asks SET state = 'escalated', escalated_at = ? WHERE id = ? AND state = 'open'`).run(this.store.now(), a.id);
     this.tell({ msg_id: `${a.id}-escalation`, from: 'hq', to: this.cfg.managerId, kind: 'escalation', ref: a.id, urgency: a.urgency,
       priority: 'next', body: [
-        `שאלה חוסמת מ-${this.label(a.from_identity)} לא נענתה ע"י רן (${why}).`,
+        `שאלה חוסמת מ-${this.label(a.from_identity)} לא נענתה ע"י ${this.names.owner.name} (${why}).`,
         `שאלה (${a.id}): ${a.question}`,
         a.options.length ? `אפשרויות: ${a.options.join(' / ')}` : '',
-        `אם זה בסמכותך: ענה עם tell(to="${a.from_identity}", ref="${a.id}", body="החלטתי במקומך: X, כי Y"). אם לא: השאר אותה לרן.`,
+        `אם זה בסמכותך: ענה עם tell(to="${a.from_identity}", ref="${a.id}", body="החלטתי במקומך: X, כי Y"). אם לא: השאר אותה ${pre('ל', this.names.owner.name)}.`,
       ].filter(Boolean).join('\n') });
     this.store.emit('ask.escalated', a.from_identity, { id: a.id, why });
   }
@@ -568,9 +572,9 @@ function askDTO(r: AskRow): AskDTO {
   return { ...r, options: JSON.parse(r.options) as string[], blocking: r.blocking === 1 };
 }
 
-/** "רן מחכה לתשובה על «…»" for his unanswered messages (#118): the latest one quoted, one line. */
-export function waitingLine(msgs: Pick<MessageRow, 'body'>[]): string {
+/** "רן מחכה לתשובה על «…»" for his unanswered messages (#118): the latest one quoted, one line. `owner`: his name (names.ts). */
+export function waitingLine(msgs: Pick<MessageRow, 'body'>[], owner: string): string {
   const last = msgs.at(-1)?.body.replace(/\s+/g, ' ').trim() ?? '';
   const quote = last.length > 80 ? `${last.slice(0, 79)}…` : last;
-  return `רן מחכה לתשובה על «${quote}»${msgs.length > 1 ? ` (ועוד ${msgs.length - 1})` : ''}`;
+  return `${owner} מחכה לתשובה על «${quote}»${msgs.length > 1 ? ` (ועוד ${msgs.length - 1})` : ''}`;
 }

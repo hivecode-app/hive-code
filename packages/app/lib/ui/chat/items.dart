@@ -1024,7 +1024,10 @@ class _AskCardViewState extends State<AskCardView> {
   }
 
   static String _doneLine(AskCard card, String from, bool go) {
-    if (card.state == AskState.decidedByManager) return 'יואב החליט במקומך: ${card.answer}';
+    if (card.state == AskState.decidedByManager) {
+      final n = companyNames;
+      return '${n.manager} ${n.m('החליט', 'החליטה')} במקומך: ${card.answer}';
+    }
     final a = card.answer;
     if (a == null) return go ? 'הבקשה נסגרה' : 'השאלה נסגרה';
     if (go && a == 'GO') return '${ltr('GO')} נשלח ל$from';

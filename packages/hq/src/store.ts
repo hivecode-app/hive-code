@@ -3,7 +3,7 @@
 import Database from 'better-sqlite3';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { HqEvent, IdentityId } from '@company/shared';
+import { DEFAULT_NAMES, pre, type HqEvent, type IdentityId } from '@company/shared';
 
 export type DB = Database.Database;
 
@@ -403,10 +403,11 @@ const MIGRATIONS: string[] = [
   `,
 ];
 
-export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [
+/** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */
+export const defaultToggles = (manager: string): { key: string; enabled: boolean; description: string }[] => [
   { key: 'scheduler', enabled: true, description: 'המתזמן ממלא משבצות פנויות מהתור' },
-  { key: 'residents', enabled: true, description: 'התושבים (יואב) רצים תמיד' },
-  { key: 'escalation', enabled: true, description: 'שאלה חוסמת שלא נענתה עוברת ליואב' },
+  { key: 'residents', enabled: true, description: `התושבים (${manager}) רצים תמיד` },
+  { key: 'escalation', enabled: true, description: `שאלה חוסמת שלא נענתה עוברת ${pre('ל', manager)}` },
   { key: 'push', enabled: true, description: 'התראות: מה שחסום עליך, והודעות מעובדים' },
   { key: 'backup', enabled: true, description: 'גיבוי hq.db כל שעה' },
   { key: 'focus', enabled: false, description: 'מצב פוקוס: רק תקלה דחופה בפרודקשן מתריעה' },
@@ -420,7 +421,7 @@ export class Store {
   private listeners = new Set<Listener>();
   now: () => number;
 
-  constructor(path: string, opts: { now?: () => number } = {}) {
+  constructor(path: string, opts: { now?: () => number; managerName?: string } = {}) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new Database(path);
     // Messages and asks are his private life (B.3 ⚠): owner-only. -wal/-shm inherit this mode.
@@ -431,7 +432,7 @@ export class Store {
     this.db.pragma('busy_timeout = 5000');
     this.now = opts.now ?? Date.now;
     this.migrate();
-    this.seedToggles();
+    this.seedToggles(opts.managerName ?? DEFAULT_NAMES.manager.name);
   }
 
   private migrate(): void {
@@ -448,10 +449,10 @@ export class Store {
     return this.db.pragma('user_version', { simple: true }) as number;
   }
 
-  private seedToggles(): void {
+  private seedToggles(manager: string): void {
     const ins = this.db.prepare(
       'INSERT OR IGNORE INTO toggles (key, enabled, description, updated_at) VALUES (?, ?, ?, ?)');
-    for (const t of DEFAULT_TOGGLES) ins.run(t.key, t.enabled ? 1 : 0, t.description, this.now());
+    for (const t of defaultToggles(manager)) ins.run(t.key, t.enabled ? 1 : 0, t.description, this.now());
   }
 
   // ── events / CDC ──────────────────────────────────────────────────────────

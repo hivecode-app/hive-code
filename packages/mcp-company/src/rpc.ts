@@ -5,6 +5,7 @@ import { COMPANY_API_VERSION } from '@company/shared';
 import type { OpName, WalEntry } from '@company/shared';
 import type { RecallQuery, RecallResult } from './recall.ts';
 import { hebrewProblem, TOOL_BY_NAME, TOOLS, validateArgs } from './tools.ts';
+import type { ToolDef } from './tools.ts';
 import type { Settled } from './wal.ts';
 
 /** Ops answered with hq's verdict instead of {queued:true}: their rejection must reach the caller in the same turn (#69). */
@@ -28,6 +29,8 @@ export interface ServerDeps {
   recall: (req: RecallQuery) => Promise<RecallResult>;
   now?: () => Date;
   log?: (msg: string) => void;
+  /** tools/list: the catalogue with this company's names (buildTools). Default: TOOLS. */
+  tools?: readonly ToolDef[];
 }
 
 type Id = string | number | null;
@@ -110,7 +113,7 @@ export function createServer(deps: ServerDeps) {
           serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
         };
       case 'ping': return {};
-      case 'tools/list': return { tools: TOOLS };
+      case 'tools/list': return { tools: deps.tools ?? TOOLS };
       case 'tools/call': return callTool(params);
       default: throw Object.assign(new Error(`method not found: ${method}`), { rpcCode: -32601 });
     }

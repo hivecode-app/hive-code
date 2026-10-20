@@ -3,6 +3,7 @@
 // pushes), and the phone page drives the tab. "סיימתי" (on the phone or in the app) wakes the requester at
 // once: its waiting tool call returns, or, when nothing is waiting, a `now` message through its mailbox.
 // One live login per site (a short lock), so two workers never trigger two SMS codes.
+import { g, pre } from '@company/shared';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Store } from '../store.ts';
 import type { Inbox } from '../inbox.ts';
@@ -261,7 +262,8 @@ export class TabHandoffs {
     } else {
       this.inbox.resolve(itemId, 'dismissed');
       if (!r.from_identity || !getIdentity(this.store, r.from_identity)) return;
-      const what = v.state === 'expired' ? 'פג בלי שרן נכנס' : 'נסגר, כי הטאב כבר לא פתוח';
+      const o = this.mailbox.names.owner;
+      const what = v.state === 'expired' ? `פג בלי ${pre('ש', o.name)} ${g(o, 'נכנס', 'נכנסה')}` : 'נסגר, כי הטאב כבר לא פתוח';
       this.mailbox.tell({
         msg_id: `handoff-${r.id}-${v.state}`, from: 'hq', to: r.from_identity, kind: 'system', ref: `inbox-${itemId}`, priority: 'next',
         body: `הקישור לכניסה ל-${r.domain || 'האתר'} ${what}. אם עדיין צריך, קרא שוב ל-browser_ask_user.`,

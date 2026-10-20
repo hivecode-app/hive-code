@@ -204,6 +204,7 @@ class HqBackend extends Backend {
     // org.yaml `timezone` (#121): before the mapping, so "today" and every hour in it are his.
     company_time.CompanyTime.apply(results[0]['timezone']);
     final prev = _data;
+    if (results[0] is Map && (results[0] as Map).containsKey('names')) companyNames = CompanyNames.fromJson(results[0]['names']);
     _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), awaiting: _list(results[0], 'awaiting'), asked: _list(results[0], 'asked'), manager: (results[0]['manager'] as String?) ?? '', previous: prev);
     // Order and last lines from the last messages fetch, right away: without them the list showed
     // board order, then jumped into recency order when the messages came back (on every event).
@@ -389,6 +390,7 @@ class HqBackend extends Backend {
       if (c['url'] != baseUrl) return;
       List<Map<String, dynamic>> list(String k, String f) => ((c[k] as Map)[f] as List).cast<Map<String, dynamic>>();
       company_time.CompanyTime.apply((c['board'] as Map)['timezone']);
+      if (c['board'] is Map && (c['board'] as Map).containsKey('names')) companyNames = CompanyNames.fromJson(c['board']['names']);
       _data = mapSnapshot(board: list('board', 'identities'), inbox: list('inbox', 'items'), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'),
           tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'), awaiting: _list(c['board'], 'awaiting'), asked: _list(c['board'], 'asked'),
           manager: ((c['board'] as Map)['manager'] as String?) ?? '');
@@ -1584,16 +1586,29 @@ AskCard? cardFor(List<ChatItem> items, String? ref) =>
     if (m != null) return (m.group(1)!.trim(), false);
   }
   // Closed without doing it (dismiss) or done without a note: the card's line says so.
-  if (body.startsWith('רן דחה: ') || body.startsWith('רן סגר את השאלה בלי תשובה: ')) return ('נסגר', true);
-  if (body.startsWith('רן סיים: ')) return ('סיימתי', true);
+  final n = companyNames, owner = n.owner;
+  if (body.startsWith('$owner ${n.o('דחה', 'דחתה')}: ') || body.startsWith('$owner ${n.o('סגר', 'סגרה')} את השאלה בלי תשובה: ')) return ('נסגר', true);
+  if (body.startsWith('$owner ${n.o('סיים', 'סיימה')}: ')) return ('סיימתי', true);
   return (body, false);
 }
 
-final _answerEnvelopes = [
-  RegExp(r'^תשובה לשאלה \S+: ([\s\S]*)$'),
-  RegExp(r'^תשובה של רן (?:לבקשת ה-GO|על) "[\s\S]*?": ([\s\S]*)$'),
-  RegExp(r'^רן סיים: [^\n]*\n([\s\S]*)$'),
-];
+/// hq's wrappings (mailbox.ts), built from the names in force; rebuilt only when they change.
+List<RegExp> get _answerEnvelopes {
+  final n = companyNames;
+  if (!identical(n, _envelopesFor)) {
+    final owner = RegExp.escape(n.owner);
+    _envelopes = [
+      RegExp(r'^תשובה לשאלה \S+: ([\s\S]*)$'),
+      RegExp('^תשובה של $owner (?:לבקשת ה-GO|על) "[\\s\\S]*?": ([\\s\\S]*)\$'),
+      RegExp('^$owner ${n.o('סיים', 'סיימה')}: [^\\n]*\\n([\\s\\S]*)\$'),
+    ];
+    _envelopesFor = n;
+  }
+  return _envelopes;
+}
+
+CompanyNames? _envelopesFor;
+List<RegExp> _envelopes = const [];
 
 /// His answer to a card: the card closes with it ("ענית: X"). Words he typed are also his message, a reply
 /// to the card (as when he sent them); a button's answer is the card's line only, as when he tapped it.

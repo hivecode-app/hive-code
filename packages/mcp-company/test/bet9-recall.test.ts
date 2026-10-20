@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  bet9Sources, createIndex, defaultStateRoot, keywordCachePath, loadKeywordCache, loadRecords, openL3, sha1, tokenize, variants,
+  addNameStopWords, bet9Sources, createIndex, defaultStateRoot, keywordCachePath, loadKeywordCache, loadRecords, openL3, sha1, tokenize, variants,
 } from '../src/l3.ts';
 
 interface Q { id: number; project: string; q: string; src: string }
@@ -27,6 +27,7 @@ test('bet9: src record ranks in top 5 for >= 18/20 questions', (t) => {
   if (!noKw && !records.some((r) => r.keywordsHe.length)) {
     t.skip('keywords cache has no entry for the bet9 corpus; run scripts/memory-keywords.mjs --bet9'); return;
   }
+  addNameStopWords(join(import.meta.dirname, '..', '..', '..', 'company')); // as recall does, from org.yaml
   const idx = createIndex(records);
   let rank1 = 0, top5 = 0;
   const rows: string[] = [];

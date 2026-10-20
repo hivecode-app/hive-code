@@ -60,6 +60,7 @@ const cases = [
   ['unknown home machine', 'home "', (d) => edit(d, 'company/org.yaml', 'home: hq-host', 'home: mars')],
   ['machine dropped from the list', 'home "hq-host" is not one of', (d) => edit(d, 'company/org.yaml', 'machines: [hq-host, ci-host, laptop]', 'machines: [ci-host, laptop]')],
   ['manager is not an identity', '"manager" "nobody"', (d) => edit(d, 'company/org.yaml', 'manager: yoav ', 'manager: nobody ')],
+  ['owner gender is not male|female', '"owner_gender" "f"', (d) => edit(d, 'company/org.yaml', 'owner_gender: male ', 'owner_gender: f ')],
   ['monitoring lead is not an identity', '"monitoring_lead" "nobody"', (d) => edit(d, 'company/org.yaml', 'monitoring_lead: rotem ', 'monitoring_lead: nobody ')],
   ['unknown time zone', '"timezone" must be an IANA', (d) => edit(d, 'company/org.yaml', 'timezone: Asia/Bangkok', 'timezone: Bangkok')],
   ['no time zone', '"timezone" must be an IANA', (d) => edit(d, 'company/org.yaml', 'timezone: Asia/Bangkok', '# no zone')],

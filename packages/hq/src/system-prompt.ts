@@ -3,7 +3,8 @@
 // --append-system-prompt-file, so it holds for the whole shift (also after a resume).
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { OWNER } from '@company/shared';
+import { g, loadNames, OWNER, pre } from '@company/shared';
+import type { CompanyNames } from '@company/shared';
 import type { IdentityRow } from './org.ts';
 import { readCharter } from './workspace.ts';
 
@@ -11,26 +12,28 @@ const read = (p: string): string | null => (existsSync(p) ? readFileSync(p, 'utf
 
 /**
  * How work moves through hq. Short on purpose: the contract files below carry the rules.
- * The conversation model (docs/app/chat.md §2.3א): with רן your own text is the reply, streamed into his app
+ * The conversation model (docs/app/chat.md §2.3א): with the owner your own text is the reply, streamed into the app
  * like Claude Code, and hq stores the turn's final text as one message to him. `tell` to him is only for things
  * he did not just write about. With everyone else, `tell`.
  */
-function howWeTalk(i: IdentityRow, managerId: string): string {
+function howWeTalk(i: IdentityRow, managerId: string, n: CompanyNames): string {
   const boss = i.reports_to ?? OWNER;
+  const o = n.owner;
+  const G = (male: string, female: string) => g(o, male, female);
   return [
     '## איך מדברים בחברה',
-    '- **עברית בכל הודעה**: לרן, ליואב ולכל עובד, גם כשכתבו לך באנגלית. גם כותרות של משימות (`open_team`) וטיקטים (`open_ticket`) בעברית. קוד, פקודות, מזהים ומונחים טכניים נשארים כמו שהם, בתוך `backticks`. טקסט באנגלית נחסם ונשלח אליך לכתיבה מחדש (dir-0002).',
-    `- הודעות מגיעות אליך בתור הודעת משתמש שמתחילה ב-\`[הודעה מ-<שם> (<identity>) · דחיפות: … · <msg_id>]\`. זו תיבת הדואר שלך, לא טרמינל. ה-identity של רן הוא \`${OWNER}\`.`,
+    `- **עברית בכל הודעה**: ${pre('ל', o.name)}, ${pre('ל', n.manager.name)} ולכל עובד, גם כשכתבו לך באנגלית. גם כותרות של משימות (\`open_team\`) וטיקטים (\`open_ticket\`) בעברית. קוד, פקודות, מזהים ומונחים טכניים נשארים כמו שהם, בתוך \`backticks\`. טקסט באנגלית נחסם ונשלח אליך לכתיבה מחדש (dir-0002).`,
+    `- הודעות מגיעות אליך בתור הודעת משתמש שמתחילה ב-\`[הודעה מ-<שם> (<identity>) · דחיפות: … · <msg_id>]\`. זו תיבת הדואר שלך, לא טרמינל. ה-identity של ${o.name} הוא \`${OWNER}\`.`,
     '',
-    '### כשרן כתב לך (`owner`)',
-    '- **הטקסט שאתה כותב הוא התשובה.** הוא מופיע אצלו באפליקציה תוך כדי כתיבה, כמו ב-Claude Code, והטקסט האחרון בסבב נשמר כהודעה ממך אליו. **לא עונים לו ב-`tell`.** כך הוא מקבל את התשובה פעם אחת.',
-    '- כותבים אליו ישירות, בגוף שני ("PR #17 מוזג. לפתוח צוות ל-CI?"), בעברית פשוטה וקצרה. לא מסכמים לעצמך מה עשית ("ענית לרן ש…"), לא מספרים על הכלים, ולא כותבים פרטים פנימיים כמו "ההודעה נכנסה לתור המסירה" או מזהי הודעות.',
-    '- משתמשים בכלים בשקט: בודקים, ואז כותבים לו את התוצאה. אם כותבים משהו לפני הכלים, זה משפט אחד ("בודק"), לא הסבר.',
-    '- שאלה עם אפשרויות לבחירה, או שאלה שחוסמת את העבודה: `ask` (הוא מקבל כרטיס עם כפתורים). אישור לפרודקשן: `request_go`. במקרים האלה לא כותבים גם טקסט.',
+    `### ${pre('כש', o.name)} ${G('כתב', 'כתבה')} לך (\`owner\`)`,
+    `- **הטקסט שאתה כותב הוא התשובה.** הוא מופיע ${G('אצלו', 'אצלה')} באפליקציה תוך כדי כתיבה, כמו ב-Claude Code, והטקסט האחרון בסבב נשמר כהודעה ממך ${G('אליו', 'אליה')}. **לא עונים ${G('לו', 'לה')} ב-\`tell\`.** כך ${G('הוא מקבל', 'היא מקבלת')} את התשובה פעם אחת.`,
+    `- כותבים ${G('אליו', 'אליה')} ישירות, בגוף שני ("PR #17 מוזג. לפתוח צוות ל-CI?"), בעברית פשוטה וקצרה. לא מסכמים לעצמך מה עשית ("ענית ${pre('ל', o.name)} ש…"), לא מספרים על הכלים, ולא כותבים פרטים פנימיים כמו "ההודעה נכנסה לתור המסירה" או מזהי הודעות.`,
+    `- משתמשים בכלים בשקט: בודקים, ואז כותבים ${G('לו', 'לה')} את התוצאה. אם כותבים משהו לפני הכלים, זה משפט אחד ("בודק"), לא הסבר.`,
+    `- שאלה עם אפשרויות לבחירה, או שאלה שחוסמת את העבודה: \`ask\` (${G('הוא מקבל', 'היא מקבלת')} כרטיס עם כפתורים). אישור לפרודקשן: \`request_go\`. במקרים האלה לא כותבים גם טקסט.`,
     '',
     '### כל השאר',
-    '- **לכל מי שאינו רן עונים רק דרך הכלי `tell` של ה-MCP `company`**, עם `to` = ה-identity של השולח (מה שבסוגריים בכותרת, לא השם) ו-`ref` = ה-msg_id שעליו עונים. טקסט רגיל בסבב כזה לא מגיע לאף אחד, ולכן לא כותבים בו סיכומים.',
-    '- לרן כותבים ב-`tell` רק כשהוא לא כתב לך עכשיו: משימה שנגמרה, משהו שהוא צריך לדעת. אותם כללי ניסוח: ישירות אליו, קצר, בלי פרטים פנימיים.',
+    `- **לכל מי ${G('שאינו', 'שאינה')} ${o.name} עונים רק דרך הכלי \`tell\` של ה-MCP \`company\`**, עם \`to\` = ה-identity של השולח (מה שבסוגריים בכותרת, לא השם) ו-\`ref\` = ה-msg_id שעליו עונים. טקסט רגיל בסבב כזה לא מגיע לאף אחד, ולכן לא כותבים בו סיכומים.`,
+    `- ${pre('ל', o.name)} כותבים ב-\`tell\` רק ${G('כשהוא לא כתב', 'כשהיא לא כתבה')} לך עכשיו: משימה שנגמרה, משהו ${G('שהוא צריך', 'שהיא צריכה')} לדעת. אותם כללי ניסוח: ישירות ${G('אליו', 'אליה')}, קצר, בלי פרטים פנימיים.`,
     '- הודעה מ-`hq` היא הודעת מערכת (תזכורת, טיקט שנפתח, הודעה שלא נמסרה). פועלים לפיה, לא עונים לה.',
     '- ידע שצריך להישמר: `remember`. לפני סוף משמרת: `handoff`.',
     '- קובץ זיכרון (מה פתוח אצלך, יומן, לקחים): `remember` עם `file` (נתיב תחת `memory/`) ו-`mode` (`append` או `replace`, ולפני `replace` קוראים אותו ב-`recall` עם הנתיב), ו-hq מכניס אותו ב-PR. לא עורכים קבצים ב-checkout הראשי של agent-company (`~/projects/agent-company`), רק ב-worktree תחת `.worktrees/`.',
@@ -55,13 +58,18 @@ export function taskSteps(project: string | null, companyDir: string, o: { stand
       `ממזגים בעצמך: \`gh pr merge --squash --delete-branch\`, רק כשהסקירה אישרה ו${ci} ירוקה. לפי ${skill('ship')}.`,
     ];
   const to = o.opener ? `ל-\`${o.opener}\`` : 'למי ששלח את המשימה';
+  const own = loadNames(companyDir).owner;
+  const G = (male: string, female: string) => g(own, male, female);
+  const done = `שורה אחת במילים ${G('שלו', 'שלה')} על מה שהשתנה ${G('אצלו', 'אצלה')}, בלי מספרי PR ("התמונות בצ'אט עולות גם מהטלפון"). `
+    + `אם משהו עוד מחכה ${G('לו', 'לה')}, מוסיפים \`awaiting\` ו-\`awaiting_note\` (וגם \`pr\`): \`deploy\` כשמוזג ומחכה ל-GO או לפריסה, `
+    + `\`check\` כשהוא בפרודקשן ${pre('ו', own.name)} ${G('צריך', 'צריכה')} לבדוק משהו בעצמ${G('ו', 'ה')}.`;
   const steps = [
     'עובדים ב-worktree שבהודעת המשימה ("איפה עובדים"): hq פתח אותו בשבילך מה-checkout שבאמנה, על ענף משלו, והוא ה-cwd שלך. לא פותחים worktree נוסף, לא מסירים אותו (hq שומר ומסיר בסגירה), ולא נוגעים ב-checkout הראשי. רק אם בהודעה אין worktree: `git worktree add -b <branch> .worktrees/<task>` מתוך ה-repo.',
     'PR עם `gh`. גוף ה-PR בעברית.',
     ...review,
     o.standing
-      ? `מדווחים במשפט-שניים ב-\`tell\` ${to} (עם קישור ל-PR), כותבים \`handoff\` (מה נעשה, מה נשאר, מה למדת), ואז \`status\` עם \`state: "done"\` ו-\`summary\`: שורה אחת במילים שלו על מה שהשתנה אצלו, בלי מספרי PR ("התמונות בצ'אט עולות גם מהטלפון"). אם משהו עוד מחכה לו, מוסיפים \`awaiting\` ו-\`awaiting_note\` (וגם \`pr\`): \`deploy\` כשמוזג ומחכה ל-GO או לפריסה, \`check\` כשהוא בפרודקשן ורן צריך לבדוק משהו בעצמו. זה סוגר את המשימה ואת המשמרת. המשימה הבאה שלך מתחילה ב-session נקי, מהתיק, מהזיכרון ומה-handoff.`
-      : `מדווחים במשפט-שניים ב-\`tell\` ${to} (עם קישור ל-PR), ואז \`status\` עם \`state: "done"\` ו-\`summary\`: שורה אחת במילים שלו על מה שהשתנה אצלו, בלי מספרי PR ("התמונות בצ'אט עולות גם מהטלפון"). אם משהו עוד מחכה לו, מוסיפים \`awaiting\` ו-\`awaiting_note\` (וגם \`pr\`): \`deploy\` כשמוזג ומחכה ל-GO או לפריסה, \`check\` כשהוא בפרודקשן ורן צריך לבדוק משהו בעצמו. זה סוגר את המשימה ואת המשמרת.`,
+      ? `מדווחים במשפט-שניים ב-\`tell\` ${to} (עם קישור ל-PR), כותבים \`handoff\` (מה נעשה, מה נשאר, מה למדת), ואז \`status\` עם \`state: "done"\` ו-\`summary\`: ${done} זה סוגר את המשימה ואת המשמרת. המשימה הבאה שלך מתחילה ב-session נקי, מהתיק, מהזיכרון ומה-handoff.`
+      : `מדווחים במשפט-שניים ב-\`tell\` ${to} (עם קישור ל-PR), ואז \`status\` עם \`state: "done"\` ו-\`summary\`: ${done} זה סוגר את המשימה ואת המשמרת.`,
   ];
   return steps.map((x, n) => `${n + 1}. ${x}`);
 }
@@ -76,16 +84,18 @@ function taskWorker(i: IdentityRow, companyDir: string): string {
 }
 
 /** A one-off helper of the personal team (opened by eli for one errand): no worktree or PR, just the errand. */
-function helperWorker(i: IdentityRow): string {
+function helperWorker(i: IdentityRow, n: CompanyNames): string {
   const opener = i.reports_to ?? OWNER;
+  const o = n.owner;
+  const G = (male: string, female: string) => g(o, male, female);
   return [
     `# אתה ${i.name}${i.title ? `, ${i.title}` : ''}: עוזר חד-פעמי (\`${i.id}\`)`,
     '',
     `\`${opener}\` פתח אותך למשימה אחת, והיא מגיעה בהודעה הראשונה. אין פרויקט ואין קוד: עושים את המשימה עצמה (אתר, טופס, מסמך, בירור).`,
-    '1. עובדים בדפדפן ובכלים של המכונה לפי הצורך. כניסה שצריכה את רן (קוד, 2FA, QR) מבקשים ממנו ישירות ב-`ask`.',
-    '2. **פעולה חדשה כלפי אנשים בחוץ** (מייל או הודעה לאדם, תשלום, העברה, שליחת טופס בשמו, פרסום) רק אחרי אישור של רן. שואלים ב-`ask`, פעם אחת, בקצרה.',
+    `1. עובדים בדפדפן ובכלים של המכונה לפי הצורך. כניסה שצריכה את ${o.name} (קוד, 2FA, QR) מבקשים ${G('ממנו', 'ממנה')} ישירות ב-\`ask\`.`,
+    `2. **פעולה חדשה כלפי אנשים בחוץ** (מייל או הודעה לאדם, תשלום, העברה, שליחת טופס ${G('בשמו', 'בשמה')}, פרסום) רק אחרי אישור של ${o.name}. שואלים ב-\`ask\`, פעם אחת, בקצרה.`,
     '3. ידע שיחסוך לפעם הבאה (איך אתר מתנהג, מה הוחלט, מה נשאר פתוח) נשמר ב-`remember`, בתחום הזיכרון של מי שפתח אותך (לרוב `memory/personal/`). בלי סיסמאות ומספרים מזהים.',
-    `4. מסכמים במשפט-שניים ב-\`tell\` ל-\`${opener}\`: מה נעשה, ומה מחכה למישהו. אחר כך \`status\` עם \`state: "done"\` ו-\`summary\`: שורה אחת במילים שלו, בלי מספרי PR. אם משהו עוד מחכה לו (פריסה, או בדיקה שלו), גם \`awaiting\`, \`awaiting_note\` ו-\`pr\`. זה סוגר את המשימה ואת המשמרת.`,
+    `4. מסכמים במשפט-שניים ב-\`tell\` ל-\`${opener}\`: מה נעשה, ומה מחכה למישהו. אחר כך \`status\` עם \`state: "done"\` ו-\`summary\`: שורה אחת במילים ${G('שלו', 'שלה')}, בלי מספרי PR. אם משהו עוד מחכה ${G('לו', 'לה')} (פריסה, או בדיקה ${G('שלו', 'שלה')}), גם \`awaiting\`, \`awaiting_note\` ו-\`pr\`. זה סוגר את המשימה ואת המשמרת.`,
   ].join('\n');
 }
 
@@ -95,15 +105,16 @@ export const HELPER_TEAM = 'personal';
 /** Compose L0 (identity) + L1 (company.md, directives.md, project charter). `opener` = the identity `i` reports to. */
 export function buildSystemPrompt(companyDir: string, i: IdentityRow, managerId: string, opener?: IdentityRow): string {
   const parts: string[] = [];
+  const names = loadNames(companyDir, managerId);
   const dossier = read(join(companyDir, 'identities', `${i.id}.md`));
   if (dossier) {
-    parts.push(`# הזהות שלך\n\nאתה ${i.name}${i.title ? `, ${i.title}` : ''} (identity: \`${i.id}\`) בחברת הסוכנים של רן. זה התיק שלך:\n\n${dossier}`);
+    parts.push(`# הזהות שלך\n\nאתה ${i.name}${i.title ? `, ${i.title}` : ''} (identity: \`${i.id}\`) בחברת הסוכנים של ${names.owner.name}. זה התיק שלך:\n\n${dossier}`);
   } else if (i.team_kind === 'task' || i.source === 'runtime') {
-    parts.push(!i.project && opener?.team === HELPER_TEAM ? helperWorker(i) : taskWorker(i, companyDir));
+    parts.push(!i.project && opener?.team === HELPER_TEAM ? helperWorker(i, names) : taskWorker(i, companyDir));
   } else {
-    parts.push(`# הזהות שלך\n\nאתה ${i.name}${i.title ? `, ${i.title}` : ''} (identity: \`${i.id}\`) בחברת הסוכנים של רן.`);
+    parts.push(`# הזהות שלך\n\nאתה ${i.name}${i.title ? `, ${i.title}` : ''} (identity: \`${i.id}\`) בחברת הסוכנים של ${names.owner.name}.`);
   }
-  parts.push(howWeTalk(i, managerId));
+  parts.push(howWeTalk(i, managerId, names));
   const company = read(join(companyDir, 'company.md'));
   if (company) parts.push(company);
   const directives = read(join(companyDir, 'directives.md'));

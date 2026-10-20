@@ -128,3 +128,4 @@ export interface ConversationStateDTO {
 export * from './shift-protocol.ts';
 export * from './company-api.ts';
 export * from './hebrew.ts';
+export * from './names.ts';

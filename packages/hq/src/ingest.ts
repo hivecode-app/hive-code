@@ -11,7 +11,7 @@ import { existsSync, readdirSync, readFileSync, lstatSync, chmodSync, rmSync } f
 import { execFile } from 'node:child_process';
 import { join, relative } from 'node:path';
 import {
-  COMPANY_API_VERSION, OWNER, type OpAck, type OpName, type Priority, type RecallItem, type RecallRequest, type RecallResponse,
+  COMPANY_API_VERSION, g, OWNER, pre, type OpAck, type OpName, type Priority, type RecallItem, type RecallRequest, type RecallResponse,
   type Urgency, type WalEntry,
 } from '@company/shared';
 import type { Hq } from './hq.ts';
@@ -100,8 +100,9 @@ export class Ingest {
         const to = need('to');
         // A display name ("יואב") instead of an id would wake a shift for an identity that doesn't exist.
         if (to !== OWNER && to !== 'hq' && !this.hq.identityExists(to)) {
-          throw new IngestError(400, `tell: unknown identity ${to} (use the id, e.g. yoav, or ${OWNER} for רן)`,
-            `ההודעה ל-"${to}" לא נשלחה: אין identity כזה. שלח שוב עם ה-id (מה שבסוגריים בכותרת ההודעה), למשל yoav, או ${OWNER} לרן.`);
+          const n = mailbox.names;
+          throw new IngestError(400, `tell: unknown identity ${to} (use the id, e.g. ${n.manager.id}, or ${OWNER} for ${n.owner.name})`,
+            `ההודעה ל-"${to}" לא נשלחה: אין identity כזה. שלח שוב עם ה-id (מה שבסוגריים בכותרת ההודעה), למשל ${n.manager.id}, או ${OWNER} ${pre('ל', n.owner.name)}.`);
         }
         const m = mailbox.tell({ msg_id: e.id, from: e.identity, to, body: need('body'), priority: pr, urgency, ref: s(a.ref) });
         return { ok: true, id: e.id, ref: m.id };
@@ -194,8 +195,8 @@ export class Ingest {
         const left = t!.state !== 'done' && t!.identity && a.force !== true ? mailbox.unanswered(t!.identity, t!.started_at ?? t!.created_at) : [];
         if (left.length) {
           reject(409, `close_team: the owner is waiting for an answer from ${t!.identity} (${left.map((m) => m.id).join(', ')})`,
-            `הצוות "${team}" (t${t!.id}) לא נסגר: ${waitingLine(left)} מ-${mailbox.label(t!.identity!)}. `
-            + 'כדאי שהעובד יענה לו קודם. אם בכל זאת לסגור, `close_team` שוב עם `force: true`.');
+            `הצוות "${team}" (t${t!.id}) לא נסגר: ${waitingLine(left, mailbox.names.owner.name)} מ-${mailbox.label(t!.identity!)}. `
+            + `כדאי שהעובד יענה ${g(mailbox.names.owner, 'לו', 'לה')} קודם. אם בכל זאת לסגור, \`close_team\` שוב עם \`force: true\`.`);
         }
         // The closer's line wins over the worker's: it is the last word, written for him.
         if (taskSummary(a.summary)) this.hq.store.db.prepare('UPDATE tasks SET summary = ? WHERE id = ?').run(taskSummary(a.summary), t!.id);

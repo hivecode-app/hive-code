@@ -4,6 +4,38 @@ import 'dart:typed_data';
 
 enum Gender { f, m }
 
+/// The owner's and the manager's names, as hq reads them from org.yaml (`/api/board` `names`). hq's own
+/// texts are built from the same names (packages/shared/src/names.ts), so the app reads them back by them.
+class CompanyNames {
+  const CompanyNames({required this.ownerId, required this.owner, required this.ownerGender, required this.managerId, required this.manager, required this.managerGender});
+  /// org.yaml `owner` ("ran"), not the protocol id `owner`.
+  final String ownerId;
+  final String owner;
+  final Gender ownerGender;
+  final String managerId;
+  final String manager;
+  final Gender managerGender;
+
+  /// Before hq has said (and from an hq too old to say): the defaults of names.ts.
+  static const fallback = CompanyNames(ownerId: 'owner', owner: 'בעל החברה', ownerGender: Gender.m, managerId: 'manager', manager: 'מנהל החברה', managerGender: Gender.m);
+
+  static CompanyNames fromJson(Object? j) {
+    if (j is! Map) return fallback;
+    final o = j['owner'], m = j['manager'];
+    String str(Object? p, String key, String or) => p is Map && p[key] is String && (p[key] as String).isNotEmpty ? p[key] as String : or;
+    Gender gender(Object? p) => p is Map && p['gender'] == 'female' ? Gender.f : Gender.m;
+    return CompanyNames(ownerId: str(o, 'id', fallback.ownerId), owner: str(o, 'name', fallback.owner), ownerGender: gender(o),
+        managerId: str(m, 'id', fallback.managerId), manager: str(m, 'name', fallback.manager), managerGender: gender(m));
+  }
+
+  /// The owner's form of a word: `o('סגר', 'סגרה')`.
+  String o(String male, String female) => ownerGender == Gender.f ? female : male;
+  String m(String male, String female) => managerGender == Gender.f ? female : male;
+}
+
+/// The names in force: set from every board hq sends (hq_backend.dart).
+CompanyNames companyNames = CompanyNames.fallback;
+
 /// Derived status, always shown as icon + word (APP-SPEC §6.2).
 enum WorkerStatus { free, working, waiting, blocked, stuck, restarting, resting, done }
 

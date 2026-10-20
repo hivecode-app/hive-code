@@ -84,6 +84,9 @@ Future<(HqBackend, _Hq)> up() async {
 List<String> ids(HqBackend b) => [for (final i in b.data!.chats['yoav']?.items ?? const <ChatItem>[]) i.id];
 
 void main() {
+  // hq's texts in these fixtures name רן: the names his org.yaml gives (an older hq's board has none).
+  setUpAll(() => companyNames = const CompanyNames(ownerId: 'ran', owner: 'רן', ownerGender: Gender.m, managerId: 'yoav', manager: 'יואב', managerGender: Gender.m));
+
   test('a reply that arrives while the history loads is kept', () async {
     final (b, hq) = await up();
     hq.messagesDelay = const Duration(milliseconds: 400);

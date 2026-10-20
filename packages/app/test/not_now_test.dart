@@ -62,6 +62,9 @@ Future<void> until(bool Function() ok, {int ms = 5000}) async {
 }
 
 void main() {
+  // hq's texts in these fixtures name רן: the names his org.yaml gives (an older hq's board has none).
+  setUpAll(() => companyNames = const CompanyNames(ownerId: 'ran', owner: 'רן', ownerGender: Gender.m, managerId: 'yoav', manager: 'יואב', managerGender: Gender.m));
+
   test('"לא עכשיו", its undo and closing survive a full reload from hq', () async {
     SharedPreferences.setMockInitialValues({});
     final hq = _Hq();
@@ -107,5 +110,20 @@ void main() {
   test('a closed question reads as closed on its card', () {
     expect(answerText('רן סגר את השאלה בלי תשובה: הבוטים'), ('נסגר', true));
     expect(answerText('רן דחה: GO: x'), ('נסגר', true));
+  });
+
+  test("another owner's names: hq's lines read by her name and gender", () {
+    final was = companyNames;
+    companyNames = CompanyNames.fromJson({
+      'owner': {'id': 'dana', 'name': 'דנה', 'gender': 'female'},
+      'manager': {'id': 'mira', 'name': 'מירה', 'gender': 'female'},
+    });
+    addTearDown(() => companyNames = was);
+    expect(answerText('דנה סגרה את השאלה בלי תשובה: הבוטים'), ('נסגר', true));
+    expect(answerText('דנה דחתה: GO: x'), ('נסגר', true));
+    expect(answerText('דנה סיימה: x'), ('סיימתי', true));
+    expect(answerText('תשובה של דנה על "x": כן'), ('כן', false));
+    expect(answerText('רן דחה: GO: x'), ('רן דחה: GO: x', false));
+    expect(companyNames.manager, 'מירה');
   });
 }

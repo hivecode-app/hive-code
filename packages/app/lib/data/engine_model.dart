@@ -171,7 +171,7 @@ bool hiddenTool(String name, Object? input) => reachesOwner(name, input) || cons
 bool reachesOwner(String name, Object? input) =>
     name == 'mcp__company__ask' ||
     name == 'mcp__company__request_go' ||
-    (name == 'mcp__company__tell' && input is Map && const {'owner', 'רן', 'ran'}.contains(input['to']));
+    (name == 'mcp__company__tell' && input is Map && {'owner', companyNames.owner, companyNames.ownerId}.contains(input['to']));
 
 String toolIcon(String name) => switch (name) {
       'Read' => 'description',

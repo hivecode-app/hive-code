@@ -1,6 +1,7 @@
 // `company hq` composition root: one process (B.1) wiring store, mailboxes, inbox, scheduler,
 // watchdog, probe-runner, push, backups and the API. Timers are plain intervals; every loop is
 // independently guarded so one failing loop never stops the others.
+import { loadNames } from '@company/shared';
 import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 import type { HqConfig } from './config.ts';
@@ -94,7 +95,7 @@ export class Hq {
   readonly cfg: HqConfig;
   constructor(cfg: HqConfig, deps: HqDeps = {}) {
     this.cfg = cfg;
-    this.store = new Store(cfg.dbPath, { now: deps.now });
+    this.store = new Store(cfg.dbPath, { now: deps.now, managerName: loadNames(cfg.companyDir, cfg.managerId).manager.name });
     this.inbox = new Inbox(this.store);
     this.auth = new Auth(this.store, cfg.auth);
     this.shifts = new ShiftManager(this.store, cfg, deps.launcher ?? lazyTemplateLauncher(cfg), deps.connect);
