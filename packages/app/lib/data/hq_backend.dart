@@ -1219,7 +1219,7 @@ CompanyData mapSnapshot({
   CompanyData? previous,
   DateTime? now,
 }) {
-  const teamNamesBuiltIn = {'mgmt': 'הנהלה', 'management': 'הנהלה', 'monitor': 'ניטור', 'monitoring': 'ניטור', 'personal': 'הצוות האישי', 'improve': 'מחלקת השיפור', 'improvement': 'מחלקת השיפור', 'lumo': 'לומו', 'tikibot': 'טיקיבוט', 'voice': 'voice-bot', 'agent-company': 'החברה'};
+  const teamNamesBuiltIn = {'mgmt': 'הנהלה', 'management': 'הנהלה', 'monitor': 'ניטור', 'monitoring': 'ניטור', 'personal': 'הצוות האישי', 'improve': 'מחלקת השיפור', 'improvement': 'מחלקת השיפור', 'design': 'עיצוב', 'lumo': 'לומו', 'tikibot': 'טיקיבוט', 'voice': 'voice-bot', 'agent-company': 'החברה'};
   // A project and its team show the owner's name for the project (org.yaml `projects[].name`, from hq).
   // An older hq sends no name: the built-in names, then the id.
   final projectNames = <String, String>{
@@ -1236,7 +1236,7 @@ CompanyData mapSnapshot({
   // "?" on the whole personal team, QA-LOG item 3).
   const teamSymbols = {
     'management': 'explore', 'mgmt': 'explore', 'monitoring': 'shield', 'monitor': 'shield', 'personal': 'folder_shared',
-    'improvement': 'build', 'improve': 'build', 'agent-company': 'architecture', 'lumo': 'local_shipping',
+    'improvement': 'build', 'improve': 'build', 'design': 'palette', 'agent-company': 'architecture', 'lumo': 'local_shipping',
     'tikibot': 'smart_toy', 'tiki-bot-go': 'directions_car', 'lumo-bot': 'smart_toy', 'voice': 'graphic_eq', 'voice-bot': 'graphic_eq',
   };
   final teams = <String, Team>{};
@@ -1472,7 +1472,7 @@ CompanyData mapSnapshot({
     ));
   }
   // Permanent teams first, management on top (the order of company.md); project teams after them.
-  const permanentOrder = ['management', 'mgmt', 'monitoring', 'monitor', 'personal', 'improvement', 'improve'];
+  const permanentOrder = ['management', 'mgmt', 'monitoring', 'monitor', 'personal', 'improvement', 'improve', 'design'];
   int rank(OrgTeam t) {
     if (teamKind[t.teamId] == 'project') return 200;
     final i = permanentOrder.indexOf(t.teamId);

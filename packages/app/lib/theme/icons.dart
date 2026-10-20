@@ -117,4 +117,5 @@ const Map<String, IconData> kIcons = {
   'rocket_launch': Symbols.rocket_launch_rounded,
   'route': Symbols.route_rounded,
   'smartphone': Symbols.smartphone_rounded,
+  'animation': Symbols.animation_rounded,
 };
