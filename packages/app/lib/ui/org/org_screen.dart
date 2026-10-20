@@ -153,7 +153,7 @@ class _OrgScreenState extends State<OrgScreen> {
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(a.sentence, style: TextStyle(fontFamily: kFont, fontSize: 15, height: 1.4, fontWeight: FontWeight.w500, color: a.enabled ? p.text : p.text2)),
+                    Rich(a.sentence, style: TextStyle(fontFamily: kFont, fontSize: 15, height: 1.4, fontWeight: FontWeight.w500, color: a.enabled ? p.text : p.text2)),
                     const SizedBox(height: 2),
                     Text(a.meta, style: T.small.copyWith(color: p.text2)),
                   ]),

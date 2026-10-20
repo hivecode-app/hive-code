@@ -41,7 +41,7 @@ class _TicketScreenState extends State<TicketScreen> {
           ),
           Padding(
             padding: const EdgeInsets.only(top: 2, bottom: 8),
-            child: Text(t.title, style: TextStyle(fontFamily: kFont, fontSize: 23, height: 1.3, fontWeight: FontWeight.w700, color: p.text)),
+            child: Rich(t.title, style: TextStyle(fontFamily: kFont, fontSize: 23, height: 1.3, fontWeight: FontWeight.w700, color: p.text)),
           ),
           Badge2(
             label: detail?.statusLine ?? statusWord(t.status, who?.gender ?? Gender.m),

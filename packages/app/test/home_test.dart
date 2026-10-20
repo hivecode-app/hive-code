@@ -55,6 +55,6 @@ void main() {
     final after = tester.getTopLeft(find.text('עמית').first);
     // The answered row collapses (buttons -> one line), rows below may move up but never reorder.
     expect(after.dy <= before.dy, isTrue);
-    expect(find.textContaining('GO נשלח · רותם מחזירה ל-r207'), findsOneWidget);
+    expect(findShown('GO נשלח · רותם מחזירה ל-r207'), findsOneWidget);
   });
 }

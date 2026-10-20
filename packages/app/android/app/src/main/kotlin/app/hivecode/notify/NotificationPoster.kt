@@ -115,7 +115,10 @@ object NotificationPoster {
     private fun identity(snap: Snapshot, wid: String): Identity = snap.identities[wid]
         ?: Identity(wid, if (wid == SYSTEM_IDENTITY) Wording.SYSTEM_NAME else wid, "", "", null, "resident", null, false)
 
-    fun messageText(item: InboxItem, snap: Snapshot): String {
+    /** The text a notification, the summary and the widget show for [item], bidi-safe (Bidi.kt). */
+    fun messageText(item: InboxItem, snap: Snapshot): String = Bidi.display(rawMessageText(item, snap))
+
+    private fun rawMessageText(item: InboxItem, snap: Snapshot): String {
         if (item.kind == "ask") {
             val q = item.ref?.let { snap.asks[it]?.question } ?: listOf(item.title, item.body).filter { it.isNotBlank() }.joinToString(". ")
             return (if (item.blocking) Wording.BLOCKING_PREFIX else "") + q

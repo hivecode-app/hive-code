@@ -30,7 +30,7 @@ data class ActionCall(
     val demo: Boolean get() = itemId < 0
 
     /** What the countdown and result lines show: "GO לפרודקשן: לומו 1.1.20", the option, the typed text. */
-    val subject: String get() = ActionPlanner.subject(op, label, answer, title, body)
+    val subject: String get() = Bidi.display(ActionPlanner.subject(op, label, answer, title, body))
 
     fun toJson(): String = JSONObject()
         .put("op", op.name).put("label", label).put("notifId", notifId).put("itemId", itemId)

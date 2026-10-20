@@ -8,6 +8,9 @@ import '../data/backend.dart';
 import '../model/models.dart';
 import '../theme/icons.dart';
 import '../theme/tokens.dart';
+import 'bidi.dart';
+
+export 'bidi.dart';
 
 /// `.ms`: a Material Symbols Rounded glyph. [fill] = FILL 1 (active state, APP-SPEC §7.6).
 class Ic extends StatelessWidget {
@@ -516,9 +519,11 @@ class UndoLine extends StatelessWidget {
 // ───────────────────────────── markup text ─────────────────────────────
 
 /// Small inline markup used across the app (not full markdown):
-///   `code`  → mono, LTR-isolated (chat.md §5), optionally boxed like the mockup's `.b code`
-///   **x**   → bold
-///   #1234, r207-like ids inside text are wrapped in LTR isolates so they never flip.
+///   `code`      → mono, isolated (chat.md §5), optionally boxed like the mockup's `.b code`
+///   **x**       → bold, and the inside is markup too (`**השינויים ב-`main`:**`)
+///   [t](url)    → link colour; bare URLs too
+///   everything else: LTR runs (paths, ids, versions, `PR #17`, English phrases) are wrapped in
+///   LRI…PDI when the text has Hebrew, so punctuation and brackets around them stay put (bidi.dart).
 class Rich extends StatelessWidget {
   const Rich(this.markup, {super.key, this.style, this.codeBox = false, this.maxLines, this.overflow, this.align, this.auto = false});
   final String markup;
@@ -528,7 +533,7 @@ class Rich extends StatelessWidget {
   final TextOverflow? overflow;
   final TextAlign? align;
 
-  /// Direction by the first strong character (chat bubbles, chat.md §5). Otherwise the ambient RTL.
+  /// Align by the text's own direction (chat content). Otherwise aligned like the screen (RTL).
   final bool auto;
 
   @override
@@ -539,58 +544,59 @@ class Rich extends StatelessWidget {
       style: base,
       maxLines: maxLines,
       overflow: overflow ?? (maxLines != null ? TextOverflow.ellipsis : null),
-      textAlign: align,
-      textDirection: auto ? firstStrongDirection(markup) : null,
+      // The text's own direction always, so an English title ends with its period on the
+      // right. Lists and rows keep their RTL alignment unless [auto] asks for the text's own.
+      textAlign: align ?? (auto ? TextAlign.start : (Directionality.of(context) == TextDirection.rtl ? TextAlign.right : TextAlign.left)),
+      textDirection: paragraphDirection(markup),
     );
   }
 
-  static final _tok = RegExp(r'`([^`]+)`|\*\*([^*]+)\*\*|(#\d+)');
+  static final _tok = RegExp(r'''`([^`]+)`|\*\*(.+?)\*\*(?!\*)|\[([^\]\n]+)\]\(([^)\s]+)\)|(https?://[^\s)<>]*[^\s)<>.,:;!?'"])''');
 
-  static List<InlineSpan> spans(BuildContext context, String s, TextStyle base, {bool codeBox = false}) {
+  static List<InlineSpan> spans(BuildContext context, String s, TextStyle base, {bool codeBox = false, bool? isolate}) {
     final p = context.p;
+    final iso = isolate ?? (s.runes.any(isHebrewRune) && paragraphDirection(s) == TextDirection.rtl);
+    String plain(String t) => iso ? isolateLtr(t, force: true) : t;
     final out = <InlineSpan>[];
     var i = 0;
     for (final m in _tok.allMatches(s)) {
       if (m.start > i) {
-        var pre = s.substring(i, m.start);
-        if (m.group(1) != null) pre = pre.replaceFirstMapped(RegExp(r' ([א-ת]{1,2}-)$'), (x) => '\u00A0${x.group(1)}');
+        var pre = plain(s.substring(i, m.start));
+        // "ב-" right before code: a word joiner keeps the prefix on the code's line.
+        if (m.group(1) != null && endsWithHebrewPrefix(pre)) pre = '$pre$kWJ';
         out.add(TextSpan(text: pre));
       }
       if (m.group(1) != null) {
         final code = m.group(1)!;
         final mono = T.mono((base.fontSize ?? 15.5) * 0.86, lh: (base.fontSize ?? 15.5) * 1.2).copyWith(color: base.color);
-        if (codeBox) {
-          out.add(WidgetSpan(
-            alignment: PlaceholderAlignment.baseline,
-            baseline: TextBaseline.alphabetic,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              decoration: BoxDecoration(color: p.codeBg, borderRadius: BorderRadius.circular(4), border: Border.all(color: p.line)),
-              child: Text(code, textDirection: TextDirection.ltr, style: mono),
-            ),
-          ));
-        } else {
-          out.add(TextSpan(text: ltr(code), style: mono));
-        }
+        // Boxed code is a background on the text run, not a WidgetSpan: with two or more
+        // WidgetSpans in an RTL paragraph the engine paints each child in the other's slot
+        // (QA-LOG, RTL/bidi). Narrow no-break spaces pad the box without adding a line break point.
+        final whole = keepWhole(code);
+        final run = codeBox ? '\u202F$whole\u202F' : whole;
+        out.add(TextSpan(
+          text: iso ? '$kFSI$run$kPDI' : run,
+          style: codeBox ? mono.copyWith(background: Paint()..color = p.codeBg) : mono,
+        ));
       } else if (m.group(2) != null) {
-        out.add(TextSpan(text: m.group(2), style: const TextStyle(fontWeight: FontWeight.w700)));
+        out.add(TextSpan(
+          style: const TextStyle(fontWeight: FontWeight.w700),
+          children: spans(context, m.group(2)!, base.copyWith(fontWeight: FontWeight.w700), codeBox: codeBox, isolate: iso),
+        ));
+      } else if (m.group(3) != null) {
+        out.add(TextSpan(
+          style: TextStyle(color: p.accent),
+          children: spans(context, m.group(3)!, base.copyWith(color: p.accent), codeBox: codeBox, isolate: iso),
+        ));
       } else {
-        out.add(TextSpan(text: ltr(m.group(3)!)));
+        final url = keepWhole(m.group(5)!);
+        out.add(TextSpan(text: iso ? '$kLRI$url$kPDI' : url, style: TextStyle(color: p.accent)));
       }
       i = m.end;
     }
-    if (i < s.length) out.add(TextSpan(text: s.substring(i)));
+    if (i < s.length) out.add(TextSpan(text: plain(s.substring(i))));
     return out;
   }
-}
-
-/// Direction by the first strong character (chat.md §5). Empty or neutral text is RTL.
-TextDirection firstStrongDirection(String s) {
-  for (final r in s.runes) {
-    if ((r >= 0x0590 && r <= 0x08FF) || (r >= 0xFB1D && r <= 0xFDFF) || (r >= 0xFE70 && r <= 0xFEFF)) return TextDirection.rtl;
-    if ((r >= 0x41 && r <= 0x5A) || (r >= 0x61 && r <= 0x7A) || (r >= 0xC0 && r <= 0x24F)) return TextDirection.ltr;
-  }
-  return TextDirection.rtl;
 }
 
 /// Fixed-time formatting used by every list ("14:02").

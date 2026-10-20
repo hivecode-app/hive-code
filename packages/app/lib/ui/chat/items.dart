@@ -78,14 +78,17 @@ class Meta extends StatelessWidget {
   }
 }
 
+/// Text with the time in the bottom corner where the last line ends: left after a Hebrew line,
+/// right after an English one. The last line reserves the room, so the time never covers text.
 class _WithMeta extends StatelessWidget {
-  const _WithMeta({required this.child, required this.meta});
+  const _WithMeta({required this.child, required this.meta, this.end = TextDirection.rtl});
   final Widget child;
   final Widget meta;
+  final TextDirection end;
   @override
   Widget build(BuildContext context) => Stack(children: [
         Padding(padding: const EdgeInsets.only(bottom: 2), child: child),
-        PositionedDirectional(end: 0, bottom: 0, child: meta),
+        Positioned(bottom: 0, left: end == TextDirection.rtl ? 0 : null, right: end == TextDirection.ltr ? 0 : null, child: meta),
       ]);
 }
 
@@ -100,14 +103,17 @@ class UserBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-    final style = T.body.copyWith(color: p.text);
-    final spans = Rich.spans(context, msg.text, style, codeBox: true)..add(WidgetSpan(child: SizedBox(width: Meta.widthFor(msg.delivery), height: 10)));
+    final multi = parseMarkdown(msg.text).length > 1;
     final body = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
       if (msg.replyTo != null) QuoteStrip(quote: msg.replyTo!),
-      Text.rich(TextSpan(children: spans), style: style, textDirection: firstStrongDirection(msg.text)),
+      Markdown(msg.text, trailerWidth: multi ? 0 : Meta.widthFor(msg.delivery)),
+      if (multi) const SizedBox(height: 14),
     ]);
-    final bubble = Bubble(out: true, queued: msg.delivery == Delivery.queued, child: _WithMeta(meta: Meta(time: hm(msg.ts), delivery: msg.delivery), child: body));
+    final bubble = Bubble(
+      out: true,
+      queued: msg.delivery == Delivery.queued,
+      child: _WithMeta(meta: Meta(time: hm(msg.ts), delivery: msg.delivery), end: markdownEndDirection(msg.text), child: body),
+    );
     final under = switch (msg.delivery) {
       Delivery.queued => _QLine(
           text: 'בתור · ${msg.priority == Priority.later ? 'בסוף התור' : 'אחרי הצעד הנוכחי'} · ',
@@ -166,7 +172,7 @@ class QuoteStrip extends StatelessWidget {
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(quote.author, style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, fontWeight: FontWeight.w700, color: p.text)),
-            Rich(quote.text, maxLines: 2, style: TextStyle(fontFamily: kFont, fontSize: 13, height: 1.4, color: p.text2)),
+            Rich(quote.text, maxLines: 2, auto: true, style: TextStyle(fontFamily: kFont, fontSize: 13, height: 1.4, color: p.text2)),
           ]),
         ),
         if (onClose != null) IconButton(onPressed: onClose, tooltip: 'ביטול הציטוט', icon: Ic('close', size: 18, color: p.text2)),
@@ -200,6 +206,8 @@ class _TextBubbleState extends State<TextBubble> {
       wide: wide,
       child: _WithMeta(
         meta: Meta(time: hm(m.ts)),
+        // Folded: the bottom row is the "continue reading" link on the right, so the time stays left.
+        end: long ? TextDirection.rtl : markdownEndDirection(text),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
           if (m.author != null) Text(m.author!, style: TextStyle(fontFamily: kFont, fontSize: 13, fontWeight: FontWeight.w700, color: p.text)),
           // One paragraph: the time rides on its last line (WhatsApp). Rich multi-block text: the

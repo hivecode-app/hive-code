@@ -27,6 +27,10 @@ Future<void> loadFonts() async {
   await family('packages/material_symbols_icons/MaterialSymbolsRounded', ['packages/material_symbols_icons/lib/fonts/MaterialSymbolsRounded.ttf']);
 }
 
+/// Text as the reader sees it: bidi controls (LRI/PDI, word joiners) are invisible, so the
+/// finder ignores them (lib/ui/bidi.dart adds them around English runs in Hebrew text).
+Finder findShown(String text) => find.byWidgetPredicate((w) => w is RichText && stripBidi(w.text.toPlainText()).contains(text));
+
 /// Phone screen of the mockup: 342 x 716 logical px (360 frame minus bezel, status and gesture bars).
 const kPhone = Size(342, 716);
 
