@@ -49,7 +49,7 @@ class Ic extends StatelessWidget {
 
 String statusIcon(WorkerStatus s) => switch (s) {
       WorkerStatus.free => 'radio_button_unchecked',
-      WorkerStatus.working => 'progress_activity',
+      WorkerStatus.working => 'play_arrow',
       WorkerStatus.waiting => 'front_hand',
       WorkerStatus.blocked => 'block',
       WorkerStatus.stuck => 'warning',
@@ -679,6 +679,44 @@ class BigTitle extends StatelessWidget {
         Text(title, style: T.big.copyWith(color: p.text, height: 1.2)),
         if (sub != null) Padding(padding: const EdgeInsets.only(top: 2), child: Text(sub!, style: T.secondary.copyWith(color: p.text2))),
       ]),
+    );
+  }
+}
+
+/// `.tog`: 46x28 switch, accent when on.
+class Toggle extends StatelessWidget {
+  const Toggle({super.key, required this.on, required this.onTap, required this.label});
+  final bool on;
+  final VoidCallback onTap;
+  final String label;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Semantics(
+      toggled: on,
+      label: label,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: 46,
+            height: 28,
+            decoration: BoxDecoration(color: on ? p.accent : p.surface3, borderRadius: BorderRadius.circular(14)),
+            child: AnimatedAlign(
+              duration: const Duration(milliseconds: 150),
+              alignment: on ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart,
+              child: Container(
+                width: 20,
+                height: 20,
+                margin: const EdgeInsets.all(4),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: on ? p.onAccent : p.text3),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

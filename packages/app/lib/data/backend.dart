@@ -72,7 +72,7 @@ class CompanyData {
   Team? teamOf(String identityId) => teams[identities[identityId]?.teamId];
 
   /// "מפתחת · voice-bot": the title, then the team or project the worker belongs to, wherever a worker is
-  /// shown (#40). The team is left out when the title already names it ("מנכ"לית agent-company").
+  /// shown (#40). The team is left out when the title already names it ("מנכ"לית החברה").
   String roleLine(String identityId, {bool short = false}) {
     final who = this.who(identityId);
     final title = short ? who.short : who.title;

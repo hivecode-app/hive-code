@@ -11,18 +11,18 @@ void main() {
     testWidgets('desktop: rail, list, chat, context ($t)', (tester) async {
       await pumpApp(tester, dark: dark, size: const Size(1440, 860));
       final ctx = tester.element(find.byType(Scaffold).first);
-      NavScope.read(ctx).go(AppTab.convs);
+      NavScope.read(ctx).go(AppTab.chats);
       await tester.pump();
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/desktop_$t.png'));
     });
   }
 
-  testWidgets('desktop: G then B opens the board, by physical key', (tester) async {
+  testWidgets('desktop: G then P opens the projects, by physical key', (tester) async {
     await pumpApp(tester, size: const Size(1440, 860));
     await tester.sendKeyEvent(LogicalKeyboardKey.keyG, physicalKey: PhysicalKeyboardKey.keyG);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyB, physicalKey: PhysicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyP, physicalKey: PhysicalKeyboardKey.keyP);
     await tester.pump();
     final ctx = tester.element(find.byType(Scaffold).first);
-    expect(NavScope.read(ctx).tab, AppTab.board);
+    expect(NavScope.read(ctx).tab, AppTab.projects);
   });
 }

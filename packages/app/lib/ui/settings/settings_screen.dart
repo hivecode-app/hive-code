@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../data/backend.dart';
+import '../../model/models.dart';
 import '../../data/backend_select.dart';
 import '../../data/auth_client.dart';
 import '../../data/store.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
-import '../org/org_screen.dart';
 import 'devices_screen.dart';
 import '../../native/native_bridge.dart';
 import '../../native/native_glue.dart';
@@ -17,7 +17,10 @@ import '../../native/native_glue.dart';
 const kVersion = '0.1.0';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({super.key, this.tab = false});
+
+  /// A bottom tab (#53): no back arrow, and the automations are here (they were on "ארגון").
+  final bool tab;
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
@@ -69,14 +72,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
           child: Row(children: [Text(k, style: T.row2.copyWith(color: p.text2)), const SizedBox(width: 12), Expanded(child: Align(alignment: AlignmentDirectional.centerEnd, child: v))]),
         );
-    return Scaffold(
-      backgroundColor: p.bg,
-      body: SafeArea(
-        child: Column(children: [
-          TopBar(title: 'הגדרות', leading: IBtn('arrow_forward', tip: 'חזרה', onTap: () => Navigator.of(context).maybePop())),
+    final autos = d?.automations ?? const <Automation>[];
+    final page = Column(children: [
+          TopBar(
+              title: 'הגדרות',
+              showLink: widget.tab,
+              leading: widget.tab ? null : IBtn('arrow_forward', tip: 'חזרה', onTap: () => Navigator.of(context).maybePop())),
           Expanded(
             child: ListView(padding: EdgeInsets.zero, children: [
-              const Section('שרת', top: 8),
+              if (widget.tab && d != null) ...[
+                const Section('אוטומציות', top: 8),
+                MoreRow(
+                  icon: 'tune',
+                  bold: '${autos.where((a) => a.enabled).length} פועלות',
+                  rest: 'מתוך ${autos.length}${autos.any((a) => a.meta.startsWith('כובתה ידנית')) ? ' · ${autos.where((a) => a.meta.startsWith('כובתה ידנית')).length} כובו ידנית' : ''}',
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AutomationsScreen())),
+                ),
+              ],
+              _AccountSwitch(backend: store.backend),
+              const Section('מכשירים'),
+              MoreRow(
+                icon: 'devices',
+                bold: 'מכשירים ו-passkeys',
+                rest: 'ביטול וצימוד',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DevicesScreen())),
+              ),
+              const Section('שרת'),
               ListBlock(inset: 16, children: [
                 pair('כתובת', Text(store.backend.label, textDirection: TextDirection.ltr, style: T.row2.copyWith(color: p.text))),
                 Padding(
@@ -87,14 +108,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ]),
                 ),
               ]),
-              _AccountSwitch(backend: store.backend),
-              const Section('מכשירים'),
-              MoreRow(
-                icon: 'devices',
-                bold: 'מכשירים ו-passkeys',
-                rest: 'ביטול וצימוד',
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DevicesScreen())),
-              ),
               const Section('התראות'),
               ListBlock(inset: 16, children: [
                 pair('פוקוס', Toggle(on: d?.focus ?? false, label: 'פוקוס', onTap: store.toggleFocus)),
@@ -120,6 +133,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ListBlock(inset: 16, children: [
                 pair('גרסה', GestureDetector(onLongPress: () => Clipboard.setData(const ClipboardData(text: kVersion)), child: Text(kVersion, style: T.mono(13).copyWith(color: p.text)))),
               ]),
+              const SizedBox(height: 24),
+            ]),
+          ),
+        ]);
+    if (widget.tab) return page;
+    return Scaffold(backgroundColor: p.bg, body: SafeArea(child: page));
+  }
+}
+
+/// Every automation, grouped by the worker who runs it ("noga/drift-check" is Noga's), one switch each.
+class AutomationsScreen extends StatelessWidget {
+  const AutomationsScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final store = StoreScope.of(context);
+    final d = store.data!;
+    String owner(Automation a) {
+      final i = a.key.indexOf('/');
+      if (i < 0) return a.team;
+      final who = d.who(a.key.substring(0, i));
+      return who.title.isEmpty ? who.name : '${who.name} · ${who.title}';
+    }
+
+    final groups = <String, List<Automation>>{};
+    for (final a in d.automations) {
+      groups.putIfAbsent(owner(a), () => []).add(a);
+    }
+    final order = [...groups.keys]..sort((a, b) => a == 'מערכת' ? -1 : (b == 'מערכת' ? 1 : 0));
+    return Scaffold(
+      backgroundColor: p.bg,
+      body: SafeArea(
+        child: Column(children: [
+          TopBar(title: 'אוטומציות', leading: IBtn('arrow_forward', tip: 'חזרה', onTap: () => Navigator.of(context).maybePop())),
+          Expanded(
+            child: ListView(padding: EdgeInsets.zero, children: [
+              for (final (i, g) in order.indexed) ...[
+                Section(g, top: i == 0 ? 8 : 16),
+                ListBlock(inset: 16, children: [
+                  for (final a in groups[g]!)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Rich(a.sentence, maxLines: 2, style: TextStyle(fontFamily: kFont, fontSize: 15, height: 1.4, fontWeight: FontWeight.w500, color: a.enabled ? p.text : p.text2)),
+                            const SizedBox(height: 2),
+                            Text(a.meta, style: T.small.copyWith(color: p.text2)),
+                          ]),
+                        ),
+                        const SizedBox(width: 12),
+                        Toggle(on: a.enabled, label: a.sentence, onTap: () => store.toggleAutomation(a)),
+                      ]),
+                    ),
+                ]),
+              ],
               const SizedBox(height: 24),
             ]),
           ),

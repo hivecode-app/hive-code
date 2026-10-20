@@ -1,25 +1,21 @@
+// "מחכה לך" rows (WaitingList, the desktop peek): one-tap answers with an undo, rows that never move.
 import 'package:agent_company/model/models.dart';
+import 'package:agent_company/ui/home/home_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'helpers.dart';
 
 void main() {
-  for (final dark in [false, true]) {
-    testWidgets('home golden (${dark ? 'dark' : 'light'})', (tester) async {
-      await pumpApp(tester, dark: dark);
-      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/home_${dark ? 'dark' : 'light'}.png'));
-    });
-  }
+  const list = Scaffold(body: WaitingList());
 
-  testWidgets('home at 130% text keeps the first answer visible', (tester) async {
-    await pumpApp(tester, textScale: 1.3);
-    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/home_130.png'));
+  testWidgets('waiting list at 130% text keeps the first answer visible', (tester) async {
+    await pumpApp(tester, textScale: 1.3, home: list);
     expect(find.text('GO לחזרה'), findsOneWidget);
   });
 
   testWidgets('one-tap answer waits 3s with an in-place undo, then collapses', (tester) async {
-    final store = await pumpApp(tester);
+    final store = await pumpApp(tester, home: list);
     expect(find.text('מחכה לך'), findsWidgets);
     await tester.tap(find.text('ניסיון נוסף אחרי 24 שעות').first);
     await tester.pump();
@@ -36,7 +32,7 @@ void main() {
   });
 
   testWidgets('undo cancels the answer and brings the buttons back', (tester) async {
-    final store = await pumpApp(tester);
+    final store = await pumpApp(tester, home: list);
     await tester.tap(find.text('GO').first);
     await tester.pump();
     expect(find.text("GO יישלח לדנה בעוד 3 שנ'"), findsOneWidget);
@@ -47,7 +43,7 @@ void main() {
   });
 
   testWidgets('rows keep their place after an answer (nothing moves under the finger)', (tester) async {
-    await pumpApp(tester);
+    await pumpApp(tester, home: list);
     final before = tester.getTopLeft(find.text('עמית').first);
     await tester.tap(find.text('GO לחזרה'));
     await tester.pump(const Duration(seconds: 4));

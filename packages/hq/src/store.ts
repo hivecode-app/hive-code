@@ -362,6 +362,8 @@ const MIGRATIONS: string[] = [
   INSERT INTO conversations (identity, read_at, updated_at)
     SELECT from_identity, MAX(created_at), MAX(created_at) FROM messages WHERE to_identity = 'owner' GROUP BY from_identity;
   `,
+  // v12: what a finished task did, one line in his words ("התמונות עלו"), from status done or close_team (#53).
+  `ALTER TABLE tasks ADD COLUMN summary TEXT;`,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [

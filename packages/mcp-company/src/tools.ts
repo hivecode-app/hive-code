@@ -67,9 +67,12 @@ export const TOOLS: readonly ToolDef[] = [
     reason: s('סיבת ההעברה, e.g. context, end_of_day / why handing off'),
     task: s('מזהה משימה / task id'),
   }, ['state']),
-  tool('status', 'עדכון מצב העובד. Update your working status.', {
-    state: s('מצב, e.g. working | blocked | idle / state'),
+  tool('status', 'עדכון מצב העובד. עם state: "done" המשימה נסגרת, ו-summary הוא מה שרן רואה ב"מה הסתיים". '
+    + 'Update your working status. With state "done" the task closes; summary is the line he sees under "what finished".', {
+    state: s('מצב, e.g. working | blocked | idle | done / state'),
     note: s('הערה קצרה / short note'),
+    summary: s('ב-done: שורה אחת במילים שלו, מה השתנה אצלו, בלי מספרי PR ובלי מונחים טכניים, e.g. "התמונות בצ\'אט עולות גם מהטלפון" '
+      + '/ with done: one line in his words on what changed for him, no PR numbers or jargon'),
   }, ['state']),
   tool('open_team', 'פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. עם assignee המשימה הולכת לעובד הקבוע שהתחום שלו: '
     + 'worktree משלה ו-session נקי, ואם הוא באמצע משימה אחרת היא מחכה בתור שלו. אם hq דוחה (למשל פרויקט רדום או assignee לא חוקי), הדחייה והסיבה חוזרות כשגיאה. '
@@ -87,6 +90,8 @@ export const TOOLS: readonly ToolDef[] = [
     + 'Close a task team: the task is done, its shift stops, uncommitted work is preserved.', {
     team: s('מזהה המשימה (t22), ה-identity של העובד (lumo-t22) או השם שלו / task id, worker identity or name'),
     reason: s('סיבה, נשלחת לעובד לפני העצירה / reason, sent to the worker before the stop'),
+    summary: s('שורה אחת במילים שלו על מה שהמשימה עשתה, בלי מספרי PR, e.g. "מיכל בצוות של לומו בוט". גוברת על מה שהעובד כתב '
+      + '/ one line in his words on what the task did, no PR numbers; overrides the worker\'s'),
   }, ['team']),
   tool('request_go', 'בקשת אישור לפעולה. מופיעה אצלו כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. '
     + 'מה שהוא כותב בשיחה כשהבקשה פתוחה הוא התשובה. '

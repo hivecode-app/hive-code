@@ -89,7 +89,7 @@ void main() {
   });
 
   testWidgets('the system sender has a name, a direct answer field, and its own page', (tester) async {
-    final store = await pumpApp(tester, home: const Scaffold(body: HomeScreen()));
+    final store = await pumpApp(tester, home: const Scaffold(body: WaitingList()));
     store.data!.waiting.insert(0, systemAsk());
     store.touch();
     await tester.pump();

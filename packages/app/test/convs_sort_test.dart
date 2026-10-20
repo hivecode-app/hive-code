@@ -1,6 +1,6 @@
-// The conversation list can be ordered (owner, 20/10): newest message (the default), working ones on top,
-// waiting-for-you on top, or by name. Yoav stays pinned and finished ones stay last; the choice stays on
-// this device across restarts.
+// The desktop conversation list can be ordered (owner, 20/10): newest message (the default), working ones
+// on top, waiting-for-you on top, or by name. Yoav stays pinned and finished ones stay last; the choice
+// stays on this device across restarts. The phone's main screen has its own order since #53 (layout_test).
 import 'package:agent_company/data/fake_backend.dart';
 import 'package:agent_company/data/store.dart';
 import 'package:agent_company/model/models.dart';
@@ -33,13 +33,13 @@ void main() {
   }
 
   testWidgets('the default is the newest message, as before', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen()));
+    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen(compact: true)));
     expect(store.convSort, ConvSort.recent);
     expect(order(tester), shown);
   });
 
   testWidgets('"עובדים עכשיו למעלה": working ones first, each group by newest message, Yoav pinned', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen()));
+    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen(compact: true)));
     await pick(tester, 'עובדים עכשיו למעלה');
     expect(store.convSort, ConvSort.working);
     expect(order(tester), ['יואב', 'דנה', 'נועה', 'נגה', 'עידו', 'רותם', 'איתי', 'עמית', 'אלי']);
@@ -51,7 +51,7 @@ void main() {
   });
 
   testWidgets('"מחכה לך למעלה" and "לפי שם"', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen()));
+    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen(compact: true)));
     await pick(tester, 'מחכה לך למעלה');
     expect(order(tester), ['יואב', 'עידו', 'רותם', 'עמית', 'דנה', 'נועה', 'איתי', 'נגה', 'אלי']);
     await pick(tester, 'לפי שם');
@@ -70,7 +70,7 @@ void main() {
   });
 
   testWidgets('the sheet marks the current choice with a check, and the choice is saved', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen()));
+    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen(compact: true)));
     await pick(tester, 'עובדים עכשיו למעלה');
     expect((await SharedPreferences.getInstance()).getString(AppStore.kConvSortKey), 'working');
     await tester.tap(find.byTooltip('מיון'));

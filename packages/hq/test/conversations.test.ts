@@ -161,6 +161,7 @@ test('migration: what was there before counts as read', () => {
   try {
     // Roll back to v10, put history in, migrate again.
     s.db.exec('DROP TABLE conversations');
+    s.db.exec('ALTER TABLE tasks DROP COLUMN summary'); // v12, so the replay from v10 adds it again
     s.db.pragma('user_version = 10');
     s.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, body, created_at) VALUES ('a', 'eli', 'owner', 'ישן', 100), ('b', 'eli', 'owner', 'ישן יותר', 50)`).run();
     (s as unknown as { migrate(): void }).migrate();

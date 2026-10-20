@@ -600,6 +600,11 @@ class Ticket {
     required this.status,
     this.endLine,
     this.diffStat,
+    this.assigneeId,
+    this.startedAt,
+    this.doneAt,
+    this.summary,
+    this.openedBy,
   });
   final String number;
   final String title;
@@ -613,13 +618,32 @@ class Ticket {
   final WorkerStatus status;
   final String? endLine;
   final String? diffStat;
+
+  /// The worker on it (a task worker too); null while it waits in the queue.
+  final String? assigneeId;
+  final DateTime? startedAt;
+
+  /// When it finished; null while it is open.
+  final DateTime? doneAt;
+
+  /// What it did, one line in his words (hq `tasks.summary`, written at status done / close_team).
+  final String? summary;
+
+  /// Who opened it (`opened-by:` label): its lead on the main screen when it has no project.
+  final String? openedBy;
+
+  /// The line "מה הסתיים" shows: the summary, or the title without its area prefix.
+  String get doneLine => summary?.trim().isNotEmpty == true ? summary!.trim() : plainTitle(title);
 }
 
 /// A project from org.yaml (`projects:`) with its charter's status; the board's filter chips.
 class ProjectInfo {
-  const ProjectInfo({required this.id, required this.active, String? name}) : name = name ?? id;
+  const ProjectInfo({required this.id, required this.active, String? name, this.teamId}) : name = name ?? id;
   final String id;
   final String name;
+
+  /// The project's standing team (org.yaml `projects[].team`): its lead is the project's team lead.
+  final String? teamId;
 
   /// The charter says `active`. A dormant project has no workers yet (it moves to the company later).
   final bool active;
@@ -694,4 +718,12 @@ class SystemStatus {
   final LinkState state;
   final String? since;
   final int updated;
+}
+
+/// A task title as one line for him: without the area prefix ("אפליקציה: ", "hq: ") and the issue number.
+String plainTitle(String title) {
+  var t = title.trim().replaceFirst(RegExp(r'^#\d+\s+'), '');
+  final m = RegExp(r'^([^:]{1,14}):\s+').firstMatch(t);
+  if (m != null) t = t.substring(m.end);
+  return t.isEmpty ? title : t;
 }

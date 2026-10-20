@@ -1,116 +1,43 @@
-// Home: "מחכה לך" (APP-SPEC §4.2, mockup screen 1).
-// Only what blocks on the owner, sorted by urgency, one-tap answers with a 3s in-place undo.
-// Rows never move while the screen is open: answered rows collapse in place.
+// "מחכה לך" rows (APP-SPEC §4.2): one-tap answers with a 3s in-place undo, an answer field for
+// questions. Since #53 the home tab is gone; these rows are the desktop's waiting peek, and the
+// cards themselves live in the conversation (#79).
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../data/backend.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import '../chat/chat_screen.dart';
 import '../nav.dart';
-import '../system_bar.dart';
 
-class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, this.embedded = false});
-
-  /// Desktop list column: smaller title, no top-bar actions.
-  final bool embedded;
-
-  /// Builds since the last reset, counted in debug and test builds only (test/perf_bench_test.dart).
-  static int debugBuilds = 0;
-
+/// Everything waiting for him, one [WaitRow] each, most urgent first. The order is frozen at the
+/// first build so nothing moves under the finger (APP-SPEC §4.2); new arrivals go to the end.
+class WaitingList extends StatefulWidget {
+  const WaitingList({super.key});
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<WaitingList> createState() => _WaitingListState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  /// Order frozen at first build so nothing moves under the finger (APP-SPEC §4.2).
+class _WaitingListState extends State<WaitingList> {
   List<String>? _order;
 
   static int _rank(WaitItem w) => w.state == WaitState.notNow ? 99 : w.kind.index;
 
-  List<WaitItem> _sorted(CompanyData d) {
+  @override
+  Widget build(BuildContext context) {
+    final d = StoreScope.of(context).data;
+    if (d == null) return const SizedBox.shrink();
     _order ??= ([...d.waiting]..sort((a, b) => _rank(a).compareTo(_rank(b)))).map((w) => w.id).toList();
     final byId = {for (final w in d.waiting) w.id: w};
-    final out = [for (final id in _order!) if (byId[id] != null) byId[id]!];
-    for (final w in d.waiting) {
-      if (!_order!.contains(w.id)) out.add(w); // new arrivals go to the end, never above the finger
-    }
-    return out;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    assert(() {
-      HomeScreen.debugBuilds++;
-      return true;
-    }());
-    final store = StoreScope.of(context);
-    final d = store.data;
-    final p = context.p;
-    if (d == null) return const SizedBox.shrink();
-    final items = _sorted(d);
-    return Column(children: [
-      TopBar(title: 'החברה', showLink: true, actions: [
-        const IBtn('search', tip: 'חיפוש'),
-        IBtn(d.focus ? 'do_not_disturb_on' : 'do_not_disturb_on', tip: d.focus ? 'פוקוס פעיל · כיבוי' : 'פוקוס', fill: d.focus, color: d.focus ? p.text : null, onTap: store.toggleFocus),
-        IBtn('more_vert', tip: 'עוד', onTap: () => Nav.settings(context)),
-      ]),
-      const SystemBar(),
-      Expanded(
-        child: ListView(padding: EdgeInsets.zero, children: [
-          Section('מחכה לך', count: d.waitingCount > 0 ? '${d.waitingCount}' : null, top: 16),
-          if (items.isEmpty)
-            const _EmptyWaiting()
-          else
-            ListBlock(children: [for (final w in items) WaitRow(item: w, key: ValueKey(w.id))]),
-          if (d.decisions.isNotEmpty) ...[
-            Section('יואב החליט במקומך היום', count: '${d.decisions.length}'),
-            ListBlock(children: [for (final x in d.decisions) _DecisionRow(x)]),
-          ],
-          if (d.digest.isNotEmpty) ...[
-            Section('מאז הביקור הקודם', count: d.digestSince),
-            ListBlock(children: [_DigestRow(lines: d.digest)]),
-          ],
-          if (d.activity.isNotEmpty) ...[
-            const Section('עכשיו בעבודה'),
-            ListBlock(inset: 16, children: [for (final a in d.activity) _ActivityRow(a)]),
-          ],
-          if (d.night != null) ...[
-            const Section('לילה'),
-            ListBlock(inset: 16, children: [_ActivityRow(TeamActivity(symbol: 'nights_stay', team: 'לילה', line: d.night!))]),
-          ],
-          const SizedBox(height: 20),
-        ]),
-      ),
+    final items = [for (final id in _order!) if (byId[id] != null) byId[id]!, for (final w in d.waiting) if (!_order!.contains(w.id)) w];
+    return ListView(padding: EdgeInsets.zero, children: [
+      Section('מחכה לך', count: d.waitingCount > 0 ? '${d.waitingCount}' : null),
+      ListBlock(children: [for (final w in items) WaitRow(key: ValueKey(w.id), item: w)]),
     ]);
   }
 }
 
-class _EmptyWaiting extends StatelessWidget {
-  const _EmptyWaiting();
-  @override
-  Widget build(BuildContext context) {
-    final p = context.p;
-    final d = StoreScope.of(context).data!;
-    final working = d.presence.values.where((x) => x.status == WorkerStatus.working).length;
-    return ListBlock(children: [
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('אין כלום שמחכה לך.', style: T.name.copyWith(color: p.text)),
-          const SizedBox(height: 2),
-          Text('$working עובדים בעבודה · יואב זמין', style: T.secondary.copyWith(color: p.text2)),
-        ]),
-      ),
-    ]);
-  }
-}
-
-/// One "waiting for you" row. Used on home, in the desktop context column and in the gallery.
 class WaitRow extends StatelessWidget {
   const WaitRow({super.key, required this.item});
   final WaitItem item;
@@ -415,83 +342,6 @@ class _AnswerFieldState extends State<AnswerField> {
           ),
       ],
     ]);
-  }
-}
-
-class _DecisionRow extends StatelessWidget {
-  const _DecisionRow(this.x);
-  final DecisionByManager x;
-  @override
-  Widget build(BuildContext context) {
-    final d = StoreScope.of(context).data!;
-    final p = context.p;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Monogram.of(d, x.by, size: AvSize.sm),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Rich(x.text, style: T.row2.copyWith(color: p.text)),
-            const SizedBox(height: 4),
-            Row(children: [Text('${x.time} · ', style: T.small.copyWith(color: p.text2)), const LinkText('שינוי')]),
-          ]),
-        ),
-      ]),
-    );
-  }
-}
-
-class _DigestRow extends StatelessWidget {
-  const _DigestRow({required this.lines});
-  final List<String> lines;
-  @override
-  Widget build(BuildContext context) {
-    final d = StoreScope.of(context).data!;
-    final p = context.p;
-    final style = TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.65, color: p.text);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Monogram.of(d, 'yoav', size: AvSize.sm),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            for (final l in lines.take(5)) Rich(l, style: style),
-            const SizedBox(height: 4),
-            Row(children: [Text('יואב · ', style: T.small.copyWith(color: p.text2)), const LinkText('הסיכום המלא')]),
-          ]),
-        ),
-      ]),
-    );
-  }
-}
-
-class _ActivityRow extends StatelessWidget {
-  const _ActivityRow(this.a);
-  final TeamActivity a;
-  @override
-  Widget build(BuildContext context) {
-    final p = context.p;
-    return InkWell(
-      onTap: () => NavScope.read(context).go(AppTab.board),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-        child: Row(children: [
-          Ic(a.symbol, size: 20, color: p.text2),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text.rich(
-              TextSpan(children: [
-                TextSpan(text: a.team, style: TextStyle(fontWeight: FontWeight.w700, color: p.text)),
-                TextSpan(text: ' · ${a.line}'),
-              ]),
-              style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: a.dormant ? p.text2 : p.text),
-            ),
-          ),
-        ]),
-      ),
-    );
   }
 }
 

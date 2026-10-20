@@ -98,4 +98,8 @@ const Map<String, IconData> kIcons = {
   'domain': Symbols.domain_rounded,
   'expand_less': Symbols.expand_less_rounded,
   'sort': Symbols.sort_rounded,
+  'folder': Symbols.folder_rounded,
+  'push_pin': Symbols.push_pin_rounded,
+  'pause_circle': Symbols.pause_circle_rounded,
+  'chevron_right': Symbols.chevron_right_rounded,
 };

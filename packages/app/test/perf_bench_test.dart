@@ -5,7 +5,7 @@ import 'package:agent_company/data/store.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
 import 'package:agent_company/ui/chat/items.dart';
-import 'package:agent_company/ui/home/home_screen.dart';
+import 'package:agent_company/ui/convs/conversations_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -92,31 +92,31 @@ void main() {
     final nav = tester.state<NavigatorState>(find.byType(Navigator).first);
     nav.push(MaterialPageRoute(builder: (_) => const ChatScreen(identityId: 'dana')));
     await tester.pumpAndSettle();
-    HomeScreen.debugBuilds = 0;
+    ConversationsScreen.debugBuilds = 0;
     for (var i = 0; i < 10; i++) {
       store.touch();
       await tester.pump();
     }
-    expect(HomeScreen.debugBuilds, 0, reason: 'home is covered by the chat');
+    expect(ConversationsScreen.debugBuilds, 0, reason: 'the chats tab is covered by the chat');
     nav.pop();
     await tester.pumpAndSettle();
-    expect(HomeScreen.debugBuilds, greaterThanOrEqualTo(1), reason: 'home caught up when shown again');
+    expect(ConversationsScreen.debugBuilds, greaterThanOrEqualTo(1), reason: 'the chats tab caught up when shown again');
   });
 
   testWidgets('a dialog does not freeze the screen behind it', (tester) async {
     final store = await pumpApp(tester, home: const StoreGate(child: _ShellLike()));
-    showDialog<void>(context: tester.element(find.byType(HomeScreen)), builder: (_) => const AlertDialog(content: Text('דיאלוג')));
+    showDialog<void>(context: tester.element(find.byType(ConversationsScreen)), builder: (_) => const AlertDialog(content: Text('דיאלוג')));
     await tester.pumpAndSettle();
-    HomeScreen.debugBuilds = 0;
+    ConversationsScreen.debugBuilds = 0;
     store.touch();
     await tester.pump();
-    expect(HomeScreen.debugBuilds, 1, reason: 'what is behind a dialog stays visible, so it stays live');
+    expect(ConversationsScreen.debugBuilds, 1, reason: 'what is behind a dialog stays visible, so it stays live');
   });
 }
 
-/// The phone shell's home tab, as the app wraps it (main.dart: StoreGate(child: Shell())).
+/// The phone shell's main tab, as the app wraps it (main.dart: StoreGate(child: Shell())).
 class _ShellLike extends StatelessWidget {
   const _ShellLike();
   @override
-  Widget build(BuildContext context) => const Scaffold(body: HomeScreen());
+  Widget build(BuildContext context) => const Scaffold(body: ConversationsScreen());
 }

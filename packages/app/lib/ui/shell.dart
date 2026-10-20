@@ -6,13 +6,13 @@ import 'package:flutter/services.dart';
 import '../data/backend.dart';
 import '../data/store.dart';
 import '../theme/tokens.dart';
-import 'board/board_screen.dart';
 import 'common.dart';
 import 'convs/conversations_screen.dart';
 import 'desktop.dart';
-import 'home/home_screen.dart';
 import 'nav.dart';
-import 'org/org_screen.dart';
+import 'projects/projects_screen.dart';
+import 'settings/settings_screen.dart';
+import 'status/status_screen.dart';
 import 'system_bar.dart';
 
 class Shell extends StatelessWidget {
@@ -22,6 +22,7 @@ class Shell extends StatelessWidget {
   Widget build(BuildContext context) {
     final nav = NavScope.of(context);
     final store = StoreScope.of(context);
+    nav.onLeaveStatus = store.markStatusSeen;
     return LayoutBuilder(builder: (context, c) {
       // A phone on its side (up to ~930 x 430dp) stays a phone, the way WhatsApp does, instead of
       // squeezing three columns into 411dp of height. A short but wide window (a laptop browser
@@ -37,10 +38,10 @@ class Shell extends StatelessWidget {
               Expanded(
                 // Only the tab on screen follows the store; the others catch up when shown.
                 child: IndexedStack(index: nav.tab.index, children: [
-                  StoreGate(active: nav.tab == AppTab.home, child: const HomeScreen()),
-                  StoreGate(active: nav.tab == AppTab.convs, child: const ConversationsScreen()),
-                  StoreGate(active: nav.tab == AppTab.board, child: const BoardScreen()),
-                  StoreGate(active: nav.tab == AppTab.org, child: const OrgScreen()),
+                  StoreGate(active: nav.tab == AppTab.chats, child: const ConversationsScreen()),
+                  StoreGate(active: nav.tab == AppTab.status, child: const StatusScreen()),
+                  StoreGate(active: nav.tab == AppTab.projects, child: const ProjectsScreen()),
+                  StoreGate(active: nav.tab == AppTab.settings, child: const SettingsScreen(tab: true)),
                 ]),
               ),
               const BottomNav(),
@@ -52,14 +53,14 @@ class Shell extends StatelessWidget {
         ),
         // Android back on another tab goes to home first, then leaves the app (as WhatsApp does).
         child: PopScope(
-          canPop: (nav.wide || nav.tab == AppTab.home) && nav.backHandler == null,
+          canPop: (nav.wide || nav.tab == AppTab.chats) && nav.backHandler == null,
           onPopInvokedWithResult: (didPop, _) {
             if (didPop) return;
             final close = nav.backHandler;
             if (close != null) {
               close(); // an open search closes first
             } else {
-              nav.go(AppTab.home);
+              nav.go(AppTab.chats);
             }
           },
           child: Scaffold(
@@ -109,10 +110,10 @@ class NavDest {
 }
 
 const kDests = [
-  NavDest(AppTab.home, 'home', 'בית'),
-  NavDest(AppTab.convs, 'chat', 'שיחות'),
-  NavDest(AppTab.board, 'view_kanban', 'לוח'),
-  NavDest(AppTab.org, 'account_tree', 'ארגון'),
+  NavDest(AppTab.chats, 'chat', 'שיחות'),
+  NavDest(AppTab.status, 'monitor_heart', 'סטטוס'),
+  NavDest(AppTab.projects, 'folder', 'פרויקטים'),
+  NavDest(AppTab.settings, 'settings', 'הגדרות'),
 ];
 
 /// Mockup `.nav`: 72dp, pill 56x30 in accent-soft on the active tab, FILL 1 icon,
@@ -144,8 +145,8 @@ class BottomNav extends StatelessWidget {
 
 /// The number on a tab: "בית" counts what waits for him, "שיחות" the messages he hasn't read.
 int? navCount(AppTab tab, CompanyData? d) => switch (tab) {
-      AppTab.home => d?.waitingCount,
-      AppTab.convs => d?.unreadCount,
+      AppTab.chats => d?.unreadCount,
+      AppTab.status => d?.waitingCount,
       _ => null,
     };
 
@@ -167,7 +168,7 @@ class NavItem extends StatelessWidget {
     return Semantics(
       selected: on,
       button: true,
-      label: count != null && count! > 0 ? '${dest.label}, $count ${dest.tab == AppTab.convs ? 'לא נקראו' : 'מחכים לך'}' : dest.label,
+      label: count != null && count! > 0 ? '${dest.label}, $count ${dest.tab == AppTab.chats ? 'לא נקראו' : 'מחכים לך'}' : dest.label,
       child: InkWell(
         onTap: onTap,
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [

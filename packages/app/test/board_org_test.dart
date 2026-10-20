@@ -1,8 +1,8 @@
-// The board and the org tab read hq's tasks and org.yaml's projects (t19): every open task shows with
-// its worker, state and project; closed task teams are gone from org; project teams list their workers.
+// hq's tasks and org.yaml's projects (t19) map to tickets and teams: every open task with its worker, state
+// and project; closed task teams are gone; the project screen (#53) lists the team and what each one does.
 import 'package:agent_company/data/hq_backend.dart';
 import 'package:agent_company/model/models.dart';
-import 'package:agent_company/ui/org/org_screen.dart';
+import 'package:agent_company/ui/projects/project_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -50,9 +50,10 @@ void main() {
   ];
   final d = mapSnapshot(board: board, inbox: const [], asks: const [], toggles: const [], tasks: tasks, projects: projects, now: now);
 
-  test('every open task is a board row with its worker, state and project; done today folds in, older done does not', () {
+  test('every open task is a ticket with its worker, state and project; done this week is kept with its time', () {
     final by = {for (final t in d.tickets) t.number: t};
-    expect(by.keys.toSet(), {'t16', 't17', 't18', 't20', 't21', 't23', 't24', 't15'});
+    expect(by.keys.toSet(), {'t16', 't17', 't18', 't20', 't21', 't23', 't24', 't15', 't1'});
+    expect(by['t1']!.doneAt, DateTime(2026, 10, 19, 22), reason: 'yesterday: for "מאז הביקור הקודם" after a day away (#53)');
     expect(by['t16']!.assignee, 'רעות');
     expect(by['t16']!.sub, 'מפתחת');
     expect(by['t16']!.project, 'agent-company');
@@ -157,11 +158,24 @@ void main() {
     expect(pr.currentTask, 'שדרוג השרת');
     expect(pr.activity, 'שדרוג השרת', reason: 'the current task, not the last one');
     expect(pr.queued, 2);
-    expect(memberLine('אחראי שרת', pr), 'אחראי שרת · משימה: שדרוג השרת');
     final idle = mapSnapshot(board: board, inbox: const [], asks: const [], toggles: const []).presence['adi']!;
     expect(idle.currentTask, isNull);
     expect(idle.queued, 0, reason: 'an older hq without the fields');
-    expect(memberLine('מנכ"לית', idle), 'מנכ"לית');
+  });
+
+  test('#53: a task carries who opened it, its summary, and what finished this week (not older)', () {
+    final m = mapSnapshot(board: board, inbox: const [], asks: const [], toggles: const [], now: now, tasks: [
+      {'id': 60, 'title': 'עוזר: ביטוח', 'project': null, 'state': 'running', 'identity': null, 'labels': '["opened-by:eli","repo:x"]', 'updated_at': ms(14, 0)},
+      {'id': 61, 'title': 'אפליקציה: תמונות', 'project': 'lumo', 'state': 'done', 'identity': null, 'summary': 'התמונות עלו', 'updated_at': now.subtract(const Duration(days: 2)).millisecondsSinceEpoch},
+      {'id': 62, 'title': 'ישנה', 'project': 'lumo', 'state': 'done', 'identity': null, 'updated_at': now.subtract(const Duration(days: 9)).millisecondsSinceEpoch},
+    ]);
+    final byNo = {for (final t in m.tickets) t.number: t};
+    expect(byNo['t60']!.openedBy, 'eli');
+    expect(byNo['t61']!.doneLine, 'התמונות עלו');
+    expect(byNo['t61']!.doneAt, isNotNull);
+    expect(byNo.containsKey('t62'), isFalse, reason: 'older than a week');
+    expect(plainTitle('אפליקציה: לשונית "ארגון"'), 'לשונית "ארגון"');
+    expect(plainTitle('#23 passkey ו-token לכל מכשיר'), 'passkey ו-token לכל מכשיר');
   });
 
   group('#t48: a project team lists its lead and standing workers, then task workers, under the project\'s name', () {
@@ -191,15 +205,13 @@ void main() {
       final t = voice.orgTeams.firstWhere((t) => t.teamId == 'voice-bot');
       expect(voice.teams['voice-bot']!.name, 'הבוט הקולי', reason: 'the project\'s name, never its id');
       expect([for (final m in t.members) m.identityId], ['shachar', 'keren', 'nir', 'voice-bot-t50']);
-      expect([for (final m in t.members) memberLine(m.line, voice.presence[m.identityId]!)],
-          ['ראש צוות', 'אחראית קול · משימה: השהיה בשיחה', 'אחראי בדיקות', 'תיקון הקלטה']);
       expect(voice.presence['keren']!.status, WorkerStatus.working);
       expect(voice.presence['keren']!.queued, 1);
       expect(voice.presence['nir']!.status, WorkerStatus.resting);
       expect(t.line, 'שחר · 4 עובדים · 3 משימות פתוחות');
     });
 
-    testWidgets('the org tab shows them with their state in a word', (tester) async {
+    testWidgets('the project screen shows the team with what each one does, then the open tasks', (tester) async {
       await loadFonts();
       Motion.frozen = true;
       SharedPreferences.setMockInitialValues({});
@@ -208,19 +220,19 @@ void main() {
       addTearDown(tester.view.reset);
       final store = AppStore(SnapshotBackend(voice));
       await store.start();
-      await tester.pumpWidget(CompanyApp(store: store, themeMode: ThemeMode.light, home: const Scaffold(body: OrgScreen())));
+      await tester.pumpWidget(CompanyApp(store: store, themeMode: ThemeMode.light, home: const ProjectScreen(projectId: 'voice-bot')));
       await tester.pump();
       expect(find.text('הבוט הקולי'), findsOneWidget);
       expect(find.text('voice-bot'), findsNothing);
-      expect(findShown('שחר · 4 עובדים · 3 משימות פתוחות'), findsOneWidget);
-      // Someone besides the lead is at work: the team starts open.
-      expect(find.text('קרן'), findsOneWidget);
-      expect(find.text('ניר'), findsOneWidget);
-      expect(find.text('אורית'), findsOneWidget);
-      expect(findShown('אחראית קול · משימה: השהיה בשיחה'), findsOneWidget);
-      // The state in a word, next to its icon: Keren works with one waiting, Nir rests.
+      expect(findShown('ראש צוות: שחר · 3 עובדים קבועים · 3 משימות פתוחות'), findsOneWidget);
+      // Keren works on a task: the task, with play_arrow. Nir rests: the state in a word.
+      expect(findShown('השהיה בשיחה'), findsWidgets);
+      expect(find.byWidgetPredicate((w) => w is Ic && w.name == 'play_arrow'), findsWidgets);
       final states = {for (final w in tester.widgetList<StatusWord>(find.byType(StatusWord))) (w.icon, w.word)};
-      expect(states, containsAll([(statusIcon(WorkerStatus.working), '${statusWord(WorkerStatus.working, Gender.f)} · 1 בתור'), (statusIcon(WorkerStatus.resting), statusWord(WorkerStatus.resting, Gender.m))]));
+      expect(states, contains((statusIcon(WorkerStatus.resting), statusWord(WorkerStatus.resting, Gender.m))));
+      // The task worker is in the open tasks, marked as temporary; the queued one says so.
+      expect(findShown('אורית (זמני)'), findsOneWidget);
+      expect(findShown('קרן · בתור'), findsOneWidget);
     });
   });
 }

@@ -507,7 +507,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
     OrgTeam(teamId: 'mgmt', line: 'יואב · מנהל החברה', statusIcon: 'radio_button_unchecked', statusWord: 'פנוי'),
     OrgTeam(teamId: 'monitor', line: 'רותם · 6 פרויקטים בפרודקשן', statusIcon: 'front_hand', statusWord: 'מחכה לך', bold: true),
     OrgTeam(teamId: 'personal', line: 'אלי · 3 מומחים', statusIcon: 'front_hand', statusWord: '1 מחכה לך', bold: true),
-    OrgTeam(teamId: 'improve', line: 'נגה', statusIcon: 'progress_activity', statusWord: 'עובדת'),
+    OrgTeam(teamId: 'improve', line: 'נגה', statusIcon: 'play_arrow', statusWord: 'עובדת'),
     OrgTeam(teamId: 'lumo', line: 'פעיל · 3 עובדים', statusIcon: '', statusWord: '', members: [
       OrgMember(identityId: 'dana', line: 'מנכ"לית לומו · משמרת 7'),
       OrgMember(identityId: 'ido', line: 'מפתח · משמרת 2', group: 'צוות משימה `t3711` · תשלומים נכשלים', sub: true),

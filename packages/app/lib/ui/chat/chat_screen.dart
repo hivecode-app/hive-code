@@ -537,7 +537,7 @@ class _ChatBar extends StatelessWidget {
       status = StatusWord(icon: 'stop_circle', word: '${f ? 'נעצרה' : 'נעצר'} · ${chat.live.stoppedAt}', size: 12);
     } else if (busy) {
       status = StatusWord(
-        icon: 'progress_activity',
+        icon: statusIcon(WorkerStatus.working),
         word: '${statusWord(WorkerStatus.working, who.gender)}${presence.activity != null ? ' · ${presence.activity}' : ''} · ',
         size: 12,
         trailing: Semantics(button: true, label: 'עצירה', child: GestureDetector(onTap: onStop, child: Text('עצירה', style: TextStyle(fontFamily: kFont, fontSize: 12, height: 1.4, fontWeight: FontWeight.w700, color: p.accent)))),

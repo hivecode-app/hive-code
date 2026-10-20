@@ -6,14 +6,14 @@ import 'package:flutter/services.dart';
 import '../data/store.dart';
 import '../model/models.dart';
 import '../theme/tokens.dart';
-import 'board/board_screen.dart';
-import 'board/ticket_screen.dart';
 import 'chat/chat_screen.dart';
 import 'common.dart';
 import 'convs/conversations_screen.dart';
 import 'home/home_screen.dart';
 import 'nav.dart';
-import 'org/org_screen.dart';
+import 'projects/projects_screen.dart';
+import 'settings/settings_screen.dart';
+import 'status/status_screen.dart';
 import 'shell.dart';
 
 class DesktopFrame extends StatefulWidget {
@@ -64,10 +64,9 @@ class _DesktopFrameState extends State<DesktopFrame> {
     if (gPrefix) {
       gPrefix = false;
       final t = {
-        PhysicalKeyboardKey.keyH: AppTab.home,
-        PhysicalKeyboardKey.keyC: AppTab.convs,
-        PhysicalKeyboardKey.keyB: AppTab.board,
-        PhysicalKeyboardKey.keyO: AppTab.org,
+        PhysicalKeyboardKey.keyC: AppTab.chats,
+        PhysicalKeyboardKey.keyS: AppTab.status,
+        PhysicalKeyboardKey.keyP: AppTab.projects,
       }[k];
       if (t != null) nav.go(t);
       if (k == PhysicalKeyboardKey.keyI) setState(() => peekWaiting = !peekWaiting);
@@ -193,20 +192,20 @@ class _DesktopFrameState extends State<DesktopFrame> {
     Widget main;
     Widget? side;
     switch (nav.tab) {
-      case AppTab.home:
-        list = const HomeScreen();
+      case AppTab.status:
+        list = const StatusScreen();
         main = ChatScreen(identityId: selected, embedded: true);
         side = _ContextColumn(identityId: selected, showWaiting: false);
-      case AppTab.convs:
+      case AppTab.chats:
         list = const ConversationsScreen(compact: true);
         main = ChatScreen(identityId: selected, embedded: true);
         side = peekWaiting ? const _WaitingPeek() : _ContextColumn(identityId: selected);
-      case AppTab.board:
-        list = const BoardScreen();
-        main = TicketScreen(number: nav.ticket ?? '#3711', embedded: true);
+      case AppTab.settings:
+        list = const SettingsScreen(tab: true);
+        main = ChatScreen(identityId: selected, embedded: true);
         side = null;
-      case AppTab.org:
-        list = const OrgScreen();
+      case AppTab.projects:
+        list = const ProjectsScreen();
         main = ChatScreen(identityId: selected, embedded: true);
         side = _ContextColumn(identityId: selected, showWaiting: false);
     }
@@ -235,7 +234,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
               ]),
             ),
             Container(
-              width: nav.tab == AppTab.home || nav.tab == AppTab.org ? 380 : 300,
+              width: nav.tab == AppTab.chats ? 300 : 380,
               decoration: BoxDecoration(color: p.bg, border: BorderDirectional(end: BorderSide(color: p.line))),
               child: list,
             ),
@@ -385,11 +384,5 @@ class _ContextColumn extends StatelessWidget {
 class _WaitingPeek extends StatelessWidget {
   const _WaitingPeek();
   @override
-  Widget build(BuildContext context) {
-    final d = StoreScope.of(context).data!;
-    return ListView(padding: EdgeInsets.zero, children: [
-      Section('מחכה לך', count: '${d.waitingCount}'),
-      ListBlock(children: [for (final w in d.waiting) WaitRow(key: ValueKey(w.id), item: w)]),
-    ]);
-  }
+  Widget build(BuildContext context) => const WaitingList();
 }

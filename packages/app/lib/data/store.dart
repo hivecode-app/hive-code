@@ -80,6 +80,8 @@ class AppStore extends ChangeNotifier {
       // Tests without a mock store: drafts stay in memory.
     }
     _convSort = ConvSort.values.asNameMap()[_prefs?.getString(kConvSortKey)] ?? ConvSort.recent;
+    final seen = _prefs?.getInt(kStatusSeenKey);
+    statusSeenAt ??= seen == null ? null : DateTime.fromMillisecondsSinceEpoch(seen);
     await backend.start();
     _restoreDrafts();
     if (_online) unawaited(flushOutbox()); // came up online: what waited from last time goes now
@@ -349,6 +351,18 @@ class AppStore extends ChangeNotifier {
     _convSort = s;
     _prefs?.setString(kConvSortKey, s.name);
     notifyListeners();
+  }
+
+  // ── the status screen's "since your last visit", kept on this device ─────
+
+  static const kStatusSeenKey = 'status.seen';
+
+  /// When he last left the status screen: what finished after it is "מאז הביקור הקודם".
+  DateTime? statusSeenAt;
+
+  void markStatusSeen([DateTime? at]) {
+    statusSeenAt = at ?? DateTime.now();
+    _prefs?.setInt(kStatusSeenKey, statusSeenAt!.millisecondsSinceEpoch);
   }
 
   // ── drafts and outbox, persisted ─────────────────────────────────────────

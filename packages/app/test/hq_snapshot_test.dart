@@ -52,10 +52,9 @@ void main() {
         await tester.pump();
         expect(tester.takeException(), isNull, reason: 'tab $t');
       }
-      // The board shows hq's open tasks (#t19: it was empty, with project chips written in the code).
-      NavScope.read(ctx).go(AppTab.board);
+      // Projects come from hq (org.yaml), by the owner's names, never from names written in the code.
+      NavScope.read(ctx).go(AppTab.projects);
       await tester.pump();
-      expect(find.text('העברת לומו לחברה'), findsWidgets);
       expect(find.text('טיקיבוט'), findsNothing);
       store.selectedConversation = 'yoav';
       Nav.chat(ctx, 'yoav');

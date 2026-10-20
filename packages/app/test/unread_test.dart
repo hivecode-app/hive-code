@@ -17,7 +17,7 @@ void main() {
     expect(find.descendant(of: find.byType(UnreadPill), matching: find.text('3')), findsOneWidget, reason: 'Noga, muted');
     expect(find.byWidgetPredicate((w) => w is Ic && w.name == 'notifications_off'), findsOneWidget);
     expect(store.data!.unreadCount, 2);
-    final tab = tester.widget<NavItem>(find.byWidgetPredicate((w) => w is NavItem && w.dest.tab == AppTab.convs));
+    final tab = tester.widget<NavItem>(find.byWidgetPredicate((w) => w is NavItem && w.dest.tab == AppTab.chats));
     expect(tab.count, 2);
   });
 

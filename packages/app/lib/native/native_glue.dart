@@ -110,7 +110,7 @@ class NativeGlue {
       if (w != null) {
         Nav.waitItem(ctx, w);
       } else {
-        NavScope.read(ctx).go(AppTab.home);
+        NavScope.read(ctx).go(AppTab.chats);
       }
     } else if (parts.length == 2 && parts[0] == 'chat') {
       navigatorKey.currentState!.popUntil((r) => r.isFirst);
@@ -121,7 +121,7 @@ class NativeGlue {
       if (w != null) Nav.handoff(ctx, w);
     } else {
       navigatorKey.currentState!.popUntil((r) => r.isFirst);
-      NavScope.read(ctx).go(AppTab.home);
+      NavScope.read(ctx).go(AppTab.chats);
     }
   }
 

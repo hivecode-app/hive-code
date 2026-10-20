@@ -123,6 +123,7 @@ export class Ingest {
         if (a.state === 'done' || a.state === 'task_done') {
           const t = this.hq.store.db.prepare(`SELECT id FROM tasks WHERE identity = ? AND state IN ('running','resting') ORDER BY updated_at DESC LIMIT 1`)
             .get(e.identity) as { id: number } | undefined;
+          if (t && taskSummary(a.summary)) this.hq.store.db.prepare('UPDATE tasks SET summary = ? WHERE id = ?').run(taskSummary(a.summary), t.id);
           if (t) this.hq.store.bg(this.hq.scheduler.completeTask(t.id), 'task.complete');
           return { ok: true, id: e.id, result: { stored: true, task_done: t?.id ?? null } };
         }
@@ -192,6 +193,8 @@ export class Ingest {
         if (!this.hq.scheduler.canCloseTeam(t!, e.identity)) {
           reject(403, `close_team: ${e.identity} may not close task ${t!.id}`, `הצוות "${team}" (t${t!.id}) לא נסגר: רק מי שפתח אותו, המנהל שלו, המנהל של העובד (או ראש הפרויקט, כשאין מי שפתח) או ${this.hq.cfg.managerId} יכולים לסגור.`);
         }
+        // The closer's line wins over the worker's: it is the last word, written for him.
+        if (taskSummary(a.summary)) this.hq.store.db.prepare('UPDATE tasks SET summary = ? WHERE id = ?').run(taskSummary(a.summary), t!.id);
         if (t!.state === 'done') return { ok: true, id: e.id, ref: `task-${t!.id}`, result: { task: t!.id, state: 'done', already: true } };
         const worker = t!.identity;
         // A standing worker writes its handoff first (its next task starts from it); closed by the sweep after the grace.
@@ -406,4 +409,11 @@ export async function startIngestSocket(ingest: Ingest, path: string): Promise<S
   await new Promise<void>((resolve, reject) => { srv.once('error', reject); srv.listen(path, () => resolve()); });
   chmodSync(path, 0o600);
   return srv;
+}
+
+/** A task's closing line (#53): one line, trimmed, at most 200 characters; empty = none. */
+export function taskSummary(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const line = v.split('\n')[0]!.trim();
+  return line ? line.slice(0, 200) : null;
 }

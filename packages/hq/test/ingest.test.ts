@@ -313,3 +313,24 @@ test('delivery states from the host: delivered → started = seen; deltas stream
     assert.equal(host.sent.filter((x) => x.msgId === 'd-1').length, 1, 'nothing written twice');
   } finally { await env.cleanup(); }
 });
+
+test('#53: a task\'s summary comes from status done, and close_team\'s overrides it; one line, no blanks', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock } = env;
+    const r = await post(sock, '/v1/ops', entry('open_team', { name: 'אפליקציה: תמונות', purpose: 'משהו', project: 'agent-company' }, 'eli-1:50'));
+    const id = r.json.result.task as number;
+    const worker = `agent-company-t${id}`;
+    await hq.scheduler.fill();
+    await until(() => hq.shifts.current(worker)?.state === 'live', 3000, 'task worker live');
+    const done = await post(sock, '/v1/ops', entry('status', { state: 'done', summary: '  התמונות עלו\nPR #12 מוזג' }, `${worker}-1:01`, worker));
+    assert.equal(done.status, 200);
+    await until(() => hq.scheduler.task(id)!.state === 'done', 3000, 'task done');
+    assert.equal(hq.scheduler.task(id)!.summary, 'התמונות עלו', 'the first line, trimmed');
+    assert.equal((hq.scheduler.tasks().find((t) => t.id === id) as { summary?: string }).summary, 'התמונות עלו', 'the board carries it');
+    await post(sock, '/v1/ops', entry('close_team', { team: `t${id}`, summary: 'התמונות בצ\'אט עולות גם מהטלפון' }, 'eli-1:51'));
+    assert.equal(hq.scheduler.task(id)!.summary, 'התמונות בצ\'אט עולות גם מהטלפון', 'the closer has the last word');
+    await post(sock, '/v1/ops', entry('close_team', { team: `t${id}`, summary: '   ' }, 'eli-1:52'));
+    assert.equal(hq.scheduler.task(id)!.summary, 'התמונות בצ\'אט עולות גם מהטלפון', 'a blank one changes nothing');
+  } finally { await env.cleanup(); }
+});

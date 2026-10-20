@@ -1253,7 +1253,7 @@ CompanyData mapSnapshot({
   ];
 
   // The tasks hq is running (the board, APP-SPEC §4.5, and the project teams in org). Finished ones
-  // leave both; the board keeps what finished today, folded at the end.
+  // leave both. What finished in the last week stays (doneAt), for "מאז הביקור הקודם" after a day away (#53).
   final clock = now ?? DateTime.now();
   final today = DateTime(clock.year, clock.month, clock.day).millisecondsSinceEpoch;
   final tickets = <Ticket>[];
@@ -1262,7 +1262,7 @@ CompanyData mapSnapshot({
     final state = t['state'] as String? ?? 'queued';
     final updated = t['updated_at'] as int? ?? 0;
     // `closed`: the issue closed in GitHub. Nobody works on it and it is not done by us.
-    if (state == 'closed' || (state == 'done' && updated < today)) continue;
+    if (state == 'closed' || (state == 'done' && updated < today - const Duration(days: 6).inMilliseconds)) continue;
     final idn = t['identity'] as String?;
     final who = idn == null ? null : ids[idn];
     final title = t['title'] as String? ?? '';
@@ -1273,7 +1273,7 @@ CompanyData mapSnapshot({
     final withWorker = state == 'running' || state == 'resting';
     final status = state == 'done' ? WorkerStatus.done : (withWorker ? (presence[idn]?.status ?? WorkerStatus.free) : WorkerStatus.free);
     final group = switch ((state, status)) {
-      ('done', _) => TicketGroup.doneToday,
+      ('done', _) => TicketGroup.doneToday, // "done", today or this week: doneAt says when
       _ when !withWorker => TicketGroup.queued,
       (_, WorkerStatus.waiting) => TicketGroup.waiting,
       (_, WorkerStatus.blocked || WorkerStatus.stuck) => TicketGroup.attention,
@@ -1291,12 +1291,17 @@ CompanyData mapSnapshot({
       sub: who == null || who.title.isEmpty ? null : who.title,
       status: status,
       endLine: state == 'done' ? 'הסתיים ${_hm(updated)}' : (started != null ? 'התחיל ${_hm(started)}' : null),
+      assigneeId: idn,
+      startedAt: started == null ? null : DateTime.fromMillisecondsSinceEpoch(started),
+      doneAt: state == 'done' ? DateTime.fromMillisecondsSinceEpoch(updated) : null,
+      summary: t['summary'] as String?,
+      openedBy: _openedBy(t['labels']),
     ));
   }
 
   final projectList = [
     for (final p in projects)
-      if (p['id'] is String) ProjectInfo(id: p['id'] as String, name: projectNames[p['id']], active: p['status'] == 'active'),
+      if (p['id'] is String) ProjectInfo(id: p['id'] as String, name: projectNames[p['id']], active: p['status'] == 'active', teamId: projectTeam[p['id']]),
   ];
 
   // Org (APP-SPEC §4.6): the permanent teams, then each project's team: its lead, its standing
@@ -1360,7 +1365,7 @@ CompanyData mapSnapshot({
   final live = presence.entries.where((e) => e.value.status != WorkerStatus.done && (teamKind[ids[e.key]?.teamId] != 'task' || taskOf.containsKey(e.key)));
   final active = live.where((e) => e.value.status != WorkerStatus.resting).length;
   final open = tickets.where((t) => t.group != TicketGroup.doneToday).length;
-  final doneToday = tickets.length - open;
+  final doneToday = tickets.where((t) => t.doneAt != null && !t.doneAt!.isBefore(DateTime(clock.year, clock.month, clock.day))).length;
 
   return CompanyData(
     teams: teams,
@@ -1493,4 +1498,18 @@ ChatItem? answerItem(Map<String, dynamic> m, AskCard card, String author, List<C
     replyTo: Quote(author: author, text: (card.headline ?? card.question).split('\n').first, itemId: card.id, askId: card.askId, go: card is GoCard),
     attachments: attachmentsOf(m),
   );
+}
+
+/// Who opened a task: its `opened-by:<id>` label (hq sends labels as a JSON array string).
+String? _openedBy(Object? labels) {
+  List<Object?> list;
+  try {
+    list = labels is String ? (jsonDecode(labels) as List) : (labels is List ? labels : const []);
+  } catch (_) {
+    return null;
+  }
+  for (final l in list) {
+    if (l is String && l.startsWith('opened-by:')) return l.substring(10);
+  }
+  return null;
 }

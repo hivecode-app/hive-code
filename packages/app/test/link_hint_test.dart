@@ -4,7 +4,7 @@ import 'package:agent_company/data/fake_backend.dart';
 import 'package:agent_company/data/store.dart';
 import 'package:agent_company/main.dart';
 import 'package:agent_company/model/models.dart';
-import 'package:agent_company/ui/home/home_screen.dart';
+import 'package:agent_company/ui/status/status_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -32,7 +32,7 @@ void main() {
     final backend = _LinkBackend();
     final store = AppStore(backend);
     await store.start();
-    await tester.pumpWidget(CompanyApp(store: store, themeMode: ThemeMode.light, home: const Scaffold(body: HomeScreen())));
+    await tester.pumpWidget(CompanyApp(store: store, themeMode: ThemeMode.light, home: const Scaffold(body: StatusScreen())));
     await tester.pump();
 
     final first = find.text('מחכה לך').first;
