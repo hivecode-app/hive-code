@@ -1,0 +1,49 @@
+# עץ הצוותים והזהויות של החברה.
+# משנים רק ב-PR. הבדיקה: company check (במנוע: npm run check:contract)
+#
+# זה השלד שההתקנה יוצרת: מנהל אחד עם שם זמני, בלי צוותים ובלי פרויקטים.
+# המנהל משלים אותו בשיחת ההקמה (skills/setup/SKILL.md), ובסוף מוחק את השורה setup: pending.
+# כל עוד היא כאן, הבדיקה מקבלת owner_name ו-timezone ריקים.
+#
+# kind:       permanent | project | task      (סוג הצוות)
+# lifecycle:  always-on | dormant | ephemeral (רק resident:true מחזיק תהליך חי)
+# may_open:   אילו סוגי צוותים הזהות פותחת מתחתיה בלי לשאול
+# grants:     הרשאות פרודקשן שבעל החברה נתן מראש, עם ציטוט ותאריך. ריק עד שהוא נותן
+# automations: כל מה שקורה מעצמו. enabled הוא המתג בלוח
+# symbol:     שם אייקון מ-Material Symbols (fonts.google.com/icons). לא אמוג'י ולא צבע
+# monogram:   שתי אותיות עבריות לכל זהות. אין שדה צבע בשום מקום. כללי העיצוב: memory/company/design-taste.md
+
+version: 1
+setup: pending
+owner: owner
+owner_name:             # איך הטקסטים קוראים לבעל החברה. נקבע בשאלה הראשונה של ההקמה
+owner_gender: male      # male | female: ההטיות בטקסטים (אליו/אליה, סגר/סגרה)
+manager: manager        # מקבל הסלמות ושאלות שלא נענו. שמו (name, gender) בטקסטים
+timezone:               # IANA, למשל Asia/Jerusalem. המקור היחיד לשעה: לילה, מסך הבית, השעות באפליקציה
+
+teams:
+  - id: management
+    name: הנהלה
+    kind: permanent
+    symbol: account_tree
+    lead: manager
+    members: []
+    helpers: ephemeral
+
+identities:
+  - id: manager
+    name: מנהל החברה    # שם זמני. בעל החברה בוחר שם בהקמה, מתוך שמות שהמנהל מציע
+    gender: male        # לפי השם שנבחר
+    title: מנהל החברה
+    symbol: explore
+    team: management
+    reports_to: owner
+    kind: permanent
+    lifecycle: always-on
+    resident: true      # היחיד שמחזיק תהליך חי תמיד
+    may_open: [permanent, project, task]
+    memory_domain: company
+    grants: []
+    automations: []
+
+projects: []

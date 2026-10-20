@@ -1,0 +1,68 @@
+# מה מוסיפים ל-company/org.yaml בשיחת ההקמה. כל רשימה כאן מתמזגת לרשימה באותו שם שם.
+# id של צוות פרויקט = id של הפרויקט. id של זהות: אותיות קטנות באנגלית, לפי השם (avivit, hadar).
+
+monitoring_lead: hadar     # רק אם יש לפחות פרודקשן אחד
+
+projects:
+  - id: example-app
+    name: האפליקציה         # שם התצוגה בלוח, במילים של בעל החברה
+    status: active
+    team: example-app
+  - id: old-site
+    name: האתר הישן
+    status: dormant          # רדום: בלי צוות. האמנה קיימת, עם status: dormant
+
+teams:
+  - id: example-app
+    name: האפליקציה
+    kind: project
+    project: example-app
+    symbol: smartphone
+    lead: aviv
+    members: []
+    helpers: ephemeral
+
+  - id: monitoring
+    name: צוות הניטור
+    kind: permanent
+    symbol: monitor_heart
+    lead: hadar
+    members: []
+    helpers: ephemeral
+
+identities:
+  - id: aviv
+    name: אביב
+    gender: male
+    title: ראש צוות האפליקציה
+    symbol: smartphone
+    monogram: אב
+    team: example-app
+    reports_to: manager
+    kind: project
+    lifecycle: always-on
+    home: srv1              # אחת מ-machines
+    may_open: [task]
+    memory_domain: projects/example-app
+    grants: []
+    automations: []
+
+  - id: hadar
+    name: הדר
+    gender: female
+    title: ראשת צוות הניטור
+    symbol: shield
+    monogram: הד
+    team: monitoring
+    reports_to: manager
+    kind: permanent
+    lifecycle: always-on
+    home: srv1
+    may_open: [task]
+    memory_domain: company
+    grants: []              # הניטור רק צופה ומדווח, עד שבעל החברה נותן הרשאה במפורש
+    automations:
+      - id: prod-probes
+        what: probe-runner מריץ את בדיקות הפרודקשן מהאמנות (GET בלבד, בלי טוקנים). חריגה מעירה את ראשת הניטור
+        when: לפי every של כל probe באמנת הפרויקט
+        enabled: true

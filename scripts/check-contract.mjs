@@ -176,11 +176,17 @@ const AUTHORITY_END = '<!-- /RAN:AUTHORITY -->';
 // When he changes the source, copy the new text into directives.md and update this pin in the same PR.
 const AUTHORITY_SHA256 = '56ec6097c8334b54d9450898aeeaa08570d6f5bd0237eb79028a4c675efc2220';
 
-export function extractAuthority(text) {
+// A company set up from the starter kit has no CLAUDE.md to copy from: its Authority block is the engine's own,
+// in Hebrew, describing what the hook refuses. It must equal starter/company/directives.md of this engine.
+const GENERIC_AUTHORITY_HEADING = '# סמכות: קרא את זה לפני שאתה מחליט שאסור לך';
+const GENERIC_AUTHORITY_END = '<!-- /AUTHORITY -->';
+const STARTER_DIRECTIVES = join(dirname(fileURLToPath(import.meta.url)), '..', 'starter', 'company', 'directives.md');
+
+export function extractAuthority(text, heading = AUTHORITY_HEADING, endMarker = AUTHORITY_END) {
   const lines = text.split(/\r?\n/);
-  const start = lines.indexOf(AUTHORITY_HEADING);
+  const start = lines.indexOf(heading);
   if (start < 0) return null;
-  const end = lines.indexOf(AUTHORITY_END, start);
+  const end = lines.indexOf(endMarker, start);
   if (end < 0) return null;
   return lines.slice(start, end).join('\n').trimEnd();
 }
@@ -233,7 +239,10 @@ export function main() {
     if (!isObj(org)) { if (parsed) err(`${W}: top level must be a non-empty mapping`); org = null; }
     else if (typeof org.owner !== 'string' || !org.owner) err(`${W}: "owner" must be set (the id everyone reports to)`);
     // #121: the one time zone of the company (night, home, the hours in the app). An IANA name.
-    if (org) {
+    // setup: pending = the skeleton from the starter kit, before the setup conversation (skills/setup).
+    // Until then the owner's name and time zone are not known yet; the playbook fills them and drops the flag.
+    if (org && org.setup != null && org.setup !== 'pending') err(`${W}: "setup" can only be "pending" (the skeleton before the setup conversation), got ${JSON.stringify(org.setup)}`);
+    if (org && !(org.setup === 'pending' && org.timezone == null)) {
       let tzOk = typeof org.timezone === 'string' && !!org.timezone;
       if (tzOk) { try { new Intl.DateTimeFormat('en-US', { timeZone: org.timezone }); } catch { tzOk = false; } }
       if (!tzOk) err(`${W}: "timezone" must be an IANA time zone (e.g. Asia/Bangkok), got ${JSON.stringify(org.timezone)}`);
@@ -279,7 +288,7 @@ export function main() {
       if (org[k] != null && !identityIds.has(org[k])) err(`${W}: "${k}" "${org[k]}" is not an identity`);
     }
     // The names in texts (packages/shared/src/names.ts): a misspelt gender would quietly bend every text to male.
-    if (org.owner_name != null && (typeof org.owner_name !== 'string' || !org.owner_name.trim())) err(`${W}: "owner_name" must be a non-empty name`);
+    if ((org.owner_name != null || org.setup !== 'pending') && (typeof org.owner_name !== 'string' || !org.owner_name.trim())) err(`${W}: "owner_name" must be a non-empty name`);
     const GENDERS = ['male', 'female'];
     if (org.owner_gender != null && !GENDERS.includes(org.owner_gender)) err(`${W}: "owner_gender" "${org.owner_gender}" is not one of ${GENDERS.join('|')}`);
     for (const p of org.identities ?? []) {
@@ -309,6 +318,7 @@ export function main() {
       for (const f of required) if (!(f in p)) err(`${W}: ${who} is missing "${f}"`);
       checkSymbol(who, p.symbol, W);
       for (const f of ['name', 'title']) if (typeof p[f] === 'string' && EMOJI.test(p[f])) err(`${W}: ${who} ${f} contains an emoji`);
+      if (typeof p.name !== 'string' || !p.name.trim()) err(`${W}: ${who} has no name`);
       if (p.phase != null && !Number.isInteger(p.phase)) err(`${W}: ${who} phase must be a whole number`);
       if (p.home != null && !machineOk(p.home)) err(`${W}: ${who} home "${p.home}" is not ${machineList}`);
       if (p.monogram != null && !MONOGRAM.test(String(p.monogram))) err(`${W}: ${who} monogram "${p.monogram}" must be two Hebrew letters`);
@@ -416,7 +426,15 @@ export function main() {
   if (!existsSync(directivesPath)) err('company/directives.md is missing');
   else {
     const d = readFileSync(directivesPath, 'utf8');
-    if (!d.split('\n').includes(AUTHORITY_HEADING)) err(`company/directives.md: the Authority heading is missing ("${AUTHORITY_HEADING}")`);
+    const dLines = d.split('\n');
+    if (!dLines.includes(AUTHORITY_HEADING) && dLines.includes(GENERIC_AUTHORITY_HEADING)) {
+      const block = extractAuthority(d, GENERIC_AUTHORITY_HEADING, GENERIC_AUTHORITY_END);
+      const engine = existsSync(STARTER_DIRECTIVES) ? extractAuthority(readFileSync(STARTER_DIRECTIVES, 'utf8'), GENERIC_AUTHORITY_HEADING, GENERIC_AUTHORITY_END) : null;
+      if (block === null) err(`company/directives.md: the Authority block must run from "${GENERIC_AUTHORITY_HEADING}" to a line "${GENERIC_AUTHORITY_END}"`);
+      else if (engine === null) err(`company/directives.md: cannot read the engine's Authority block from ${STARTER_DIRECTIVES}`);
+      else if (block !== engine) err('company/directives.md: the Authority block differs from the engine\'s (starter/company/directives.md). It describes what the hook refuses; copy it again, word for word');
+    } else if (!dLines.includes(AUTHORITY_HEADING)) err(`company/directives.md: the Authority heading is missing ("${AUTHORITY_HEADING}" or "${GENERIC_AUTHORITY_HEADING}")`);
+    else {
     const block = extractAuthority(d);
     if (block === null) err(`company/directives.md: the Authority block must run from "${AUTHORITY_HEADING}" to a line "${AUTHORITY_END}"`);
     else {
@@ -428,6 +446,7 @@ export function main() {
         if (src === null && srcText.split(/\r?\n/).includes(AUTHORITY_HEADING)) err(`~/.claude/CLAUDE.md has the Authority heading but no "${AUTHORITY_END}" line; cannot compare`);
         if (src !== null && src !== block) err('company/directives.md: the Authority block differs from ~/.claude/CLAUDE.md on this machine. Copy it again, word for word');
       }
+    }
     }
     const ids = [...d.matchAll(/^## (dir-\d{4})\b/gm)].map((m) => m[1]);
     const dup = ids.filter((x, k) => ids.indexOf(x) !== k);

@@ -2,7 +2,7 @@
 // Run: npm run test:contract
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync, appendFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, appendFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -101,4 +101,78 @@ test('broken charter YAML is reported at its line in the file (#70)', () => {
   } finally {
     rmSync(dir, { recursive: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// The starter kit (starter/): the skeleton a new company starts from, and the examples the setup copies.
+// ---------------------------------------------------------------------------
+function copyStarter() {
+  const dir = mkdtempSync(join(tmpdir(), 'starter-'));
+  for (const d of ['company', 'memory', 'examples']) cpSync(join(repo, 'starter', d), join(dir, d), { recursive: true });
+  return dir;
+}
+
+// What the setup conversation writes (skills/setup "מה נוצר"), from examples/: the skeleton becomes a company.
+async function finishSetup(dir) {
+  const { parse, stringify } = await import('yaml');
+  const orgPath = join(dir, 'company/org.yaml');
+  const org = parse(readFileSync(orgPath, 'utf8'));
+  const add = parse(readFileSync(join(dir, 'examples/org-additions.yaml'), 'utf8'));
+  delete org.setup;
+  Object.assign(org, { owner_name: 'דנה', owner_gender: 'female', timezone: 'Asia/Jerusalem', machines: ['srv1'], monitoring_lead: add.monitoring_lead });
+  Object.assign(org.identities[0], { name: 'יובל', monogram: 'יו', home: 'srv1' });
+  org.projects = [...org.projects, ...add.projects];
+  org.teams = [...org.teams, ...add.teams];
+  org.identities = [...org.identities, ...add.identities];
+  writeFileSync(orgPath, stringify(org, { lineWidth: 0 }));
+  for (const f of ['projects/example-app.md', 'projects/old-site.md', 'identities/aviv.md', 'identities/hadar.md']) {
+    cpSync(join(dir, 'examples', f), join(dir, 'company', f));
+  }
+  mkdirSync(join(dir, 'memory/projects/example-app'));
+  writeFileSync(join(dir, 'memory/projects/example-app/INDEX.md'), '# האפליקציה (L3)\n');
+  appendFileSync(join(dir, 'memory/projects/INDEX.md'), '| [example-app](example-app/INDEX.md) | האפליקציה |\n');
+}
+
+test('the starter kit passes as a skeleton', () => {
+  const dir = copyStarter();
+  try {
+    const r = run(dir);
+    assert.equal(r.code, 0, r.out);
+  } finally { rmSync(dir, { recursive: true }); }
+});
+
+test('the starter kit with the examples set up passes', async () => {
+  const dir = copyStarter();
+  try {
+    await finishSetup(dir);
+    const r = run(dir);
+    assert.equal(r.code, 0, r.out);
+    assert.doesNotMatch(r.out, /^warn /m, r.out);
+  } finally { rmSync(dir, { recursive: true }); }
+});
+
+const starterCases = [
+  ['setup done without a time zone', '"timezone" must be an IANA', (d) => edit(d, 'company/org.yaml', 'setup: pending\n', '')],
+  ['setup done without the owner name', '"owner_name" must be a non-empty name', (d) => edit(d, 'company/org.yaml', 'setup: pending\n', '')],
+  ['manager without a name', 'identity "manager" has no name', (d) => edit(d, 'company/org.yaml', 'name: מנהל החברה', 'name:')],
+  ['setup flag with another value', '"setup" can only be "pending"', (d) => edit(d, 'company/org.yaml', 'setup: pending\nowner:', 'setup: done\nowner:')],
+  ['generic Authority edited', 'differs from the engine', (d) => edit(d, 'company/directives.md', 'מותר לך הכול, חוץ מחמשת הסוגים', 'מותר לך הכול, חוץ מהסוגים')],
+  ['generic Authority without its end marker', 'must run from', (d) => edit(d, 'company/directives.md', '<!-- /AUTHORITY -->', '')],
+];
+
+for (const [name, expect, mutate] of starterCases) {
+  test(`starter fails on: ${name}`, () => {
+    const dir = copyStarter();
+    try {
+      mutate(dir);
+      const r = run(dir);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, new RegExp(expect.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    } finally { rmSync(dir, { recursive: true }); }
+  });
+}
+
+test('the starter kit carries nothing of the owner of this repo', () => {
+  const r = spawnSync('grep', ['-rniE', 'רן|יואב|ran|hivecode', join(repo, 'starter')], { encoding: 'utf8' });
+  assert.equal(r.stdout, '', r.stdout);
 });
