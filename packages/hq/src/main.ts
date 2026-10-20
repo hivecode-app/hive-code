@@ -4,7 +4,9 @@
 //   node packages/hq/src/main.ts backup      # one-off sqlite backup, then exit
 //   node packages/hq/src/main.ts token       # print the API token (creates it on first run)
 //   node packages/hq/src/main.ts pair        # one-time pairing code + link for a new device (10 min)
+//   node packages/hq/src/main.ts pair --qr   # the same, and the link as a QR for the phone's camera (scripts/install.sh)
 import { parseArgs } from 'node:util';
+import { renderUnicodeCompact } from 'uqr';
 import { join } from 'node:path';
 import { loadConfig } from './config.ts';
 import { Hq, loadForeignInjector } from './hq.ts';
@@ -18,6 +20,7 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     port: { type: 'string' }, host: { type: 'string' }, state: { type: 'string' }, company: { type: 'string' },
+    qr: { type: 'boolean' },
   },
 });
 const args = positionals[0] === 'hq' ? positionals.slice(1) : positionals;
@@ -41,6 +44,7 @@ if (args[0] === 'pair') {
   store.close();
   console.log(`code: ${p.code}  (valid until ${hhmm(p.expires_at, readTimeZone(cfg.companyDir))})`);
   if (p.link) console.log(`link: ${p.link}`);
+  if (p.link && values.qr) console.log(`\n${renderUnicodeCompact(p.link, { border: 2 })}`);
   process.exit(0);
 }
 

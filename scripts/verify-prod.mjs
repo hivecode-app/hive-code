@@ -14,6 +14,9 @@
 //     URLs checked here are its auth.appUrl, apiUrl and tab.baseUrl (env VERIFY_*_URL override them).
 //   - COMPANY_HOME: hq and every live worker read the contract and memory from it, not from this engine repo
 //     (scripts/company-home-check.mjs).
+// --install: a server set up by scripts/install.sh, one public origin with hq under /hq. Only what every
+// install has: COMPANY_HOME, hq's health and auth, pairing, the WebSocket, /pair and assetlinks.json. It skips
+// what only hq-host has: hq.config.json in git, dictation, the web app and APK release, tab.hq, the old path.
 // Prints one Hebrew line per check; exit 1 when any check fails.
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -27,6 +30,7 @@ import { companyLocation } from '../packages/hq/src/config.ts';
 import { companyHomeFindings, liveReaders, procEnv } from './company-home-check.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const install = process.argv.includes('--install');
 const LOCAL = 'http://127.0.0.1:7420';
 const state = process.env.COMPANY_STATE ?? join(homedir(), '.local/state/agent-company');
 const liveCfgText = existsSync(join(state, 'hq.config.json')) ? readFileSync(join(state, 'hq.config.json'), 'utf8') : null;
@@ -98,7 +102,7 @@ const companyHome = resolveCompanyHome({ stateRoot: state, fallback: repo });
 }
 
 // ── hq.config.json: this company's values, exactly as in git ─────────────────
-{
+if (!install) {
   const src = join(companyHome, 'company/hq.config.json');
   const want = existsSync(src) ? readFileSync(src, 'utf8') : null;
   expect(want != null && liveCfgText === want, `hq.config.json של hq זהה ל-${src}`,
@@ -115,6 +119,8 @@ const companyHome = resolveCompanyHome({ stateRoot: state, fallback: repo });
   expect(a.status === 401, 'app.hq: /hq/api/board בלי טוקן נחסם (401)', `app.hq: /hq/api/board בלי טוקן ענה ${a.status}, ציפיתי ל-401`);
   const w = await ws(`${APP.replace(/^http/, 'ws')}/hq/ws`);
   expect(w === 'HTTP 401', 'WebSocket בלי טוקן נחסם (401)', `WebSocket בלי טוקן: ${w}, ציפיתי ל-401`);
+}
+if (!install) {
   const d = await dictate(`${APP}/hq/api/dictate/transcribe`);
   expect(d.status === 401, 'הכתבה בלי מכשיר מצומד נחסמת (401)', `הכתבה בלי טוקן ענתה ${d.status}, ציפיתי ל-401`);
   const open = await dictate(`${APP}/dictate/transcribe`);
@@ -127,11 +133,11 @@ const companyHome = resolveCompanyHome({ stateRoot: state, fallback: repo });
   let device = null;
   try {
     const pc = await req(`${LOCAL}/api/devices/pair`, { method: 'POST', headers: { ...bearer(admin), 'content-type': 'application/json' }, body: '{}' });
-    const code = pc.status === 200 ? (await pc.json()).code : null;
+    const code = pc.status === 200 ? (await pc.json().catch(() => ({}))).code : null;
     expect(Boolean(code), 'קוד צימוד חד-פעמי נוצר', `לא נוצר קוד צימוד (${pc.status})`);
     if (code) {
       const p = await req(`${APP}/hq/api/auth/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, name: 'בדיקת פריסה (scripts/deploy.sh)' }) });
-      device = p.status === 200 ? await p.json() : null;
+      device = p.status === 200 ? await p.json().catch(() => null) : null;
       expect(Boolean(device?.token), 'הקוד הפך ל-token של מכשיר דרך הכתובת הציבורית', `הצימוד נכשל (${p.status})`);
     }
     if (device?.token) {
@@ -139,9 +145,9 @@ const companyHome = resolveCompanyHome({ stateRoot: state, fallback: repo });
       expect(b.status === 200, 'עם token של מכשיר /api/board עונה 200', `/api/board עם token של מכשיר ענה ${b.status}`);
       const w = await ws(`${APP.replace(/^http/, 'ws')}/hq/ws?token=${encodeURIComponent(device.token)}`);
       expect(w === 'open', 'WebSocket עם token של מכשיר נפתח', `WebSocket עם token של מכשיר: ${w}`);
-      const d = await dictate(`${APP}/hq/api/dictate/transcribe`, device.token);
-      const body = d.status === 200 ? await d.json().catch(() => ({})) : {};
-      expect(d.status === 200 && typeof body.text === 'string', 'הכתבה עם token של מכשיר עוברת דרך hq ל-dictate-server', `הכתבה עם token של מכשיר ענתה ${d.status}`);
+      const d = install ? null : await dictate(`${APP}/hq/api/dictate/transcribe`, device.token);
+      const body = d?.status === 200 ? await d.json().catch(() => ({})) : {};
+      if (d) expect(d.status === 200 && typeof body.text === 'string', 'הכתבה עם token של מכשיר עוברת דרך hq ל-dictate-server', `הכתבה עם token של מכשיר ענתה ${d.status}`);
     }
   } finally {
     if (device?.device?.id) {
@@ -153,12 +159,14 @@ const companyHome = resolveCompanyHome({ stateRoot: state, fallback: repo });
 }
 
 // ── the app at the root, assetlinks, the APK ─────────────────────────────────
-{
+if (!install) {
   const root = await req(`${APP}/`);
   const html = root.status === 200 ? await root.text() : '';
   expect(root.status === 200 && html.includes('<base href="/">'), 'האפליקציה נטענת בשורש', `השורש ענה ${root.status}${html && !html.includes('<base href="/">') ? ' בלי <base href="/">' : ''}`);
   const js = await req(`${APP}/main.dart.js`, { method: 'HEAD' });
   expect(js.status === 200, 'main.dart.js נטען', `main.dart.js ענה ${js.status}`);
+}
+{
   const al = await req(`${APP}/.well-known/assetlinks.json`);
   const alText = al.status === 200 ? await al.text() : '';
   expect(alText.includes('"package_name"'), 'assetlinks.json מוגש (passkeys באנדרואיד)', `assetlinks.json ענה ${al.status}`);
@@ -167,6 +175,8 @@ const companyHome = resolveCompanyHome({ stateRoot: state, fallback: repo });
   const pp = await req(`${API}/pair?code=TEST-CODE`);
   const ppText = pp.status === 200 ? await pp.text() : '';
   expect(ppText.includes('TEST-CODE'), 'דף הצימוד /pair מוגש', `/pair ענה ${pp.status}`);
+}
+if (!install) {
 
   const apk = await req(`${APP}/agent-company.apk`);
   const bytes = apk.status === 200 ? Buffer.from(await apk.arrayBuffer()) : Buffer.alloc(0);
@@ -198,7 +208,7 @@ const companyHome = resolveCompanyHome({ stateRoot: state, fallback: repo });
 }
 
 // ── tab.hq: hq's handoff listener answers, and only for /h/ and /ws/ ─────────
-{
+if (!install) {
   const TAB = process.env.VERIFY_TAB_URL ?? noSlash(liveCfg.tab?.baseUrl) ?? 'http://127.0.0.1:7422';
   // A token no handoff has: hq answers 410 (expired page), which proves Caddy reaches hq's listener.
   const fake = Array.from({ length: 32 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
@@ -209,7 +219,7 @@ const companyHome = resolveCompanyHome({ stateRoot: state, fallback: repo });
 }
 
 // ── the old secret path, while it is still in the Caddy file ─────────────────
-if (legacy) {
+if (legacy && !install) {
   const r = await req(`${APP}/${legacy}/`);
   expect(r.status === 301 && r.headers.get('location') === '/', 'הנתיב הסודי הישן מפנה לשורש (301)', `הנתיב הישן ענה ${r.status} → ${r.headers.get('location')}`);
   const h = await req(`${APP}/${legacy}/hq/health`);
