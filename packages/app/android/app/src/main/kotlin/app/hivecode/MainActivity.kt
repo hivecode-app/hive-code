@@ -12,6 +12,7 @@ open class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         bridge = NativeBridge(this, flutterEngine.dartExecutor.binaryMessenger).also { it.takeLaunchIntent(intent) }
+        flutterEngine.platformViewsController.registry.registerViewFactory("company/composer", ComposerFieldFactory(flutterEngine.dartExecutor.binaryMessenger))
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {

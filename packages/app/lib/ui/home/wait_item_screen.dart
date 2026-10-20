@@ -8,6 +8,7 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../selection.dart';
 import 'home_screen.dart';
 
 class WaitItemScreen extends StatelessWidget {
@@ -44,7 +45,7 @@ class WaitItemScreen extends StatelessWidget {
                 Expanded(child: Text('${item.kicker} · ${item.time}', style: T.secondary.copyWith(color: p.text2))),
               ]),
               const SizedBox(height: 14),
-              SelectionArea(child: Rich(item.body, auto: true, style: T.body.copyWith(color: p.text))),
+              CopySelectionArea(child: Rich(item.body, auto: true, style: T.body.copyWith(color: p.text))),
               const SizedBox(height: 20),
               if (item.state == WaitState.answered)
                 DoneLine(item.answerLine ?? item.doneLine ?? 'טופל')

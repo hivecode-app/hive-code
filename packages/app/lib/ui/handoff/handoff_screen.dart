@@ -12,6 +12,7 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../selection.dart';
 import '../nav.dart';
 
 class HandoffScreen extends StatefulWidget {
@@ -124,7 +125,7 @@ class _HandoffScreenState extends State<HandoffScreen> {
               ]),
             ),
             Expanded(
-              child: SelectionArea(
+              child: CopySelectionArea(
                 child: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 16), children: [
                   Rich(widget.item.body, auto: true, style: T.body.copyWith(color: p.text)),
                   const SizedBox(height: 20),

@@ -2,7 +2,7 @@
 // button beside it: mic when empty, send when there is text or an image. Tap on send while the
 // worker is busy = "after the current step"; long press opens "when to deliver?". Stop is NOT here
 // (top bar). Images (attach, camera, paste) wait above the field as a removable preview, and go
-// with the next message.
+// with the next message. On Android the text field itself is native (composer_field.dart).
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -12,10 +12,10 @@ import 'package:image_picker/image_picker.dart';
 import '../../data/dictation.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
-import '../../native/native_bridge.dart';
 import '../../native/paste.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import 'composer_field.dart';
 import 'items.dart';
 
 class Composer extends StatefulWidget {
@@ -227,17 +227,6 @@ class _ComposerState extends State<Composer> {
     _addImage(data, c.uri.split('/').last, mime: c.mimeType);
   }
 
-  /// Android's "הדבקה" knows only text: with an image on the clipboard, the menu gets one that takes it.
-  Widget _menu(BuildContext context, EditableTextState state) => _PasteImageMenu(
-        state: state,
-        onPaste: () async {
-          state.hideToolbar();
-          final img = await NativeBridge.instance.clipboardImage();
-          if (img == null) return _fail('לא הצלחתי לקרוא את התמונה מהלוח.');
-          _addImage(img.bytes, img.name, mime: img.mime);
-        },
-      );
-
   @override
   Widget build(BuildContext context) {
     final p = context.p;
@@ -280,32 +269,43 @@ class _ComposerState extends State<Composer> {
             )
           : Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
               Expanded(
-                child: CallbackShortcuts(
-                  bindings: {
-                    const SingleActivator(LogicalKeyboardKey.enter): () => _send(Priority.next),
-                    const SingleActivator(LogicalKeyboardKey.enter, control: true): () => _send(Priority.now),
-                  },
-                  child: TextField(
-                    controller: widget.controller,
-                    focusNode: widget.focus,
-                    minLines: 1,
-                    maxLines: 6,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    textDirection: firstStrongDirection(widget.controller.text),
-                    style: T.body.copyWith(color: p.text, height: 1.45),
-                    cursorColor: p.accent,
-                    contentInsertionConfiguration: ContentInsertionConfiguration(onContentInserted: _inserted, allowedMimeTypes: kImageMimes),
-                    contextMenuBuilder: NativeBridge.instance.supported ? _menu : _defaultMenu,
-                    decoration: InputDecoration(
-                      isCollapsed: true,
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.fromLTRB(4, 12, 4, 12),
-                      hintText: 'הודעה ל${who.name}',
-                      hintStyle: T.body.copyWith(color: p.text3),
-                    ),
-                  ),
-                ),
+                child: NativeComposerField.available
+                    ? NativeComposerField(
+                        controller: widget.controller,
+                        focus: widget.focus,
+                        hint: 'הודעה ל${who.name}',
+                        style: T.body.copyWith(color: p.text, height: 1.45),
+                        hintColor: p.text3,
+                        accent: p.accent,
+                        onImage: (bytes, name, mime) => _addImage(bytes, name, mime: mime),
+                        onImageFailed: () => _fail('לא הצלחתי לקרוא את התמונה. אפשר לצרף אותה מהגלריה.'),
+                      )
+                    : CallbackShortcuts(
+                        bindings: {
+                          const SingleActivator(LogicalKeyboardKey.enter): () => _send(Priority.next),
+                          const SingleActivator(LogicalKeyboardKey.enter, control: true): () => _send(Priority.now),
+                        },
+                        // Web and desktop: one direction for the whole field, from its first line.
+                        child: TextField(
+                          controller: widget.controller,
+                          focusNode: widget.focus,
+                          minLines: 1,
+                          maxLines: 6,
+                          keyboardType: TextInputType.multiline,
+                          textInputAction: TextInputAction.newline,
+                          textDirection: firstStrongDirection(widget.controller.text),
+                          style: T.body.copyWith(color: p.text, height: 1.45),
+                          cursorColor: p.accent,
+                          contentInsertionConfiguration: ContentInsertionConfiguration(onContentInserted: _inserted, allowedMimeTypes: kImageMimes),
+                          decoration: InputDecoration(
+                            isCollapsed: true,
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.fromLTRB(4, 12, 4, 12),
+                            hintText: 'הודעה ל${who.name}',
+                            hintStyle: T.body.copyWith(color: p.text3),
+                          ),
+                        ),
+                      ),
               ),
               _FieldBtn(icon: 'attach_file', tip: 'צירוף', onTap: _attach),
               if (MediaQuery.sizeOf(context).width < 800) _FieldBtn(icon: 'photo_camera', tip: 'מצלמה', onTap: () => _pick(ImageSource.camera)),
@@ -388,38 +388,6 @@ class _ComposerState extends State<Composer> {
       ]),
     );
   }
-}
-
-Widget _defaultMenu(BuildContext context, EditableTextState state) => AdaptiveTextSelectionToolbar.editableText(editableTextState: state);
-
-/// The standard menu, plus "הדבקה" for an image when the clipboard has one (Android only).
-class _PasteImageMenu extends StatefulWidget {
-  const _PasteImageMenu({required this.state, required this.onPaste});
-  final EditableTextState state;
-  final VoidCallback onPaste;
-  @override
-  State<_PasteImageMenu> createState() => _PasteImageMenuState();
-}
-
-class _PasteImageMenuState extends State<_PasteImageMenu> {
-  bool image = false;
-
-  @override
-  void initState() {
-    super.initState();
-    NativeBridge.instance.clipboardHasImage().then((v) {
-      if (mounted && v) setState(() => image = true);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) => AdaptiveTextSelectionToolbar.buttonItems(
-        anchors: widget.state.contextMenuAnchors,
-        buttonItems: [
-          ...widget.state.contextMenuButtonItems,
-          if (image) ContextMenuButtonItem(label: 'הדבקת תמונה', onPressed: widget.onPaste),
-        ],
-      );
 }
 
 /// What waits to go with the next message: a thumbnail each, with an × to take it out (WhatsApp).

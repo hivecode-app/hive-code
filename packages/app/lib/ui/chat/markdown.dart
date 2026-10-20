@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../selection.dart';
 
 sealed class MdBlock {}
 
@@ -252,10 +253,11 @@ class Markdown extends StatelessWidget {
                   padding: EdgeInsetsDirectional.only(start: 16.0 * it.depth),
                   child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     // Wide enough for "10." so the text column lines up across items.
+                    // The bullet is not copied with the text.
                     SizedBox(
                       width: it.marker == '•' ? 16 : markerWidth,
-                      child: Text(it.depth > 0 && it.marker == '•' ? '◦' : it.marker,
-                          textDirection: dir, style: base.copyWith(color: p.text2)),
+                      child: SelectionContainer.disabled(child: Text(it.depth > 0 && it.marker == '•' ? '◦' : it.marker,
+                          textDirection: dir, style: base.copyWith(color: p.text2))),
                     ),
                     Expanded(child: _inline(context, it.text, base, lastItem)),
                   ]),
@@ -287,7 +289,7 @@ class Markdown extends StatelessWidget {
           if (last && trailerWidth > 0) children.add(SizedBox(height: 16, width: trailerWidth));
       }
     }
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: children);
+    return SelectionLines(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: children));
   }
 
   /// A table in the direction of its header, columns as wide as their content, scrolling sideways
@@ -401,7 +403,7 @@ class _CodeBlockState extends State<CodeBlock> {
       child: Directionality(
         textDirection: TextDirection.ltr,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Container(
+          SelectionContainer.disabled(child: Container(
             height: 28,
             padding: const EdgeInsets.only(left: 10, right: 2),
             decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
@@ -409,14 +411,14 @@ class _CodeBlockState extends State<CodeBlock> {
               Expanded(child: Text(widget.lang, style: T.mono(11.5).copyWith(color: p.text2))),
               _CopyButton(text: widget.code),
             ]),
-          ),
+          )),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
             child: Text(shown, style: T.mono(12.5, lh: 19).copyWith(color: p.text)),
           ),
           if (lines.length > 20)
-            InkWell(
+            SelectionContainer.disabled(child: InkWell(
               onTap: () => setState(() => open = !open),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -426,7 +428,7 @@ class _CodeBlockState extends State<CodeBlock> {
                       style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
                 ),
               ),
-            ),
+            )),
         ]),
       ),
     );

@@ -8,11 +8,13 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../selection.dart';
 import '../convs/conversations_screen.dart';
 import '../entity_link.dart';
 import '../nav.dart';
 import 'composer.dart';
 import 'items.dart';
+import 'markdown.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key, required this.identityId, this.embedded = false});
@@ -218,6 +220,29 @@ class _ChatScreenState extends State<ChatScreen> {
     focus.requestFocus();
   }
 
+  /// Part of a message: the long press on a bubble is the message's own (select, quote), so its text
+  /// opens in a sheet where a long press selects words, with handles and the copy/select-all menu.
+  void _selectText(ChatItem it) {
+    final text = _textOf(it);
+    setState(() => selected = null);
+    final p = context.p;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: p.surface,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.8),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: CopySelectionArea(child: Markdown(text)),
+          ),
+        ),
+      ),
+    );
+  }
+
   String _textOf(ChatItem it) => switch (it) { UserMsg() => it.text, TextMsg() => it.text, AskCard() => it.question, _ => '' };
 
   @override
@@ -270,6 +295,7 @@ class _ChatScreenState extends State<ChatScreen> {
               _quoteItem(selectedItem, d);
               controller.text = 'למה?';
             },
+            onSelectText: widget.embedded ? null : () => _selectText(selectedItem),
           )
         : searching
             ? _SearchBar(
@@ -334,8 +360,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 return KeyedSubtree(
                   key: ValueKey(e.key),
                   // Desktop: text selects with the mouse like a page (APP-SPEC §3, #55). The phone
-                  // selects a whole message with a long press and copies it from the top bar.
-                  child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 780), child: widget.embedded ? SelectionArea(child: row) : row)),
+                  // selects a whole message with a long press and copies it from the top bar, or
+                  // picks part of it in "בחירת טקסט" (_selectText).
+                  child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 780), child: widget.embedded ? CopySelectionArea(child: row) : row)),
                 );
               },
             ),
@@ -730,8 +757,9 @@ class _PinBar extends StatelessWidget {
 }
 
 class _SelectionBar extends StatelessWidget {
-  const _SelectionBar({required this.onClose, required this.onQuote, required this.onCopy, required this.onWhy});
+  const _SelectionBar({required this.onClose, required this.onQuote, required this.onCopy, required this.onWhy, this.onSelectText});
   final VoidCallback onClose, onQuote, onCopy, onWhy;
+  final VoidCallback? onSelectText;
   @override
   Widget build(BuildContext context) {
     final p = context.p;
@@ -744,6 +772,7 @@ class _SelectionBar extends StatelessWidget {
         const Spacer(),
         IBtn('reply', tip: 'ציטוט', onTap: onQuote),
         IBtn('content_copy', tip: 'העתקה', onTap: onCopy),
+        if (onSelectText != null) IBtn('select_all', tip: 'בחירת טקסט', onTap: onSelectText!),
         IBtn('help', tip: 'למה?', onTap: onWhy),
         IBtn('share', tip: 'שיתוף', onTap: onCopy),
       ]),
