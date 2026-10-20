@@ -24,7 +24,7 @@ class ProjectBlock extends StatelessWidget {
     String name(String id) => d?.who(id).name ?? id;
     final who = l.who.isEmpty ? '' : (l.who.length == 1 ? name(l.who.first) : '${name(l.who.first)} ועוד ${l.who.length - 1}');
     final second = T.small.copyWith(color: p.text2);
-    final today = now ?? DateTime.now();
+    final today = now ?? CompanyTime.now();
     String when(DateTime t) {
       final ago = daysAgo(t, today);
       if (ago == 0) return hm(t);

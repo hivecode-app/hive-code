@@ -17,16 +17,13 @@ class StatusScreen extends StatelessWidget {
   /// Lines under "מאז הביקור הקודם" before "עוד N".
   static const kDoneShown = 6;
 
-  /// The clock "today" is read from (tests pin it).
-  static DateTime Function() clock = DateTime.now;
-
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
     final d = store.data;
     if (d == null) return const SizedBox.shrink();
     final waiting = [for (final w in d.waiting) if (w.state == WaitState.open || w.state == WaitState.pending) w];
-    final now = clock();
+    final now = CompanyTime.now();
     final since = store.statusSeenAt ?? dayStart(now);
     final done = [for (final t in d.tickets) if (t.doneAt != null && t.assigneeId != null && t.doneAt!.isAfter(since)) t]..sort((a, b) => b.doneAt!.compareTo(a.doneAt!));
     return Column(children: [

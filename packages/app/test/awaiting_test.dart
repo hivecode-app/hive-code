@@ -87,8 +87,6 @@ void main() {
   });
 
   testWidgets('"סטטוס": "מה לבדוק" under "מחכה לך", only when something waits', (tester) async {
-    StatusScreen.clock = () => _at;
-    addTearDown(() => StatusScreen.clock = DateTime.now);
     final store = await pumpApp(tester, home: const Scaffold(body: StatusScreen()), size: const Size(342, 1100));
     await tester.pumpAndSettle();
     expect(find.text('מה לבדוק'), findsOneWidget);

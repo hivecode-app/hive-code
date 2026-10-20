@@ -60,7 +60,7 @@ class _HandoffScreenState extends State<HandoffScreen> {
         ? await store.backend.freeAnswer(item.askId!, c)
         : !store.data!.canChat(item.from)
             ? const CommandResult.fail('לבקשה הזאת אין למי לשלוח קוד. אפשר לסמן "סיימתי".')
-            : await store.backend.send(item.from, UserMsg(id: 'm-${DateTime.now().millisecondsSinceEpoch}', ts: DateTime.now(), text: c));
+            : await store.backend.send(item.from, UserMsg(id: 'm-${DateTime.now().millisecondsSinceEpoch}', ts: CompanyTime.now(), text: c));
     if (!mounted) return;
     if (!r.ok) {
       setState(() {

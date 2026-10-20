@@ -17,7 +17,6 @@ import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/blocks/blocks.dart';
 import 'package:agent_company/ui/common.dart';
 import 'package:agent_company/ui/convs/conversations_screen.dart';
-import 'package:agent_company/ui/status/status_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -137,12 +136,7 @@ Future<AppStore> _pump(WidgetTester tester, CompanyData d, HomeRecipe? recipe, {
   SharedPreferences.setMockInitialValues({});
   tester.view.physicalSize = size * 2;
   tester.view.devicePixelRatio = 2;
-  StatusScreen.clock = () => _at;
-  ConversationsScreen.clock = () => _at;
-  addTearDown(() {
-    StatusScreen.clock = DateTime.now;
-    ConversationsScreen.clock = DateTime.now;
-  });
+  pinClock(_at);
   addTearDown(tester.view.reset);
   d.home = recipe;
   final store = AppStore(_Snapshot(d));

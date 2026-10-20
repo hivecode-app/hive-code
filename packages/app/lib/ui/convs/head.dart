@@ -237,7 +237,7 @@ class AlertBlock extends StatelessWidget {
         if (w.state == WaitState.open || w.state == WaitState.pending) HeadData.lineOf(w),
       if (d != null) for (final id in stuck) HeadData.stuckOf(d, id),
     ];
-    return _Lines(lines: lines, now: now ?? DateTime.now());
+    return _Lines(lines: lines, now: now ?? CompanyTime.now());
   }
 }
 
@@ -254,7 +254,7 @@ class WaitingBlock extends StatelessWidget {
           for (final w in items)
             if (w.state == WaitState.open || w.state == WaitState.pending) HeadData.lineOf(w),
         ],
-        now: now ?? DateTime.now(),
+        now: now ?? CompanyTime.now(),
       );
 }
 

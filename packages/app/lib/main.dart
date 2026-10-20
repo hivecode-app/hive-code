@@ -9,6 +9,7 @@ import 'data/backend.dart';
 import 'data/backend_select.dart';
 import 'data/hq_backend.dart';
 import 'data/store.dart';
+import 'model/company_time.dart';
 import 'native/badge.dart';
 import 'native/native_bridge.dart';
 import 'native/native_glue.dart';
@@ -16,7 +17,6 @@ import 'native/window_focus.dart';
 import 'theme/theme.dart';
 import 'theme/tokens.dart';
 import 'ui/auth/sign_in_screen.dart';
-import 'ui/convs/conversations_screen.dart';
 import 'ui/nav.dart';
 import 'ui/shell.dart';
 
@@ -261,7 +261,7 @@ class _CompanyAppState extends State<CompanyApp> {
     var shown = windowFocused();
     void sync() {
       final now = windowFocused();
-      if (shown && !now && (nav.wide || nav.tab == AppTab.chats)) widget.store.markChatsSeen(ConversationsScreen.clock());
+      if (shown && !now && (nav.wide || nav.tab == AppTab.chats)) widget.store.markChatsSeen(CompanyTime.now());
       shown = now;
       widget.backend.setVisible(now);
     }

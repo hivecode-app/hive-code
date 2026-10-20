@@ -160,11 +160,11 @@ class HqBackend extends Backend {
     _replaying = false; // a failed connection must still say so on screen
     _holdRedraws = false;
     // On data from the device cache, "since" is when that data was current, not when the link failed.
-    _downSince ??= _fromCache ?? DateTime.now();
+    _downSince ??= _fromCache ?? company_time.CompanyTime.now();
     final t = _downSince!;
     final hm = company_time.hm(t);
     // Cached data can be days old: "אתמול 22:10" or "18/10 22:10", never a bare time that reads as today.
-    final since = switch (company_time.daysAgo(t, DateTime.now())) { 0 => hm, 1 => 'אתמול $hm', _ => '${company_time.dm(t)} $hm' };
+    final since = switch (company_time.daysAgo(t, company_time.CompanyTime.now())) { 0 => hm, 1 => 'אתמול $hm', _ => '${company_time.dm(t)} $hm' };
     _status = SystemStatus(LinkState.offline, since: since);
   }
 
@@ -407,7 +407,7 @@ class HqBackend extends Backend {
           _lastLines = lines;
         } catch (_) {}
       }
-      _fromCache = c['saved'] is int ? DateTime.fromMillisecondsSinceEpoch(c['saved'] as int) : DateTime.now();
+      _fromCache = c['saved'] is int ? DateTime.fromMillisecondsSinceEpoch(c['saved'] as int) : company_time.CompanyTime.now();
       notifyListeners();
     } catch (_) {
       // A cache that doesn't parse is just not used.
@@ -430,7 +430,7 @@ class HqBackend extends Backend {
     try {
       final prefs = await SharedPreferences.getInstance();
       try {
-        await prefs.setString(kCacheKey, jsonEncode({'url': baseUrl, 'saved': DateTime.now().millisecondsSinceEpoch, ...snap, if (_lastLines != null) 'messages': _lastLines, if (_homeRaw != null) 'home': _homeRaw}));
+        await prefs.setString(kCacheKey, jsonEncode({'url': baseUrl, 'saved': company_time.CompanyTime.now().millisecondsSinceEpoch, ...snap, if (_lastLines != null) 'messages': _lastLines, if (_homeRaw != null) 'home': _homeRaw}));
       } catch (_) {
         await prefs.remove(kCacheKey); // a cache that can't be written must not go on aging
       }
@@ -893,7 +893,7 @@ class HqBackend extends Backend {
       if (have.contains(a.askId)) continue;
       // At the time it was asked, not "now": a card stamped now sorted below everything and buried
       // every new message under it.
-      final ts = a.createdAt ?? DateTime.now();
+      final ts = a.createdAt ?? company_time.CompanyTime.now();
       chat.items.add(a.kind == WaitKind.go
           ? GoCard(id: 'go:${a.inboxId}', ts: ts, askId: a.askId, ref: a.ref, from: identityId, headline: a.headline, details: a.body)
           : AskCard(id: 'ask:${a.askId}', ts: ts, askId: a.askId, from: identityId, headline: a.headline, question: a.body, options: a.options, blocking: a.blocking));
@@ -1368,7 +1368,7 @@ CompanyData mapSnapshot({
 
   // The tasks hq is running (the board, APP-SPEC §4.5, and the project teams in org). Finished ones
   // leave both. What finished in the last week stays (doneAt), for "מאז הביקור הקודם" after a day away (#53).
-  final clock = now ?? DateTime.now();
+  final clock = now ?? company_time.CompanyTime.now();
   final today = company_time.dayStart(clock).millisecondsSinceEpoch;
   final tickets = <Ticket>[];
   final taskOf = <String, String>{}; // worker -> the task it works on

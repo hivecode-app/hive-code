@@ -3,6 +3,7 @@
 // UI's job; this class only applies the result, simulates delivery acks and Dana's streaming.
 import 'dart:async';
 
+import '../model/company_time.dart';
 import '../model/models.dart';
 import 'backend.dart';
 
@@ -24,7 +25,7 @@ class FakeBackend extends Backend {
   @override
   String get label => 'הדגמה';
 
-  DateTime get _today => _now ?? DateTime.now();
+  DateTime get _today => _now ?? CompanyTime.now();
   DateTime at(int h, int m) => DateTime(_today.year, _today.month, _today.day, h, m);
 
   @override
@@ -169,7 +170,7 @@ class FakeBackend extends Backend {
           chat.live = const LiveState(phase: LivePhase.thinking, seconds: 1);
         });
         _later(const Duration(milliseconds: 2600), () {
-          chat.items.add(TextMsg(id: 'r-${msg.id}', ts: DateTime.now(), text: 'קיבלתי. אני על זה.'));
+          chat.items.add(TextMsg(id: 'r-${msg.id}', ts: CompanyTime.now(), text: 'קיבלתי. אני על זה.'));
           msg.delivery = Delivery.handled;
           chat.live = const LiveState();
         });
@@ -215,7 +216,7 @@ class FakeBackend extends Backend {
   @override
   Future<CommandResult> stop(String identityId) async {
     final chat = _data!.chats[identityId];
-    final now = DateTime.now();
+    final now = CompanyTime.now();
     final hm = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
     if (chat != null) {
       for (final t in chat.items.whereType<TextMsg>()) {

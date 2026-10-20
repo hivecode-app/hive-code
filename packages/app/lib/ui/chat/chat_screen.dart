@@ -521,7 +521,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   static String _dayLabel(DateTime d) {
-    final ago = daysAgo(d, DateTime.now());
+    final ago = daysAgo(d, CompanyTime.now());
     if (ago == 0) return 'היום';
     if (ago == 1) return 'אתמול';
     const days = ['ב\'', 'ג\'', 'ד\'', 'ה\'', 'ו\'', 'ש\'', 'א\''];

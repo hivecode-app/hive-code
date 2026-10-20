@@ -86,7 +86,7 @@ class AwaitingBlock extends StatelessWidget {
               child: Column(children: [
                 for (final (i, x) in items.indexed) ...[
                   if (i > 0) const BlockHairline(),
-                  _Row(key: ValueKey('awaiting-${x.id}'), x: x, now: now ?? DateTime.now()),
+                  _Row(key: ValueKey('awaiting-${x.id}'), x: x, now: now ?? CompanyTime.now()),
                 ],
               ]),
             ),

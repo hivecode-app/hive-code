@@ -2,11 +2,20 @@
 // /api/org ({name, offset_min}). Every hour and day the app shows ("14:02", "אתמול", "מאז 18/10", the hours
 // on the lanes) is his, wherever the phone thinks it is. Until hq answers (and in the fake backend): the phone's.
 //
+// "Now" too comes from here: every place the app reads the time (the day separators, "מאז", "לפני 5 דק'",
+// the lanes) calls CompanyTime.now(), so tests pin one clock and the goldens don't depend on the day they run (#125).
+//
 // The app carries no tz database: hq sends the offset in force now, and every board refreshes it. A timestamp
 // from before a daylight-saving change can show an hour off; Asia/Bangkok, for one, has none.
 
 class CompanyTime {
   CompanyTime._();
+
+  /// Where "now" comes from. Tests pin it (test/helpers.dart `pinClock`); the app leaves it on the phone's clock.
+  static DateTime Function() clock = DateTime.now;
+
+  /// Now, by [clock].
+  static DateTime now() => clock();
 
   /// The IANA name, e.g. Asia/Bangkok. Null: not heard from hq yet.
   static String? zone;

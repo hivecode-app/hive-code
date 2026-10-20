@@ -23,9 +23,6 @@ class ConversationsScreen extends StatefulWidget {
   /// Desktop list column (mockup screen 10): smaller rows, quick-switch field.
   final bool compact;
 
-  /// The clock the head reads "how long" and "since" from (tests pin it).
-  static DateTime Function() clock = DateTime.now;
-
   /// Builds since the last reset, counted in debug and test builds only (test/perf_bench_test.dart).
   static int debugBuilds = 0;
 
@@ -162,7 +159,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     // A finished task worker with unread lines goes below every live conversation (#40).
     final rest = [...others.where((c) => !d.isDone(c.identityId)), ...others.where((c) => d.isDone(c.identityId))];
     ConversationSummary conv(String id) => d.conversations.where((c) => c.identityId == id).firstOrNull ?? ConversationSummary(identityId: id, lastLine: '', time: '');
-    final now = ConversationsScreen.clock();
+    final now = CompanyTime.now();
     final since = store.chatsSeenAt ?? dayStart(now);
     final head = HeadData.of(d, since: since);
     final listed = {for (final c in rest) c.identityId};

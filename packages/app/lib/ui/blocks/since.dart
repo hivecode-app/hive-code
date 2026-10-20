@@ -45,7 +45,7 @@ class _SinceBlockState extends State<SinceBlock> {
     return _Since(
       done: items,
       since: widget.data.since,
-      now: widget.now ?? DateTime.now(),
+      now: widget.now ?? CompanyTime.now(),
       open: widget.open ?? _open,
       onTap: widget.onToggle ?? () => setState(() => _open = !_open),
     );

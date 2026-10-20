@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/backend_select.dart';
+import '../model/company_time.dart';
 import 'native_bridge.dart';
 
 /// One build on hq. [apkPath] is relative to hq's base URL.
@@ -57,7 +58,7 @@ class AppUpdate extends ChangeNotifier {
   AppUpdate({Future<AppRelease?> Function()? fetch, NativeBridge? bridge, DateTime Function()? now})
       : _fetch = fetch ?? fetchLatestRelease,
         _bridge = bridge ?? NativeBridge.instance,
-        _now = now ?? DateTime.now;
+        _now = now ?? CompanyTime.now;
 
   final Future<AppRelease?> Function() _fetch;
   final NativeBridge _bridge;

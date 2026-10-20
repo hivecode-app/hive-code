@@ -21,11 +21,13 @@ concurrency:
 jobs:
   company-ci:
     runs-on: [self-hosted, company]
-    timeout-minutes: 20
+    # 40: the flutter steps can wait minutes on the ~/flutter lock other sessions on hq-host share.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - run: node --version
       - run: npm ci --no-audit --no-fund
       - name: contract
@@ -34,3 +36,24 @@ jobs:
         run: npm run typecheck
       - name: test
         run: npm test
+      # The app (#97): flutter analyze and test, as deploy.sh runs them, so a failure shows on the PR and
+      # not at deploy time. Only when the PR (or the push) touches packages/app. Flutter is in ~/flutter
+      # on hq-host; the runner runs as ran.
+      - name: app changed?
+        id: app
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null || ! git diff --quiet "$BASE" HEAD -- packages/app .github/workflows/company-ci.yml; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: flutter analyze
+        if: steps.app.outputs.run == 'true'
+        working-directory: packages/app
+        run: |
+          "$HOME/flutter/bin/flutter" pub get
+          "$HOME/flutter/bin/flutter" analyze
+      - name: flutter test
+        if: steps.app.outputs.run == 'true'
+        working-directory: packages/app
+        run: '"$HOME/flutter/bin/flutter" test'

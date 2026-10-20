@@ -21,7 +21,6 @@ import 'package:agent_company/ui/convs/conversations_screen.dart';
 import 'package:agent_company/ui/nav.dart';
 import 'package:agent_company/ui/projects/projects_screen.dart';
 import 'package:agent_company/ui/settings/settings_screen.dart';
-import 'package:agent_company/ui/status/status_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -153,12 +152,7 @@ Future<BuildContext> _pump(WidgetTester tester,
   tester.view.physicalSize = size * 2;
   tester.view.devicePixelRatio = 2;
   tester.platformDispatcher.textScaleFactorTestValue = textScale;
-  StatusScreen.clock = () => _at;
-  ConversationsScreen.clock = () => _at;
-  addTearDown(() {
-    StatusScreen.clock = DateTime.now;
-    ConversationsScreen.clock = DateTime.now;
-  });
+  pinClock(_at);
   addTearDown(tester.view.reset);
   addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
   final store = AppStore(_Snapshot(_data(earlierWaiting: earlierWaiting, burning: burning, summaries: summaries)));

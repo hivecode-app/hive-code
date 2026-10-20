@@ -53,7 +53,7 @@ class WaitRow extends StatelessWidget {
 
     Widget tail;
     if (item.state == WaitState.answered) {
-      tail = DoneLine(item.answerLine ?? item.doneLine ?? 'טופל · ${hm(DateTime.now())}', top: 8);
+      tail = DoneLine(item.answerLine ?? item.doneLine ?? 'טופל · ${hm(CompanyTime.now())}', top: 8);
     } else if (pending != null) {
       tail = UndoLine(label: pending.label, onCancel: () => store.cancelUndo(item.id));
     } else if (item.state == WaitState.notNow) {

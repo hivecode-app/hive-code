@@ -6,6 +6,7 @@
 // reconnect (`/ws?after=<seq>`) never duplicates a line (chat.md §7).
 // The conversation model (chat.md §2.3א): a turn that reached the owner through `tell`/`ask`/`request_go`
 // shows that item, not its own text: the text of such a turn is dropped when the turn ends.
+import '../model/company_time.dart';
 import '../model/models.dart';
 
 class EngineModel {
@@ -30,7 +31,7 @@ class EngineModel {
     final seq = (e['seq'] as num?)?.toInt() ?? 0;
     if (seq != 0 && seq <= lastSeq) return; // already applied (replay overlap)
     if (seq != 0) lastSeq = seq;
-    final ts = DateTime.fromMillisecondsSinceEpoch((e['ts'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch);
+    final ts = DateTime.fromMillisecondsSinceEpoch((e['ts'] as num?)?.toInt() ?? CompanyTime.now().millisecondsSinceEpoch);
     final type = e['type'] as String? ?? '';
     final data = (e['data'] as Map?)?.cast<String, dynamic>() ?? const {};
 

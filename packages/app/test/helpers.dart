@@ -27,6 +27,16 @@ Future<void> loadFonts() async {
   await family('packages/material_symbols_icons/MaterialSymbolsRounded', ['packages/material_symbols_icons/lib/fonts/MaterialSymbolsRounded.ttf']);
 }
 
+/// The demo's "now": 14:06 on 20/10/2026, the day the fake data lives on.
+final kDemoNow = DateTime(2026, 10, 20, 14, 6);
+
+/// Pins the app's one clock ([CompanyTime.clock]) to [at] for this test, so "היום", "אתמול" and "לפני 5 דק'"
+/// read the same on any day the tests run (#125).
+void pinClock(DateTime at) {
+  CompanyTime.clock = () => at;
+  addTearDown(() => CompanyTime.clock = DateTime.now);
+}
+
 /// Text as the reader sees it: bidi controls (LRI/PDI, word joiners) are invisible, so the
 /// finder ignores them (lib/ui/bidi.dart adds them around English runs in Hebrew text).
 Finder findShown(String text) => find.byWidgetPredicate((w) => w is RichText && stripBidi(w.text.toPlainText()).contains(text));
@@ -37,13 +47,14 @@ const kPhone = Size(342, 716);
 Future<AppStore> pumpApp(WidgetTester tester, {Widget? home, bool dark = false, Size size = kPhone, double textScale = 1}) async {
   await loadFonts();
   Motion.frozen = true;
+  pinClock(kDemoNow);
   SharedPreferences.setMockInitialValues({});
   tester.view.physicalSize = size * 2;
   tester.view.devicePixelRatio = 2;
   tester.platformDispatcher.textScaleFactorTestValue = textScale;
   addTearDown(tester.view.reset);
   addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-  final store = AppStore(FakeBackend(simulate: false, now: DateTime(2026, 10, 20, 14, 6)));
+  final store = AppStore(FakeBackend(simulate: false, now: kDemoNow));
   await store.start();
   await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: home));
   await tester.pump();

@@ -40,7 +40,7 @@ class _ProjectScreenState extends State<ProjectScreen> {
     members.sort((a, b) => rank(a).compareTo(rank(b)));
     final tickets = proj == null ? const <Ticket>[] : d.tickets.where((t) => t.project == proj.id).toList();
     final open = [...runningIn(d, proj?.id ?? ''), ...tickets.where((t) => t.group == TicketGroup.queued)];
-    final today = DateUtils.dateOnly(StatusScreen.clock());
+    final today = DateUtils.dateOnly(CompanyTime.now());
     final done = [for (final t in tickets) if (t.doneAt != null && t.assigneeId != null && !t.doneAt!.isBefore(today)) t]..sort((a, b) => b.doneAt!.compareTo(a.doneAt!));
     final shownDone = allDone ? done : done.take(ProjectScreen.kDoneShown).toList();
     final lead = leadId == null ? null : d.who(leadId);

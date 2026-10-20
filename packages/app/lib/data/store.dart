@@ -223,8 +223,8 @@ class AppStore extends ChangeNotifier {
 
   Future<UserMsg> send(String identityId, String text, Priority priority, {Quote? quote, List<Attachment> attachments = const []}) async {
     final msg = UserMsg(
-      id: 'm-${DateTime.now().millisecondsSinceEpoch}-${_n++}',
-      ts: DateTime.now(),
+      id: 'm-${company_time.CompanyTime.now().millisecondsSinceEpoch}-${_n++}',
+      ts: company_time.CompanyTime.now(),
       text: text,
       priority: priority,
       replyTo: quote,
@@ -322,7 +322,7 @@ class AppStore extends ChangeNotifier {
 
   Future<void> toggleAutomation(Automation a) async {
     final on = !a.enabled;
-    final hm = company_time.hm(DateTime.now());
+    final hm = company_time.hm(company_time.CompanyTime.now());
     if (!on) {
       a.prevMeta = a.meta;
       a.meta = 'כובתה ידנית · $hm';
@@ -366,7 +366,7 @@ class AppStore extends ChangeNotifier {
   DateTime? statusSeenAt;
 
   void markStatusSeen([DateTime? at]) {
-    statusSeenAt = at ?? DateTime.now();
+    statusSeenAt = at ?? company_time.CompanyTime.now();
     _prefs?.setInt(kStatusSeenKey, statusSeenAt!.millisecondsSinceEpoch);
   }
 
@@ -384,7 +384,7 @@ class AppStore extends ChangeNotifier {
   }
 
   void markChatsSeen([DateTime? at]) {
-    final t = at ?? DateTime.now();
+    final t = at ?? company_time.CompanyTime.now();
     _chatsSeenLocal = t;
     _prefs?.setInt(kChatsSeenKey, t.millisecondsSinceEpoch);
     unawaited(backend.markSeen('chats', t));
