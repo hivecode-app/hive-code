@@ -90,7 +90,7 @@ test('the real contract parses: company/org.yaml in this repo', () => {
   assert.ok(automations.some((a) => a.key === 'rotem/prod-probes'));
 });
 
-test('projects for the board: org.yaml order, the charter\'s status wins, no charter falls back to org.yaml', () => {
+test('projects for the board: org.yaml order and names, the charter\'s status wins, no charter falls back to org.yaml', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hq-projects-'));
   try {
     assert.deepEqual(listProjects(dir), [], 'no org.yaml');
@@ -98,16 +98,16 @@ test('projects for the board: org.yaml order, the charter\'s status wins, no cha
     writeFileSync(join(dir, 'org.yaml'), [
       'projects:',
       '  - id: co', '    status: dormant', '    team: co',
-      '  - id: shop', '    status: dormant',
+      '  - id: shop', '    name: החנות', '    status: dormant', '    team: shop-team',
       '  - id: lost', '    status: active',
       '  - status: active',
     ].join('\n'));
     writeFileSync(join(dir, 'projects', 'co.md'), '---\nproject: co\nstatus: active\n---\n# co\n');
     writeFileSync(join(dir, 'projects', 'shop.md'), '---\nproject: shop\nstatus: dormant\n---\n# shop\n');
     assert.deepEqual(listProjects(dir), [
-      { id: 'co', status: 'active', team: 'co' },
-      { id: 'shop', status: 'dormant', team: null },
-      { id: 'lost', status: 'active', team: null },
+      { id: 'co', name: null, status: 'active', team: 'co' },
+      { id: 'shop', name: 'החנות', status: 'dormant', team: 'shop-team' },
+      { id: 'lost', name: null, status: 'active', team: null },
     ]);
     writeFileSync(join(dir, 'org.yaml'), 'projects: [');
     assert.deepEqual(listProjects(dir), [], 'a broken org.yaml is an empty list, not a crash');
@@ -117,6 +117,9 @@ test('projects for the board: org.yaml order, the charter\'s status wins, no cha
 test('the real contract lists its projects with their charter status', () => {
   const projects = listProjects(join(import.meta.dirname, '..', '..', '..', 'company'));
   assert.ok(projects.some((p) => p.id === 'agent-company' && p.status === 'active'));
+  // The owner's names (20/10/2026), not the repo ids.
+  const name = (id: string) => projects.find((p) => p.id === id)?.name;
+  assert.deepEqual([name('lumo'), name('lumo-bot'), name('tiki-bot-go')], ['האפליקציה לומו', 'לומו בוט', 'טיקי בוט']);
   assert.ok(projects.length >= 2);
 });
 

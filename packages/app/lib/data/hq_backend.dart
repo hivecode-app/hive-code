@@ -910,14 +910,25 @@ CompanyData mapSnapshot({
   CompanyData? previous,
   DateTime? now,
 }) {
-  const teamNames = {'mgmt': 'הנהלה', 'management': 'הנהלה', 'monitor': 'ניטור', 'monitoring': 'ניטור', 'personal': 'הצוות האישי', 'improve': 'מחלקת השיפור', 'improvement': 'מחלקת השיפור', 'lumo': 'לומו', 'tikibot': 'טיקיבוט', 'voice': 'voice-bot', 'agent-company': 'החברה'};
+  const teamNamesBuiltIn = {'mgmt': 'הנהלה', 'management': 'הנהלה', 'monitor': 'ניטור', 'monitoring': 'ניטור', 'personal': 'הצוות האישי', 'improve': 'מחלקת השיפור', 'improvement': 'מחלקת השיפור', 'lumo': 'לומו', 'tikibot': 'טיקיבוט', 'voice': 'voice-bot', 'agent-company': 'החברה'};
+  // A project and its team show the owner's name for the project (org.yaml `projects[].name`, from hq).
+  // An older hq sends no name: the built-in names, then the id.
+  final projectNames = <String, String>{
+    for (final p in projects)
+      if (p['id'] is String && p['name'] is String && (p['name'] as String).isNotEmpty) p['id'] as String: p['name'] as String,
+  };
+  final teamNames = <String, String>{
+    ...teamNamesBuiltIn,
+    for (final p in projects)
+      if (p['team'] is String && projectNames.containsKey(p['id'])) p['team'] as String: projectNames[p['id']]!,
+  };
   // The team badge on every monogram. By team id first (hq's real ids and the older short ones),
   // then a member's own symbol if the app has that icon; never an icon it doesn't have (that drew
   // "?" on the whole personal team, QA-LOG item 3).
   const teamSymbols = {
     'management': 'explore', 'mgmt': 'explore', 'monitoring': 'shield', 'monitor': 'shield', 'personal': 'folder_shared',
     'improvement': 'build', 'improve': 'build', 'agent-company': 'architecture', 'lumo': 'local_shipping',
-    'tikibot': 'smart_toy', 'voice': 'graphic_eq', 'voice-bot': 'graphic_eq',
+    'tikibot': 'smart_toy', 'tiki-bot-go': 'directions_car', 'lumo-bot': 'smart_toy', 'voice': 'graphic_eq', 'voice-bot': 'graphic_eq',
   };
   final teams = <String, Team>{};
   final ids = <String, Identity>{};
@@ -1054,7 +1065,7 @@ CompanyData mapSnapshot({
       number: 't${t['id']}',
       title: title,
       project: project,
-      projectName: project,
+      projectName: projectNames[project] ?? project,
       group: group,
       assignee: who?.name ?? '',
       sub: who == null || who.title.isEmpty ? null : who.title,
@@ -1065,7 +1076,7 @@ CompanyData mapSnapshot({
 
   final projectList = [
     for (final p in projects)
-      if (p['id'] is String) ProjectInfo(id: p['id'] as String, active: p['status'] == 'active'),
+      if (p['id'] is String) ProjectInfo(id: p['id'] as String, name: projectNames[p['id']], active: p['status'] == 'active'),
   ];
 
   // Org (APP-SPEC §4.6): the permanent teams, then each project's team: its lead, then the workers

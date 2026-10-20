@@ -14,6 +14,7 @@ const Map<String, IconData> kIcons = {
   'account_tree': Symbols.account_tree_rounded,
   'local_shipping': Symbols.local_shipping_rounded,
   'smart_toy': Symbols.smart_toy_rounded,
+  'directions_car': Symbols.directions_car_rounded,
   'build': Symbols.build_rounded,
   'graphic_eq': Symbols.graphic_eq_rounded,
   'explore': Symbols.explore_rounded,

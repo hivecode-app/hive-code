@@ -170,7 +170,8 @@ export function projectLead(store: Store, project: string): string | undefined {
   return r?.id;
 }
 
-export interface ProjectRow { id: string; status: string; team: string | null }
+/** name: the project's display name, as the owner calls it (org.yaml `projects[].name`); null without one. */
+export interface ProjectRow { id: string; name: string | null; status: string; team: string | null }
 
 /**
  * The projects in company/org.yaml (`projects:`), in contract order, for the app's board. The status is
@@ -180,14 +181,15 @@ export interface ProjectRow { id: string; status: string; team: string | null }
 export function listProjects(companyDir: string): ProjectRow[] {
   const file = join(companyDir, 'org.yaml');
   if (!existsSync(file)) return [];
-  let org: { projects?: { id?: unknown; status?: unknown; team?: unknown }[] };
+  let org: { projects?: { id?: unknown; name?: unknown; status?: unknown; team?: unknown }[] };
   try { org = (parse(readFileSync(file, 'utf8')) ?? {}) as typeof org; } catch { return []; }
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
   const out: ProjectRow[] = [];
   for (const p of Array.isArray(org.projects) ? org.projects : []) {
     if (typeof p?.id !== 'string' || !p.id) continue;
     const charter = readCharter(companyDir, p.id);
     const status = charter?.status ?? (typeof p.status === 'string' ? p.status : 'active');
-    out.push({ id: p.id, status, team: typeof p.team === 'string' ? p.team : null });
+    out.push({ id: p.id, name: str(p.name), status, team: str(p.team) });
   }
   return out;
 }

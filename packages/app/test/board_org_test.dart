@@ -36,7 +36,7 @@ void main() {
     task(1, 'הושלמה אתמול', 'done', 'ac-t1', DateTime(2026, 10, 19, 22).millisecondsSinceEpoch),
   ];
   final projects = [
-    {'id': 'agent-company', 'status': 'active', 'team': 'agent-company'},
+    {'id': 'agent-company', 'name': null, 'status': 'active', 'team': 'agent-company'},
     {'id': 'lumo', 'status': 'dormant', 'team': null},
   ];
   final d = mapSnapshot(board: board, inbox: const [], asks: const [], toggles: const [], tasks: tasks, projects: projects, now: now);
@@ -75,6 +75,21 @@ void main() {
     expect(ac.line, 'עדי · 5 משימות פתוחות');
     // The closed task's worker is not counted: 5 working, waiting or free (yoav, t16, t17, t18, t24), 3 resting.
     expect(d.orgSubtitle, '5 עובדים פעילים · 3 נחים');
+  });
+
+  test('a project and its team show the owner\'s name from org.yaml; an older hq without names keeps the ids', () {
+    final named = mapSnapshot(
+      board: [...board, _id('boaz', 'בועז', 'lumo-bot', 'project', 'lead', 'resting', project: 'lumo-bot')],
+      inbox: const [], asks: const [], toggles: const [],
+      tasks: [{'id': 30, 'title': 'משימה', 'project': 'lumo-bot', 'state': 'queued', 'identity': null, 'updated_at': ms(14, 0)}],
+      projects: [{'id': 'lumo-bot', 'name': 'לומו בוט', 'status': 'active', 'team': 'lumo-bot'}],
+      now: now,
+    );
+    expect(named.projects.single.name, 'לומו בוט');
+    expect(named.tickets.single.projectName, 'לומו בוט');
+    expect(named.teams['lumo-bot']!.name, 'לומו בוט');
+    expect(d.projects.last.name, 'lumo');
+    expect(d.teams['agent-company']!.name, 'החברה', reason: 'no name in org.yaml: the built-in one');
   });
 
   test('an hq without tasks or projects still maps (older hq, older cached snapshot)', () {
