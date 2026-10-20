@@ -5,7 +5,8 @@
 // The guard: one writer (a single queue in hq, one commit at a time, from a temp worktree, never the main checkout);
 // every commit starts from a fresh fetch of main, so `append` never conflicts; `replace` carries the `base_sha` the
 // worker read through recall and fails if the file moved since, and the worker gets the new text to try again; the
-// path must be a registry in the worker's own project; the text is checked for size, markdown that keeps
+// path must be a registry in the worker's own project (or, for a company team's `open-*.md`, the worker's own memory
+// domain); the text is checked for size, markdown that keeps
 // check:contract green, and secrets; every write is an event with who, what and the sha.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -20,6 +21,11 @@ export const REGISTRY_PATTERNS: readonly RegExp[] = [
   /^memory\/projects\/([^/]+)\/[^/]+-actions\.md$/,
   /^memory\/projects\/([^/]+)\/customers\.md$/,
 ];
+/**
+ * A company team's own list of what's open: `memory/company/<team>/open-*.md` (the design team's open-noa.md and
+ * open-tom.md). Group 1 is the memory domain (`company/design`); the writer's `memory_domain` in org.yaml must match.
+ */
+export const DOMAIN_REGISTRY = /^memory\/(company\/[^/]+)\/open-[^/]+\.md$/;
 /** "Anything marked so": a file in a project folder whose first lines carry this comment (added in a reviewed PR). */
 export const REGISTRY_MARK = '<!-- company:registry -->';
 /** In a commit message: what deploy.sh reads to leave these commits out of what it reports. */
@@ -35,6 +41,11 @@ export const MAX_FILE_BYTES = 256 * 1024;
 export function registryProject(file: string): string | null {
   for (const p of REGISTRY_PATTERNS) { const m = p.exec(file); if (m) return m[1]!; }
   return null;
+}
+
+/** The company memory domain a registry path belongs to (`company/design`), or null. */
+export function registryDomain(file: string): string | null {
+  return DOMAIN_REGISTRY.exec(file)?.[1] ?? null;
 }
 
 /** git's blob id of a text: the `base_sha` recall hands out, and what a `replace` is checked against. */
@@ -103,17 +114,31 @@ export class MemoryRegistry {
 
   /** A registry by name or by mark (read from the deployed checkout, which is where a reviewed mark arrives). */
   isRegistry(file: string): boolean {
-    if (registryProject(file)) return true;
+    if (registryProject(file) || registryDomain(file)) return true;
     if (!/^memory\/projects\/[^/]+\/[^/]+\.md$/.test(file)) return false;
     try { return readFileSync(join(this.host.repoDir, file), 'utf8').split('\n', 5).some((l) => l.trim() === REGISTRY_MARK); }
     catch { return false; }
   }
 
   /**
-   * The checks at the door (ingest, synchronous): a registry path in the writer's own project, a folder that exists
-   * with its INDEX.md (or check:contract fails). Size and secrets are checked for every file update (ingest). Returns the reason in Hebrew, or null.
+   * The checks at the door (ingest, synchronous): a registry path in the writer's own project (or own memory domain,
+   * for `memory/company/<team>/open-*.md`), a folder that exists with its INDEX.md (or check:contract fails). Size and secrets are checked for every file update (ingest). Returns the reason in Hebrew, or null.
    */
   refuse(identity: string, file: string): string | null {
+    const domain = registryDomain(file);
+    if (domain) {
+      const row = this.db.prepare('SELECT data FROM identities WHERE id = ?').get(identity) as { data: string } | undefined;
+      let mine: unknown = null;
+      try { mine = (JSON.parse(row?.data ?? '{}') as { memory_domain?: unknown }).memory_domain; } catch { /* no domain */ }
+      if (mine !== domain) {
+        return `\`${file}\` הוא רישום של התחום \`${domain}\`, ו${typeof mine === 'string' && mine ? `התחום שלך הוא \`${mine}\`` : 'אין לך תחום זיכרון'}. `
+          + 'רישום של תחום אחר מעדכנים ב-PR מ-worktree של agent-company, או מבקשים מבעל הקובץ.';
+      }
+      if (!existsSync(join(this.host.repoDir, 'memory', domain, 'INDEX.md'))) {
+        return `אין תיקייה \`memory/${domain}/\` עם \`INDEX.md\`. תיקייה חדשה נפתחת ב-PR.`;
+      }
+      return null;
+    }
     const project = file.split('/')[2]!;
     const mine = (this.db.prepare('SELECT project FROM identities WHERE id = ?').get(identity) as { project: string | null } | undefined)?.project;
     if (mine !== project) {

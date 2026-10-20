@@ -3,7 +3,7 @@
 // file update into one rolling PR on `company/memory-updates`: a fresh branch from origin/main, or more commits on the
 // PR that is still open. It flushes when enough updates wait or the oldest has waited long enough, so at least daily.
 // The automation is `memory-files` in org.yaml; its owner gets the PR to review and merge.
-// Registries (open-*.md, *-actions.md, customers.md) skip the PR and land on main at once: memory-registry.ts.
+// Registries (open-*.md, *-actions.md, customers.md; a company team's memory/company/<team>/open-*.md) skip the PR and land on main at once: memory-registry.ts.
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

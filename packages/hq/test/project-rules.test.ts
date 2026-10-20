@@ -105,6 +105,27 @@ test('task worker prompt: absolute skill paths by default; merge_instructions re
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 
+test('design_review: a PR in those paths also goes to the designer, before the merge step; the small-PR fallback is spelled out', () => {
+  const d = mkdtempSync(join(tmpdir(), 'co-'));
+  try {
+    mkdirSync(join(d, 'projects'));
+    writeFileSync(join(d, 'projects', 'ui.md'), charter('/x', 'design_review:\n  reviewer: noa\n  paths: [packages/app/lib/]\n  wait_minutes: 30\n  small_lines: 50\n'));
+    writeFileSync(join(d, 'projects', 'plain.md'), charter('/x'));
+    assert.deepEqual(readCharter(d, 'ui')!.designReview, { reviewer: 'noa', paths: ['packages/app/lib/'], waitMinutes: 30, smallLines: 50 });
+    assert.equal(readCharter(d, 'plain')!.designReview, null);
+    const w = { id: 'ui-t1', name: 'דנה', title: 'מפתחת', symbol: 'build', team: null, team_kind: 'task', project: 'ui',
+      reports_to: 'adi', lifecycle: 'ephemeral', source: 'runtime', active: 1, data: '{}', updated_at: 0 } as IdentityRow;
+    const ui = buildSystemPrompt(d, w, 'yoav').split('\n---\n')[0]!;
+    assert.match(ui, /^3\. PR שנוגע ב-`packages\/app\/lib\/` מקבל גם סקירת עיצוב של `noa`.*`tell` ל-`noa`.*30 דקות.*פחות מ-50 שורות.*git diff --numstat origin\/main\.\.\.HEAD -- packages\/app\/lib\//m);
+    assert.match(ui, /^4\. סקירה בלתי תלויה/m);
+    assert.match(ui, /^5\. ממזגים בעצמך/m);
+    assert.match(ui, /דוחפים ושולחים שוב ל-`noa`/);
+    assert.match(ui, /^6\. מדווחים/m);
+    const plain = buildSystemPrompt(d, { ...w, id: 'plain-t1', project: 'plain' }, 'yoav').split('\n---\n')[0]!;
+    assert.doesNotMatch(plain, /סקירת עיצוב/);
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
+
 test('worktree_setup runs in the new worktree with COMPANY_CHECKOUT, also when a missing tree is brought back', async () => {
   const r = repo();
   try {

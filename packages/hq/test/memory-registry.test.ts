@@ -8,19 +8,23 @@ import { join } from 'node:path';
 import type { WalEntry } from '@company/shared';
 import { git, makeEnv, ORG_YAML, repo, type TestEnv } from './helpers.ts';
 import { type Run } from '../src/memory-files.ts';
-import { blobSha, CONFLICTS_TO_OWNER, markdownProblem, registryProject, secretIn, TRAILER } from '../src/memory-registry.ts';
+import { blobSha, CONFLICTS_TO_OWNER, markdownProblem, registryDomain, registryProject, secretIn, TRAILER } from '../src/memory-registry.ts';
 
 const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
 const exec: Run = (cmd, args, cwd) => new Promise((res, rej) =>
   execFile(cmd, args, { cwd, env: GIT_ENV }, (e, out, err) => (e ? rej(new Error(err || e.message)) : res(out))));
 
-// Two workers of agent-company (ac-ceo and ac-dev) and one of another project (sb-dev, lumo-bot).
-const ORG = ORG_YAML.replace('members: []}\nidentities:', 'members: [ac-dev]}\n  - {id: lumo-bot, kind: project, project: lumo-bot, symbol: domain, lead: sb-dev, members: []}\nidentities:')
+// Two workers of agent-company (ac-ceo and ac-dev), one of another project (sb-dev, lumo-bot), and the design team
+// (dz-lead, whose memory domain is company/design).
+const ORG = ORG_YAML.replace('members: []}\nidentities:', 'members: [ac-dev]}\n  - {id: lumo-bot, kind: project, project: lumo-bot, symbol: domain, lead: sb-dev, members: []}\n'
+  + '  - {id: design, kind: permanent, symbol: palette, lead: dz-lead, members: []}\nidentities:')
   + '  - {id: ac-dev, name: עידו, title: מפתח, symbol: build, team: agent-company, reports_to: ac-ceo, kind: project, lifecycle: dormant}\n'
-  + '  - {id: sb-dev, name: רון, title: מפתח, symbol: build, team: lumo-bot, reports_to: yoav, kind: project, lifecycle: dormant}\n';
+  + '  - {id: sb-dev, name: רון, title: מפתח, symbol: build, team: lumo-bot, reports_to: yoav, kind: project, lifecycle: dormant}\n'
+  + '  - {id: dz-lead, name: נועה, title: ראשת צוות העיצוב, symbol: palette, team: design, reports_to: yoav, lifecycle: dormant, memory_domain: company/design}\n';
 
 const OPEN = 'memory/projects/agent-company/open-ac.md';
 const LOG = 'memory/projects/agent-company/ac-actions.md';
+const DESIGN_OPEN = 'memory/company/design/open-noa.md';
 
 const entry = (args: Record<string, unknown>, id: string, identity: string): WalEntry =>
   ({ id, v: 1, ts: new Date().toISOString(), identity, shift: `${identity}-1`, sessionId: null, op: 'remember', args });
@@ -31,6 +35,9 @@ async function setup(run?: (base: Run, r: ReturnType<typeof repo>) => Run) {
   writeFileSync(join(r.checkout, 'memory', 'projects', 'agent-company', 'INDEX.md'), '# agent-company\n');
   writeFileSync(join(r.checkout, OPEN), '# מה פתוח\n');
   writeFileSync(join(r.checkout, LOG), '# יומן\n');
+  mkdirSync(join(r.checkout, 'memory', 'company', 'design'), { recursive: true });
+  writeFileSync(join(r.checkout, 'memory', 'company', 'design', 'INDEX.md'), '# עיצוב\n');
+  writeFileSync(join(r.checkout, DESIGN_OPEN), '# מה פתוח אצל נועה\n');
   git(r.checkout, 'add', '.'); git(r.checkout, 'commit', '--quiet', '-m', 'mem'); git(r.checkout, 'push', '--quiet', 'origin', 'HEAD:main');
   const env = await makeEnv({ org: ORG });
   const { hq } = env;
@@ -59,6 +66,36 @@ test('registryProject: the closed list, by name', () => {
   assert.equal(registryProject('memory/projects/lumo-bot/customers.md'), 'lumo-bot');
   for (const no of ['memory/projects/lumo-bot/decisions.md', 'memory/projects/lumo-bot/lessons.md', 'memory/open-ron.md',
     'memory/projects/lumo-bot/sub/open-x.md', 'memory/company/customers.md']) assert.equal(registryProject(no), null, no);
+});
+
+test('registryDomain: a company team\'s open-*.md, one folder under memory/company/', () => {
+  assert.equal(registryDomain('memory/company/design/open-noa.md'), 'company/design');
+  assert.equal(registryDomain('memory/company/design/open-tom.md'), 'company/design');
+  for (const no of ['memory/company/open-x.md', 'memory/company/design-taste.md', 'memory/company/design/INDEX.md',
+    'memory/company/design/tom-actions.md', 'memory/company/design/sub/open-x.md', 'memory/personal/open-x.md',
+    'memory/projects/lumo-bot/open-ron.md']) assert.equal(registryDomain(no), null, no);
+});
+
+test('a company team\'s open-*.md: lands on main at once for the owner of the domain, refused for anyone else', async () => {
+  const { hq, add, main, gh, done } = await setup();
+  try {
+    // A worker of a project, with no company domain.
+    assert.throws(() => add('d:1', 'ac-dev', DESIGN_OPEN, '- שורה'), /not a registry ac-dev may write/);
+    assert.match(hq.mailbox.get('d:1-rejected')!.body, /התחום `company\/design`/);
+    // amit's domain is personal/finance: not this one.
+    assert.throws(() => add('d:2', 'amit', DESIGN_OPEN, '- שורה'), /not a registry amit may write/);
+    assert.match(hq.mailbox.get('d:2-rejected')!.body, /התחום שלך הוא `personal\/finance`/);
+    // The owner of the domain: straight to main, no PR. recall hands out a base_sha for it.
+    const ok = add('d:3', 'dz-lead', DESIGN_OPEN, '- סקירת עיצוב ל-PR 150');
+    assert.equal((ok.result as { commit?: string }).commit, 'queued');
+    await hq.memoryFiles.registry.kick();
+    assert.equal(main(DESIGN_OPEN), '# מה פתוח אצל נועה\n- סקירת עיצוב ל-PR 150');
+    assert.deepEqual(hq.memoryFiles.pending(), [], 'not in the rolling PR');
+    assert.deepEqual(gh, []);
+    // Other files of the domain still go to the PR.
+    add('d:4', 'dz-lead', 'memory/company/design/INDEX.md', '- שורה');
+    assert.deepEqual(hq.memoryFiles.pending().map((p) => p.id), ['d:4']);
+  } finally { await done(); }
 });
 
 test('secretIn: tokens, keys and passwords; ordinary notes pass', () => {

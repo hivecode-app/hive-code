@@ -60,7 +60,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       project: s('פרויקט כש-scope=project / project when scope=project'),
       domain: s('תחום כש-scope=personal / domain when scope=personal'),
       file: s('עדכון לקובץ זיכרון: נתיב יחסי תחת memory/, למשל memory/projects/lumo-bot/open-ron.md. רישומים של הפרויקט שלך '
-        + '(open-*.md, *-actions.md, customers.md) נכנסים ל-main מיד; שאר הקבצים נכנסים ל-PR מאוחד לסקירה. לא עורכים קבצים ב-checkout הראשי / '
+        + '(open-*.md, *-actions.md, customers.md), וה-open-*.md של צוות חברה בתחום שלך (memory/company/<team>/), נכנסים ל-main מיד; שאר הקבצים נכנסים ל-PR מאוחד לסקירה. לא עורכים קבצים ב-checkout הראשי / '
         + 'update a memory file (path under memory/): your project\'s registries land on main at once, other files go to one rolling PR'),
       mode: oneOf(['append', 'replace'], 'עם file: append מוסיף את text לסוף הקובץ (ברירת מחדל), replace מחליף את כל הקובץ ב-text. '
         + 'לפני replace קוראים את הקובץ ב-recall עם הנתיב כ-query: הוא חוזר שלם, כולל עדכונים שעוד מחכים, ועם base_sha / '

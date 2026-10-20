@@ -36,7 +36,7 @@ function howWeTalk(i: IdentityRow, managerId: string, n: CompanyNames): string {
     `- ${pre('ל', o.name)} כותבים ב-\`tell\` רק ${G('כשהוא לא כתב', 'כשהיא לא כתבה')} לך עכשיו: משימה שנגמרה, משהו ${G('שהוא צריך', 'שהיא צריכה')} לדעת. אותם כללי ניסוח: ישירות ${G('אליו', 'אליה')}, קצר, בלי פרטים פנימיים.`,
     '- הודעה מ-`hq` היא הודעת מערכת (תזכורת, טיקט שנפתח, הודעה שלא נמסרה). פועלים לפיה, לא עונים לה.',
     '- ידע שצריך להישמר: `remember`. לפני סוף משמרת: `handoff`.',
-    '- קובץ זיכרון (מה פתוח אצלך, יומן, לקחים): `remember` עם `file` (נתיב תחת `memory/`) ו-`mode` (`append` או `replace`; לפני `replace` קוראים אותו ב-`recall` עם הנתיב ושולחים את ה-`base_sha` שחזר). רישומים של הפרויקט שלך (`open-*.md`, `*-actions.md`, `customers.md`) נכנסים מיד, ושאר הקבצים ב-PR לסקירה. לא עורכים קבצים ב-checkout הראשי של agent-company (`~/projects/agent-company`), רק ב-worktree תחת `.worktrees/`.',
+    '- קובץ זיכרון (מה פתוח אצלך, יומן, לקחים): `remember` עם `file` (נתיב תחת `memory/`) ו-`mode` (`append` או `replace`; לפני `replace` קוראים אותו ב-`recall` עם הנתיב ושולחים את ה-`base_sha` שחזר). רישומים של הפרויקט שלך (`open-*.md`, `*-actions.md`, `customers.md`), וה-`open-*.md` של צוות חברה בתחום שלך (`memory/company/<team>/`), נכנסים מיד, ושאר הקבצים ב-PR לסקירה. לא עורכים קבצים ב-checkout הראשי של agent-company (`~/projects/agent-company`), רק ב-worktree תחת `.worktrees/`.',
     `- אתה מדווח ל-\`${boss}\`. מנהל החברה הוא \`${managerId}\`.`,
   ].join('\n');
 }
@@ -57,6 +57,15 @@ export function taskSteps(project: string | null, companyDir: string, o: { stand
       `סקירה בלתי תלויה בהקשר נקי, לפי ${skill('reviewer')} (סוכן משנה בלי כלי עריכה). מתקנים מה שעלה.`,
       `ממזגים בעצמך: \`gh pr merge --squash --delete-branch\`, רק כשהסקירה אישרה ו${ci} ירוקה. לפי ${skill('ship')}.`,
     ];
+  const dr = ch?.designReview;
+  if (dr) {
+    const paths = dr.paths.map((x) => `\`${x}\``).join(', ');
+    review.unshift(`PR שנוגע ב-${paths} מקבל גם סקירת עיצוב של \`${dr.reviewer}\`. מיד כשהוא נפתח שולחים אותו ב-\`tell\` ל-\`${dr.reviewer}\`: קישור, `
+      + `ומה השתנה במסך (צילום מסך אם יש). סקירת העיצוב מתפרסמת כהערה על ה-PR, וה-approve בה הוא תנאי למיזוג, בנוסף לסקירה הבלתי תלויה. `
+      + `אם לא הגיעה תשובה תוך ${dr.waitMinutes} דקות, ובשינוי פחות מ-${dr.smallLines} שורות בנתיבים האלה `
+      + `(\`git diff --numstat origin/main...HEAD -- ${dr.paths.join(' ')}\`, נוספו ונמחקו יחד), ממזגים בלי סקירת העיצוב וכותבים על ה-PR הערה שסקירת העיצוב לא הגיעה. `
+      + `PR גדול יותר מחכה לסקירה. על \`changes\` בסקירת העיצוב מתקנים, דוחפים ושולחים שוב ל-\`${dr.reviewer}\`.`);
+  }
   const to = o.opener ? `ל-\`${o.opener}\`` : 'למי ששלח את המשימה';
   const own = loadNames(companyDir).owner;
   const G = (male: string, female: string) => g(own, male, female);

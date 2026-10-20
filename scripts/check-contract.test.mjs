@@ -54,6 +54,7 @@ const cases = [
   ['empty org.yaml', 'non-empty mapping', (d) => writeFileSync(join(d, 'company/org.yaml'), '# nothing\n')],
   ['member of two teams', 'that identity says team', (d) => edit(d, 'company/org.yaml', 'members: [amit, lia, uri]', 'members: [amit, lia, uri, yoav]')],
   ['rgb colour value', 'colour value', (d) => edit(d, 'company/org.yaml', 'helpers: ephemeral   #', 'helpers: "rgb(255,0,0)"   #')],
+  ['design reviewer unknown', 'design_review needs "reviewer"', (d) => edit(d, 'company/projects/agent-company.md', 'merge: worker-squash', 'design_review:\n  reviewer: nobody\n  paths: [packages/app/lib/]\nmerge: worker-squash')],
   ['colour in skill frontmatter', 'colour fields', (d) => edit(d, 'company/skills/verify/SKILL.md', 'name: verify\n', 'name: verify\ncolor: x\n')],
   ['malformed percent escape', 'not valid URL encoding', (d) => appendFileSync(join(d, 'memory/company/machines.md'), '\n[x](a%zz.md)\n')],
   ['emoji in a name', 'contains an emoji', (d) => edit(d, 'company/org.yaml', 'name: יואב', 'name: "🧭 יואב"')],

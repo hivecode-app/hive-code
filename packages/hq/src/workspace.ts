@@ -15,6 +15,13 @@ export interface Checkout {
   repo: string | null;    // GitHub owner/name
 }
 
+/**
+ * `design_review` in a charter: a PR that touches `paths` also needs the approval of `reviewer` before the merge. If
+ * the reviewer has not answered within `wait_minutes`, a PR under `small_lines` changed lines in those paths merges
+ * without it, with a note on the PR.
+ */
+export interface DesignReview { reviewer: string; paths: string[]; waitMinutes: number; smallLines: number }
+
 export interface Charter {
   project: string;
   status: string;         // active | dormant | …
@@ -24,6 +31,7 @@ export interface Charter {
   commands: Record<string, string>;
   ciCheck: string | null;
   mergeInstructions: string[] | null; // merge_instructions (a string, or one string per step): replaces the default review + merge steps in a task worker's prompt
+  designReview: DesignReview | null;  // design_review: a second review, by a designer, for a PR that touches these paths
   error?: string;         // status "invalid": why the charter could not be read
 }
 
@@ -46,7 +54,7 @@ export function readCharter(companyDir: string, project: string): Charter | null
     const m = readFileSync(file, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
     fm = ((m ? parse(m[1]!) : {}) ?? {}) as Record<string, unknown>;
   } catch (e) {
-    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, error: (e as Error).message };
+    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, designReview: null, error: (e as Error).message };
   }
   const s = (v: unknown) => (typeof v === 'string' && v ? v : null);
   const checkouts: Checkout[] = [];
@@ -62,8 +70,17 @@ export function readCharter(companyDir: string, project: string): Charter | null
   return {
     project, status: s(fm.status) ?? 'active', machine: s(fm.machine), checkouts,
     worktreeDir: s(fm.worktree_dir) ?? '.worktrees', commands, ciCheck: s(fm.ci_check),
-    mergeInstructions: steps(fm.merge_instructions),
+    mergeInstructions: steps(fm.merge_instructions), designReview: designReview(fm.design_review),
   };
+}
+
+function designReview(v: unknown): DesignReview | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const paths = (Array.isArray(o.paths) ? o.paths : []).filter((x): x is string => typeof x === 'string' && !!x);
+  if (typeof o.reviewer !== 'string' || !o.reviewer || !paths.length) return null;
+  const n = (x: unknown, d: number) => (typeof x === 'number' && x > 0 ? x : d);
+  return { reviewer: o.reviewer, paths, waitMinutes: n(o.wait_minutes, 30), smallLines: n(o.small_lines, 50) };
 }
 
 /** A string or a list of strings → non-empty steps, or null. */

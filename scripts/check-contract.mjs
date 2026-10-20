@@ -420,6 +420,12 @@ export function main() {
         : Array.isArray(fm.merge_instructions) && fm.merge_instructions.length && fm.merge_instructions.every((v) => typeof v === 'string' && v))) {
         err(`${rel(charter)}: "merge_instructions" must be a string or a list of strings (one per step)`);
       }
+      if (fm.design_review != null) {
+        const dr = fm.design_review;
+        if (!isObj(dr) || !identityIds.has(dr.reviewer)) err(`${rel(charter)}: design_review needs "reviewer", an identity`);
+        if (!isObj(dr) || !Array.isArray(dr.paths) || !dr.paths.length || !dr.paths.every((v) => typeof v === 'string' && v)) err(`${rel(charter)}: design_review needs "paths", a list of paths`);
+        for (const k of ['wait_minutes', 'small_lines']) if (isObj(dr) && dr[k] != null && !(Number.isInteger(dr[k]) && dr[k] > 0)) err(`${rel(charter)}: design_review "${k}" must be a positive whole number`);
+      }
       if (fm.ci === 'required' && !fm.ci_check) err(`${rel(charter)}: ci: required needs "ci_check" (the check name a merge waits for)`);
     }
     const projDir = join(companyDir, 'projects');
