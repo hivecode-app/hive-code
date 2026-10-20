@@ -14,6 +14,7 @@ import { proxyDictate } from './dictate.ts';
 import { MUTE_FOR } from './conversations.ts';
 import { readRaw, UploadError } from './uploads.ts';
 import { OWNER } from '@company/shared';
+import { HomeError } from './home.ts';
 
 export function loadOrCreateToken(stateDir: string): string {
   if (process.env.HQ_TOKEN) return process.env.HQ_TOKEN;
@@ -103,6 +104,22 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   // awaiting: "מה לבדוק" (#108), finished tasks that wait for a deploy or for him to check (awaiting.ts).
   route('GET', '/api/board', () => ({ identities: hq.board(), tasks: hq.scheduler.tasks(), awaiting: hq.awaiting.list(), projects: hq.projects(),
     slots: hq.scheduler.slots(), probes: hq.probes.summary() }));
+
+  // The head of the conversations screen (home.ts): the recipe in force, and a new one. The app says
+  // ?opened=1 when he is looking at it (start, back to the front): that releases what was held for the morning.
+  route('GET', '/api/home', ({ caller, url }) => {
+    if (caller.kind === 'device' && url.searchParams.get('opened') === '1') hq.home.opened();
+    return hq.home.current();
+  });
+  // From a device it is his own arrangement; only hq's admin token may compose in someone else's name.
+  route('PUT', '/api/home', async ({ body, caller }) => {
+    const b = await body();
+    const by = caller.kind === 'device' ? OWNER : str(b.composed_by, 'composed_by', false) ?? OWNER;
+    if (!hq.home.mayCompose(by)) throw new HttpError(403, `${by} may not compose the home screen`);
+    try { hq.home.compose(b.blocks, by, str(b.reason, 'reason', false)); }
+    catch (e) { throw e instanceof HomeError ? new HttpError(400, e.message) : e; }
+    return hq.home.current();
+  });
 
   route('GET', '/api/inbox', () => ({ items: hq.inbox.open() }));
   route('POST', '/api/inbox/:id/ack', ({ params }) => ({ ok: hq.inbox.ack(Number(params[0])) }));

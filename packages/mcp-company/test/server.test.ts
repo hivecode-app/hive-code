@@ -67,7 +67,7 @@ test('handshake, tools/list, write tools queue to WAL while hq is down', async (
 
     const list = await c.call('tools/list');
     const names = list.result.tools.map((t: { name: string }) => t.name).sort();
-    assert.deepEqual(names, ['ask', 'close_team', 'handoff', 'open_team', 'open_ticket', 'recall', 'remember', 'request_go', 'status', 'tell']);
+    assert.deepEqual(names, ['ask', 'close_team', 'compose_home', 'handoff', 'open_team', 'open_ticket', 'recall', 'remember', 'request_go', 'status', 'tell']);
     for (const t of list.result.tools) assert.equal(t.inputSchema.type, 'object');
 
     const tell = await c.call('tools/call', { name: 'tell', arguments: { to: 'dana', body: 'שלום', urgency: 'now' } });
@@ -93,6 +93,12 @@ test('handshake, tools/list, write tools queue to WAL while hq is down', async (
     assert.equal(walLines(root, 'yoav-3', 'wal.ndjson').length, 1, 'none of them reached the WAL');
     const open = TOOL_BY_NAME.get('open_team')!;
     assert.equal(hebrewProblem(open, { name: 'העברת ה-handoff של הטאב ל-hq', purpose: 'PR עם `company-ci` ירוק' }), null);
+    // compose_home: blocks are objects, and the words in them are his too.
+    const home = TOOL_BY_NAME.get('compose_home')!;
+    assert.equal(hebrewProblem(home, { blocks: [{ type: 'headline', text: 'בוקר שקט' }, { type: 'since', items: ['התמונות עולות'] }] }), null);
+    assert.match(hebrewProblem(home, { blocks: [{ type: 'since', items: ['Images upload from the phone now'] }] }) ?? '', /blocks\[0\]/);
+    const notObjects = await c.call('tools/call', { name: 'compose_home', arguments: { blocks: ['headline'] } });
+    assert.match(notObjects.result.content[0].text, /array of objects/);
 
     const bad = await c.call('tools/call', { name: 'remember', arguments: { scope: 'galaxy', kind: 'fact', text: 'x' } });
     assert.equal(bad.result.isError, true);

@@ -8,7 +8,7 @@ import { hebrewProblem, TOOL_BY_NAME, TOOLS, validateArgs } from './tools.ts';
 import type { Settled } from './wal.ts';
 
 /** Ops answered with hq's verdict instead of {queued:true}: their rejection must reach the caller in the same turn (#69). */
-const SYNC_OPS: ReadonlySet<OpName> = new Set(['open_team']);
+const SYNC_OPS: ReadonlySet<OpName> = new Set(['open_team', 'compose_home']);
 
 export const SERVER_NAME = 'company';
 export const SERVER_VERSION = '0.1.0';

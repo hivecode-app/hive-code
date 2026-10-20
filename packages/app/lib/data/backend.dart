@@ -3,6 +3,7 @@
 // lib/data/backend_select.dart picks one, and that is the only line that changes.
 import 'package:flutter/foundation.dart';
 
+import '../model/home_recipe.dart';
 import '../model/models.dart';
 import '../theme/tokens.dart';
 
@@ -29,6 +30,7 @@ class CompanyData {
     this.focus = false,
     this.night,
     this.awaiting = const [],
+    this.home,
   });
 
   final Map<String, Team> teams;
@@ -60,6 +62,9 @@ class CompanyData {
 
   /// "מה לבדוק" (#108): finished tasks that wait for a deploy or for him to check, newest first.
   List<AwaitingTask> awaiting;
+
+  /// The head of the conversations screen (GET /api/home); null from an hq without it (the screen draws hq's default shape itself).
+  HomeRecipe? home;
 
   int get waitingCount => waiting.where((w) => w.state == WaitState.open || w.state == WaitState.pending).length;
 

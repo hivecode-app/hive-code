@@ -18,8 +18,9 @@ import type { Hq } from './hq.ts';
 import { noWorkers, readCharter } from './workspace.ts';
 import { getIdentity, isStandingWorker } from './org.ts';
 import { HandoffError } from './tab/handoffs.ts';
+import { HomeError } from './home.ts';
 
-const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket']);
+const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home']);
 
 export class IngestError extends Error {
   status: number;
@@ -218,6 +219,20 @@ export class Ingest {
           this.hq.store.bg(this.hq.scheduler.completeTask(t!.id), 'task.close');
         });
         return { ok: true, id: e.id, ref: `task-${t!.id}`, result: { task: t!.id, state: 'closing' } };
+      }
+      case 'compose_home': {
+        if (!this.hq.home.mayCompose(e.identity)) {
+          const c = this.hq.home.composer();
+          throw new IngestError(403, `compose_home: ${e.identity} may not compose the home screen`,
+            `רק ${c ? `${this.hq.mailbox.label(c)} (\`${c}\`) ו-` : ''}${this.hq.cfg.managerId} מרכיבים את ראש מסך השיחות`);
+        }
+        try {
+          const r = this.hq.home.compose(a.blocks, e.identity, s(a.reason));
+          return { ok: true, id: e.id, ref: `home-${r.version}`, result: { version: r.version, blocks: r.blocks.length } };
+        } catch (err) {
+          if (err instanceof HomeError) throw new IngestError(400, `compose_home: ${err.message}`, `המתכון לא נשמר: ${err.message}`);
+          throw err;
+        }
       }
       default:
         // remember / handoff / status: stored durably now (ops table),

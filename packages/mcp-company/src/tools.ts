@@ -122,6 +122,21 @@ export const TOOLS: readonly ToolDef[] = [
     pr: s('קישור או מספר PR / PR url or number'),
     risk: oneOf(['low', 'medium', 'high'], 'רמת סיכון / risk level'),
   }, ['headline', 'what']),
+  tool('compose_home', 'הרכבת ראש מסך השיחות של רן: אילו בלוקים, באיזה סדר ובאיזה ניסוח. רק לעדי וליואב. '
+    + 'האפליקציה מציירת כל בלוק מקומפוננטה קבועה וממלאת אותו מנתונים חיים, ולכן מפנים לנתונים לפי מזהה, והטקסט בעברית. '
+    + 'אוצר הבלוקים: '
+    + 'headline {text} משפט אחד · alert {inbox: מספר} או {shift: מזהה משמרת} · waiting {inbox: [מספרים]} · awaiting {tasks: [מזהי משימות]} מה לבדוק, משימות שמחכות לפריסה או לבדיקה שלו · lanes {projects: [ids]} פסי היום · '
+    + 'project {project, note?} שתי שורות · people {identities: [ids], caption?} · since {items: [עד 3 משפטים]} · '
+    + 'note {text, icon} הערה שלך, icon הוא שם של Material Symbol. לכל בלוק אפשר emphasis: normal|quiet|strong (טיפוגרפיה בלבד). '
+    + 'בלוק לא מוכר, שדה חסר או הפניה שלא קיימת נדחים עם הסיבה. מה שנסגר נעלם לבד, ומה שחוסם עליו ולא שובץ מתווסף לבד. '
+    + 'מתכון ישן מ-30 דקות מתחלף בברירת המחדל של hq. '
+    + 'דוגמה: [{"type":"headline","text":"בוקר שקט, שתי משימות רצות"},{"type":"waiting","inbox":[41]},'
+    + '{"type":"lanes","projects":["agent-company","lumo"]},{"type":"project","project":"lumo","note":"מחכה ל-GO על 2.6.10"},'
+    + '{"type":"note","text":"שווה לבדוק את הפריסה של 2.6.10","icon":"rocket_launch","emphasis":"quiet"}] '
+    + "Compose the head of the owner's conversations screen from the fixed block vocabulary above (Hebrew text, data by reference).", {
+    blocks: { type: 'array', items: { type: 'object' }, description: 'הבלוקים לפי הסדר / the blocks, in order' },
+    reason: s('למה ההרכבה הזו, בשורה / why this composition, one line'),
+  }, ['blocks']),
   tool('open_ticket', 'פתיחת כרטיס ב-repo. Open an issue in a repo.', {
     repo: s('owner/repo'),
     title: s('כותרת / title'),
@@ -157,7 +172,9 @@ export function validateArgs(def: ToolDef, args: unknown): string | null {
         if (typeof p.maximum === 'number' && (v as number) > p.maximum) return `${k} must be <= ${p.maximum}`;
         break;
       case 'array':
-        if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) return `${k} must be an array of strings`;
+        if ((p.items as Schema | undefined)?.type === 'object') {
+          if (!Array.isArray(v) || v.some((x) => typeof x !== 'object' || x === null || Array.isArray(x))) return `${k} must be an array of objects`;
+        } else if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) return `${k} must be an array of strings`;
         break;
     }
   }
@@ -172,6 +189,8 @@ const HEBREW_TITLE: Partial<Record<ToolDef['name'], string[]>> = {
   open_team: ['name'], open_ticket: ['title'], ask: ['headline'], request_go: ['headline'],
   status: ['awaiting_note'], close_team: ['awaiting_note'],
 };
+/** compose_home: every text a block shows him (headline, note, caption, since items) is Hebrew too. */
+const BLOCK_TEXT = ['text', 'note', 'caption'];
 
 /** The rewrite request when a field that a person reads is English, else null. */
 export function hebrewProblem(def: ToolDef, args: Record<string, unknown>): string | null {
@@ -183,6 +202,12 @@ export function hebrewProblem(def: ToolDef, args: Record<string, unknown>): stri
     const v = args[k];
     const bad = typeof v === 'string' ? englishLines(v) : [];
     if (bad.length) return hebrewReason(`${def.name}.${k}`, bad);
+  }
+  if (def.name === 'compose_home' && Array.isArray(args.blocks)) {
+    for (const [i, b] of (args.blocks as Record<string, unknown>[]).entries()) {
+      const texts = [...BLOCK_TEXT.map((k) => b?.[k]), ...(Array.isArray(b?.items) ? b.items : [])].filter((v): v is string => typeof v === 'string');
+      for (const v of texts) if (isEnglishTitle(v)) return hebrewReason(`compose_home.blocks[${i}]`, [v]);
+    }
   }
   return null;
 }

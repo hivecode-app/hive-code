@@ -20,6 +20,7 @@ import { ProbeRunner } from './probes.ts';
 import { Pusher, loadOrCreateVapid, telegramVia, type TelegramSend, type WebPushSend } from './push.ts';
 import { backupOnce } from './backup.ts';
 import { board } from './board.ts';
+import { Home } from './home.ts';
 import { startApi, loadOrCreateToken, health, type ApiServer } from './api.ts';
 import { Auth } from './auth.ts';
 import { Ingest, startIngestSocket, type Ticketer } from './ingest.ts';
@@ -78,6 +79,7 @@ export class Hq {
   readonly ingest: Ingest;
   readonly accounts: AccountManager;
   readonly tab: TabHandoffs;
+  readonly home: Home;
   private tabServer: TabServer | null = null;
   private ingestServer: Server | null = null;
   private timers: NodeJS.Timeout[] = [];
@@ -104,6 +106,7 @@ export class Hq {
     // The CDP connection is opened on first use, so an hq with no handoff never touches Chrome.
     this.tab = new TabHandoffs(this.store, this.inbox, this.mailbox, cfg.tab, deps.tabBrowser ?? new CdpTabBrowser(cfg.tab.cdpUrl, tabLog));
     this.ingest = new Ingest(this, deps.ticketer);
+    this.home = new Home(this);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
     this.awaiting = new AwaitingBoard(this.store);
@@ -187,7 +190,7 @@ export class Hq {
       this.every(5_000, 'spool', () => this.shifts.collectSpools());
       this.every(T.watchdogMs, 'watchdog', async () => { await this.watchdog.sweep(); await this.shifts.releaseEnded(); });
       this.every(T.livenessMs, 'liveness', () => this.shifts.pingAll());
-      this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); await this.night.sweep(); });
+      this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); await this.night.sweep(); this.home.sweep(); });
       this.every(5_000, 'probes', () => this.probes.tick());
       this.every(30_000, 'push', () => this.pusher.sweepUnacked());
       // A handoff link never outlives its 10 minutes, and never leaves a phone viewport on a tab.

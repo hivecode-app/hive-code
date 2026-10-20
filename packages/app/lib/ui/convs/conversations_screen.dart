@@ -10,9 +10,11 @@ import '../common.dart';
 import '../nav.dart';
 import '../system_bar.dart';
 import 'head.dart';
+import 'home_blocks.dart';
 import 'kbd.dart';
 
 export 'head.dart';
+export 'home_blocks.dart';
 export 'kbd.dart';
 
 class ConversationsScreen extends StatefulWidget {
@@ -171,7 +173,8 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
       for (final c in rest) working.containsKey(c.identityId) ? WorkingRow(c: c, lines: working[c.identityId]!) : ConversationRow(c: c, quiet: true),
     ];
     return ListView(padding: EdgeInsets.zero, children: [
-      ChatsHead(data: head, since: since, now: now),
+      // hq's recipe when it has one (home_blocks.dart); an older hq: the card alone, as before.
+      if (d.home case final recipe?) HomeBlocks(recipe: recipe, data: d, now: now, since: since) else ChatsHead(data: head, since: since, now: now),
       if (rows.isNotEmpty) ListBlock(top: false, children: rows),
       const SizedBox(height: 80),
     ]);

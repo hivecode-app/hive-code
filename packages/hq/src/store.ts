@@ -383,6 +383,16 @@ const MIGRATIONS: string[] = [
     created_at INTEGER NOT NULL
   );
   `,
+  // v14: the head of his conversations screen as a recipe of blocks (home.ts). The newest row is in force; kept 200 back.
+  `
+  CREATE TABLE home_recipes (
+    version INTEGER PRIMARY KEY AUTOINCREMENT,
+    composed_by TEXT NOT NULL,
+    composed_at INTEGER NOT NULL,
+    reason TEXT,
+    blocks TEXT NOT NULL                     -- JSON [Block], validated on the way in
+  );
+  `,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [

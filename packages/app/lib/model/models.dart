@@ -764,7 +764,8 @@ class SystemStatus {
 
 /// A task title as one line for him: without the area prefix ("אפליקציה: ", "hq: ") and the issue number.
 String plainTitle(String title) {
-  var t = title.trim().replaceFirst(RegExp(r'^#\d+\s+'), '');
+  // PR and ticket numbers are ours, not his (status summary rules): "סיום PR #43: X" reads "סיום: X".
+  var t = title.trim().replaceAll(RegExp(r'\s*\(#\d+\)'), '').replaceAll(RegExp(r'\s*\bPR\s*#\d+'), '').replaceFirst(RegExp(r'^#\d+\s+'), '').replaceAll(RegExp(r'\s+#\d+\b'), '');
   final m = RegExp(r'^([^:]{1,14}):\s+').firstMatch(t);
   if (m != null) t = t.substring(m.end);
   return t.isEmpty ? title : t;

@@ -5,6 +5,7 @@
 //   POST /api/uploads (raw image bytes) → {upload:{id,…}}  ·  GET /api/uploads/:id (the bytes)
 //   PUT  /api/toggles/:key
 //   GET  /api/conversations  ·  POST /api/conversations/:id/{read,mute}  ·  PUT /api/presence {identity}
+//   GET  /api/home  (the head of the conversations screen: hq's recipe of blocks, home.ts)
 //   WS   /ws?after=<seq>  (replay, then {type:'live'}, then live events; deltas have seq 0)
 // The app reaches hq through Caddy at <base>/hq (deploy/caddy/agent-company.caddy).
 import 'dart:async';
@@ -16,6 +17,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../model/home_recipe.dart';
 import '../model/models.dart';
 import '../theme/icons.dart';
 import 'backend.dart';
@@ -124,7 +126,11 @@ class HqBackend extends Backend {
     try {
       await _load();
       notifyListeners(); // the snapshot shows at once; the WebSocket only adds what is new
+      unawaited(_loadHome(opened: true));
       _connect();
+      _homeTick = Timer.periodic(const Duration(minutes: 1), (_) {
+        if (_visible && !_disposed) unawaited(_loadHome());
+      });
     } catch (_) {
       _setDown();
       _scheduleRetry();
@@ -135,6 +141,7 @@ class HqBackend extends Backend {
   @override
   void dispose() {
     _disposed = true;
+    _homeTick?.cancel();
     _replayGuard?.cancel();
     _onlineAgain?.cancel();
     _saveTimer?.cancel();
@@ -211,6 +218,9 @@ class HqBackend extends Backend {
     // "בדקתי" still on its way: a board fetched before hq took it must not bring the row back for a moment.
     if (_checking.isNotEmpty) _data!.awaiting = [for (final x in _data!.awaiting) if (!_checking.contains(x.id)) x];
     _snapshotRaw = {'board': results[0], 'inbox': results[1], 'asks': results[2], 'toggles': results[3]};
+    // The head keeps the recipe it had until the fresh one is in: no flash of the default on every reload.
+    _data!.home = prev?.home;
+    unawaited(_loadHome());
     _fromCache = null;
     if (!_fresh.isCompleted) _fresh.complete();
     final open = openIdentity, openChat = open == null ? null : _data!.chats[open];
@@ -260,6 +270,26 @@ class HqBackend extends Backend {
   Future<void> markSeen(String screen, DateTime at) async {
     _seenAt(screen, at.millisecondsSinceEpoch);
     await _send('PUT', '/api/seen/${Uri.encodeComponent(screen)}', {'at': at.millisecondsSinceEpoch});
+  }
+
+  /// The head of the conversations screen (GET /api/home): hq's recipe with live data applied. Asked again
+  /// on every snapshot reload and once a minute while the app is in front (a recipe goes stale after 30 minutes).
+  Map<String, dynamic>? _homeRaw;
+  Timer? _homeTick;
+  /// [opened]: he is looking at the app now (it started, or came to the front). hq lets what it held for the
+  /// morning go to the composer on that, so a reload in the background must not say it.
+  Future<void> _loadHome({bool opened = false}) async {
+    try {
+      final j = (await _get(opened ? '/api/home?opened=1' : '/api/home')) as Map<String, dynamic>;
+      final d = _data;
+      if (d == null) return;
+      d.home = HomeRecipe.fromJson(j);
+      _homeRaw = j;
+      notifyListeners();
+      _saveSoon();
+    } catch (_) {
+      // An older hq (404) or a blip: the head keeps what it had.
+    }
   }
 
   /// Last line and time per conversation, newest first, Yoav pinned (APP-SPEC §4.3).
@@ -360,6 +390,12 @@ class HqBackend extends Backend {
       List<Map<String, dynamic>> list(String k, String f) => ((c[k] as Map)[f] as List).cast<Map<String, dynamic>>();
       _data = mapSnapshot(board: list('board', 'identities'), inbox: list('inbox', 'items'), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'),
           tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'), awaiting: _list(c['board'], 'awaiting'));
+      if (c['home'] is Map) {
+        try {
+          _data!.home = HomeRecipe.fromJson((c['home'] as Map).cast<String, dynamic>());
+          _homeRaw = (c['home'] as Map).cast<String, dynamic>();
+        } catch (_) {}
+      }
       final lines = c['messages'] as Map<String, dynamic>?;
       if (lines != null) {
         try {
@@ -390,7 +426,7 @@ class HqBackend extends Backend {
     try {
       final prefs = await SharedPreferences.getInstance();
       try {
-        await prefs.setString(kCacheKey, jsonEncode({'url': baseUrl, 'saved': DateTime.now().millisecondsSinceEpoch, ...snap, if (_lastLines != null) 'messages': _lastLines}));
+        await prefs.setString(kCacheKey, jsonEncode({'url': baseUrl, 'saved': DateTime.now().millisecondsSinceEpoch, ...snap, if (_lastLines != null) 'messages': _lastLines, if (_homeRaw != null) 'home': _homeRaw}));
       } catch (_) {
         await prefs.remove(kCacheKey); // a cache that can't be written must not go on aging
       }
@@ -517,7 +553,8 @@ class HqBackend extends Backend {
     final d = _data;
     if (d == null) return;
 
-    if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'task.new' || type == 'task.state' || type == 'task.awaiting' || type == 'toggle.changed' || type.startsWith('watchdog.')) {
+    if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'task.new' || type == 'task.state' || type == 'toggle.changed' || type.startsWith('watchdog.')
+        || type == 'home.composed' || type == 'task.awaiting' || type == 'deploy.recorded') {
       _refreshSoon();
     }
     if (type == 'conv.read' || type == 'conv.muted') _refreshConvs();
@@ -646,6 +683,7 @@ class HqBackend extends Backend {
   void setVisible(bool visible) {
     if (_visible == visible) return;
     _visible = visible;
+    if (visible && _data != null) unawaited(_loadHome(opened: true));
     _onScreenChanged();
   }
 
