@@ -119,7 +119,9 @@ export class Scheduler {
   }
 
   slots() {
-    const running = (this.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND kind = 'work'`).get() as { n: number }).n;
+    // A task still in its worktree setup has no shift row yet, but its slot is taken.
+    const running = (this.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND kind = 'work'`).get() as { n: number }).n
+      + this.starting.size;
     const residents = (this.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND kind = 'resident'`).get() as { n: number }).n;
     return capacity(this.cfg, this.memInfo(), running, Math.max(residents, this.cfg.capacity.residents.length));
   }
@@ -135,44 +137,78 @@ export class Scheduler {
     return this.store.now() - (this.lastStartAt.get(id) ?? -Infinity) < this.cfg.timers.taskRetryMs;
   }
 
-  /** Fill free slots from the queue. Concurrent calls coalesce into one more pass. Returns task ids started. */
+  /**
+   * Tasks whose start is in flight (worktree, commands.worktree_setup, launch): never picked twice, and their
+   * slot is taken (slots()), so a slow setup (`flutter pub get`) holds only its own task, not the queue. It
+   * overlaps the new shift row briefly: never too many, and the pass after the starts settle fills what it hid.
+   */
+  private starting = new Set<number>();
+
+  /** A queued task whose start is under way (the night's empty-slot metric does not count it as waiting). */
+  isStarting(id: number): boolean { return this.starting.has(id); }
+
+  /**
+   * Fill free slots from the queue. Starts run side by side. The caller that ran the pass gets the ids its
+   * starts started (after they settle); a call that coalesced into a running pass gets the ids started so far.
+   */
   async fill(): Promise<number[]> {
     if (!this.store.toggle('scheduler')) return [];
     if (this.filling) { this.refill = true; return this.filling; }
+    const started: number[] = [];
+    const starts: Promise<void>[] = [];
+    let failed = false;
     const run = (async () => {
-      const started: number[] = [];
       let passes = 0;
       do {
         this.refill = false;
-        let { free } = this.slots();
+        let free = this.slots().free;
         for (const t of this.queue()) {
           if (free <= 0) break;
+          if (this.starting.has(t.id)) continue;
           try {
             // A dormant project (charter status) gets no workers until it moves to the company (D phase 3).
             if (this.dormant(t.project)) continue;
             // Backoff: a task that just started (and crashed or failed to launch) waits before the next try.
             if (this.inBackoff(t.id)) continue;
-            this.lastStartAt.set(t.id, this.store.now());
-            await this.start(t);
-            started.push(t.id);
-            free--;
-            this.lastStartError = null;
           } catch (e) {
-            this.lastStartError = (e as Error).message;
             this.store.emit('scheduler.start_failed', t.identity, { task: t.id, error: (e as Error).message });
+            continue;
           }
+          this.lastStartAt.set(t.id, this.store.now());
+          this.starting.add(t.id);
+          free--;
+          starts.push(this.start(t).then((ok) => {
+            if (ok) started.push(t.id); else failed = true; // closed during setup: its slot is free again
+            this.lastStartError = null;
+          }, (e: Error) => {
+            failed = true;
+            this.lastStartError = e.message;
+            this.store.emit('scheduler.start_failed', t.identity, { task: t.id, error: e.message });
+          }).finally(() => this.starting.delete(t.id)));
         }
+        await Promise.resolve();
       } while (this.refill && ++passes < 3);
-      try { this.afterFill(); } catch (e) { this.store.emit('loop.error', null, { loop: 'scheduler.afterFill', error: (e as Error).message }); }
-      return started;
     })();
     // Cleared on settle, never inside the IIFE: a pass with no awaits would finish before the assignment.
-    this.filling = run.finally(() => { this.filling = null; });
-    return this.filling;
+    this.filling = run.then(() => started).finally(() => {
+      this.filling = null;
+      // A call that came in after the last pass looked at `refill`: run it now, not never.
+      if (this.refill) { this.refill = false; this.store.bg(this.fill(), 'scheduler.refill'); }
+    });
+    await this.filling;
+    await Promise.all(starts);
+    try { this.afterFill(); } catch (e) { this.store.emit('loop.error', null, { loop: 'scheduler.afterFill', error: (e as Error).message }); }
+    // A start that failed held a slot it never used, and a pass during a launch saw that slot twice: one more
+    // pass now (a failed task is in backoff, so this ends).
+    if (failed || started.length) this.store.bg(this.fill(), 'scheduler.refill');
+    return started;
   }
 
-  /** Open a task worker under the project CEO (B.16) and hand it the task as its first prompt. */
-  private async start(t: TaskRow): Promise<void> {
+  /**
+   * Open a task worker under the project CEO (B.16) and hand it the task as its first prompt. False when the
+   * task was closed while its worktree was being set up (no worker then).
+   */
+  private async start(t: TaskRow): Promise<boolean> {
     const lead = t.project ? projectLead(this.store, t.project) : undefined;
     const OPENED_BY = 'opened-by:';
     const openedBy = (JSON.parse(t.labels || '[]') as string[]).find((l) => l.startsWith(OPENED_BY))?.slice(OPENED_BY.length);
@@ -198,6 +234,12 @@ export class Scheduler {
           body: `משימה ${t.ref ?? `#${t.id}`} (${t.title}) לא התחילה: ${(e as Error).message}. היא סומנה needs-decision ויצאה מהתור.` });
         throw e;
       }
+      // Closed (done, closed on GitHub…) during a long worktree_setup: no worker, and the worktree goes.
+      const now = this.task(t.id);
+      if (!now || !['queued', 'open', 'interrupted'].includes(now.state)) {
+        if (now?.worktree) await this.closeWorktree(t.id);
+        return false;
+      }
     }
     const row = await this.shifts.request(identity, { kind: 'work', reason: 'task', taskId: t.id, cwd: ws?.path });
     // The identity already had a live shift (no new launch): bind the task to it so its end closes the loop.
@@ -208,6 +250,7 @@ export class Scheduler {
     // One prompt per run of the shift: a resumed run gets the task again (the old prompt id would be a no-op).
     this.mailbox.tell({ msg_id: `task-${t.id}-${row.id}-${row.started_at}`, from: openedBy ?? lead ?? 'hq', to: identity, priority: 'next',
       body: [`משימה ${t.ref ?? `#${t.id}`}: ${t.title}`, ws?.note, t.body, this.promptNote()].filter(Boolean).join('\n\n') });
+    return true;
   }
 
   private invalidReported = new Map<string, number>();
@@ -237,7 +280,7 @@ export class Scheduler {
     const ch = t.project ? readCharter(this.cfg.companyDir, t.project) : null;
     if (t.worktree) {
       const { c } = this.checkoutOf(t);
-      if (!(await this.workspaces.ensure(t.worktree, c?.path))) throw new Error(`task ${t.id}: worktree ${t.worktree} is gone and its branch too`);
+      if (!(await this.workspaces.ensure(t.worktree, c?.path, ch ?? undefined))) throw new Error(`task ${t.id}: worktree ${t.worktree} is gone and its branch too`);
       return { path: t.worktree, note: worktreeNote(t.worktree, ch) };
     }
     // Started before hq made worktrees: its session and work live where it ran (hq's default cwd and

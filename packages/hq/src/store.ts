@@ -328,6 +328,8 @@ const MIGRATIONS: string[] = [
   CREATE INDEX tab_handoffs_live ON tab_handoffs(state, domain);
   CREATE INDEX tab_handoffs_inbox ON tab_handoffs(inbox_id);
   `,
+  // v7: where the run's CLI ran. Claude Code keeps sessions per cwd: a new cwd means a new shift, not a resume.
+  `ALTER TABLE shifts ADD COLUMN cwd TEXT;`,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [

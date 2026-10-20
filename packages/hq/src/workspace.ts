@@ -2,7 +2,7 @@
 // a machine; hq creates one worktree per task there (`git worktree add -b`), runs the shift in it, and
 // on close preserves anything uncommitted under refs/company/preserved/<task> before removing the
 // worktree without --force.
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmdirSync, rmSync } from 'node:fs';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -23,6 +23,7 @@ export interface Charter {
   worktreeDir: string;    // relative to the checkout: <checkout>/<worktreeDir>/<task>
   commands: Record<string, string>;
   ciCheck: string | null;
+  mergeInstructions: string[] | null; // merge_instructions (a string, or one string per step): replaces the default review + merge steps in a task worker's prompt
   error?: string;         // status "invalid": why the charter could not be read
 }
 
@@ -45,7 +46,7 @@ export function readCharter(companyDir: string, project: string): Charter | null
     const m = readFileSync(file, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
     fm = ((m ? parse(m[1]!) : {}) ?? {}) as Record<string, unknown>;
   } catch (e) {
-    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, error: (e as Error).message };
+    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, error: (e as Error).message };
   }
   const s = (v: unknown) => (typeof v === 'string' && v ? v : null);
   const checkouts: Checkout[] = [];
@@ -61,7 +62,14 @@ export function readCharter(companyDir: string, project: string): Charter | null
   return {
     project, status: s(fm.status) ?? 'active', machine: s(fm.machine), checkouts,
     worktreeDir: s(fm.worktree_dir) ?? '.worktrees', commands, ciCheck: s(fm.ci_check),
+    mergeInstructions: steps(fm.merge_instructions),
   };
+}
+
+/** A string or a list of strings → non-empty steps, or null. */
+function steps(v: unknown): string[] | null {
+  const out = (Array.isArray(v) ? v : [v]).filter((x): x is string => typeof x === 'string' && !!x.trim()).map((x) => x.trim());
+  return out.length ? out : null;
 }
 
 /** hq's own commits (the preserved refs) need no user git config. */
@@ -77,15 +85,56 @@ export const runGit: Git = (cwd, args, env) => new Promise((res, rej) => {
     (err, stdout, stderr) => (err ? rej(new Error(`git ${args.join(' ')} (in ${cwd}): ${String(stderr || err.message).trim().slice(0, 400)}`)) : res(String(stdout))));
 });
 
+/**
+ * commands.worktree_setup of the charter: runs in a new worktree right after `git worktree add` (links to
+ * untracked dirs of the main checkout, `flutter pub get`…), in `bash -c` with COMPANY_CHECKOUT = the checkout.
+ */
+export type Setup = (cwd: string, command: string, checkout: string, timeoutMs?: number) => Promise<void>;
+
+export const runSetup: Setup = (cwd, command, checkout, timeoutMs = 15 * 60_000) => new Promise((res, rej) => {
+  // Its own process group: a timeout kills the whole setup (flutter, dart…), not only bash.
+  const p = spawn('bash', ['-c', command], { cwd, env: { ...process.env, COMPANY_CHECKOUT: checkout }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  const keep = (b: Buffer) => { out = (out + b.toString()).slice(-4000); };
+  p.stdout!.on('data', keep);
+  p.stderr!.on('data', keep);
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; try { process.kill(-p.pid!, 'SIGKILL'); } catch { /* gone */ } }, timeoutMs);
+  const fail = (why: string) => rej(new Error(`worktree_setup failed in ${cwd} (${why}): ${out.trim().slice(-600) || 'no output'}`));
+  p.on('error', (e) => { clearTimeout(timer); fail(e.message); });
+  p.on('close', (code, signal) => {
+    clearTimeout(timer);
+    if (timedOut) fail(`timed out after ${Math.round(timeoutMs / 60_000)} min`);
+    else if (code === 0) res();
+    else fail(code != null ? `exit ${code}` : `signal ${signal}`);
+  });
+});
+
 export interface Worktree { path: string; branch: string; checkout: string; base: string }
 export interface CloseResult { path: string; preserved: string | null; removed: boolean; branchDeleted: boolean; ignored: string[]; error?: string }
 
 export class Workspaces {
   private git: Git;
   private host: string;
-  constructor(git: Git = runGit, host: string = hostname()) {
+  private setup: Setup;
+  constructor(git: Git = runGit, host: string = hostname(), setup: Setup = runSetup) {
     this.git = git;
     this.host = host;
+    this.setup = setup;
+  }
+
+  /**
+   * commands.worktree_setup in a worktree hq just made. When it fails, the half-set-up tree goes (nothing of
+   * a worker's is in it yet; with keepBranch, the branch and its commits stay for the next try) and it throws.
+   */
+  private async runSetup(ch: Charter, c: Checkout, path: string, keepBranch: boolean): Promise<void> {
+    if (!ch.commands.worktree_setup) return;
+    try {
+      await this.setup(path, ch.commands.worktree_setup, c.path);
+    } catch (e) {
+      const r = await this.close(path, c.defaultBranch, keepBranch);
+      throw new Error(`${(e as Error).message}${r.removed ? '' : ` (and the worktree was not removed: ${r.error})`}`);
+    }
   }
 
   /** The checkout a task works in: the named one, else the charter's first. Refuses another machine's checkout. */
@@ -101,6 +150,7 @@ export class Workspaces {
   /**
    * New worktree <checkout>/<worktreeDir>/<task> on a new branch named <task> (e.g. company-t12), from origin/<default>
    * (fetched first; the local default branch if the fetch fails). A taken name gets a suffix, never reused.
+   * Then commands.worktree_setup runs in it; if that fails, the worktree is closed and create throws.
    */
   async create(ch: Charter, c: Checkout, task: string): Promise<Worktree> {
     if (!SLUG.test(task)) throw new Error(`invalid task slug ${task}`);
@@ -116,6 +166,7 @@ export class Workspaces {
       const taken = existsSync(path) || await this.git(c.path, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]).then(() => true, () => false);
       if (!taken) {
         await this.git(c.path, ['worktree', 'add', '--quiet', '-b', branch, path, base]);
+        await this.runSetup(ch, c, path, false);
         return { path, branch, checkout: c.path, base };
       }
       if (i >= 5) throw new Error(`no free worktree name for ${task} in ${c.path}`);
@@ -147,8 +198,10 @@ export class Workspaces {
   /**
    * A worktree that went missing (removed by hand) comes back on its branch, if the branch is still there.
    * `checkout` is the repository it belongs to (from the charter); without it, <checkout>/<dir>/<task> is assumed.
+   * With the charter, a worktree brought back gets its commands.worktree_setup again; if that fails, the
+   * tree goes again (the branch stays) and it throws, so a later try runs the setup again.
    */
-  async ensure(path: string, checkout?: string): Promise<boolean> {
+  async ensure(path: string, checkout?: string, ch?: Charter): Promise<boolean> {
     if (existsSync(path)) {
       if (!(await this.isLinkedWorktree(path))) throw new Error(`${path} is not a linked worktree (a main checkout?)`);
       return true;
@@ -160,6 +213,8 @@ export class Workspaces {
     if (!has) return false;
     await this.git(repo, ['worktree', 'prune']);
     await this.git(repo, ['worktree', 'add', '--quiet', path, branch]);
+    const c = ch?.checkouts.find((x) => x.path === repo);
+    if (ch && c) await this.runSetup(ch, c, path, true);
     return true;
   }
 
@@ -170,7 +225,7 @@ export class Workspaces {
    * (node_modules, *.db, .env…) are not preserved: they are listed in the result.
    * The branch is deleted only when it holds no commit beyond the default branch.
    */
-  async close(path: string, defaultBranch = 'main'): Promise<CloseResult> {
+  async close(path: string, defaultBranch = 'main', keepBranch = false): Promise<CloseResult> {
     const out: CloseResult = { path, preserved: null, removed: false, branchDeleted: false, ignored: [] };
     if (!existsSync(path)) return { ...out, error: 'missing' };
     if (!(await this.isLinkedWorktree(path))) return { ...out, error: 'not a linked worktree: refusing to reset, clean or remove it' };
@@ -210,7 +265,7 @@ export class Workspaces {
       out.removed = true;
       // The worktree dir itself (e.g. .worktrees/) goes too when this was its last worktree.
       try { rmdirSync(dirname(path)); } catch { /* not empty, or not ours to remove */ }
-      if (branch === task || branch.startsWith('company-')) {
+      if (!keepBranch && (branch === task || branch.startsWith('company-'))) {
         const base = await this.git(repo, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${defaultBranch}`]).then(() => `origin/${defaultBranch}`, () => defaultBranch);
         const ahead = (await this.git(repo, ['rev-list', '--count', `${base}..${branch}`])).trim();
         if (ahead === '0') {

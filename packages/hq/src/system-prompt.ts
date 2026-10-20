@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import { OWNER } from '@company/shared';
 import type { IdentityRow } from './org.ts';
+import { readCharter } from './workspace.ts';
 
 const read = (p: string): string | null => (existsSync(p) ? readFileSync(p, 'utf8').trim() : null);
 
@@ -36,16 +37,29 @@ function howWeTalk(i: IdentityRow, managerId: string): string {
   ].join('\n');
 }
 
-function taskWorker(i: IdentityRow): string {
+/**
+ * Review and merge go by the project's charter: its merge_instructions replace the company's default steps
+ * (a project with its own reviewer and merge guard, e.g. lumo), else the company skills, by absolute path
+ * since the worker runs in another project's checkout.
+ */
+function taskWorker(i: IdentityRow, companyDir: string): string {
+  const ch = i.project ? readCharter(companyDir, i.project) : null;
+  const skill = (name: string) => `\`${join(companyDir, 'skills', name, 'SKILL.md')}\``;
+  const ci = ch?.ciCheck ? `בדיקת ה-CI שבאמנה (\`${ch.ciCheck}\`)` : 'בדיקת ה-CI שבאמנה (`ci_check`)';
+  const review = ch?.mergeInstructions
+    ? ch.mergeInstructions.map((m, n) => `${n + 3}. ${n === 0 ? 'סקירה ומיזוג לפי האמנה של הפרויקט, לא לפי ה-skills של החברה. ' : ''}${m}`)
+    : [
+      `3. סקירה בלתי תלויה בהקשר נקי, לפי ${skill('reviewer')} (סוכן משנה בלי כלי עריכה). מתקנים מה שעלה.`,
+      `4. ממזגים בעצמך: \`gh pr merge --squash --delete-branch\`, רק כשהסקירה אישרה ו${ci} ירוקה. לפי ${skill('ship')}.`,
+    ];
   return [
     `# אתה ${i.name}${i.title ? `, ${i.title}` : ''}, בצוות משימה (\`${i.id}\`)`,
     '',
     `צוות משימה חד-פעמי${i.project ? ` בפרויקט \`${i.project}\`` : ''}. המשימה מגיעה בהודעה הראשונה. עושים אותה לפי אמנת הפרויקט:`,
     '1. עובדים ב-worktree שבהודעת המשימה ("איפה עובדים"): hq פתח אותו בשבילך מה-checkout שבאמנה, על ענף משלו, והוא ה-cwd שלך. לא פותחים worktree נוסף, לא מסירים אותו (hq שומר ומסיר בסגירה), ולא נוגעים ב-checkout הראשי. רק אם בהודעה אין worktree: `git worktree add -b <branch> .worktrees/<task>` מתוך ה-repo.',
     '2. PR עם `gh`. גוף ה-PR בעברית.',
-    '3. סקירה בלתי תלויה בהקשר נקי, לפי `company/skills/reviewer/SKILL.md` (סוכן משנה בלי כלי עריכה). מתקנים מה שעלה.',
-    '4. ממזגים בעצמך: `gh pr merge --squash --delete-branch`, רק כשהסקירה אישרה ובדיקת ה-CI שבאמנה (`ci_check`, ב-agent-company זו `company-ci`) ירוקה. לפי `company/skills/ship/SKILL.md`.',
-    `5. מדווחים במשפט-שניים ב-\`tell\` למי ששלח את המשימה (עם קישור ל-PR), ואז \`status\` עם \`state: "done"\`. זה סוגר את המשימה ואת המשמרת.`,
+    ...review,
+    `${review.length + 3}. מדווחים במשפט-שניים ב-\`tell\` למי ששלח את המשימה (עם קישור ל-PR), ואז \`status\` עם \`state: "done"\`. זה סוגר את המשימה ואת המשמרת.`,
   ].join('\n');
 }
 
@@ -73,7 +87,7 @@ export function buildSystemPrompt(companyDir: string, i: IdentityRow, managerId:
   if (dossier) {
     parts.push(`# הזהות שלך\n\nאתה ${i.name}${i.title ? `, ${i.title}` : ''} (identity: \`${i.id}\`) בחברת הסוכנים של רן. זה התיק שלך:\n\n${dossier}`);
   } else if (i.team_kind === 'task' || i.source === 'runtime') {
-    parts.push(!i.project && opener?.team === HELPER_TEAM ? helperWorker(i) : taskWorker(i));
+    parts.push(!i.project && opener?.team === HELPER_TEAM ? helperWorker(i) : taskWorker(i, companyDir));
   } else {
     parts.push(`# הזהות שלך\n\nאתה ${i.name}${i.title ? `, ${i.title}` : ''} (identity: \`${i.id}\`) בחברת הסוכנים של רן.`);
   }

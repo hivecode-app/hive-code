@@ -12,6 +12,7 @@ import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
 import { getIdentity, type IdentityRow } from './org.ts';
 import { buildSystemPrompt, writeSystemPrompt } from './system-prompt.ts';
+import { noWorkers, readCharter, Workspaces } from './workspace.ts';
 
 export type ShiftKind = 'work' | 'resident' | 'foreign';
 
@@ -22,7 +23,7 @@ export interface ShiftRow {
   started_at: number; ended_at: number | null; end_reason: string | null; last_event_at: number | null;
   in_turn: number; long_tool: number; rate_limited_until: number | null; stuck_since: number | null;
   nudged_at: number | null; interrupted_at: number | null; dead_signals: number; last_ping_ok_at: number | null;
-  unit_released_at: number | null; run_start_seq: number | null;
+  unit_released_at: number | null; run_start_seq: number | null; cwd: string | null;
 }
 
 export interface LaunchSpec {
@@ -225,7 +226,12 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     const last = this.last(identity);
     // A shift number whose session never ran (launch/stop failed before any frame) is reused as new.
     const neverRan = !!last && last.host_seq === 0 && last.run_start_seq == null;
-    const resume = !!last && !neverRan && !opts.forceNew && !NEW_SHIFT_REASONS.has(last.end_reason ?? '');
+    const wouldResume = !!last && !neverRan && !opts.forceNew && !NEW_SHIFT_REASONS.has(last.end_reason ?? '');
+    const cwd = opts.cwd ?? this.taskCwd(opts.taskId ?? (wouldResume ? last!.task_id : null), identity) ?? this.projectCwd(identity) ?? this.cfg.defaultCwd;
+    // The session lives where it ran (Claude Code keeps sessions per cwd): elsewhere, a new shift. Rows from
+    // before v7 have no cwd and resume as before (on hq-host defaultCwd is the agent-company checkout itself).
+    const moved = !!last?.cwd && last.cwd !== cwd;
+    const resume = wouldResume && !moved;
     const shiftNo = resume || (neverRan && !opts.forceNew) ? last!.shift_no : (last?.shift_no ?? 0) + 1;
     const shiftId = `${identity}-${shiftNo}`;
     const socketPath = shiftSocketPath(this.paths, shiftId);
@@ -233,15 +239,15 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     const now = this.store.now();
     const kind: ShiftKind = opts.kind ?? last?.kind ?? (this.cfg.capacity.residents.includes(identity) ? 'resident' : 'work');
     const taskId = opts.taskId ?? (resume ? last!.task_id : null);
-    this.store.db.prepare(`INSERT INTO shifts (id, identity, shift_no, session_id, state, kind, socket_path, task_id, started_at, last_event_at)
-        VALUES (?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?)
+    this.store.db.prepare(`INSERT INTO shifts (id, identity, shift_no, session_id, state, kind, socket_path, task_id, started_at, last_event_at, cwd)
+        VALUES (?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET state='starting', kind=excluded.kind, started_at=excluded.started_at, ended_at=NULL,
         end_reason=NULL, last_event_at=excluded.last_event_at, in_turn=0, long_tool=0, stuck_since=NULL, nudged_at=NULL,
         interrupted_at=NULL, dead_signals=0, pid=NULL, host_pid=NULL, proc_start=NULL, last_ping_ok_at=NULL,
-        unit_released_at=NULL, run_start_seq=NULL, task_id=excluded.task_id`)
-      .run(shiftId, identity, shiftNo, sessionId, kind, socketPath, taskId, now, now);
+        unit_released_at=NULL, run_start_seq=NULL, task_id=excluded.task_id, cwd=excluded.cwd`)
+      .run(shiftId, identity, shiftNo, sessionId, kind, socketPath, taskId, now, now, cwd);
     const row = this.get(shiftId)!;
-    this.store.emit('shift.state', identity, { shift: shiftId, state: 'starting', resume, reason: opts.reason });
+    this.store.emit('shift.state', identity, { shift: shiftId, state: 'starting', resume, reason: opts.reason, ...(moved && wouldResume ? { moved_from: last!.cwd, cwd } : {}) });
     const unit = shiftUnit(shiftId);
     this.patch(shiftId, { unit });
     this.heldExits.delete(shiftId); // held exits belong to a previous connection/run
@@ -262,7 +268,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       this.patch(shiftId, { account: acct?.name ?? null });
       await this.launcher.launch({
         shiftId, identity, shiftNo, sessionId, resume, kind, socketPath, taskId, unit,
-        cwd: opts.cwd ?? this.taskCwd(taskId, identity) ?? this.cfg.defaultCwd, systemPromptFile, account: acct?.name ?? null, configDir: acct?.configDir ?? null,
+        cwd, systemPromptFile, account: acct?.name ?? null, configDir: acct?.configDir ?? null,
       });
     } catch (e) {
       this.markEnded(shiftId, 'dead', stage);
@@ -286,6 +292,27 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     ) as { worktree: string | null } | undefined;
     return r?.worktree ?? undefined;
   }
+
+  /**
+   * A standing identity of a project (its CEO…) runs in the project's first checkout (B.5), so the project's
+   * own CLAUDE.md, hooks, skills and agents load. Task workers are not standing: they run in their worktree.
+   * No checkout, a dormant project, another machine or a missing repository: hq's default cwd, and an event.
+   */
+  private projectCwd(identity: string): string | undefined {
+    const i = getIdentity(this.store, identity);
+    if (!i?.project || i.team_kind === 'task' || i.source === 'runtime') return undefined;
+    const ch = readCharter(this.cfg.companyDir, i.project);
+    if (!ch || noWorkers(ch)) return undefined;
+    try {
+      return this.workspaces.checkout(ch)?.path;
+    } catch (e) {
+      this.store.emit('shift.project_cwd_failed', identity, { project: i.project, error: (e as Error).message });
+      return undefined;
+    }
+  }
+
+  /** Checkout lookup for standing identities (the machine check uses this host's name). */
+  workspaces = new Workspaces();
 
   /** Connect (with retries while the host boots) and keep the connection. Safe to call repeatedly. */
   async attach(row: ShiftRow, tries = 20, delayMs = 250): Promise<boolean> {

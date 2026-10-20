@@ -63,6 +63,7 @@ const cases = [
   ['relative checkout path', 'must be absolute', (d) => edit(d, 'company/projects/lumo.md', 'path: ~/new-lumo-application', 'path: new-lumo-application')],
   ['worktree_dir outside the checkout', 'inside the checkout', (d) => edit(d, 'company/projects/lumo.md', 'worktree_dir: .worktrees', 'worktree_dir: ../wt')],
   ['required CI without a check name', 'needs "ci_check"', (d) => edit(d, 'company/projects/agent-company.md', 'ci_check: company-ci', 'ci_check: null')],
+  ['merge_instructions that is not text', 'must be a string or a list', (d) => edit(d, 'company/projects/agent-company.md', 'ci_check: company-ci', 'ci_check: company-ci\nmerge_instructions: [1, 2]')],
 ];
 
 for (const [name, expect, mutate] of cases) {

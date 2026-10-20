@@ -359,6 +359,10 @@ export function main() {
       if (fm.commands != null && (!isObj(fm.commands) || Object.values(fm.commands).some((v) => typeof v !== 'string' || !v))) {
         err(`${rel(charter)}: "commands" must map names to command strings`);
       }
+      if (fm.merge_instructions != null && !(typeof fm.merge_instructions === 'string' ? fm.merge_instructions
+        : Array.isArray(fm.merge_instructions) && fm.merge_instructions.length && fm.merge_instructions.every((v) => typeof v === 'string' && v))) {
+        err(`${rel(charter)}: "merge_instructions" must be a string or a list of strings (one per step)`);
+      }
       if (fm.ci === 'required' && !fm.ci_check) err(`${rel(charter)}: ci: required needs "ci_check" (the check name a merge waits for)`);
     }
     const projDir = join(companyDir, 'projects');

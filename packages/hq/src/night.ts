@@ -287,16 +287,18 @@ export class Night {
     for (const t of running) ins.run(night.id, t.id, now);
 
     const slots = this.scheduler.slots();
+    // A task whose start is under way (a long worktree_setup) is not waiting, and its slot is taken.
+    const waiting = queue.filter((t) => !this.scheduler.isStarting(t.id));
     // A slot that exists but cannot start (not enough memory free right now) is empty too.
-    const empty = queue.length > 0 && (slots.total - slots.running > 0 || slots.total === 0);
-    const reason = empty ? this.reason(queue, slots) : null;
+    const empty = waiting.length > 0 && (slots.total - slots.running > 0 || slots.total === 0);
+    const reason = empty ? this.reason(waiting, slots) : null;
     const open = this.openInterval(night.id);
     if (open && open.reason !== reason) {
       this.store.db.prepare('UPDATE night_empty SET ended_at = ? WHERE id = ?').run(now, open.id);
     }
     if (reason && (!open || open.reason !== reason)) {
       this.store.db.prepare('INSERT INTO night_empty (night_id, started_at, reason) VALUES (?, ?, ?)').run(night.id, now, reason);
-      this.store.emit('metric.empty_slot', null, { night: night.id, free: slots.free, total: slots.total, waiting: queue.length, reason });
+      this.store.emit('metric.empty_slot', null, { night: night.id, free: slots.free, total: slots.total, waiting: waiting.length, reason });
     }
   }
 

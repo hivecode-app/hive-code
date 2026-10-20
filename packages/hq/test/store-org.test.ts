@@ -15,11 +15,11 @@ test('store: WAL, migrations idempotent across reopen, toggles seeded once', () 
     const path = join(dir, 'hq.db');
     const s1 = new Store(path);
     assert.equal(s1.db.pragma('journal_mode', { simple: true }), 'wal');
-    assert.equal(s1.schemaVersion, 6);
+    assert.equal(s1.schemaVersion, 7);
     s1.setToggle('probes', false);
     s1.close();
     const s2 = new Store(path);
-    assert.equal(s2.schemaVersion, 6);
+    assert.equal(s2.schemaVersion, 7);
     assert.equal(s2.toggle('probes'), false, 'manual off survives restart');
     assert.equal(s2.toggle('scheduler'), true);
     const e = s2.emit('x', 'eli', { a: 1 });
@@ -160,6 +160,10 @@ test('system prompt (L0+L1): dossier, how to reply, Authority, charter; task wor
   assert.match(worker, /\*\*עברית בכל הודעה\*\*: לרן, ליואב ולכל עובד, גם כשכתבו לך באנגלית/);
   assert.match(worker, /`open_team`\) וטיקטים \(`open_ticket`\) בעברית/);
   assert.match(worker, /gh pr merge --squash/);
+  // The worker runs in another project's checkout: the company skills by absolute path.
+  assert.ok(worker.includes(`\`${join(companyDir, 'skills', 'reviewer', 'SKILL.md')}\``), 'absolute reviewer skill path');
+  assert.ok(worker.includes(`\`${join(companyDir, 'skills', 'ship', 'SKILL.md')}\``), 'absolute ship skill path');
+  assert.match(worker, /`company-ci`/);
   assert.match(worker, /# אמנת agent-company/);                  // project charter
   assert.match(worker, /מדווח ל-`adi`/);
   // A helper eli opens has no project: the errand itself, no worktree/PR, outward acts need the owner (#24).
