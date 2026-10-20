@@ -26,7 +26,7 @@ class WordingAndMonogramTest {
 
     @Test fun recipient() {
         assertEquals("לדנה", Wording.to("דנה"))
-        assertEquals("לחברה", Wording.to(Wording.SYSTEM_NAME))
+        assertEquals("למערכת", Wording.to(Wording.SYSTEM_NAME))
         assertEquals("ל-Bob", Wording.to("Bob"))
         assertEquals("להדס", Wording.to("הדס")) // a name that starts with ה keeps it
     }

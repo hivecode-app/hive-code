@@ -294,7 +294,7 @@ class ConversationRow extends StatelessWidget {
                           TextSpan(text: 'טיוטה: ', style: TextStyle(color: p.accent, fontWeight: FontWeight.w700)),
                           // Isolated, so an English draft keeps its own punctuation where it belongs.
                           const TextSpan(text: kFSI),
-                          ...Rich.spans(context, draft.split('\n').first, TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text2)),
+                          ...Rich.spans(context, draft.split('\n').first, TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text2), links: false),
                           const TextSpan(text: kPDI),
                         ]),
                         maxLines: 1,

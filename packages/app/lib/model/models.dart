@@ -17,6 +17,14 @@ class Team {
   final bool permanent;
 }
 
+/// hq itself as a sender: questions and notes from the server (accounts, pairing, failures).
+/// Shown by name and with a symbol, never as a worker called "hq" (#55).
+const kSystemId = 'hq';
+const kSystem = Identity(id: kSystemId, name: 'המערכת', title: 'הודעה מהשרת', teamId: '');
+
+/// "לדנה", and "למערכת" (the article drops after ל).
+String toName(String name) => name == kSystem.name ? 'למערכת' : 'ל$name';
+
 class Identity {
   const Identity({
     required this.id,
@@ -224,10 +232,13 @@ class UserMsg extends ChatItem {
 }
 
 class Quote {
-  const Quote({required this.author, required this.text, this.itemId});
+  const Quote({required this.author, required this.text, this.itemId, this.askId});
   final String author;
   final String text;
   final String? itemId;
+
+  /// Quoting a question: the reply is its answer (POST /api/asks/:id/answer), not a new message (#55).
+  final String? askId;
 }
 
 class Attachment {

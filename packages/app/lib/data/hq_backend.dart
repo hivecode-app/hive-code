@@ -233,7 +233,7 @@ class HqBackend extends Backend {
     final seen = <String>{};
     for (final m in (res['messages'] as List).cast<Map<String, dynamic>>()) {
       final other = m['from_identity'] == 'owner' ? m['to_identity'] as String : m['from_identity'] as String;
-      if (!seen.add(other)) continue;
+      if (other == kSystemId || !seen.add(other)) continue; // the system has no conversation (#55)
       final i = d.conversations.indexWhere((c) => c.identityId == other);
       final c = ConversationSummary(
         identityId: other,
@@ -598,7 +598,7 @@ class HqBackend extends Backend {
         final there = mine[m.id];
         if (there != null) {
           there.delivery = furtherDelivery(there.delivery, m.delivery);
-        } else if (const {Delivery.queued, Delivery.pendingConnection, Delivery.failed}.contains(m.delivery)) {
+        } else if (const {Delivery.queued, Delivery.pendingConnection, Delivery.failed}.contains(m.delivery) || m.replyTo?.askId != null) {
           mine[m.id] = m;
           chat.items.add(m);
         }

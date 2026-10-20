@@ -2,6 +2,7 @@
 // Only what blocks on the owner, sorted by urgency, one-tap answers with a 3s in-place undo.
 // Rows never move while the screen is open: answered rows collapse in place.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../data/backend.dart';
 import '../../data/store.dart';
@@ -143,7 +144,13 @@ class WaitRow extends StatelessWidget {
     } else if (pending != null) {
       tail = UndoLine(label: pending.label, onCancel: () => store.cancelUndo(item.id));
     } else {
-      tail = Padding(padding: const EdgeInsets.only(top: 10), child: Wrap(spacing: 8, runSpacing: 8, children: _actions(context, store)));
+      final isAsk = item.kind == WaitKind.blockingAsk || item.kind == WaitKind.softAsk;
+      tail = Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: isAsk && item.askId != null
+            ? AnswerField(item: item, key: ValueKey('answer-${item.id}'))
+            : Wrap(spacing: 8, runSpacing: 8, children: _actions(context, store)),
+      );
     }
 
     final row = Padding(
@@ -188,7 +195,8 @@ class WaitRow extends StatelessWidget {
       container: true,
       label: '${who.name}, ${who.title}. ${item.kicker}',
       child: Stack(children: [
-        row,
+        // A tap opens the item; a long press offers to copy it (#55).
+        InkWell(onTap: () => openWait(context, item), onLongPress: () => _copySheet(context, item), child: row),
         if (flagged)
           PositionedDirectional(
             start: 0,
@@ -220,13 +228,14 @@ class WaitRow extends StatelessWidget {
   }
 
   List<Widget> _actions(BuildContext context, AppStore store) {
-    void open() => Nav.chat(context, item.from);
-    void ask() => Nav.chat(context, item.from, quote: Quote(author: store.nameOf(item.from), text: item.body), focus: true);
+    final chat = store.data?.canChat(item.from) ?? false;
+    void open() => openWait(context, item);
+    void ask() => Nav.chat(context, item.from, quote: Quote(author: store.nameOf(item.from), text: item.body, askId: item.askId), focus: true);
     switch (item.kind) {
       case WaitKind.urgentProd:
         return [
           for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.tonal, onTap: () => store.answerWait(item, o)),
-          Btn('שאלה', onTap: ask),
+          if (chat) Btn('שאלה', onTap: ask),
           Btn('פתיחה', onTap: open),
         ];
       case WaitKind.go:
@@ -247,11 +256,155 @@ class WaitRow extends StatelessWidget {
         ];
       case WaitKind.blockingAsk:
       case WaitKind.softAsk:
+        // Without an ask behind it (an escalation note): the conversation is where to answer.
         return [
           for (final o in item.options) Btn(o.label, kind: BtnKind.tonal, onTap: () => store.answerWait(item, o)),
-          Btn('תשובה אחרת', onTap: ask),
+          if (chat) Btn('תשובה', onTap: ask),
+          Btn('פתיחה', onTap: open),
         ];
     }
+  }
+
+  void _copySheet(BuildContext context, WaitItem item) {
+    final p = context.p;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: p.bg,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: Ic('content_copy', color: p.text),
+            title: Text('העתקת הטקסט', style: T.row2.copyWith(color: p.text)),
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: item.body));
+              Navigator.pop(c);
+            },
+          ),
+          for (final url in linksIn(item.body))
+            ListTile(
+              leading: Ic('link', color: p.text),
+              title: Text('העתקת הקישור', style: T.row2.copyWith(color: p.text)),
+              subtitle: Text(url, maxLines: 1, overflow: TextOverflow.ellipsis, textDirection: TextDirection.ltr, style: T.small.copyWith(color: p.text2)),
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: url));
+                Navigator.pop(c);
+              },
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Opens a waiting item: a site sign-in opens the handoff, a worker's item opens the conversation
+/// (where its card is), and the system's opens a page of its own (#55).
+void openWait(BuildContext context, WaitItem item) {
+  if (item.kind == WaitKind.login) return Nav.handoff(context, item);
+  final d = StoreScope.read(context).data;
+  if (d != null && d.canChat(item.from)) return Nav.chat(context, item.from);
+  Nav.waitItem(context, item);
+}
+
+/// Every http(s) link in a text, in order.
+List<String> linksIn(String s) => [for (final m in RegExp(r'''https?://[^\s)<>]*[^\s)<>.,:;!?'"]''').allMatches(s)) m[0]!];
+
+/// The answer to a question, typed (or pasted: a code, a link). Questions with options show the
+/// options, and "תשובה אחרת" opens the field; a question without options shows the field at once (#55).
+class AnswerField extends StatefulWidget {
+  const AnswerField({super.key, required this.item, this.autofocus = false});
+  final WaitItem item;
+  final bool autofocus;
+  @override
+  State<AnswerField> createState() => _AnswerFieldState();
+}
+
+class _AnswerFieldState extends State<AnswerField> {
+  final text = TextEditingController();
+  late bool open = widget.item.options.isEmpty;
+  bool busy = false;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    text.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    text.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    final t = text.text.trim();
+    if (t.isEmpty || busy) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    final r = await StoreScope.read(context).answerText(widget.item, t);
+    if (!mounted) return;
+    setState(() {
+      busy = false;
+      error = r.ok ? null : r.error;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final store = StoreScope.of(context);
+    final item = widget.item;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+      if (item.options.isNotEmpty || !open)
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final o in item.options) Btn(o.label, kind: BtnKind.tonal, onTap: () => store.answerWait(item, o)),
+          if (!open) Btn('תשובה אחרת', onTap: () => setState(() => open = true)),
+        ]),
+      if (open) ...[
+        if (item.options.isNotEmpty) const SizedBox(height: 8),
+        TextField(
+          key: Key('answer-field-${item.id}'),
+          controller: text,
+          autofocus: widget.autofocus || item.options.isNotEmpty,
+          minLines: 1,
+          maxLines: 4,
+          textInputAction: TextInputAction.send,
+          onSubmitted: (_) => _send(),
+          style: T.body.copyWith(color: p.text),
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: 'תשובה ${toName(store.nameOf(item.from))}',
+            hintStyle: T.body.copyWith(color: p.text3),
+            filled: true,
+            fillColor: p.surface2,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+            suffixIcon: text.text.trim().isEmpty
+                ? IconButton(
+                    tooltip: 'הדבקה',
+                    icon: Ic('content_paste', size: 20, color: p.text2),
+                    onPressed: () async {
+                      final t = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+                      if (!mounted || t == null) return;
+                      text.text = t.trim();
+                    },
+                  )
+                : IconButton(tooltip: 'שליחה', icon: Ic('send', size: 20, color: busy ? p.text3 : p.accent), onPressed: busy ? null : _send),
+          ),
+        ),
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Ic('error', size: 18, color: p.urgent),
+              const SizedBox(width: 6),
+              Expanded(child: Text(error!, style: T.secondary.copyWith(color: p.text))),
+            ]),
+          ),
+      ],
+    ]);
   }
 }
 
@@ -352,7 +505,7 @@ class _ClampedBodyState extends State<_ClampedBody> {
     return LayoutBuilder(builder: (context, c) {
       final style = DefaultTextStyle.of(context).style.merge(widget.style); // as Text.rich draws it
       final tp = TextPainter(
-        text: TextSpan(children: Rich.spans(context, widget.text, style), style: style),
+        text: TextSpan(children: Rich.spans(context, widget.text, style, links: false), style: style),
         textDirection: paragraphDirection(widget.text),
         maxLines: _lines,
         textScaler: MediaQuery.textScalerOf(context),
@@ -361,7 +514,7 @@ class _ClampedBodyState extends State<_ClampedBody> {
       tp.dispose();
       if (!long) return Rich(widget.text, style: widget.style);
       return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-        Rich(widget.text, style: widget.style, maxLines: open ? null : _lines),
+        Rich(widget.text, style: widget.style, maxLines: open ? null : _lines, links: true),
         GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => setState(() => open = !open),

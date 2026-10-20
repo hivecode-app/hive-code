@@ -54,7 +54,11 @@ class CompanyData {
 
   int get waitingCount => waiting.where((w) => w.state == WaitState.open || w.state == WaitState.pending).length;
 
-  Identity who(String id) => identities[id] ?? Identity(id: id, name: id, title: '', teamId: '');
+  Identity who(String id) => identities[id] ?? (id == kSystemId ? kSystem : Identity(id: id, name: id, title: '', teamId: ''));
+
+  /// A worker the owner can talk to. hq itself (the accounts manager, pairing, failures) is not:
+  /// it has no conversation, and a message to it reaches no one (#55).
+  bool canChat(String id) => id != kSystemId;
   Team? teamOf(String identityId) => teams[identities[identityId]?.teamId];
 }
 

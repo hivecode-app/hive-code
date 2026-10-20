@@ -171,7 +171,7 @@ class QuoteStrip extends StatelessWidget {
       child: Row(children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(quote.author, style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, fontWeight: FontWeight.w700, color: p.text)),
+            Text(quote.askId != null ? 'תשובה לשאלה של ${quote.author}' : quote.author, style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, fontWeight: FontWeight.w700, color: p.text)),
             Rich(quote.text, maxLines: 2, auto: true, style: TextStyle(fontFamily: kFont, fontSize: 13, height: 1.4, color: p.text2)),
           ]),
         ),

@@ -143,8 +143,10 @@ class _ChatScreenState extends State<ChatScreen> {
       AskCard() => (d.who(it.from).name, it.question),
       _ => (d.who(widget.identityId).name, ''),
     };
+    // Quoting an open question answers it (#55).
+    final askId = it is AskCard && it.state == AskState.open ? it.askId : null;
     setState(() {
-      quote = Quote(author: author, text: text.split('\n').first, itemId: it.id);
+      quote = Quote(author: author, text: text.split('\n').first, itemId: it.id, askId: askId);
       selected = null;
     });
     focus.requestFocus();
@@ -250,9 +252,12 @@ class _ChatScreenState extends State<ChatScreen> {
               // Desktop keeps lines readable: messages in a 780px column (mockup `.dmain .msgs`).
               itemBuilder: (context, i) {
                 final e = rows[rows.length - 1 - i];
+                final row = _row(context, e, chat, d, openAsk, hitId);
                 return KeyedSubtree(
                   key: ValueKey(e.key),
-                  child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 780), child: _row(context, e, chat, d, openAsk, hitId))),
+                  // Desktop: text selects with the mouse like a page (APP-SPEC §3, #55). The phone
+                  // selects a whole message with a long press and copies it from the top bar.
+                  child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 780), child: widget.embedded ? SelectionArea(child: row) : row)),
                 );
               },
             ),
@@ -403,7 +408,7 @@ class _ChatScreenState extends State<ChatScreen> {
           },
           onRetry: () {
             chat.items.remove(it);
-            store.send(widget.identityId, it.text, it.priority);
+            store.send(widget.identityId, it.text, it.priority, quote: it.replyTo);
           },
         ),
       TextMsg() => TextBubble(msg: it),
@@ -417,7 +422,7 @@ class _ChatScreenState extends State<ChatScreen> {
           child: AskCardView(
             card: it,
             onOther: () {
-              setState(() => quote = Quote(author: d.who(it.from).name, text: it.question, itemId: it.id));
+              setState(() => quote = Quote(author: d.who(it.from).name, text: it.question, itemId: it.id, askId: it.askId));
               focus.requestFocus();
             },
           ),

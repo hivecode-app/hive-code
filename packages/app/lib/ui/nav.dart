@@ -7,6 +7,7 @@ import 'board/ticket_screen.dart';
 import 'chat/chat_screen.dart';
 import '../native/open_url.dart';
 import 'handoff/handoff_screen.dart';
+import 'home/wait_item_screen.dart';
 import 'settings/settings_screen.dart';
 
 enum AppTab { home, convs, board, org }
@@ -81,6 +82,9 @@ class Nav {
     }
     Navigator.of(context).push(MaterialPageRoute(fullscreenDialog: true, builder: (_) => HandoffScreen(item: item)));
   }
+
+  static void waitItem(BuildContext context, WaitItem item) =>
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => WaitItemScreen(item: item)));
 
   static void settings(BuildContext context) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
 }

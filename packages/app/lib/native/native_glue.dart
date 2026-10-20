@@ -91,7 +91,16 @@ class NativeGlue {
     final ctx = _ctx;
     if (ctx == null) return;
     final parts = Uri.parse(route).pathSegments;
-    if (parts.length == 2 && parts[0] == 'chat') {
+    if (parts.length == 2 && parts[0] == 'chat' && parts[1] == kSystemId) {
+      // A notification from the system: its item, not a conversation that doesn't exist (#55).
+      navigatorKey.currentState!.popUntil((r) => r.isFirst);
+      final w = store.data?.waiting.where((w) => w.from == kSystemId && w.state == WaitState.open).firstOrNull;
+      if (w != null) {
+        Nav.waitItem(ctx, w);
+      } else {
+        NavScope.read(ctx).go(AppTab.home);
+      }
+    } else if (parts.length == 2 && parts[0] == 'chat') {
       navigatorKey.currentState!.popUntil((r) => r.isFirst);
       Nav.chat(ctx, parts[1]);
     } else if (parts.length == 2 && parts[0] == 'handoff') {

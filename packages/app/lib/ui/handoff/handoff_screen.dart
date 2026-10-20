@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../data/backend.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
@@ -57,7 +58,9 @@ class _HandoffScreenState extends State<HandoffScreen> {
     });
     final r = item.askId != null
         ? await store.backend.freeAnswer(item.askId!, c)
-        : await store.backend.send(item.from, UserMsg(id: 'm-${DateTime.now().millisecondsSinceEpoch}', ts: DateTime.now(), text: c));
+        : !store.data!.canChat(item.from)
+            ? const CommandResult.fail('לבקשה הזאת אין למי לשלוח קוד. אפשר לסמן "סיימתי".')
+            : await store.backend.send(item.from, UserMsg(id: 'm-${DateTime.now().millisecondsSinceEpoch}', ts: DateTime.now(), text: c));
     if (!mounted) return;
     if (!r.ok) {
       setState(() {
@@ -152,7 +155,8 @@ class _HandoffScreenState extends State<HandoffScreen> {
                         icon: Ic('content_paste', size: 20, color: p.text2),
                         onPressed: () async {
                           final t = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
-                          if (t != null) code.text = t.trim();
+                          if (!mounted || t == null) return;
+                          code.text = t.trim();
                         },
                       ),
                     ),
@@ -160,7 +164,7 @@ class _HandoffScreenState extends State<HandoffScreen> {
                   const SizedBox(height: 10),
                   Align(
                     alignment: AlignmentDirectional.centerStart,
-                    child: Btn(busy ? 'שולח…' : 'שליחת הקוד ל${who.name}', kind: BtnKind.primary, onTap: busy || code.text.trim().isEmpty ? null : _send),
+                    child: Btn(busy ? 'שולח…' : 'שליחת הקוד ${toName(who.name)}', kind: BtnKind.primary, onTap: busy || code.text.trim().isEmpty ? null : _send),
                   ),
                   if (error != null)
                     Padding(
@@ -185,11 +189,13 @@ class _HandoffScreenState extends State<HandoffScreen> {
                   store.notNow(widget.item);
                   Navigator.of(context).maybePop();
                 })),
-                const SizedBox(width: 8),
-                Expanded(child: Btn('הודעה ל${who.name}', hpad: 8, onTap: () {
-                  Navigator.of(context).maybePop();
-                  Nav.chat(context, who.id, focus: true);
-                })),
+                if (store.data!.canChat(who.id)) ...[
+                  const SizedBox(width: 8),
+                  Expanded(child: Btn('הודעה ל${who.name}', hpad: 8, onTap: () {
+                    Navigator.of(context).maybePop();
+                    Nav.chat(context, who.id, focus: true);
+                  })),
+                ],
               ]),
             ),
           ]),

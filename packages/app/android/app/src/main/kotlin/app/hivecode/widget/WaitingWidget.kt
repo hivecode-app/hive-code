@@ -26,7 +26,7 @@ class WaitingWidget : AppWidgetProvider() {
             val prefs = Prefs(context)
             val top = snap.items.firstOrNull()
             prefs.widgetCount = WaitingCount.flutter ?: snap.items.size
-            prefs.widgetTopName = top?.let { snap.identities[it.from ?: SYSTEM_IDENTITY]?.name ?: it.from ?: Wording.SYSTEM_NAME }
+            prefs.widgetTopName = top?.let { snap.identities[it.from ?: SYSTEM_IDENTITY]?.name ?: it.from?.takeIf { f -> f != SYSTEM_IDENTITY } ?: Wording.SYSTEM_NAME }
             prefs.widgetTopLine = top?.let { NotificationPoster.messageText(it, snap) }
         }
 

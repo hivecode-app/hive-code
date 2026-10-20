@@ -19,13 +19,27 @@ class PendingAnswer {
   final Future<void> Function() fire;
   Timer? timer;
 
-  String get label => isGo ? "GO יישלח ל$to בעוד $secondsLeft שנ'" : "יישלח ל$to בעוד $secondsLeft שנ'";
+  String get label => isGo ? "GO יישלח ${toName(to)} בעוד $secondsLeft שנ'" : "יישלח ${toName(to)} בעוד $secondsLeft שנ'";
 }
 
 class AppStore extends ChangeNotifier {
   AppStore(this.backend, {this.undoSeconds = 3, SharedPreferences? prefs}) : _prefs = prefs { // ignore: prefer_initializing_formals
-    backend.addListener(notifyListeners);
+    backend.addListener(_onBackend);
   }
+
+  bool _wasOnline = false;
+
+  /// Redraw, and when the link comes back, send what waited for it (§10.1). Without this the
+  /// outbox was never flushed and a message stayed "ממתינה לחיבור" for good (#55).
+  void _onBackend() {
+    if (_disposed) return;
+    final on = _online;
+    if (on && !_wasOnline) unawaited(flushOutbox());
+    _wasOnline = on;
+    notifyListeners();
+  }
+
+  bool get _online => status.state == LinkState.online || status.state == LinkState.demo || status.state == LinkState.reconnected;
 
   final Backend backend;
   final int undoSeconds;
@@ -57,6 +71,7 @@ class AppStore extends ChangeNotifier {
     }
     await backend.start();
     _restoreDrafts();
+    if (_online) unawaited(flushOutbox()); // came up online: what waited from last time goes now
   }
 
   @override
@@ -65,7 +80,7 @@ class AppStore extends ChangeNotifier {
     for (final p in _pending.values) {
       p.timer?.cancel();
     }
-    backend.removeListener(notifyListeners);
+    backend.removeListener(_onBackend);
     super.dispose();
   }
 
@@ -170,8 +185,8 @@ class AppStore extends ChangeNotifier {
       delivery: Delivery.queued,
     );
     setDraft(identityId, '');
-    final online = status.state == LinkState.online || status.state == LinkState.demo || status.state == LinkState.reconnected;
-    if (!online) {
+    if (quote?.askId != null) return _answer(identityId, msg, quote!.askId!);
+    if (!_online) {
       // Durable outbox: shown with a clock and "ממתינה לחיבור" until the link is back.
       msg.delivery = Delivery.pendingConnection;
       data?.chats[identityId]?.items.add(msg);
@@ -186,6 +201,48 @@ class AppStore extends ChangeNotifier {
     }
     notifyListeners();
     return msg;
+  }
+
+  /// A reply that quotes a question answers it. Never queued: an answer to a question that may be
+  /// gone by then needs a yes or no now, and a refusal says why (#55).
+  Future<UserMsg> _answer(String identityId, UserMsg msg, String askId) async {
+    final chat = data?.chats[identityId];
+    chat?.items.add(msg);
+    notifyListeners();
+    final r = await backend.freeAnswer(askId, msg.text);
+    if (r.ok) {
+      msg.delivery = Delivery.delivered;
+      for (final c in chat?.items.whereType<AskCard>() ?? const <AskCard>[]) {
+        if (c.askId == askId) {
+          c.state = AskState.answered;
+          c.answer = msg.text;
+        }
+      }
+      for (final w in data?.waiting.where((w) => w.askId == askId) ?? const <WaitItem>[]) {
+        w.state = WaitState.answered;
+        w.answerLine = 'ענית: ${msg.text}';
+      }
+    } else {
+      msg.delivery = Delivery.failed;
+      error = r.error;
+    }
+    notifyListeners();
+    return msg;
+  }
+
+  /// Free text typed as the answer to [item] (home row, or a question without options).
+  Future<CommandResult> answerText(WaitItem item, String text) async {
+    final askId = item.askId;
+    if (askId == null) return const CommandResult.fail('לפריט הזה אין שאלה לענות עליה.');
+    final r = await backend.freeAnswer(askId, text);
+    if (r.ok) {
+      item.state = WaitState.answered;
+      item.answerLine = 'ענית: $text';
+    } else {
+      error = r.error;
+    }
+    notifyListeners();
+    return r;
   }
 
   /// "משיכה חזרה": the text goes back to the composer (chat.md §2.1).
@@ -250,7 +307,7 @@ class AppStore extends ChangeNotifier {
       for (final e in (jsonDecode(raw) as List).cast<Map<String, dynamic>>()) {
         final c = d.chats[e['to']];
         if (c == null || c.items.any((i) => i.id == e['id'])) continue;
-        c.items.add(UserMsg(id: e['id'], ts: DateTime.fromMillisecondsSinceEpoch(e['ts']), text: e['text'], delivery: Delivery.pendingConnection));
+        c.items.add(UserMsg(id: e['id'], ts: DateTime.fromMillisecondsSinceEpoch(e['ts']), text: e['text'], priority: Priority.values.asNameMap()[e['priority']] ?? Priority.next, delivery: Delivery.pendingConnection));
       }
     }
     notifyListeners();
@@ -260,22 +317,53 @@ class AppStore extends ChangeNotifier {
     final p = _prefs;
     if (p == null) return;
     final list = (jsonDecode(p.getString('outbox') ?? '[]') as List).cast<Map<String, dynamic>>();
-    list.add({'to': to, 'id': m.id, 'ts': m.ts.millisecondsSinceEpoch, 'text': m.text});
+    list.add({'to': to, 'id': m.id, 'ts': m.ts.millisecondsSinceEpoch, 'text': m.text, 'priority': m.priority.name});
     p.setString('outbox', jsonEncode(list));
   }
 
-  /// Called when the link comes back: flush the outbox in order.
+  bool _flushing = false;
+
+  /// The saved outbox = what still waits in memory, plus entries for conversations not loaded yet.
+  void _rewriteOutbox(CompanyData d) {
+    final p = _prefs;
+    if (p == null) return;
+    final kept = (jsonDecode(p.getString('outbox') ?? '[]') as List).cast<Map<String, dynamic>>().where((e) => !d.chats.containsKey(e['to']));
+    final waiting = [
+      for (final c in d.chats.values)
+        for (final m in c.items.whereType<UserMsg>().where((m) => m.delivery == Delivery.pendingConnection))
+          {'to': c.identityId, 'id': m.id, 'ts': m.ts.millisecondsSinceEpoch, 'text': m.text, 'priority': m.priority.name},
+    ];
+    final all = [...kept, ...waiting];
+    if (all.isEmpty) {
+      p.remove('outbox');
+    } else {
+      p.setString('outbox', jsonEncode(all));
+    }
+  }
+
+  /// Called when the link comes back: flush the outbox in order. A message the server refuses is
+  /// marked failed with the reason on screen, never left waiting for a link that is already up.
   Future<void> flushOutbox() async {
     final d = data;
-    if (d == null) return;
-    for (final c in d.chats.values) {
-      for (final m in c.items.whereType<UserMsg>().where((m) => m.delivery == Delivery.pendingConnection).toList()) {
-        c.items.remove(m);
-        final r = await backend.send(c.identityId, m);
-        if (!r.ok) m.delivery = Delivery.failed;
+    if (d == null || _flushing) return;
+    _flushing = true;
+    try {
+      for (final c in d.chats.values.toList()) {
+        for (final m in c.items.whereType<UserMsg>().where((m) => m.delivery == Delivery.pendingConnection).toList()) {
+          c.items.remove(m);
+          final r = await backend.send(c.identityId, m);
+          if (!r.ok) {
+            // The link went down mid-flush: it waits again. Up and still refused: failed, with why.
+            m.delivery = _online ? Delivery.failed : Delivery.pendingConnection;
+            if (!c.items.contains(m)) c.items.add(m);
+            if (m.delivery == Delivery.failed) error = r.error;
+          }
+        }
       }
+      _rewriteOutbox(d);
+    } finally {
+      _flushing = false;
     }
-    _prefs?.remove('outbox');
     notifyListeners();
   }
 }

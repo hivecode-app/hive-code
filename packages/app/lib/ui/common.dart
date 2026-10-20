@@ -2,10 +2,12 @@
 // .badge (Badge), .btn (Btn), .sec (Section), .list/.row (ListBlock), and the markup text (Rich).
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../data/backend.dart';
 import '../model/models.dart';
+import '../native/open_url.dart';
 import '../theme/icons.dart';
 import '../theme/tokens.dart';
 import 'bidi.dart';
@@ -79,8 +81,11 @@ bool statusLoud(WorkerStatus s) => s == WorkerStatus.waiting || s == WorkerStatu
 enum AvSize { md, sm, xs }
 
 class Monogram extends StatelessWidget {
-  const Monogram({super.key, required this.letter, this.size = AvSize.md, this.temp = false, this.teamSymbol, this.ringColor});
+  const Monogram({super.key, required this.letter, this.size = AvSize.md, this.temp = false, this.teamSymbol, this.ringColor, this.symbol});
   final String letter;
+
+  /// A symbol instead of the letter (the system sender, #55).
+  final String? symbol;
   final AvSize size;
   final bool temp;
   final String? teamSymbol;
@@ -90,6 +95,7 @@ class Monogram extends StatelessWidget {
 
   factory Monogram.of(CompanyData d, String identityId, {AvSize size = AvSize.md, Color? ring}) {
     final who = d.who(identityId);
+    if (identityId == kSystemId) return Monogram(letter: '', symbol: 'dns', size: size);
     return Monogram(letter: who.initial, size: size, temp: who.temp, teamSymbol: d.teamOf(identityId)?.symbol, ringColor: ring);
   }
 
@@ -102,7 +108,9 @@ class Monogram extends StatelessWidget {
       height: dim,
       alignment: Alignment.center,
       decoration: BoxDecoration(shape: BoxShape.circle, color: temp ? null : p.surface3),
-      child: Text(letter, style: TextStyle(fontFamily: kFont, fontWeight: FontWeight.w700, fontSize: font, height: 1, color: p.text)),
+      child: symbol != null
+          ? Ic(symbol!, size: font + 3, color: p.text)
+          : Text(letter, style: TextStyle(fontFamily: kFont, fontWeight: FontWeight.w700, fontSize: font, height: 1, color: p.text)),
     );
     final face = temp ? CustomPaint(painter: _DashedRing(p.text3), child: circle) : circle;
     if (teamSymbol == null || size == AvSize.xs) return SizedBox(width: dim, height: dim, child: face);
@@ -526,7 +534,7 @@ class UndoLine extends StatelessWidget {
 ///   everything else: LTR runs (paths, ids, versions, `PR #17`, English phrases) are wrapped in
 ///   LRI…PDI when the text has Hebrew, so punctuation and brackets around them stay put (bidi.dart).
 class Rich extends StatelessWidget {
-  const Rich(this.markup, {super.key, this.style, this.codeBox = false, this.maxLines, this.overflow, this.align, this.auto = false});
+  const Rich(this.markup, {super.key, this.style, this.codeBox = false, this.maxLines, this.overflow, this.align, this.auto = false, this.links});
   final String markup;
   final TextStyle? style;
   final bool codeBox;
@@ -537,11 +545,15 @@ class Rich extends StatelessWidget {
   /// Align by the text's own direction (chat content). Otherwise aligned like the screen (RTL).
   final bool auto;
 
+  /// Links open on tap. Default: yes, except in clamped previews.
+  final bool? links;
+
   @override
   Widget build(BuildContext context) {
     final base = style ?? DefaultTextStyle.of(context).style;
     return Text.rich(
-      TextSpan(children: spans(context, markup, base, codeBox: codeBox)),
+      // Clamped lines are previews: the row's tap opens it, so links there don't take the tap.
+      TextSpan(children: spans(context, markup, base, codeBox: codeBox, links: links ?? maxLines == null)),
       style: base,
       maxLines: maxLines,
       overflow: overflow ?? (maxLines != null ? TextOverflow.ellipsis : null),
@@ -554,8 +566,13 @@ class Rich extends StatelessWidget {
 
   static final _tok = RegExp(r'''`([^`]+)`|\*\*(.+?)\*\*(?!\*)|\[([^\]\n]+)\]\(([^)\s]+)\)|(https?://[^\s)<>]*[^\s)<>.,:;!?'"])''');
 
-  static List<InlineSpan> spans(BuildContext context, String s, TextStyle base, {bool codeBox = false, bool? isolate}) {
+  /// [links]: links open on tap (#55). Off in one-line previews, where the row's own tap wins.
+  /// Shared by every span of the same link; they hold no state between taps.
+  static final _linkTaps = <String, TapGestureRecognizer>{};
+
+  static List<InlineSpan> spans(BuildContext context, String s, TextStyle base, {bool codeBox = false, bool? isolate, bool links = true}) {
     final p = context.p;
+    TapGestureRecognizer? tap(String url) => links ? _linkTaps.putIfAbsent(url, () => TapGestureRecognizer()..onTap = () => openLink(url)) : null;
     final iso = isolate ?? (s.runes.any(isHebrewRune) && paragraphDirection(s) == TextDirection.rtl);
     String plain(String t) => iso ? isolateLtr(t, force: true) : t;
     final out = <InlineSpan>[];
@@ -582,22 +599,36 @@ class Rich extends StatelessWidget {
       } else if (m.group(2) != null) {
         out.add(TextSpan(
           style: const TextStyle(fontWeight: FontWeight.w700),
-          children: spans(context, m.group(2)!, base.copyWith(fontWeight: FontWeight.w700), codeBox: codeBox, isolate: iso),
+          children: spans(context, m.group(2)!, base.copyWith(fontWeight: FontWeight.w700), codeBox: codeBox, isolate: iso, links: links),
         ));
       } else if (m.group(3) != null) {
-        out.add(TextSpan(
-          style: TextStyle(color: p.accent),
-          children: spans(context, m.group(3)!, base.copyWith(color: p.accent), codeBox: codeBox, isolate: iso),
-        ));
+        // The label's own spans can't carry the tap (a recognizer belongs to a span with text), so
+        // the label is one run with the link's recognizer.
+        final label = m.group(3)!.replaceAll('`', '').replaceAll('**', '');
+        out.add(TextSpan(text: plain(label), style: TextStyle(color: p.accent, decoration: links ? TextDecoration.underline : null, decorationColor: p.accent), recognizer: tap(m.group(4)!)));
       } else {
-        final url = keepWhole(m.group(5)!);
-        out.add(TextSpan(text: iso ? '$kLRI$url$kPDI' : url, style: TextStyle(color: p.accent)));
+        final raw = m.group(5)!;
+        final url = keepWhole(raw);
+        out.add(TextSpan(
+          text: iso ? '$kLRI$url$kPDI' : url,
+          style: TextStyle(color: p.accent, decoration: links ? TextDecoration.underline : null, decorationColor: p.accent),
+          recognizer: tap(raw),
+        ));
       }
       i = m.end;
     }
     if (i < s.length) out.add(TextSpan(text: plain(s.substring(i))));
     return out;
   }
+}
+
+/// Opens a link from a message in the browser (a new tab on the web). Only https links open.
+Future<void> openLink(String url) async {
+  final u = Uri.tryParse(url);
+  if (u == null || u.scheme != 'https') return;
+  try {
+    await openExternalUrl(u.toString());
+  } catch (_) {}
 }
 
 /// Fixed-time formatting used by every list ("14:02").

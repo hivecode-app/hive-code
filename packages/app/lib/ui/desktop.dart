@@ -366,7 +366,7 @@ class _ContextColumn extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             for (final w in others)
               InkWell(
-                onTap: () => Nav.chat(context, w.from),
+                onTap: () => openWait(context, w),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: Rich('${d.who(w.from).name} · ${w.short}', style: TextStyle(fontFamily: kFont, fontSize: 13.5, height: 1.8, color: p.text)),

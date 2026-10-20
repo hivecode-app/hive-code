@@ -5,7 +5,7 @@ package app.hivecode.notify
  * gender-neutral Hebrew, one plain sentence per error, no codes). Pure, so it is unit tested.
  */
 object Wording {
-    const val SYSTEM_NAME = "החברה"
+    const val SYSTEM_NAME = "המערכת" // hq itself as a sender; same name as in the app (#55)
 
     const val GO = "GO"
     const val NOT_NOW = "לא עכשיו"
@@ -22,9 +22,9 @@ object Wording {
     const val SUBTEXT_HANDOFF = "כניסה לאתר"
     const val BLOCKING_PREFIX = "חוסם: "
 
-    /** "לדנה". "החברה" drops its article ("לחברה"); a non-Hebrew name gets a hyphen ("ל-Bob"). */
+    /** "לדנה". "המערכת" drops its article ("למערכת"); a non-Hebrew name gets a hyphen ("ל-Bob"). */
     fun to(name: String): String = when {
-        name == SYSTEM_NAME -> "לחברה"
+        name == SYSTEM_NAME -> "למערכת"
         name.firstOrNull()?.let { it in 'א'..'ת' } == true -> "ל$name"
         else -> "ל-$name"
     }
