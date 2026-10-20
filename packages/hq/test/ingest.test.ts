@@ -158,6 +158,126 @@ test('open_team opens a task: queued under the project, the worker hears the tas
   } finally { await env.cleanup(); }
 });
 
+test('close_team closes the task for real: reason first, shift stopped, task done, never woken again', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock, launcher, clock } = env;
+    const r = await post(sock, '/v1/ops', entry('open_team', { name: 'משימה לסגירה', purpose: 'משהו', project: 'agent-company' }, 'eli-1:30'));
+    const id = r.json.result.task as number;
+    const worker = `agent-company-t${id}`;
+    await hq.scheduler.fill();
+    await until(() => hq.shifts.current(worker)?.state === 'live', 3000, 'task worker live');
+
+    // Not found / not allowed: 4xx with the reason, never `stored`, and the caller hears why.
+    const missing = await post(sock, '/v1/ops', entry('close_team', { team: 't9999' }, 'eli-1:31'));
+    assert.equal(missing.status, 404);
+    assert.match(missing.json.error, /no team/);
+    const foreign = await post(sock, '/v1/ops', entry('close_team', { team: `t${id}` }, 'rotem-1:01', 'rotem'));
+    assert.equal(foreign.status, 403, 'rotem neither opened it nor manages its opener');
+    await until(() => hq.mailbox.get('rotem-1:01-rejected')?.to_identity === 'rotem', 2000, 'rejected caller is told');
+    assert.equal(hq.scheduler.task(id)!.state, 'running');
+    assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM ops WHERE op = 'close_team'`).get() as { n: number }).n, 0, 'a reject is not stored');
+
+    // The opener closes it by the worker's identity.
+    const ok = await post(sock, '/v1/ops', entry('close_team', { team: worker, reason: 'רן ביטל' }, 'eli-1:32'));
+    assert.equal(ok.status, 200);
+    assert.equal(ok.json.result.task, id);
+    await until(() => hq.scheduler.task(id)!.state === 'done', 3000, 'task done');
+    const shift = hq.shifts.get(`${worker}-1`)!;
+    assert.notEqual(shift.state, 'live');
+    assert.equal(shift.end_reason, 'task_done');
+    const host = launcher.hosts.get(`${worker}-1`)!;
+    const reasonAt = host.received.findIndex((f) => f.t === 'send' && /רן ביטל/.test(f.text));
+    const stopAt = host.received.findIndex((f) => f.t === 'stop');
+    assert.ok(reasonAt >= 0 && (stopAt < 0 || reasonAt < stopAt), 'the reason is sent to the worker before the stop');
+
+    // Nothing brings it back: not the scheduler, not a message, not the delivery sweep.
+    const workerLaunches = () => launcher.launches.filter((l) => l.identity === worker).length;
+    const launches = workerLaunches();
+    await hq.scheduler.sweep();
+    hq.mailbox.tell({ msg_id: 'late-1', from: 'eli', to: worker, body: 'עוד משהו?' });
+    await until(() => hq.mailbox.get('late-1')!.state === 'failed', 2000, 'message to a closed task fails');
+    assert.match(hq.mailbox.get('late-1')!.error ?? '', /המשימה כבר נסגרה/);
+    assert.match(hq.mailbox.get('late-1-failed')!.body, /המשימה כבר נסגרה/, 'the sender hears it is closed');
+    clock.advance(hq.cfg.timers.deliveryTimeoutMs * 3);
+    await hq.mailbox.sweep();
+    await hq.scheduler.sweep();
+    assert.equal(workerLaunches(), launches, 'no new shift for a closed task');
+    assert.equal(hq.shifts.current(worker), undefined);
+
+    // Closing again is a no-op ack; the manager of the opener (yoav) may close too.
+    const again = await post(sock, '/v1/ops', entry('close_team', { team: `task-${id}` }, 'yoav-1:30', 'yoav'));
+    assert.equal(again.status, 200);
+    assert.equal(again.json.result.already, true);
+  } finally { await env.cleanup(); }
+});
+
+test('delivery sweep never resurrects a worker whose task closed while its shift was up', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    const t = hq.scheduler.addTask({ title: 'תקוע', project: 'agent-company', labels: ['opened-by:eli'] });
+    const worker = `agent-company-t${t.id}`;
+    await hq.scheduler.fill();
+    await until(() => hq.shifts.current(worker)?.state === 'live', 3000, 'task worker live');
+    // A message stuck in a live shift, and the task closes underneath (the race close_team ↔ sweep).
+    hq.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, state, attempts, last_attempt_at, created_at)
+      VALUES ('stuck-1', 'eli', ?, 'tell', 'תקוע?', 'normal', 'next', 'queued', 1, ?, ?)`).run(worker, clock.now(), clock.now());
+    hq.scheduler.setTaskState(t.id, 'done');
+    const before = launcher.launches.filter((l) => l.identity === worker).length;
+    clock.advance(hq.cfg.timers.deliveryTimeoutMs * 2);
+    await hq.mailbox.sweep();
+    await until(() => !hq.shifts.current(worker), 3000, 'the closed worker\'s shift stops');
+    assert.equal(launcher.launches.filter((l) => l.identity === worker).length, before, 'no resurrect for a closed task');
+    assert.equal(hq.mailbox.get('stuck-1')!.state, 'failed');
+    assert.match(hq.mailbox.get('stuck-1-failed')!.body, /המשימה כבר נסגרה/);
+  } finally { await env.cleanup(); }
+});
+
+test('sweep and completeTask racing: the closed task stays done and no shift comes back', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    const t = hq.scheduler.addTask({ title: 'מרוץ', project: 'agent-company', labels: ['opened-by:eli'] });
+    const worker = `agent-company-t${t.id}`;
+    await hq.scheduler.fill();
+    await until(() => hq.shifts.current(worker)?.state === 'live', 3000, 'task worker live');
+    hq.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, state, attempts, last_attempt_at, created_at)
+      VALUES ('race-1', 'eli', ?, 'tell', 'תקוע?', 'normal', 'next', 'queued', 1, ?, ?)`).run(worker, clock.now(), clock.now());
+    clock.advance(hq.cfg.timers.deliveryTimeoutMs * 2);
+    const before = launcher.launches.filter((l) => l.identity === worker).length;
+    await Promise.all([hq.mailbox.sweep(), hq.scheduler.completeTask(t.id)]);
+    await hq.scheduler.fill();
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(hq.scheduler.task(t.id)!.state, 'done');
+    assert.equal(hq.shifts.current(worker), undefined, 'no live shift for the closed task');
+    assert.equal(launcher.launches.filter((l) => l.identity === worker).length, before, 'never relaunched');
+  } finally { await env.cleanup(); }
+});
+
+test('close_team by display name; an ambiguous name is rejected', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock } = env;
+    const a = hq.scheduler.addTask({ title: 'א', project: 'agent-company', labels: ['opened-by:eli'] });
+    hq.store.db.prepare(`INSERT INTO identities (id, name, team_kind, project, reports_to, lifecycle, source, updated_at)
+      VALUES (?, 'דנה', 'task', 'agent-company', 'eli', 'ephemeral', 'runtime', 0)`).run(`agent-company-t${a.id}`);
+    hq.store.db.prepare('UPDATE tasks SET identity = ? WHERE id = ?').run(`agent-company-t${a.id}`, a.id);
+    const r = await post(sock, '/v1/ops', entry('close_team', { team: 'דנה' }, 'eli-1:40'));
+    assert.equal(r.status, 200);
+    assert.equal(r.json.result.task, a.id);
+    await until(() => hq.scheduler.task(a.id)!.state === 'done', 2000, 'closed by name');
+    const b = hq.scheduler.addTask({ title: 'ב', project: 'agent-company', labels: ['opened-by:eli'] });
+    const c = hq.scheduler.addTask({ title: 'ג', project: 'agent-company', labels: ['opened-by:eli'] });
+    for (const t of [b, c]) {
+      hq.store.db.prepare(`INSERT INTO identities (id, name, team_kind, project, reports_to, lifecycle, source, updated_at)
+        VALUES (?, 'עומר', 'task', 'agent-company', 'eli', 'ephemeral', 'runtime', 0)`).run(`agent-company-t${t.id}`);
+      hq.store.db.prepare('UPDATE tasks SET identity = ? WHERE id = ?').run(`agent-company-t${t.id}`, t.id);
+    }
+    assert.equal((await post(sock, '/v1/ops', entry('close_team', { team: 'עומר' }, 'eli-1:41'))).status, 409);
+  } finally { await env.cleanup(); }
+});
+
 test('ingest over TCP requires the token', async () => {
   const env = await ingestEnv();
   try {

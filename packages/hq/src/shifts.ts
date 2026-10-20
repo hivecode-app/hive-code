@@ -215,6 +215,15 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     return this.locked(identity, () => this.requestUnlocked(identity, opts));
   }
 
+  /** A task worker (team_kind task) whose task is done: no shift starts for it again except by hand. */
+  private taskClosed(identity: string, taskId?: number | null): boolean {
+    const r = (taskId != null
+      ? this.store.db.prepare('SELECT state FROM tasks WHERE id = ?').get(taskId)
+      : this.store.db.prepare(`SELECT t.state FROM tasks t JOIN identities i ON i.id = t.identity
+          WHERE t.identity = ? AND i.team_kind = 'task' ORDER BY t.id DESC LIMIT 1`).get(identity)) as { state: string } | undefined;
+    return r?.state === 'done';
+  }
+
   private async requestUnlocked(identity: string, opts: RequestOpts): Promise<ShiftRow> {
     const cur = this.current(identity);
     if (cur && !opts.forceNew) {
@@ -222,6 +231,8 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       return cur;
     }
     if (cur && opts.forceNew) await this.stopUnlocked(cur.id, opts.reason);
+    // Checked under the identity's lock: a request queued before close_team/status done never launches a closed task.
+    if (opts.reason !== 'manual' && this.taskClosed(identity, opts.taskId)) throw new Error(`task of ${identity} is done: not starting a shift for it`);
 
     const last = this.last(identity);
     // A shift number whose session never ran (launch/stop failed before any frame) is reused as new.

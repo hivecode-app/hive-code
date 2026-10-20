@@ -153,8 +153,45 @@ export class Ingest {
         });
         return { ok: true, id: e.id, ref: `task-${task.id}`, result: { task: task.id, state: task.state } };
       }
+      case 'close_team': {
+        // Closing = completing the task: its shift stops (task_done), the worktree is preserved and removed, and
+        // nothing wakes it again. A team that isn't found or isn't the caller's to close is a 4xx with the reason.
+        const team = need('team');
+        const reason = s(a.reason);
+        const reject = (status: number, why: string, he: string): never => {
+          // MCP writes are acked locally ({queued:true}): the worker hears the rejection through its mailbox.
+          queueMicrotask(() => {
+            try {
+              mailbox.tell({ msg_id: `${e.id}-rejected`, from: 'hq', to: e.identity, kind: 'system', priority: 'now', ref: e.id, body: he });
+            } catch { /* best effort */ }
+          });
+          throw new IngestError(status, why);
+        };
+        const { task: t, ambiguous } = this.hq.scheduler.findTeam(team);
+        if (ambiguous) {
+          const ids = ambiguous.map((x) => `t${x.id}`).join(', ');
+          reject(409, `close_team: ${team} matches more than one open task (${ids})`, `הצוות "${team}" לא נסגר: השם מתאים לכמה משימות פתוחות (${ids}). סגור שוב עם המזהה.`);
+        }
+        if (!t) reject(404, `close_team: no team ${team}`, `הצוות "${team}" לא נסגר: אין משימה כזו. אפשר לסגור לפי מזהה (t22), לפי ה-identity של העובד (lumo-t22) או לפי השם שלו.`);
+        if (!this.hq.scheduler.canCloseTeam(t!, e.identity)) {
+          reject(403, `close_team: ${e.identity} may not close task ${t!.id}`, `הצוות "${team}" (t${t!.id}) לא נסגר: רק מי שפתח אותו, המנהל שלו, המנהל של העובד (או ראש הפרויקט, כשאין מי שפתח) או ${this.hq.cfg.managerId} יכולים לסגור.`);
+        }
+        if (t!.state === 'done') return { ok: true, id: e.id, ref: `task-${t!.id}`, result: { task: t!.id, state: 'done', already: true } };
+        const worker = t!.identity;
+        queueMicrotask(() => {
+          // The reason reaches the worker before its shift stops (same host connection, written first).
+          if (worker && reason) {
+            try {
+              mailbox.tell({ msg_id: `${e.id}-close`, from: e.identity, to: worker, kind: 'system', priority: 'now', ref: e.id,
+                body: `הצוות נסגר על ידי ${mailbox.label(e.identity)}: ${reason}\nהמשמרת נעצרת עכשיו.` });
+            } catch { /* best effort */ }
+          }
+          this.hq.store.bg(this.hq.scheduler.completeTask(t!.id), 'task.close');
+        });
+        return { ok: true, id: e.id, ref: `task-${t!.id}`, result: { task: t!.id, state: 'closing' } };
+      }
       default:
-        // remember / handoff / status / close_team: stored durably now (ops table),
+        // remember / handoff / status: stored durably now (ops table),
         // consumed by memory consolidation, prime.json (handoff) and the board.
         return { ok: true, id: e.id, result: { stored: true } };
     }

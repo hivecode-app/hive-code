@@ -208,6 +208,8 @@ export class Mailbox {
       return;
     }
     if (!shift) {
+      // A task worker whose task is done is not woken again (it would take a slot as <identity>-2).
+      if (this.taskClosed(m.to_identity)) { this.failClosed(m); return; }
       // Resting or dead: wake it. The message becomes the first prompt once the host is live (flush on `live`).
       try {
         await this.shifts.request(m.to_identity, { reason: 'message' });
@@ -309,26 +311,61 @@ export class Mailbox {
     const cutoff = this.store.now() - this.cfg.timers.deliveryTimeoutMs;
     const stale = (this.store.db.prepare(`SELECT * FROM messages WHERE state = 'queued' AND last_attempt_at IS NOT NULL AND last_attempt_at <= ?
       ORDER BY created_at, rowid`).all(cutoff) as StoredRow[]).map(hydrate);
-    for (const m of stale.filter((x) => x.resurrected)) this.fail(m);
+    // A task worker whose task closed meanwhile is not resurrected: its messages close as failed, with why.
+    for (const m of stale.filter((x) => !this.shifts.current(x.to_identity) && this.taskClosed(x.to_identity))) this.failClosed(m);
+    for (const m of stale.filter((x) => x.resurrected && this.get(x.id)!.state === 'queued')) this.fail(m);
     // One resurrection per identity, however many of its messages are stale.
     const byIdentity = new Map<string, MessageRow[]>();
-    for (const m of stale.filter((x) => !x.resurrected)) byIdentity.set(m.to_identity, [...(byIdentity.get(m.to_identity) ?? []), m]);
+    for (const m of stale.filter((x) => !x.resurrected && this.get(x.id)!.state === 'queued')) byIdentity.set(m.to_identity, [...(byIdentity.get(m.to_identity) ?? []), m]);
     for (const [identity, msgs] of byIdentity) {
       const mark = this.store.db.prepare('UPDATE messages SET resurrected = 1, last_attempt_at = ? WHERE id = ?');
       for (const m of msgs) { mark.run(this.store.now(), m.id); this.store.emit('message.retry', identity, { id: m.id }); }
       const cur = this.shifts.current(identity);
+      // Closed while its shift was still up (close_team on a stuck worker): stop it, never resurrect it.
+      if (this.taskClosed(identity)) {
+        if (cur && cur.kind !== 'foreign') {
+          await this.shifts.stop(cur.id, 'task_done', cur.started_at)
+            .catch((e: Error) => this.store.emit('mailbox.stop_failed', identity, { shift: cur.id, error: e.message }));
+        }
+        for (const m of msgs) if (this.get(m.id)!.state === 'queued') this.failClosed(m);
+        continue;
+      }
       try {
         if (cur && cur.kind !== 'foreign') {
           // The shift we tried isn't accepting: restart it (resume) so the messages become its next prompts.
           await this.shifts.stop(cur.id, 'resurrect', cur.started_at);
         }
-        if (!cur || cur.kind !== 'foreign') await this.shifts.request(identity, { reason: 'resurrect' });
+        // The task may have closed while the old shift was stopping.
+        if ((!cur || cur.kind !== 'foreign') && !this.taskClosed(identity)) await this.shifts.request(identity, { reason: 'resurrect' });
       } catch (e) {
         const err = this.store.db.prepare('UPDATE messages SET error = ? WHERE id = ?');
         for (const m of msgs) err.run(`resurrect failed: ${(e as Error).message}`, m.id);
       }
       for (const m of msgs) await this.deliver(m.id, true);
     }
+  }
+
+  /** The identity is a task worker and its task is done: nothing should start a shift for it. */
+  taskClosed(identity: string): boolean {
+    const r = this.store.db.prepare(`SELECT t.state FROM tasks t JOIN identities i ON i.id = t.identity
+      WHERE t.identity = ? AND i.team_kind = 'task' ORDER BY t.id DESC LIMIT 1`).get(identity) as { state: string } | undefined;
+    return r?.state === 'done';
+  }
+
+  /** A message to a closed task's worker: failed with the reason, and the sender hears the task is closed. */
+  private failClosed(m: MessageRow): void {
+    const why = 'המשימה כבר נסגרה';
+    this.setState(m.id, 'failed', { error: why });
+    // System notes (a close reason that didn't make it before the stop, hq notices) are not re-reported.
+    if (m.kind === 'system' || m.from_identity === 'hq') return;
+    const title = `הודעה ל-${this.label(m.to_identity)} לא נמסרה: ${why}`;
+    if (m.from_identity === OWNER) {
+      this.inbox.add({ kind: 'delivery_failure', title, body: m.body.slice(0, 400), from_identity: m.to_identity, urgency: 'normal',
+        ref: m.id, dedupe_key: `delivery_failure:${m.id}` });
+      return;
+    }
+    this.tell({ msg_id: `${m.id}-failed`, from: 'hq', to: m.from_identity, kind: 'system', ref: m.id, priority: 'next',
+      body: `ההודעה שלך ${m.id} ל-${this.label(m.to_identity)} לא נמסרה: ${why}, והעובד לא מוקם מחדש. אם צריך להמשיך את העבודה, פותחים צוות חדש (open_team).` });
   }
 
   private fail(m: MessageRow): void {

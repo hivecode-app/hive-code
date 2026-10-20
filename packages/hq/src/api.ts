@@ -207,6 +207,15 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     catch (e) { throw new HttpError(400, (e as Error).message); }
   });
 
+  // Priority (p0..p3, B.16 queue order) without editing hq.db by hand.
+  route('PATCH', '/api/tasks/:id', async ({ params, body }) => {
+    const b = await body();
+    if (!Number.isInteger(b.priority) || (b.priority as number) < 0 || (b.priority as number) > 3) throw new HttpError(400, 'priority must be an integer 0..3');
+    const t = hq.scheduler.setTaskPriority(Number(params[0]), b.priority as number);
+    if (!t) throw new HttpError(404, `no task ${params[0]}`);
+    return { task: t };
+  });
+
   route('POST', '/api/tasks/:id/done', async ({ params }) => {
     const t = await hq.scheduler.completeTask(Number(params[0]));
     if (!t) throw new HttpError(404, `no task ${params[0]}`);

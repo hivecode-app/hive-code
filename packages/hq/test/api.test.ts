@@ -97,6 +97,12 @@ test('API: org/board with derived status, tell, asks/answer, toggles, tasks, inb
     const task = await call('POST', '/api/tasks', { title: 'טיקט', project: 'agent-company', ref: 'agent-company#1' });
     assert.equal(task.json.task.state, 'queued');
     assert.equal((await call('GET', '/api/tasks')).json.queue[0].id, task.json.task.id);
+    const tid = task.json.task.id;
+    assert.equal((await call('PATCH', `/api/tasks/${tid}`, { priority: 0 })).json.task.priority, 0);
+    assert.equal(hq.scheduler.task(tid)!.priority, 0);
+    assert.equal((await call('PATCH', `/api/tasks/${tid}`, { priority: 7 })).status, 400);
+    assert.equal((await call('PATCH', `/api/tasks/${tid}`, { priority: '1' })).status, 400);
+    assert.equal((await call('PATCH', '/api/tasks/99999', { priority: 1 })).status, 404);
 
     const st = await call('POST', '/api/shifts/start', { identity: 'rotem' });
     assert.equal(st.json.shift.identity, 'rotem');

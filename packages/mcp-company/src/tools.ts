@@ -80,9 +80,10 @@ export const TOOLS: readonly ToolDef[] = [
     repo: s('ה-checkout מהאמנה (name), אם יש בפרויקט יותר מאחד. ברירת מחדל: הראשון / charter checkout name, default the first'),
     members: strs('identities של חברי הצוות / member identities'),
   }, ['name', 'purpose']),
-  tool('close_team', 'סגירת צוות. Close a team.', {
-    team: s('שם או מזהה הצוות / team name or id'),
-    reason: s('סיבה / reason'),
+  tool('close_team', 'סגירת צוות משימה: המשימה נסגרת, המשמרת נעצרת והעבודה נשמרת. רק מי שפתח, המנהל שלו, המנהל של העובד או יואב. '
+    + 'Close a task team: the task is done, its shift stops, uncommitted work is preserved.', {
+    team: s('מזהה המשימה (t22), ה-identity של העובד (lumo-t22) או השם שלו / task id, worker identity or name'),
+    reason: s('סיבה, נשלחת לעובד לפני העצירה / reason, sent to the worker before the stop'),
   }, ['team']),
   tool('request_go', 'בקשת אישור לפעולה. מופיעה אצלו כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. '
     + 'מה שהוא כותב בשיחה כשהבקשה פתוחה הוא התשובה. '

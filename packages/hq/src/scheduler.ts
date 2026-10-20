@@ -244,8 +244,13 @@ export class Scheduler {
     const row = await this.shifts.request(identity, { kind: 'work', reason: 'task', taskId: t.id, cwd: ws?.path });
     // The identity already had a live shift (no new launch): bind the task to it so its end closes the loop.
     if (row.task_id !== t.id) this.shifts.setFields(row.id, { task_id: t.id });
-    this.store.db.prepare(`UPDATE tasks SET state = 'running', shift_id = ?, started_at = COALESCE(started_at, ?), updated_at = ? WHERE id = ?`)
-      .run(row.id, this.store.now(), this.store.now(), t.id);
+    const set = this.store.db.prepare(`UPDATE tasks SET state = 'running', shift_id = ?, started_at = COALESCE(started_at, ?), updated_at = ?
+      WHERE id = ? AND state != 'done'`).run(row.id, this.store.now(), this.store.now(), t.id);
+    if (!set.changes) {
+      // Closed while the shift was starting: a task worker's shift does not run (a standing identity's shift is its own).
+      if (taskIdentity) await this.shifts.stop(row.id, 'task_done', row.started_at);
+      return false;
+    }
     this.store.emit('task.state', identity, { id: t.id, state: 'running', shift: row.id });
     // One prompt per run of the shift: a resumed run gets the task again (the old prompt id would be a no-op).
     this.mailbox.tell({ msg_id: `task-${t.id}-${row.id}-${row.started_at}`, from: openedBy ?? lead ?? 'hq', to: identity, priority: 'next',
@@ -373,13 +378,61 @@ export class Scheduler {
   async completeTask(id: number): Promise<TaskRow | undefined> {
     const t = this.task(id);
     if (!t || t.state === 'done') return t;
+    // A task worker's identity exists only for its task: any shift of it goes (also one a message woke, task_id null).
+    const owns = (s: { task_id: number | null }) => s.task_id === id || (s.task_id == null && getIdentity(this.store, t.identity!)?.team_kind === 'task');
     const cur = t.identity ? this.shifts.current(t.identity) : undefined;
-    if (cur && cur.task_id === id) await this.shifts.stop(cur.id, 'task_done', cur.started_at);
+    if (cur && owns(cur)) await this.shifts.stop(cur.id, 'task_done', cur.started_at);
+    // A run that started while we were stopping (resurrect, a message) is stopped too, before the worktree goes.
+    const late = t.identity ? this.shifts.current(t.identity) : undefined;
+    if (late && late.kind !== 'foreign' && owns(late) && (late.id !== cur?.id || late.started_at !== cur.started_at)) {
+      await this.shifts.stop(late.id, 'task_done', late.started_at);
+    }
     if (this.task(id)!.state !== 'done') {
       this.setTaskState(id, 'done');
       this.closeWorktree(id);
     }
     return this.task(id);
+  }
+
+  /**
+   * close_team's `team` → its task: `t22` / `task-22` / `#22` / `22`, the task worker's identity (`lumo-t22`) or a
+   * shift of it (`lumo-t22-2`), the task's ref, or the worker's display name. An open task wins over a done one;
+   * two open tasks behind one name are ambiguous (the caller says which).
+   */
+  findTeam(team: string): { task?: TaskRow; ambiguous?: TaskRow[] } {
+    const db = this.store.db;
+    const q = team.trim();
+    const num = /^(?:t|task-|#)?(\d+)$/i.exec(q);
+    if (num) { const t = this.task(Number(num[1])); return t ? { task: t } : {}; }
+    const shiftTask = (db.prepare('SELECT task_id FROM shifts WHERE id = ?').get(q) as { task_id: number | null } | undefined)?.task_id ?? null;
+    const rows = db.prepare(`SELECT t.* FROM tasks t LEFT JOIN identities i ON i.id = t.identity
+      WHERE (t.identity = @q AND i.team_kind = 'task') OR t.ref = @q OR t.id = @shiftTask OR (i.name = @q AND i.team_kind = 'task')
+      ORDER BY CASE WHEN t.state = 'done' THEN 1 ELSE 0 END, t.id DESC`)
+      .all({ q, shiftTask }) as TaskRow[];
+    const open = rows.filter((t) => t.state !== 'done');
+    if (open.length > 1) return { ambiguous: open };
+    return rows[0] ? { task: rows[0] } : {};
+  }
+
+  /** Who may close a task team: whoever opened it, that opener's manager, the worker's manager, or the company manager. */
+  canCloseTeam(t: TaskRow, by: string): boolean {
+    if (by === this.cfg.managerId) return true;
+    const openedBy = (JSON.parse(t.labels || '[]') as string[]).find((l) => l.startsWith('opened-by:'))?.slice('opened-by:'.length);
+    const allowed = new Set<string>();
+    if (openedBy) { allowed.add(openedBy); const m = getIdentity(this.store, openedBy)?.reports_to; if (m) allowed.add(m); }
+    const workerMgr = t.identity ? getIdentity(this.store, t.identity)?.reports_to : undefined;
+    if (workerMgr) allowed.add(workerMgr);
+    if (!openedBy && t.project) { const lead = projectLead(this.store, t.project); if (lead) allowed.add(lead); }
+    return allowed.has(by);
+  }
+
+  setTaskPriority(id: number, priority: number): TaskRow | undefined {
+    if (!this.task(id)) return undefined;
+    this.store.db.prepare('UPDATE tasks SET priority = ?, updated_at = ? WHERE id = ?').run(priority, this.store.now(), id);
+    const t = this.task(id)!;
+    this.store.emit('task.priority', t.identity, { id, priority });
+    queueMicrotask(() => this.store.bg(this.fill(), 'scheduler.fill'));
+    return t;
   }
 
   /** A.4: blocking ask → manager after N minutes (immediately at night, B.16). Non-blocking asks wait. */
