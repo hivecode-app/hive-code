@@ -34,6 +34,8 @@ class _FakeHq {
       Object out;
       if (name != null) {
         out = jsonDecode(File('test/fixtures/hq/$name.json').readAsStringSync()) as Object;
+      } else if (path == '/api/seen') {
+        out = {'seen': {'chats': 5000}};
       } else if (path == '/api/conversations') {
         out = {'conversations': convs.values.toList()};
       } else if (path == '/api/messages' && req.uri.queryParameters['identity'] == 'owner') {
@@ -135,5 +137,27 @@ void main() {
     expect(r.ok, isTrue);
     expect(fake.calls, contains('POST /api/conversations/agent-company-t1/mute {"for":"week"}'));
     expect(hq.data!.conversation('agent-company-t1')!.muted, isTrue);
+  });
+
+  test('hq backend: "since you were here" comes from hq, follows another device, and is told when he leaves', () async {
+    final fake = _FakeHq();
+    await fake.start();
+    addTearDown(() => fake.server.close(force: true));
+    final hq = HqBackend(baseUrl: fake.url, token: 't');
+    addTearDown(hq.dispose);
+    await hq.start();
+    await until(() => hq.seenAt('chats') != null);
+    expect(hq.seenAt('chats'), DateTime.fromMillisecondsSinceEpoch(5000));
+    // Left the chats screen on the laptop.
+    fake.send({'seq': 101, 'type': 'seen.changed', 'identity': null, 'data': {'screen': 'chats', 'at': 8000}});
+    await until(() => hq.seenAt('chats') == DateTime.fromMillisecondsSinceEpoch(8000));
+    expect(hq.seenAt('chats'), DateTime.fromMillisecondsSinceEpoch(8000));
+    fake.send({'seq': 102, 'type': 'seen.changed', 'identity': null, 'data': {'screen': 'chats', 'at': 6000}});
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(hq.seenAt('chats'), DateTime.fromMillisecondsSinceEpoch(8000), reason: 'only forward');
+    // Left it here.
+    await hq.markSeen('chats', DateTime.fromMillisecondsSinceEpoch(9000));
+    expect(fake.calls, contains('PUT /api/seen/chats {"at":9000}'));
+    expect(hq.seenAt('chats'), DateTime.fromMillisecondsSinceEpoch(9000));
   });
 }

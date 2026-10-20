@@ -13,6 +13,7 @@ import 'native/window_focus.dart';
 import 'theme/theme.dart';
 import 'theme/tokens.dart';
 import 'ui/auth/sign_in_screen.dart';
+import 'ui/convs/conversations_screen.dart';
 import 'ui/nav.dart';
 import 'ui/shell.dart';
 
@@ -171,7 +172,14 @@ class _CompanyAppState extends State<CompanyApp> {
     // window left open behind another one (inactive) must not read his messages or keep them from alerting.
     // The lifecycle only hears changes and, on the web, can miss the first focus: start from the truth and
     // follow the window's own focus events too (window_focus.dart).
-    void sync() => widget.backend.setVisible(windowFocused());
+    // The app going away while the chats screen is in front ends his visit there ("מאז שהיית פה").
+    var shown = windowFocused();
+    void sync() {
+      final now = windowFocused();
+      if (shown && !now && (nav.wide || nav.tab == AppTab.chats)) widget.store.markChatsSeen(ConversationsScreen.clock());
+      shown = now;
+      widget.backend.setVisible(now);
+    }
     _life = AppLifecycleListener(onStateChange: (_) => sync());
     _offFocus = onWindowFocusChange(sync);
     sync();

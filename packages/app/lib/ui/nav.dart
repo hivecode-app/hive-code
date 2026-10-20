@@ -27,12 +27,16 @@ class AppNav extends ChangeNotifier {
     }
     // Leaving "סטטוס", by any way (a tab, back, a link, a shortcut), is his visit there.
     if (tab == AppTab.status && t != AppTab.status) onLeaveStatus?.call();
+    if (tab == AppTab.chats && t != AppTab.chats) onLeaveChats?.call();
     tab = t;
     notifyListeners();
   }
 
   /// Set by the shell: what finishes after this is "מאז הביקור הקודם" next time.
   VoidCallback? onLeaveStatus;
+
+  /// Set by the shell: what finishes after this is "מאז שהיית פה" on the chats screen next time.
+  VoidCallback? onLeaveChats;
 
   /// Something on the current tab that Android back should close first (an open search).
   VoidCallback? backHandler;

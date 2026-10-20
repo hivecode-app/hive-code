@@ -172,3 +172,32 @@ test('migration: what was there before counts as read', () => {
     assert.equal(row.read_at, 100);
   } finally { s.close(); }
 });
+
+test('seen: when he last left the chats screen, one value for every device, only forward', async () => {
+  const env = await makeEnv();
+  try {
+    await env.hq.start({ listen: true, timers: false });
+    const token = readFileSync(join(env.cfg.stateDir, 'api-token'), 'utf8').trim();
+    const call = async (method: string, path: string, body?: unknown) => {
+      const res = await fetch(`http://127.0.0.1:${env.hq.port}${path}`, {
+        method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+      });
+      return { status: res.status, json: (await res.json()) as Record<string, any> };
+    };
+    assert.deepEqual((await call('GET', '/api/seen')).json.seen, { chats: null }, 'never yet');
+    const t0 = env.clock.t;
+    let r = await call('PUT', '/api/seen/chats', {});
+    assert.equal(r.json.at, t0, 'hq\'s clock by default');
+    r = await call('PUT', '/api/seen/chats', { at: t0 + 60_000 });
+    assert.equal(r.json.at, t0, 'not in the future');
+    env.clock.advance(5000);
+    r = await call('PUT', '/api/seen/chats', { at: t0 + 3000 });
+    assert.equal(r.json.at, t0 + 3000);
+    r = await call('PUT', '/api/seen/chats', { at: t0 + 1000 });
+    assert.equal(r.json.at, t0 + 3000, 'never moves back');
+    assert.equal((await call('GET', '/api/seen')).json.seen.chats, t0 + 3000);
+    assert.equal((await call('PUT', '/api/seen/status', {})).status, 400);
+    const events = env.hq.store.eventsAfter(0, 1000).filter((e) => e.type === 'seen.changed').map((e) => (e.data as { at: number }).at);
+    assert.deepEqual(events, [t0, t0 + 3000], 'other devices hear of it');
+  } finally { await env.cleanup(); }
+});

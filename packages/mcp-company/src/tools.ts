@@ -77,9 +77,11 @@ export const TOOLS: readonly ToolDef[] = [
     reason: s('סיבת ההעברה, e.g. context, end_of_day / why handing off'),
     task: s('מזהה משימה / task id'),
   }, ['state']),
-  tool('status', 'עדכון מצב העובד. עם state: "done" המשימה נסגרת, ו-summary הוא מה שרן רואה ב"מה הסתיים". '
+  tool('status', 'עדכון מצב העובד. עם state: "done" המשימה נסגרת, ותמיד כותבים summary: זו השורה שרן רואה ב"מאז שהיית פה" וב"מה הסתיים". '
+    + 'בלי summary הוא רואה רק את שם המשימה. '
     + 'אם משהו עוד מחכה לו (פריסה אחרי GO, או משהו שהוא צריך לבדוק בעצמו), מוסיפים awaiting ו-awaiting_note, וזה מופיע אצלו ב"מה לבדוק". '
-    + 'Update your working status. With state "done" the task closes; summary is the line he sees under "what finished". '
+    + 'Update your working status. With state "done" the task closes; always give summary: it is the line he sees under "since you were here" '
+    + 'and "what finished"; without it he sees only the task title. '
     + 'If it still waits on something (a deploy, or something he must check), add awaiting and awaiting_note: it shows under "what to check".', {
     state: s('מצב, e.g. working | blocked | idle | done / state'),
     note: s('הערה קצרה / short note'),
@@ -104,8 +106,10 @@ export const TOOLS: readonly ToolDef[] = [
     + 'Close a task team: the task is done, its shift stops, uncommitted work is preserved.', {
     team: s('מזהה המשימה (t22), ה-identity של העובד (lumo-t22) או השם שלו / task id, worker identity or name'),
     reason: s('סיבה, נשלחת לעובד לפני העצירה / reason, sent to the worker before the stop'),
-    summary: s('שורה אחת במילים שלו על מה שהמשימה עשתה, בלי מספרי PR, e.g. "מיכל בצוות של לומו בוט". גוברת על מה שהעובד כתב '
-      + '/ one line in his words on what the task did, no PR numbers; overrides the worker\'s'),
+    summary: s('שורה אחת במילים שלו, מה השתנה אצלו, בלי מספרי PR ובלי מונחים טכניים, e.g. "מיכל בצוות של לומו בוט". '
+      + 'גוברת על מה שהעובד כתב. כתבו אותה כשהעובד לא כתב, אחרת הוא רואה רק את שם המשימה '
+      + '/ one line in his words on what changed for him, no PR numbers or jargon; overrides the worker\'s. Give it when the worker gave none, '
+      + 'or he sees only the task title'),
     ...awaitingArgs,
   }, ['team']),
   tool('request_go', 'בקשת אישור לפעולה. מופיעה אצלו כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. '

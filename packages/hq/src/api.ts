@@ -85,6 +85,7 @@ const strings = (v: unknown, name: string): string[] | undefined => {
 const hasFiles = (b: Record<string, unknown>): boolean => Array.isArray(b.attachments) && b.attachments.length > 0;
 const URGENCIES = ['urgent', 'normal', 'low'] as const;
 const PRIORITIES = ['now', 'next', 'later'] as const;
+const SEEN_SCREENS = ['chats'] as const;
 
 export function health(hq: Hq) {
   const lastSweep = Number(hq.store.getMeta('last_sweep_at') ?? 0);
@@ -174,6 +175,20 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     const duration = oneOf(b.for, MUTE_FOR, 'for');
     if (!duration) throw new HttpError(400, 'for is required');
     return { conversation: hq.conversations.mute(decodeURIComponent(params[0]!), duration) };
+  });
+  // When he last left a screen, one value for all his devices: the chats screen's "מאז שהיית פה" is what
+  // happened after it. It only moves forward, and every device hears of it (`seen.changed`).
+  route('GET', '/api/seen', () => ({ seen: Object.fromEntries(SEEN_SCREENS.map((s) => [s, Number(hq.store.getMeta(`seen:${s}`)) || null])) }));
+  route('PUT', '/api/seen/:screen', async ({ params, body }) => {
+    const screen = oneOf(decodeURIComponent(params[0]!), SEEN_SCREENS, 'screen')!;
+    const b = await body();
+    const now = hq.store.now();
+    const at = typeof b.at === 'number' && Number.isFinite(b.at) ? Math.min(b.at, now) : now;
+    const prev = Number(hq.store.getMeta(`seen:${screen}`)) || 0;
+    if (at <= prev) return { screen, at: prev };
+    hq.store.setMeta(`seen:${screen}`, String(at));
+    hq.store.emit('seen.changed', null, { screen, at });
+    return { screen, at };
   });
   // The conversation open on this device's screen right now (null = none, or the app is in the background):
   // a message there doesn't alert him. Said again every 30 s while it stays open.

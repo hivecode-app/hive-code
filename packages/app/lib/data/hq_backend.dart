@@ -222,6 +222,42 @@ class HqBackend extends Backend {
       if (i['ref'] != null) _askToInbox[i['ref'] as String] = i['id'] as int;
     }
     unawaited(_loadLastLines());
+    unawaited(_loadSeen());
+  }
+
+  /// When he last left each screen, from hq (`GET /api/seen`); empty from an hq without it.
+  final Map<String, DateTime> _seen = {};
+
+  @override
+  DateTime? seenAt(String screen) => _seen[screen];
+
+  Future<void> _loadSeen() async {
+    try {
+      final res = (await _get('/api/seen')) as Map<String, dynamic>;
+      final seen = res['seen'];
+      if (seen is! Map) return;
+      var changed = false;
+      for (final e in seen.entries) {
+        if (e.value is int) changed |= _seenAt(e.key as String, e.value as int);
+      }
+      if (changed) notifyListeners();
+    } catch (_) {
+      // An older hq (404) or a blip: this device's own value stands in.
+    }
+  }
+
+  /// Only forward, as in hq. True when it moved.
+  bool _seenAt(String screen, int ms) {
+    final t = DateTime.fromMillisecondsSinceEpoch(ms), was = _seen[screen];
+    if (was != null && !t.isAfter(was)) return false;
+    _seen[screen] = t;
+    return true;
+  }
+
+  @override
+  Future<void> markSeen(String screen, DateTime at) async {
+    _seenAt(screen, at.millisecondsSinceEpoch);
+    await _send('PUT', '/api/seen/${Uri.encodeComponent(screen)}', {'at': at.millisecondsSinceEpoch});
   }
 
   /// Last line and time per conversation, newest first, Yoav pinned (APP-SPEC §4.3).
@@ -483,6 +519,10 @@ class HqBackend extends Backend {
       _refreshSoon();
     }
     if (type == 'conv.read' || type == 'conv.muted') _refreshConvs();
+    if (type == 'seen.changed' && e['data'] is Map) {
+      final data = e['data'] as Map;
+      if (data['screen'] is String && data['at'] is int && _seenAt(data['screen'] as String, data['at'] as int)) notifyListeners();
+    }
     // The first replay is history the snapshot and openConversation already cover: building chats
     // from it only cost time at start.
     if (_skipEngineReplay && _replaying && type.startsWith('engine.')) return;

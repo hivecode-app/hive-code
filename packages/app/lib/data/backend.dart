@@ -174,6 +174,12 @@ abstract class Backend extends ChangeNotifier {
   /// and a message there alerts him only when he doesn't.
   void setVisible(bool visible) {}
 
+  /// When he last left [screen] ("chats"), as the server keeps it for all his devices; null when it has none.
+  DateTime? seenAt(String screen) => null;
+
+  /// He left [screen] at [at]: what happens after it is "מאז שהיית פה" next time, on every device.
+  Future<void> markSeen(String screen, DateTime at) async {}
+
   /// "השתקה" for 8 hours, a week or always, or its undo; kept on the server, the same on every device.
   Future<CommandResult> mute(String identityId, MuteFor duration) async => const CommandResult.fail('השתקה לא זמינה כאן.');
 }

@@ -9,8 +9,10 @@ import '../../theme/tokens.dart';
 import '../common.dart';
 import '../nav.dart';
 import '../system_bar.dart';
+import 'head.dart';
 import 'kbd.dart';
 
+export 'head.dart';
 export 'kbd.dart';
 
 class ConversationsScreen extends StatefulWidget {
@@ -18,6 +20,9 @@ class ConversationsScreen extends StatefulWidget {
 
   /// Desktop list column (mockup screen 10): smaller rows, quick-switch field.
   final bool compact;
+
+  /// The clock the head reads "how long" and "since" from (tests pin it).
+  static DateTime Function() clock = DateTime.now;
 
   /// Builds since the last reset, counted in debug and test builds only (test/perf_bench_test.dart).
   static int debugBuilds = 0;
@@ -141,46 +146,33 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         const SizedBox(height: 80),
       ]);
 
-  /// Only the conversations with something waiting for him ("מחכה לך" bar, tapped).
-  bool waitingOnly = false;
-
-  /// The main screen (#53): "מחכה לך", Yoav pinned, who is in the middle of a task, then the rest by
-  /// latest. Task workers live in their project's screen; one with an unread message still shows here,
-  /// so nothing he hasn't read hides behind a count.
+  /// The main screen: the card of what needs him (head.dart), Yoav pinned, then one list by latest; who
+  /// works now is marked in his own row. Task workers live in their project's screen; one with an unread
+  /// message still shows here, so nothing he hasn't read hides behind a count.
   Widget _mainList(BuildContext context, CompanyData d, AppStore store) {
-    final waitingFrom = <String>[
-      for (final w in d.waiting)
-        if (w.state == WaitState.open || w.state == WaitState.pending) w.from,
-    ];
     final shown = [for (final c in d.conversations) if (!d.who(c.identityId).temp || c.unread > 0) c];
     final yoav = shown.where((c) => c.identityId == 'yoav').firstOrNull;
     final working = nowWorking(d);
     final others = [
       for (final c in shown)
-        if (c.identityId != 'yoav' && !working.containsKey(c.identityId) && (c.lastLine.isNotEmpty || c.unread > 0)) c,
+        if (c.identityId != 'yoav' && (working.containsKey(c.identityId) || c.lastLine.isNotEmpty || c.unread > 0)) c,
     ];
     // A finished task worker with unread lines goes below every live conversation (#40).
     final rest = [...others.where((c) => !d.isDone(c.identityId)), ...others.where((c) => d.isDone(c.identityId))];
     ConversationSummary conv(String id) => d.conversations.where((c) => c.identityId == id).firstOrNull ?? ConversationSummary(identityId: id, lastLine: '', time: '');
-    if (waitingOnly) {
-      final ids = waitingFrom.toSet();
-      return ListView(padding: EdgeInsets.zero, children: [
-        WaitingBar(count: waitingFrom.length, names: [for (final id in ids) d.who(id).name], open: true, onTap: () => setState(() => waitingOnly = false)),
-        ListBlock(top: false, children: [for (final id in ids) ConversationRow(c: conv(id), quiet: true)]),
-      ]);
-    }
+    final now = ConversationsScreen.clock();
+    final since = store.chatsSeenAt ?? DateTime(now.year, now.month, now.day);
+    final head = HeadData.of(d, since: since);
+    final listed = {for (final c in rest) c.identityId};
+    final rows = <Widget>[
+      if (yoav != null) ConversationRow(c: yoav, pinned: true, quiet: true),
+      for (final id in working.keys)
+        if (!listed.contains(id)) WorkingRow(c: conv(id), lines: working[id]!),
+      for (final c in rest) working.containsKey(c.identityId) ? WorkingRow(c: c, lines: working[c.identityId]!) : ConversationRow(c: c, quiet: true),
+    ];
     return ListView(padding: EdgeInsets.zero, children: [
-      if (waitingFrom.isNotEmpty)
-        WaitingBar(count: waitingFrom.length, names: [for (final id in waitingFrom.toSet()) d.who(id).name], onTap: () => setState(() => waitingOnly = true)),
-      if (yoav != null) ListBlock(top: false, children: [ConversationRow(c: yoav, pinned: true, quiet: true)]),
-      if (working.isNotEmpty) ...[
-        Section('עכשיו בעבודה', count: '${working.length}', top: 14),
-        ListBlock(children: [for (final e in working.entries) WorkingRow(c: conv(e.key), lines: e.value)]),
-      ],
-      if (rest.isNotEmpty) ...[
-        const Section('שיחות', top: 14),
-        ListBlock(children: [for (final c in rest) ConversationRow(c: c, quiet: true)]),
-      ],
+      ChatsHead(data: head, since: since, now: now),
+      if (rows.isNotEmpty) ListBlock(top: false, children: rows),
       const SizedBox(height: 80),
     ]);
   }
@@ -538,42 +530,6 @@ Map<String, List<String>> nowWorking(CompanyData d) {
     out[lead] = [...?out[lead], '${t.assignee}: ${plainTitle(t.title)}'];
   }
   return out;
-}
-
-/// "מחכה לך (N)" above the list, like WhatsApp's archived row: who waits, and a tap shows only them.
-class WaitingBar extends StatelessWidget {
-  const WaitingBar({super.key, required this.count, required this.names, required this.onTap, this.open = false});
-  final int count;
-  final List<String> names;
-  final VoidCallback onTap;
-
-  /// The list shows only those conversations now; the bar takes it back.
-  final bool open;
-  @override
-  Widget build(BuildContext context) {
-    final p = context.p;
-    return Material(
-      color: p.surface,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
-          child: Row(children: [
-            SizedBox(width: 42, child: Ic(open ? 'arrow_forward' : 'pause_circle', size: 26, fill: !open, color: p.text)),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(open ? 'כל השיחות' : 'מחכה לך ($count)', style: T.name.copyWith(color: p.text)),
-                if (!open) Text(names.join(', '), maxLines: 1, overflow: TextOverflow.ellipsis, style: T.secondary.copyWith(color: p.text2)),
-              ]),
-            ),
-            if (!open) Ic('chevron_left', size: 22, color: p.text3),
-          ]),
-        ),
-      ),
-    );
-  }
 }
 
 /// A conversation under "עכשיו בעבודה": the name and team, then the task with `play_arrow`.

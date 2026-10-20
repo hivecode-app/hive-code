@@ -82,6 +82,8 @@ class AppStore extends ChangeNotifier {
     _convSort = ConvSort.values.asNameMap()[_prefs?.getString(kConvSortKey)] ?? ConvSort.recent;
     final seen = _prefs?.getInt(kStatusSeenKey);
     statusSeenAt ??= seen == null ? null : DateTime.fromMillisecondsSinceEpoch(seen);
+    final chats = _prefs?.getInt(kChatsSeenKey);
+    _chatsSeenLocal ??= chats == null ? null : DateTime.fromMillisecondsSinceEpoch(chats);
     await backend.start();
     _restoreDrafts();
     if (_online) unawaited(flushOutbox()); // came up online: what waited from last time goes now
@@ -363,6 +365,27 @@ class AppStore extends ChangeNotifier {
   void markStatusSeen([DateTime? at]) {
     statusSeenAt = at ?? DateTime.now();
     _prefs?.setInt(kStatusSeenKey, statusSeenAt!.millisecondsSinceEpoch);
+  }
+
+  // ── the chats screen's "מאז שהיית פה", kept in hq for every device ──────
+
+  static const kChatsSeenKey = 'chats.seen';
+  DateTime? _chatsSeenLocal;
+
+  /// When he last left the chats screen (another tab, the app to the background): the head's "מאז שהיית פה"
+  /// is what finished after it. hq's value, shared by his devices; this device's own until hq has one.
+  DateTime? get chatsSeenAt {
+    final a = backend.seenAt('chats'), b = _chatsSeenLocal;
+    if (a == null || b == null) return a ?? b;
+    return a.isAfter(b) ? a : b;
+  }
+
+  void markChatsSeen([DateTime? at]) {
+    final t = at ?? DateTime.now();
+    _chatsSeenLocal = t;
+    _prefs?.setInt(kChatsSeenKey, t.millisecondsSinceEpoch);
+    unawaited(backend.markSeen('chats', t));
+    touch();
   }
 
   // ── drafts and outbox, persisted ─────────────────────────────────────────

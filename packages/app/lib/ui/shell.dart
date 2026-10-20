@@ -23,6 +23,7 @@ class Shell extends StatelessWidget {
     final nav = NavScope.of(context);
     final store = StoreScope.of(context);
     nav.onLeaveStatus = store.markStatusSeen;
+    nav.onLeaveChats = () => store.markChatsSeen(ConversationsScreen.clock());
     return LayoutBuilder(builder: (context, c) {
       // A phone on its side (up to ~930 x 430dp) stays a phone, the way WhatsApp does, instead of
       // squeezing three columns into 411dp of height. A short but wide window (a laptop browser
