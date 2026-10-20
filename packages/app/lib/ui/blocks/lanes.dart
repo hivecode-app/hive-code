@@ -15,6 +15,7 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../entity_link.dart';
 import '../nav.dart';
 import 'data.dart';
 import 'parts.dart';
@@ -39,7 +40,7 @@ class LanesBlock extends StatefulWidget {
 }
 
 /// The picked mark: its lane, its place, what it says.
-typedef _Pick = ({int lane, double x, double y, String text, String meta});
+typedef _Pick = ({int lane, double x, double y, String text, String meta, String? to});
 
 class _LanesBlockState extends State<LanesBlock> {
   _Pick? _pick;
@@ -85,7 +86,7 @@ class _LanesBlockState extends State<LanesBlock> {
                 nameStyle: nameStyle,
                 scaler: scaler,
                 picked: pick?.lane == i ? Offset(pick!.x, pick.y) : null,
-                onPick: (dx, dy, text, meta) => _toggle((lane: i, x: dx, y: dy, text: text, meta: meta)),
+                onPick: (dx, dy, text, meta, to) => _toggle((lane: i, x: dx, y: dy, text: text, meta: meta, to: to)),
               ),
             _Axis(data: data, x: x, label: label, width: w),
             const SizedBox(height: 10),
@@ -110,6 +111,21 @@ class _Detail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.p;
+    final story = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Rich(pick.text, auto: true, maxLines: 4, style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w500)),
+      if (pick.meta.isNotEmpty) Text(pick.meta, style: T.meta.copyWith(color: p.text2, fontFeatures: kTabular)),
+    ]);
+    // A mark a worker stands behind opens their conversation; `close` puts the legend back.
+    if (pick.to != null) {
+      return Semantics(
+        liveRegion: true,
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: EntityLink(identity: pick.to, label: [pick.text, pick.meta].where((s) => s.isNotEmpty).join('. '), borderRadius: BorderRadius.circular(8), child: story)),
+          const SizedBox(width: 4),
+          IBtn('close', tip: 'סגירה', onTap: onTap),
+        ]),
+      );
+    }
     return Semantics(
       liveRegion: true,
       button: true,
@@ -118,12 +134,7 @@ class _Detail extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Rich(pick.text, auto: true, maxLines: 4, style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w500)),
-              if (pick.meta.isNotEmpty) Text(pick.meta, style: T.meta.copyWith(color: p.text2, fontFeatures: kTabular)),
-            ]),
-          ),
+          Expanded(child: story),
           const SizedBox(width: 8),
           Ic('close', size: 18, color: p.text2),
         ]),
@@ -203,7 +214,7 @@ class _LaneRow extends StatelessWidget {
   final double width;
   final TextStyle nameStyle;
   final TextScaler scaler;
-  final void Function(double x, double y, String text, String meta) onPick;
+  final void Function(double x, double y, String text, String meta, String? to) onPick;
 
   /// Where the picked mark is on this lane: a ring around it.
   final Offset? picked;
@@ -223,8 +234,8 @@ class _LaneRow extends StatelessWidget {
     final marks = <Widget>[];
     // Each mark's span on the lane and its story: a tap picks the one nearest the finger.
     final targets = <({double from, double to, double top, double bottom, VoidCallback pick})>[];
-    VoidCallback target(double from, double to, double top, double bottom, double px, double py, String text, String meta) {
-      void pick() => onPick(px, py, text, meta);
+    VoidCallback target(double from, double to, double top, double bottom, double px, double py, String text, String meta, [String? chat]) {
+      void pick() => onPick(px, py, text, meta, chat);
       targets.add((from: from, to: to, top: top, bottom: bottom, pick: pick));
       return pick;
     }
@@ -235,7 +246,7 @@ class _LaneRow extends StatelessWidget {
       final top = _kRow - _kBarGap + i * (_kBar + _kBarGap);
       final len = math.max(x(r.from) - nowX, _kBar + 8);
       final story = [name(r.who), 'מ-${hm(r.from)}'].where((s) => s.isNotEmpty).join(' · ');
-      final pick = target(nowX, nowX + len, top, top + _kBar, nowX + _kBar / 2, top + _kBar / 2, r.text, story);
+      final pick = target(nowX, nowX + len, top, top + _kBar, nowX + _kBar / 2, top + _kBar / 2, r.text, story, d == null ? null : chatTargetOf(d, worker: r.who));
       marks.add(Positioned(
         left: nowX,
         top: top,
@@ -270,7 +281,8 @@ class _LaneRow extends StatelessWidget {
           ? [name(newest.who), hm(newest.at)].where((s) => s.isNotEmpty).join(' · ')
           : '$n הסתיימו · מ-${hm(c.items.first.at)} עד ${hm(newest.at)}';
       final size = n == 1 ? 7.0 : 15.0;
-      final pick = target(at - size / 2, at + size / 2, mid - 8, mid + 8, at, mid, text, meta);
+      final pick = target(at - size / 2, at + size / 2, mid - 8, mid + 8, at, mid, text, meta,
+          n == 1 && d != null ? chatTargetOf(d, worker: newest.who, openedBy: newest.opener, done: true) : null);
       marks.add(Positioned(
         left: at - size / 2,
         top: mid - size / 2,

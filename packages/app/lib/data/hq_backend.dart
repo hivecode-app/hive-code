@@ -658,6 +658,7 @@ class HqBackend extends Backend {
       ts: ts,
       icon: 'forward',
       text: '${d.who(m['from_identity'] as String).name} ← ${d.who(m['to_identity'] as String).name}: ${body.length > 90 ? '${body.substring(0, 90)}…' : body}',
+      between: [m['from_identity'] as String, m['to_identity'] as String],
     );
   }
 

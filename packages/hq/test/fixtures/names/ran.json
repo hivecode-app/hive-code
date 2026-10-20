@@ -299,13 +299,13 @@
   },
   {
    "name": "open_team",
-   "description": "פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. עם assignee המשימה הולכת לעובד הקבוע שהתחום שלו: worktree משלה ו-session נקי, ואם הוא באמצע משימה אחרת היא מחכה בתור שלו. אם hq דוחה (למשל פרויקט רדום או assignee לא חוקי), הדחייה והסיבה חוזרות כשגיאה. Open a task team: queued; a fresh worker starts in a free slot and reports back to you when done. With assignee it goes to that standing worker (own worktree, fresh session, one task at a time). A rejection by hq comes back as an error with the reason.",
+   "description": "פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. עם assignee המשימה הולכת לעובד הקבוע שהתחום שלו: worktree משלה ו-session נקי, ואם הוא באמצע משימה אחרת היא מחכה בתור שלו. אם hq דוחה (למשל פרויקט רדום או assignee לא חוקי), הדחייה והסיבה חוזרות כשגיאה. משימה שהיא חלק ממאמץ גדול: name מתחיל בשם המאמץ, e.g. \"מוצר גנרי, שלב 4: אפליקציה אחת לכל שרת\". המאמץ שייך לך, והשיחה איתך היא הבית שלו. Open a task team: queued; a fresh worker starts in a free slot and reports back to you when done. With assignee it goes to that standing worker (own worktree, fresh session, one task at a time). A rejection by hq comes back as an error with the reason. A task that is part of a larger effort starts its name with the effort's name.",
    "inputSchema": {
     "type": "object",
     "properties": {
      "name": {
       "type": "string",
-      "description": "כותרת המשימה / task title"
+      "description": "כותרת המשימה. חלק ממאמץ גדול: שם המאמץ קודם, e.g. \"מוצר גנרי, שלב 4: …\" / task title; part of a larger effort: the effort's name first"
      },
      "purpose": {
       "type": "string",
@@ -425,7 +425,7 @@
   },
   {
    "name": "compose_home",
-   "description": "הרכבת ראש מסך השיחות של רן: אילו בלוקים, באיזה סדר ובאיזה ניסוח. רק לעדי וליואב. האפליקציה מציירת כל בלוק מקומפוננטה קבועה וממלאת אותו מנתונים חיים, ולכן מפנים לנתונים לפי מזהה, והטקסט בעברית. אוצר הבלוקים: headline {text} משפט אחד · alert {inbox: מספר} או {shift: מזהה משמרת} · waiting {inbox: [מספרים]} · asked {messages: [מזהי הודעות]} ביקשת, בקשות שלו מעובדים שמחכות לתשובה או שהתשובה עליהן עוד לא נקראה, בדרך כלל אחרי waiting · awaiting {tasks: [מזהי משימות]} מה לבדוק, משימות שמחכות לפריסה או לבדיקה שלו · lanes {projects: [ids]} פסי היום · project {project, note?} שתי שורות · people {identities: [ids], caption?} · since {items: [עד 3 משפטים]} · note {text, icon} הערה שלך, icon הוא שם של Material Symbol. לכל בלוק אפשר emphasis: normal|quiet|strong (טיפוגרפיה בלבד). בלוק לא מוכר, שדה חסר או הפניה שלא קיימת נדחים עם הסיבה. מה שנסגר נעלם לבד, ומה שחוסם עליו ולא שובץ מתווסף לבד. מתכון ישן מ-30 דקות מתחלף בברירת המחדל של hq. דוגמה: [{\"type\":\"headline\",\"text\":\"בוקר שקט, שתי משימות רצות\"},{\"type\":\"waiting\",\"inbox\":[41]},{\"type\":\"lanes\",\"projects\":[\"agent-company\",\"lumo\"]},{\"type\":\"project\",\"project\":\"lumo\",\"note\":\"מחכה ל-GO על 2.6.10\"},{\"type\":\"note\",\"text\":\"שווה לבדוק את הפריסה של 2.6.10\",\"icon\":\"rocket_launch\",\"emphasis\":\"quiet\"}] Compose the head of the owner's conversations screen from the fixed block vocabulary above (Hebrew text, data by reference).",
+   "description": "הרכבת ראש מסך השיחות של רן: אילו בלוקים, באיזה סדר ובאיזה ניסוח. רק לעדי וליואב. האפליקציה מציירת כל בלוק מקומפוננטה קבועה וממלאת אותו מנתונים חיים, ולכן מפנים לנתונים לפי מזהה, והטקסט בעברית. אוצר הבלוקים: headline {text} משפט אחד · alert {inbox: מספר} או {shift: מזהה משמרת} · waiting {inbox: [מספרים]} · asked {messages: [מזהי הודעות]} ביקשת, בקשות שלו מעובדים שמחכות לתשובה או שהתשובה עליהן עוד לא נקראה, בדרך כלל אחרי waiting · awaiting {tasks: [מזהי משימות]} מה לבדוק, משימות שמחכות לפריסה או לבדיקה שלו · lanes {projects: [ids]} פסי היום · project {project, note?} שתי שורות · people {identities: [ids], caption?} · since {items: [עד 3: משפט, או {text, task: מזהה משימה}]}, עם task השורה מובילה לשיחה עם מי שעשה את המשימה · note {text, icon} הערה שלך, icon הוא שם של Material Symbol. לכל בלוק אפשר emphasis: normal|quiet|strong (טיפוגרפיה בלבד). בלוק לא מוכר, שדה חסר או הפניה שלא קיימת נדחים עם הסיבה. מה שנסגר נעלם לבד, ומה שחוסם עליו ולא שובץ מתווסף לבד. מתכון ישן מ-30 דקות מתחלף בברירת המחדל של hq. דוגמה: [{\"type\":\"headline\",\"text\":\"בוקר שקט, שתי משימות רצות\"},{\"type\":\"waiting\",\"inbox\":[41]},{\"type\":\"lanes\",\"projects\":[\"agent-company\",\"lumo\"]},{\"type\":\"project\",\"project\":\"lumo\",\"note\":\"מחכה ל-GO על 2.6.10\"},{\"type\":\"note\",\"text\":\"שווה לבדוק את הפריסה של 2.6.10\",\"icon\":\"rocket_launch\",\"emphasis\":\"quiet\"}] Compose the head of the owner's conversations screen from the fixed block vocabulary above (Hebrew text, data by reference).",
    "inputSchema": {
     "type": "object",
     "properties": {

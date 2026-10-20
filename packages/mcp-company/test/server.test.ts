@@ -97,6 +97,8 @@ test('handshake, tools/list, write tools queue to WAL while hq is down', async (
     const home = TOOL_BY_NAME.get('compose_home')!;
     assert.equal(hebrewProblem(home, { blocks: [{ type: 'headline', text: 'בוקר שקט' }, { type: 'since', items: ['התמונות עולות'] }] }), null);
     assert.match(hebrewProblem(home, { blocks: [{ type: 'since', items: ['Images upload from the phone now'] }] }) ?? '', /blocks\[0\]/);
+    assert.match(hebrewProblem(home, { blocks: [{ type: 'since', items: [{ text: 'Images upload from the phone now', task: 3 }] }] }) ?? '', /blocks\[0\]/);
+    assert.equal(hebrewProblem(home, { blocks: [{ type: 'since', items: [{ text: 'התמונות עולות', task: 3 }] }] }), null);
     const notObjects = await c.call('tools/call', { name: 'compose_home', arguments: { blocks: ['headline'] } });
     assert.match(notObjects.result.content[0].text, /array of objects/);
 

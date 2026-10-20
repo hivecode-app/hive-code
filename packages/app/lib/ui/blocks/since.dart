@@ -1,9 +1,11 @@
 // "מאז שהיית פה" as a block of its own: the chats card has it at its foot, the home recipe may place it anywhere.
 import 'package:flutter/material.dart';
 
+import '../../data/backend.dart';
 import '../../data/store.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../entity_link.dart';
 import 'data.dart';
 import 'parts.dart';
 
@@ -13,6 +15,14 @@ String sinceLabel(DateTime since, DateTime now) {
   if (ago <= 0) return 'מאז ${hm(since)}';
   if (ago == 1) return 'מאז אתמול ${hm(since)}';
   return 'מאז ${dm(since)}';
+}
+
+/// Where a finished line leads: the board's task when a composer named it, else the worker who did it, or
+/// whoever opened it once a task worker is done ([chatTargetOf]).
+String? sinceTarget(CompanyData d, SinceItem x) {
+  final t = x.task == null ? null : ticketOf(d, x.task!);
+  if (t != null) return chatTargetOfTicket(d, t);
+  return chatTargetOf(d, worker: x.who, openedBy: x.opener, done: true);
 }
 
 /// "מאז שהיית פה": one folded line, the newest sentence and how many more; a tap opens every sentence
@@ -120,9 +130,10 @@ class _Since extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                     for (final x in done)
-                      Semantics(
+                      EntityLink(
+                        identity: sinceTarget(d, x),
+                        minHeight: kLinkRow,
                         label: [x.text, if (x.who != null) d.who(x.who!).name, hm(x.at)].join(', '),
-                        excludeSemantics: true,
                         child: Padding(
                           padding: const EdgeInsetsDirectional.fromSTEB(16, 6, 16, 6),
                           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

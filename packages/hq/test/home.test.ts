@@ -47,6 +47,7 @@ test('validation: the whole vocabulary passes; anything off is a 400 with the re
   assert.equal(out.length, all.length);
   assert.deepEqual(out[3], { type: 'waiting', inbox: [7] }, 'duplicates folded');
   assert.equal(out[0]!.emphasis, 'strong');
+  assert.deepEqual(out[8], { type: 'since', items: [{ text: 'התמונות עולות' }, { text: 'הלילה עבר בשקט' }] }, 'a sentence is {text}');
 
   rejects([], /ריק/);
   rejects({}, /רשימה/);
@@ -65,8 +66,25 @@ test('validation: the whole vocabulary passes; anything off is a 400 with the re
   rejects([{ type: 'project', project: 'nope' }], /אין פרויקט/);
   rejects([{ type: 'people', identities: ['ghost'] }], /אין עובד "ghost"/);
   rejects([{ type: 'since', items: ['א', 'ב', 'ג', 'ד'] }], /עד 3/);
+  rejects([{ type: 'since', items: [{ text: 'א', task: 'x' }] }], /מזהה משימה/);
+  rejects([{ type: 'since', items: [{ text: 'א', who: 'ac-ceo' }] }], /שדה לא מוכר "who"/);
+  rejects([{ type: 'since', items: [{ task: 5 }] }], /רשימת משפטים/);
   rejects([{ type: 'note', text: 'x', icon: '🚀' }], /Material Symbol/);
   rejects(Array.from({ length: 13 }, () => ({ type: 'headline', text: 'x' })), /יותר מדי/);
+});
+
+test('since: a sentence may name its task, the default names it, so the line leads to who did it', async () => {
+  const env = await homeEnv();
+  try {
+    const { hq } = env;
+    const t = hq.scheduler.addTask({ title: 'תמונות', project: 'agent-company' });
+    hq.store.db.prepare(`UPDATE tasks SET state = 'done', summary = ? WHERE id = ?`).run('התמונות עולות גם מהטלפון\nפרטים', t.id);
+    const since = hq.home.current().blocks.find((b) => b.type === 'since');
+    assert.deepEqual(since, { type: 'since', items: [{ text: 'התמונות עולות גם מהטלפון', task: t.id }] });
+    hq.home.compose([{ type: 'since', items: [{ text: 'התמונות עולות', task: t.id }, 'הלילה עבר בשקט'] }], 'ac-ceo');
+    assert.deepEqual(hq.home.current().blocks.find((b) => b.type === 'since'), { type: 'since', items: [{ text: 'התמונות עולות', task: t.id }, { text: 'הלילה עבר בשקט' }] });
+    assert.throws(() => hq.home.compose([{ type: 'since', items: [{ text: 'א', task: t.id + 100 }] }], 'ac-ceo'), /אין משימה/);
+  } finally { await env.cleanup(); }
 });
 
 test('fallback: the default with no recipe, the agent one while fresh, the default again when stale or invalid', async () => {

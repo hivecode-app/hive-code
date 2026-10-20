@@ -7,6 +7,7 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../entity_link.dart';
 import '../nav.dart';
 import '../system_bar.dart';
 import 'head.dart';
@@ -505,15 +506,18 @@ class UnreadPill extends StatelessWidget {
 
 /// Who is in the middle of a task, and what (#53): a standing worker with a task in hand, and each project
 /// lead whose task workers are running, with their tasks (most work runs on task workers, who are not on
-/// this screen; without this the section was empty most of the day).
-Map<String, List<String>> nowWorking(CompanyData d) {
-  final out = <String, List<String>>{};
+/// this screen; without this the section was empty most of the day). A task worker's line carries its
+/// identity: a tap on it opens that worker.
+typedef WorkingLine = ({String text, String? who});
+
+Map<String, List<WorkingLine>> nowWorking(CompanyData d) {
+  final out = <String, List<WorkingLine>>{};
   for (final who in d.identities.values) {
     if (who.temp || who.id == d.managerId) continue;
     final pr = d.presence[who.id];
     if (pr == null || pr.status == WorkerStatus.resting || pr.status == WorkerStatus.done || pr.status == WorkerStatus.free) continue;
     final task = pr.currentTask ?? pr.activity;
-    if (task != null && task.isNotEmpty) out[who.id] = [plainTitle(task)];
+    if (task != null && task.isNotEmpty) out[who.id] = [(text: plainTitle(task), who: null)];
   }
   // A task worker's task goes under its project's lead; a task without a project (an errand for the
   // personal team, monitoring, improvement) under whoever opened it.
@@ -527,7 +531,7 @@ Map<String, List<String>> nowWorking(CompanyData d) {
       if (opener != null && !opener.temp) lead = opener.id;
     }
     if (lead == null) continue;
-    out[lead] = [...?out[lead], '${t.assignee}: ${plainTitle(t.title)}'];
+    out[lead] = [...?out[lead], (text: '${t.assignee}: ${plainTitle(t.title)}', who: chatTargetOfTicket(d, t))];
   }
   return out;
 }
@@ -536,7 +540,7 @@ Map<String, List<String>> nowWorking(CompanyData d) {
 class WorkingRow extends StatelessWidget {
   const WorkingRow({super.key, required this.c, required this.lines});
   final ConversationSummary c;
-  final List<String> lines;
+  final List<WorkingLine> lines;
   @override
   Widget build(BuildContext context) {
     final d = StoreScope.of(context).data!;
@@ -563,16 +567,26 @@ class WorkingRow extends StatelessWidget {
                   const SizedBox(width: 6),
                   Text(c.time, style: T.meta.copyWith(color: unread && !c.muted ? p.text : p.text3, fontWeight: unread && !c.muted ? FontWeight.w700 : null)),
                 ]),
+                // A task worker's line opens that worker; the rest of the row, and the lead's unread count, the lead.
                 for (final (i, l) in lines.take(3).indexed)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Row(children: [
-                      Ic('play_arrow', size: 18, fill: true, color: p.text),
-                      const SizedBox(width: 4),
-                      Expanded(child: Rich(l, auto: true, maxLines: 1, style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text))),
-                      if (i == 0 && unread) ...[const SizedBox(width: 8), UnreadPill(c.unread, muted: c.muted)],
-                    ]),
-                  ),
+                  Row(children: [
+                    Expanded(
+                      child: EntityLink(
+                        identity: l.who == c.identityId ? null : l.who,
+                        minHeight: kLinkLine,
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Row(children: [
+                            Ic('play_arrow', size: 18, fill: true, color: p.text),
+                            const SizedBox(width: 4),
+                            Expanded(child: Rich(l.text, auto: true, maxLines: 1, style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text))),
+                          ]),
+                        ),
+                      ),
+                    ),
+                    if (i == 0 && unread) ...[const SizedBox(width: 8), Padding(padding: const EdgeInsets.only(top: 3), child: UnreadPill(c.unread, muted: c.muted))],
+                  ]),
               ]),
             ),
           ]),

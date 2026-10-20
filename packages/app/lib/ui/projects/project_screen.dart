@@ -6,6 +6,7 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../entity_link.dart';
 import '../nav.dart';
 import '../status/status_screen.dart';
 
@@ -134,7 +135,8 @@ class _MemberRow extends StatelessWidget {
   }
 }
 
-/// A task: its title, then who is on it (a task worker too) and where it stands.
+/// A task: its title, then who is on it (a task worker too) and where it stands. A tap opens the conversation
+/// with the worker on it, or with who opened it while it waits or once a task worker is done.
 class _TaskRow extends StatelessWidget {
   const _TaskRow({required this.t});
   final Ticket t;
@@ -156,8 +158,9 @@ class _TaskRow extends StatelessWidget {
       icon = statusLoud(t.status) ? statusIcon(t.status) : 'play_arrow';
       state = [statusWord(t.status, who?.gender ?? Gender.m), if (t.startedAt != null) 'מ-${hm(t.startedAt!)}'].join(' ');
     }
-    return InkWell(
-      onTap: id == null ? null : () => Nav.chat(context, id),
+    return EntityLink(
+      identity: chatTargetOfTicket(d, t),
+      minHeight: kLinkRow,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

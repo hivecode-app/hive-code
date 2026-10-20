@@ -393,11 +393,14 @@ class _TextBubbleState extends State<TextBubble> {
 // ───────────────────────────── service lines (.svc) ─────────────────────────────
 
 class ServiceLine extends StatelessWidget {
-  const ServiceLine({super.key, required this.text, this.icon, this.strong = false, this.onTap, this.iconColor});
+  const ServiceLine({super.key, required this.text, this.icon, this.strong = false, this.onTap, this.tapHint, this.iconColor});
   final String text;
   final String? icon;
   final bool strong;
   final VoidCallback? onTap;
+
+  /// What a screen reader says a tap does.
+  final String? tapHint;
   final Color? iconColor;
 
   @override
@@ -412,13 +415,20 @@ class ServiceLine extends StatelessWidget {
         Flexible(child: Rich(text, style: style, align: TextAlign.center)),
       ]),
     );
+    // A line that opens something takes its margin into its target (44 high), so it sits where the others do.
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: onTap == null ? 8 : 0),
       child: LayoutBuilder(
         builder: (context, c) => Center(
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: c.maxWidth * 0.92),
-            child: onTap == null ? pill : GestureDetector(onTap: onTap, child: pill),
+            child: onTap == null
+                ? pill
+                : Semantics(
+                    button: true,
+                    hint: tapHint,
+                    child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: pill)),
+                  ),
           ),
         ),
       ),

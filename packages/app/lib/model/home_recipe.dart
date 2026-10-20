@@ -36,8 +36,8 @@ class HomeBlock {
   final List<String> projects;
   final List<String> identities;
 
-  /// since: up to 3 sentences.
-  final List<String> items;
+  /// since: up to 3 sentences, each with the task it tells of when the composer named one.
+  final List<SinceText> items;
 
   /// project: a line under the two.
   final String? note;
@@ -74,7 +74,10 @@ class HomeBlock {
       messages: _list<String>(j['messages']),
       projects: type == 'project' && j['project'] is String ? [j['project'] as String] : _list<String>(j['projects']),
       identities: _list<String>(j['identities']),
-      items: _list<String>(j['items']),
+      items: [
+        for (final x in j['items'] is List ? j['items'] as List : const [])
+          if (x is String) SinceText(x) else if (x is Map && x['text'] is String) SinceText(x['text'] as String, task: x['task'] is num ? (x['task'] as num).toInt() : null),
+      ],
       note: j['note'] as String?,
       caption: j['caption'] as String?,
     );
@@ -91,10 +94,19 @@ class HomeBlock {
         if (messages.isNotEmpty) 'messages': messages,
         if (type == 'project') 'project': projects.firstOrNull else if (projects.isNotEmpty) 'projects': projects,
         if (identities.isNotEmpty) 'identities': identities,
-        if (items.isNotEmpty) 'items': items,
+        if (items.isNotEmpty) 'items': [for (final x in items) x.toJson()],
         if (note != null) 'note': note,
         if (caption != null) 'caption': caption,
       };
+}
+
+/// A "since" sentence: plain text from an older composer, `{text, task}` from hq's default and a composer who
+/// names the task, so the line leads to the worker who did it.
+class SinceText {
+  const SinceText(this.text, {this.task});
+  final String text;
+  final int? task;
+  Object toJson() => task == null ? text : {'text': text, 'task': task};
 }
 
 class HomeRecipe {

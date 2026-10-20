@@ -13,6 +13,7 @@ import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import '../blocks/blocks.dart';
+import '../entity_link.dart';
 import 'head.dart';
 
 const _kMotion = kBlockMotion;
@@ -198,9 +199,15 @@ class _GroupView {
         );
       case 'since':
         // hq's own "since" is live: what finished after his last visit, with who and when. A composer's is her
-        // sentences, as of when she wrote them.
+        // sentences, as of when she wrote them; one that names its task has the face, the time and the tap of it.
         final data = recipe.byAgent
-            ? SinceData(since: since, items: [for (final (i, t) in b.items.indexed) SinceItem(key: 'since:$i:$t', text: t, at: recipe.composedAt)])
+            ? SinceData(since: since, items: [
+                for (final (i, x) in b.items.indexed)
+                  if ((x.task == null ? null : ticketOf(d, x.task!)) case final t?)
+                    SinceItem(key: 'since:$i:${x.text}', text: x.text, at: t.doneAt ?? recipe.composedAt, who: t.assigneeId, opener: t.openedBy, task: x.task)
+                  else
+                    SinceItem(key: 'since:$i:${x.text}', text: x.text, at: recipe.composedAt, task: x.task),
+              ])
             : SinceData.of(d, since: since);
         if (data.items.isEmpty) return null;
         return BlockCard(label: 'מאז שהיית פה', child: SinceBlock(data: data, now: now, max: 3));

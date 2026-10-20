@@ -568,9 +568,12 @@ class ShiftMarker extends ChatItem {
 }
 
 class EventLine extends ChatItem {
-  EventLine({required super.id, required super.ts, required this.text, this.icon, this.strong = false, super.seq});
+  EventLine({required super.id, required super.ts, required this.text, this.icon, this.strong = false, this.between = const [], super.seq});
   final String text;
   final String? icon;
+
+  /// A message between two workers: both identities. In one's conversation, a tap opens the other's.
+  final List<String> between;
 
   /// "2 הודעות חדשות" divider is strong.
   final bool strong;

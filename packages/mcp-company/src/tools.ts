@@ -105,9 +105,11 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
     }, ['state']),
     tool('open_team', 'פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. עם assignee המשימה הולכת לעובד הקבוע שהתחום שלו: '
       + 'worktree משלה ו-session נקי, ואם הוא באמצע משימה אחרת היא מחכה בתור שלו. אם hq דוחה (למשל פרויקט רדום או assignee לא חוקי), הדחייה והסיבה חוזרות כשגיאה. '
+      + 'משימה שהיא חלק ממאמץ גדול: name מתחיל בשם המאמץ, e.g. "מוצר גנרי, שלב 4: אפליקציה אחת לכל שרת". המאמץ שייך לך, והשיחה איתך היא הבית שלו. '
       + 'Open a task team: queued; a fresh worker starts in a free slot and reports back to you when done. With assignee it goes to that standing '
-      + 'worker (own worktree, fresh session, one task at a time). A rejection by hq comes back as an error with the reason.', {
-      name: s('כותרת המשימה / task title'),
+      + 'worker (own worktree, fresh session, one task at a time). A rejection by hq comes back as an error with the reason. '
+      + 'A task that is part of a larger effort starts its name with the effort\'s name.', {
+      name: s('כותרת המשימה. חלק ממאמץ גדול: שם המאמץ קודם, e.g. "מוצר גנרי, שלב 4: …" / task title; part of a larger effort: the effort\'s name first'),
       purpose: s('מה בדיוק לעשות ואיך יודעים שזה גמור / what to do and the definition of done'),
       project: s('הפרויקט, e.g. agent-company (ברירת מחדל: הפרויקט שלך) / project (default: yours)'),
       ref: s('טיקט, e.g. hivecode-app/hive-code#11 / issue reference'),
@@ -142,7 +144,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'האפליקציה מציירת כל בלוק מקומפוננטה קבועה וממלאת אותו מנתונים חיים, ולכן מפנים לנתונים לפי מזהה, והטקסט בעברית. '
       + 'אוצר הבלוקים: '
       + 'headline {text} משפט אחד · alert {inbox: מספר} או {shift: מזהה משמרת} · waiting {inbox: [מספרים]} · asked {messages: [מזהי הודעות]} ביקשת, בקשות ' + G('שלו', 'שלה') + ' מעובדים שמחכות לתשובה או שהתשובה עליהן עוד לא נקראה, בדרך כלל אחרי waiting · awaiting {tasks: [מזהי משימות]} מה לבדוק, משימות שמחכות לפריסה או לבדיקה ' + G('שלו', 'שלה') + ' · lanes {projects: [ids]} פסי היום · '
-      + 'project {project, note?} שתי שורות · people {identities: [ids], caption?} · since {items: [עד 3 משפטים]} · '
+      + 'project {project, note?} שתי שורות · people {identities: [ids], caption?} · since {items: [עד 3: משפט, או {text, task: מזהה משימה}]}, עם task השורה מובילה לשיחה עם מי שעשה את המשימה · '
       + 'note {text, icon} הערה שלך, icon הוא שם של Material Symbol. לכל בלוק אפשר emphasis: normal|quiet|strong (טיפוגרפיה בלבד). '
       + 'בלוק לא מוכר, שדה חסר או הפניה שלא קיימת נדחים עם הסיבה. מה שנסגר נעלם לבד, ומה שחוסם ' + G('עליו', 'עליה') + ' ולא שובץ מתווסף לבד. '
       + 'מתכון ישן מ-30 דקות מתחלף בברירת המחדל של hq. '
@@ -225,7 +227,8 @@ export function hebrewProblem(def: ToolDef, args: Record<string, unknown>): stri
   }
   if (def.name === 'compose_home' && Array.isArray(args.blocks)) {
     for (const [i, b] of (args.blocks as Record<string, unknown>[]).entries()) {
-      const texts = [...BLOCK_TEXT.map((k) => b?.[k]), ...(Array.isArray(b?.items) ? b.items : [])].filter((v): v is string => typeof v === 'string');
+      const items = Array.isArray(b?.items) ? (b.items as unknown[]).map((x) => (x && typeof x === 'object' ? (x as { text?: unknown }).text : x)) : [];
+      const texts = [...BLOCK_TEXT.map((k) => b?.[k]), ...items].filter((v): v is string => typeof v === 'string');
       for (const v of texts) if (isEnglishTitle(v)) return hebrewReason(`compose_home.blocks[${i}]`, [v]);
     }
   }

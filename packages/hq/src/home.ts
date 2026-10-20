@@ -26,9 +26,12 @@ export type Block = { type: BlockType; emphasis?: Emphasis } & (
   | { type: 'lanes'; projects: string[] }
   | { type: 'project'; project: string; note?: string }
   | { type: 'people'; identities: string[]; caption?: string }
-  | { type: 'since'; items: string[] }
+  | { type: 'since'; items: SinceItem[] }
   | { type: 'note'; text: string; icon: string }
 );
+
+/** A "since" sentence, with the task it tells of when known: the app opens the conversation with who did it. */
+export interface SinceItem { text: string; task?: number }
 
 export interface HomeRecipe {
   /** Grows with every composition; the default recipe carries the version of the one it replaced (0 = none yet). */
@@ -57,6 +60,8 @@ export interface HomeRefs {
   projects: Set<string>; identities: Set<string>; inbox: Set<number>; awaiting: Set<number>; shifts?: Set<string>;
   /** "ביקשת" (asked.ts): his requests on the list now, by message id. */
   asked?: Set<string>;
+  /** Whether a task id exists (a since item's `task`); unchecked when absent. */
+  task?: (id: number) => boolean;
 }
 
 const FIELDS: Record<BlockType, { required: string[]; optional: string[] }> = {
@@ -173,11 +178,22 @@ export function validateBlocks(raw: unknown, refs: HomeRefs): Block[] {
         break;
       }
       case 'since': {
+        // A sentence, or {text, task}: with the task, the line leads to the worker who did it.
         const v = o.items;
-        if (!Array.isArray(v) || !v.length || v.some((x) => typeof x !== 'string' || !x.trim())) throw new HomeError(`${at} (since): items חייב להיות רשימת משפטים`);
+        const bad = `${at} (since): items חייב להיות רשימת משפטים, או {text, task}`;
+        if (!Array.isArray(v) || !v.length) throw new HomeError(bad);
         if (v.length > 3) throw new HomeError(`${at} (since): עד 3 משפטים (יש ${v.length})`);
-        for (const x of v as string[]) if (x.length > 140 || /\n/.test(x)) throw new HomeError(`${at} (since): כל משפט שורה אחת, עד 140 תווים`);
-        out.push({ type: t, items: (v as string[]).map((x) => x.trim()), ...base });
+        const items = (v as unknown[]).map((x): SinceItem => {
+          const r = typeof x === 'string' ? { text: x } : x && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, unknown> : null;
+          if (!r || typeof r.text !== 'string' || !r.text.trim()) throw new HomeError(bad);
+          for (const k of Object.keys(r)) if (k !== 'text' && k !== 'task') throw new HomeError(`${at} (since): שדה לא מוכר "${k}" (יש text ו-task)`);
+          if (r.text.length > 140 || /\n/.test(r.text)) throw new HomeError(`${at} (since): כל משפט שורה אחת, עד 140 תווים`);
+          if (r.task === undefined) return { text: r.text.trim() };
+          if (!Number.isInteger(r.task) || (r.task as number) <= 0) throw new HomeError(`${at} (since): task הוא מזהה משימה (מספר)`);
+          if (refs.task && !refs.task(r.task as number)) throw new HomeError(`${at} (since): אין משימה ${String(r.task)}`);
+          return { text: r.text.trim(), task: r.task as number };
+        });
+        out.push({ type: t, items, ...base });
         break;
       }
       case 'note': {
@@ -230,6 +246,7 @@ export class Home {
       awaiting: new Set(this.awaitingIds()),
       asked: new Set(this.asked().map((a) => a.id)),
       shifts: new Set((this.db.prepare('SELECT id FROM shifts').all() as { id: string }[]).map((r) => r.id)),
+      task: (id) => !!this.db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(id),
     };
   }
 
@@ -415,9 +432,9 @@ export class Home {
     const active = this.hq.projects().filter((p) => p.status === 'active').map((p) => p.id);
     if (active.length) blocks.push({ type: 'lanes', projects: active });
     for (const p of active) blocks.push({ type: 'project', project: p });
-    const done = this.db.prepare(`SELECT summary FROM tasks WHERE state = 'done' AND summary IS NOT NULL AND summary != '' AND updated_at > ?
-      ORDER BY updated_at DESC LIMIT 3`).all(now - 24 * 3_600_000) as { summary: string }[];
-    if (done.length) blocks.push({ type: 'since', items: done.map((d) => d.summary.split('\n')[0]!.slice(0, 140)) });
+    const done = this.db.prepare(`SELECT id, summary FROM tasks WHERE state = 'done' AND summary IS NOT NULL AND summary != '' AND updated_at > ?
+      ORDER BY updated_at DESC LIMIT 3`).all(now - 24 * 3_600_000) as { id: number; summary: string }[];
+    if (done.length) blocks.push({ type: 'since', items: done.map((d) => ({ text: d.summary.split('\n')[0]!.slice(0, 140), task: d.id })) });
     return { version: 0, composed_by: 'hq', composed_at: now, reason: null, source: 'default', blocks: blocks.slice(0, MAX_BLOCKS) };
   }
 

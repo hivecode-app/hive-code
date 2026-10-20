@@ -61,12 +61,16 @@ List<ProjectInfo> projectsByActivity(CompanyData d) {
 
 /// A task that finished: a filled mark at [at].
 class LaneDone {
-  const LaneDone({required this.at, required this.text, this.who});
+  const LaneDone({required this.at, required this.text, this.who, this.opener});
   final DateTime at;
   final String text;
   final String? who;
-  factory LaneDone.fromJson(Map<String, dynamic> j) => LaneDone(at: _ms(j['at']), text: j['text'] as String? ?? '', who: j['who'] as String?);
-  Map<String, dynamic> toJson() => {'at': at.millisecondsSinceEpoch, 'text': text, 'who': who};
+
+  /// Who opened the task: where it leads once a task worker finished it.
+  final String? opener;
+  factory LaneDone.fromJson(Map<String, dynamic> j) =>
+      LaneDone(at: _ms(j['at']), text: j['text'] as String? ?? '', who: j['who'] as String?, opener: j['opener'] as String?);
+  Map<String, dynamic> toJson() => {'at': at.millisecondsSinceEpoch, 'text': text, 'who': who, 'opener': opener};
 }
 
 /// A task running now: a bar from [from] to now, the face of [who] at its end.
@@ -156,7 +160,7 @@ class LanesData {
         symbol: _symbolOf(d, p),
         done: [
           for (final t in ts)
-            if (t.doneAt != null && !t.doneAt!.isBefore(start) && !t.doneAt!.isAfter(now)) LaneDone(at: t.doneAt!, text: t.doneLine, who: t.assigneeId),
+            if (t.doneAt != null && !t.doneAt!.isBefore(start) && !t.doneAt!.isAfter(now)) LaneDone(at: t.doneAt!, text: t.doneLine, who: t.assigneeId, opener: t.openedBy),
         ],
         running: [
           for (final t in ts)
@@ -183,7 +187,7 @@ class LanesData {
 
 /// A project in two lines: what runs now and who, or "שקט" and the last thing that finished.
 class ProjectLine {
-  const ProjectLine({required this.id, required this.name, this.symbol = 'folder', this.now, this.who = const [], this.queued = 0, this.waiting = 0, this.last, this.lastAt, this.note});
+  const ProjectLine({required this.id, required this.name, this.symbol = 'folder', this.now, this.who = const [], this.queued = 0, this.waiting = 0, this.last, this.lastAt, this.lastWho, this.lastOpener, this.note});
   final String id;
   final String name;
   final String symbol;
@@ -203,6 +207,10 @@ class ProjectLine {
   final String? last;
   final DateTime? lastAt;
 
+  /// Who did [last], and who opened it: where its line leads.
+  final String? lastWho;
+  final String? lastOpener;
+
   factory ProjectLine.of(CompanyData d, String id) {
     final p = _projects(d).where((p) => p.id == id).firstOrNull ?? ProjectInfo(id: id, active: true);
     final ts = [for (final t in d.tickets) if (t.project == id) t];
@@ -219,6 +227,8 @@ class ProjectLine {
       waiting: d.waiting.where((w) => _open(w) && projectOf(d, w.from) == id).length,
       last: done.isEmpty ? null : done.first.doneLine,
       lastAt: done.isEmpty ? null : done.first.doneAt,
+      lastWho: done.firstOrNull?.assigneeId,
+      lastOpener: done.firstOrNull?.openedBy,
     );
   }
 
@@ -232,6 +242,8 @@ class ProjectLine {
         waiting: (j['waiting'] as num?)?.toInt() ?? 0,
         last: j['last'] as String?,
         lastAt: _msOrNull(j['last_at']),
+        lastWho: j['last_who'] as String?,
+        lastOpener: j['last_opener'] as String?,
         note: j['note'] as String?,
       );
   Map<String, dynamic> toJson() => {
@@ -244,22 +256,35 @@ class ProjectLine {
         'waiting': waiting,
         'last': last,
         'last_at': lastAt?.millisecondsSinceEpoch,
+        'last_who': lastWho,
+        'last_opener': lastOpener,
         'note': note,
       };
 }
 
 // ───────────────────────── since ─────────────────────────
 
-/// A task that finished after his last visit: its summary in his words, who did it, when.
+/// A task that finished after his last visit: its summary in his words, who did it, when, who opened it.
 class SinceItem {
-  const SinceItem({required this.key, required this.text, required this.at, this.who});
+  const SinceItem({required this.key, required this.text, required this.at, this.who, this.opener, this.task});
   final String key;
   final String text;
   final DateTime at;
   final String? who;
-  factory SinceItem.fromJson(Map<String, dynamic> j) =>
-      SinceItem(key: j['key'] as String? ?? '${j['at']}', text: j['text'] as String? ?? '', at: _ms(j['at']), who: j['who'] as String?);
-  Map<String, dynamic> toJson() => {'key': key, 'text': text, 'at': at.millisecondsSinceEpoch, 'who': who};
+
+  /// Who opened the task (`opened-by`): where the line leads once a task worker finished it.
+  final String? opener;
+
+  /// hq's task id, from a composer's `{text, task}`: who and opener come from the board.
+  final int? task;
+  factory SinceItem.fromJson(Map<String, dynamic> j) => SinceItem(
+      key: j['key'] as String? ?? '${j['at']}',
+      text: j['text'] as String? ?? '',
+      at: _ms(j['at']),
+      who: j['who'] as String?,
+      opener: j['opener'] as String?,
+      task: (j['task'] as num?)?.toInt());
+  Map<String, dynamic> toJson() => {'key': key, 'text': text, 'at': at.millisecondsSinceEpoch, 'who': who, 'opener': opener, 'task': task};
 }
 
 /// "מאז שהיית פה": what finished after [since], newest first.
@@ -272,7 +297,7 @@ class SinceData {
         since: since,
         items: [
           for (final t in d.tickets)
-            if (t.doneAt != null && t.doneAt!.isAfter(since)) SinceItem(key: 'done:${t.number}:${t.title}', text: t.doneLine, at: t.doneAt!, who: t.assigneeId),
+            if (t.doneAt != null && t.doneAt!.isAfter(since)) SinceItem(key: 'done:${t.number}:${t.title}', text: t.doneLine, at: t.doneAt!, who: t.assigneeId, opener: t.openedBy),
         ]..sort((a, b) => b.at.compareTo(a.at)),
       );
 

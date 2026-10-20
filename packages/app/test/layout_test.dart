@@ -21,6 +21,9 @@ import 'package:agent_company/ui/convs/conversations_screen.dart';
 import 'package:agent_company/ui/nav.dart';
 import 'package:agent_company/ui/projects/projects_screen.dart';
 import 'package:agent_company/ui/settings/settings_screen.dart';
+import 'package:agent_company/ui/entity_link.dart';
+import 'package:agent_company/ui/projects/project_screen.dart';
+import 'package:agent_company/ui/status/status_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -237,6 +240,46 @@ void main() {
     await tester.pump();
     expect(findShown('מיכל בצוות של לומו בוט'), findsOneWidget);
     expect(findShown('עובדת קבועה חדשה'), findsNothing);
+  });
+
+  testWidgets('a tap on who did it (docs/app/links.md): "מאז הביקור הקודם", a task worker under a lead, a running line on status', (tester) async {
+    final ctx = await _pump(tester, size: _tall);
+    final d = StoreScope.read(ctx).data!;
+    String? open() => find.byType(ChatScreen).evaluate().isEmpty ? null : tester.widget<ChatScreen>(find.byType(ChatScreen).last).identityId;
+    Future<void> back() async {
+      Navigator.of(tester.element(find.byType(ChatScreen).last)).pop();
+      await tester.pumpAndSettle();
+    }
+
+    // On "עכשיו בעבודה": Shani's line under Adi opens Shani; Adi's name opens Adi.
+    final shani = d.tickets.firstWhere((t) => t.doneAt == null && t.assignee == 'שני');
+    await tester.tap(findShown('שני: לא נקרא, התראות על הודעות'));
+    await tester.pumpAndSettle();
+    expect(open(), shani.assigneeId);
+    await back();
+    await tester.tap(find.text('עדי').first);
+    await tester.pumpAndSettle();
+    expect(open(), 'adi');
+    await back();
+
+    // On status: a finished task of a task worker opens who opened it, not the project.
+    NavScope.read(ctx).go(AppTab.status);
+    await tester.pumpAndSettle();
+    final since = DateTime(2026, 10, 20, 18, 0);
+    final done = [for (final t in d.tickets) if (t.doneAt != null && t.assigneeId != null && t.doneAt!.isAfter(since)) t]..sort((a, b) => b.doneAt!.compareTo(a.doneAt!));
+    final shown = done.take(StatusScreen.kDoneShown).toList();
+    final byTemp = shown.firstWhere((t) => d.who(t.assigneeId!).temp && t.openedBy != null && d.identities.containsKey(t.openedBy));
+    expect(chatTargetOfTicket(d, byTemp), byTemp.openedBy);
+    await tester.tap(findShown(byTemp.doneLine));
+    await tester.pumpAndSettle();
+    expect(open(), byTemp.openedBy);
+    expect(find.byType(ProjectScreen), findsNothing);
+    await back();
+
+    // "קרן: שעת איסוף" in "בפרויקטים עכשיו" opens Keren.
+    await tester.tap(findShown('קרן: שעת איסוף'));
+    await tester.pumpAndSettle();
+    expect(open(), 'keren');
   });
 
   testWidgets('projects: by his names, each with its lead and open tasks; then the standing teams', (tester) async {

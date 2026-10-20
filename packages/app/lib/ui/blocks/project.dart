@@ -1,10 +1,12 @@
 // A project in two lines: its name (and how many wait for him), then what runs now and who, or when
-// nothing does, "שקט" and the last thing that finished. A tap opens the project.
+// nothing does, "שקט" and the last thing that finished. A tap opens the project; on the second line, the
+// conversation with the worker behind it (docs/app/links.md).
 import 'package:flutter/material.dart';
 
 import '../../data/store.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../entity_link.dart';
 import '../nav.dart';
 import 'data.dart';
 import 'parts.dart';
@@ -34,7 +36,9 @@ class ProjectBlock extends StatelessWidget {
     final TextSpan line;
     String end = '';
     String spoken;
+    String? to;
     if (l.now != null) {
+      to = d == null ? null : chatTargetOf(d, worker: l.who.firstOrNull);
       line = TextSpan(children: [
         const TextSpan(text: 'עכשיו: ', style: TextStyle(fontWeight: FontWeight.w700)),
         TextSpan(text: l.now),
@@ -50,25 +54,27 @@ class ProjectBlock extends StatelessWidget {
         if (l.last != null) TextSpan(text: ' · אחרון: ${l.last}'),
       ]);
       if (l.lastAt != null) end = when(l.lastAt!);
+      if (l.last != null && d != null) to = chatTargetOf(d, worker: l.lastWho, openedBy: l.lastOpener, done: true);
       spoken = 'שקט${l.last == null ? '' : ', אחרון: ${l.last}${end.isEmpty ? '' : ', $end'}'}';
     }
     return Semantics(
       button: true,
-      label: [l.name, if (l.waiting > 0) l.waiting == 1 ? 'דבר אחד מחכה לך' : '${l.waiting} דברים מחכים לך', spoken, if (l.note != null) l.note!].join('. '),
+      label: [l.name, if (l.waiting > 0) l.waiting == 1 ? 'דבר אחד מחכה לך' : '${l.waiting} דברים מחכים לך', if (to == null) spoken, if (l.note != null) l.note!].join('. '),
       hint: 'פתיחת הפרויקט',
-      excludeSemantics: true,
+      // With a line that leads to a worker, that line is a node of its own; the rest is read from the label.
+      excludeSemantics: to == null,
       child: InkWell(
         onTap: () => Nav.project(context, l.id),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 60),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: EdgeInsets.fromLTRB(16, 10, 16, l.note == null && to != null ? 0 : 10),
             child: Row(children: [
               BlockSymbol(l.symbol),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                  Row(children: [
+                  ExcludeSemantics(child: Row(children: [
                     Expanded(child: Text(l.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.body.copyWith(fontWeight: FontWeight.w500, color: p.text, height: 21 / 15.5))),
                     if (l.waiting > 0) ...[
                       const SizedBox(width: 8),
@@ -76,19 +82,28 @@ class ProjectBlock extends StatelessWidget {
                       const SizedBox(width: 3),
                       Text('${l.waiting}', style: second.copyWith(color: p.text, fontWeight: FontWeight.w700, fontFeatures: kTabular)),
                     ],
-                  ]),
-                  const SizedBox(height: 2),
-                  Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-                    Expanded(child: Text.rich(line, maxLines: 1, overflow: TextOverflow.ellipsis, style: second)),
-                    if (end.isNotEmpty) ...[const SizedBox(width: 8), Text(end, style: second.copyWith(fontFeatures: kTabular))],
-                  ]),
+                  ])),
+                  // The line takes the card's bottom padding into its own target.
+                  EntityLink(
+                    identity: to,
+                    minHeight: kLinkLine,
+                    label: to == null ? null : spoken,
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: EdgeInsets.only(top: 2, bottom: l.note == null && to != null ? 10 : 0),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+                        Expanded(child: Text.rich(line, maxLines: 1, overflow: TextOverflow.ellipsis, style: second)),
+                        if (end.isNotEmpty) ...[const SizedBox(width: 8), Text(end, style: second.copyWith(fontFeatures: kTabular))],
+                      ]),
+                    ),
+                  ),
                   if (l.note != null) ...[
                     const SizedBox(height: 4),
-                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    ExcludeSemantics(child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Padding(padding: const EdgeInsets.only(top: 2), child: Ic('lightbulb', size: 14, color: p.text)),
                       const SizedBox(width: 4),
                       Expanded(child: Rich(l.note!, auto: true, maxLines: 2, style: second.copyWith(color: p.text))),
-                    ]),
+                    ])),
                   ],
                 ]),
               ),

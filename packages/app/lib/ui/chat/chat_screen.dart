@@ -9,6 +9,8 @@ import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import '../convs/conversations_screen.dart';
+import '../entity_link.dart';
+import '../nav.dart';
 import 'composer.dart';
 import 'items.dart';
 
@@ -472,6 +474,20 @@ class _ChatScreenState extends State<ChatScreen> {
     return w;
   }
 
+  /// A message between two workers, in one's conversation: a tap opens the other's, where it happened too.
+  Widget _eventLine(EventLine it) {
+    final d = StoreScope.read(context).data;
+    final other = it.between.where((id) => id != widget.identityId).firstOrNull;
+    final to = d == null || other == null ? null : chatTargetOf(d, worker: other);
+    return ServiceLine(
+      text: it.text,
+      icon: it.icon,
+      strong: it.strong,
+      onTap: to == null ? null : () => Nav.chat(context, to),
+      tapHint: to == null ? null : 'שיחה עם ${d!.who(to).name}',
+    );
+  }
+
   Widget _item(BuildContext context, ChatItem it, Conversation chat, CompanyData d, AskCard? openAsk) {
     final store = StoreScope.read(context);
     return switch (it) {
@@ -513,7 +529,7 @@ class _ChatScreenState extends State<ChatScreen> {
           icon: 'autorenew',
           text: 'משמרת ${it.shift} · קיבלה העברה ממשמרת ${it.from} · ${hm(it.ts)}',
         ),
-      EventLine() => ServiceLine(text: it.text, icon: it.icon, strong: it.strong),
+      EventLine() => _eventLine(it),
       HandoffCard() => HandoffCardView(card: it, from: widget.identityId),
       ErrorLine() => ServiceLine(text: it.text, icon: 'error', iconColor: context.p.urgent),
       UnknownItem() => ServiceLine(text: 'אירוע: ${it.kind}'),

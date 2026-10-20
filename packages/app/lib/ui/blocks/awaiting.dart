@@ -10,6 +10,7 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../entity_link.dart';
 import '../nav.dart';
 import 'parts.dart';
 
@@ -61,6 +62,9 @@ class AwaitingData {
       ]);
   Map<String, dynamic> toJson() => {'items': [for (final x in items) x.toJson()]};
 }
+
+/// The worker who did it, or who opened it once a task worker is done: it is finished (docs/app/links.md).
+String? awaitingTarget(CompanyData d, AwaitingItem x) => chatTargetOf(d, worker: x.who, openedBy: ticketOf(d, x.id)?.openedBy, done: true);
 
 class AwaitingBlock extends StatelessWidget {
   const AwaitingBlock({super.key, required this.data, this.now});
@@ -115,7 +119,8 @@ class _Row extends StatelessWidget {
             ? 'אתמול'
             : dm(x.at);
     final second = T.small.copyWith(color: p.text2);
-    final canOpen = x.who != null && d != null && d.canChat(x.who!) && d.identities.containsKey(x.who);
+    final to = d == null ? null : awaitingTarget(d, x);
+    final canOpen = to != null;
     void done() => store.checked(x.task);
     return Semantics(
       button: canOpen,
@@ -124,7 +129,7 @@ class _Row extends StatelessWidget {
       excludeSemantics: true,
       customSemanticsActions: {CustomSemanticsAction(label: action): done},
       child: InkWell(
-        onTap: canOpen ? () => Nav.chat(context, x.who!) : null,
+        onTap: canOpen ? () => Nav.chat(context, to) : null,
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 60),
           child: Padding(

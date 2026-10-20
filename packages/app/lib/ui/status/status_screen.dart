@@ -8,6 +8,7 @@ import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../blocks/awaiting.dart';
 import '../common.dart';
+import '../entity_link.dart';
 import '../nav.dart';
 import '../system_bar.dart';
 
@@ -135,14 +136,17 @@ class _WaitLine extends StatelessWidget {
 }
 
 /// A finished task in one line (its summary, or its title), and under it the project, who did it and when.
+/// A tap opens the conversation with who did it, or with who opened it once a task worker is done.
 class _DoneLine extends StatelessWidget {
   const _DoneLine({required this.t});
   final Ticket t;
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    return InkWell(
-      onTap: () => t.project.isNotEmpty ? Nav.project(context, t.project) : (t.assigneeId != null ? Nav.chat(context, t.assigneeId!) : null),
+    final d = StoreScope.of(context).data!;
+    return EntityLink(
+      identity: chatTargetOfTicket(d, t),
+      minHeight: kLinkRow,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -189,16 +193,22 @@ class _ProjectNow extends StatelessWidget {
               ]),
             )
           else
+            // Each running task opens the conversation with the worker on it; the rest of the card, the project.
             for (final t in running)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Row(children: [
-                  Ic(statusLoud(t.status) ? 'pause_circle' : 'play_arrow', size: 17, fill: true, color: p.text),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Rich('${t.assignee}: ${plainTitle(t.title)}', auto: true, maxLines: 1, style: T.secondary.copyWith(color: p.text)),
-                  ),
-                ]),
+              EntityLink(
+                identity: chatTargetOfTicket(d, t),
+                minHeight: kLinkLine,
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Row(children: [
+                    Ic(statusLoud(t.status) ? 'pause_circle' : 'play_arrow', size: 17, fill: true, color: p.text),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Rich('${t.assignee}: ${plainTitle(t.title)}', auto: true, maxLines: 1, style: T.secondary.copyWith(color: p.text)),
+                    ),
+                  ]),
+                ),
               ),
         ]),
       ),
