@@ -4,50 +4,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { hostname, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { makeEnv, until } from './helpers.ts';
+import { charter, git, makeEnv, repo, until } from './helpers.ts';
 import { readCharter, Workspaces } from '../src/workspace.ts';
-
-const ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: ENV, encoding: 'utf8' }).trim();
-
-/** origin (bare) + a checkout on main with one commit and .worktrees/ ignored. */
-function repo() {
-  const dir = mkdtempSync(join(tmpdir(), 'ws-'));
-  const origin = join(dir, 'origin.git');
-  const checkout = join(dir, 'proj');
-  git(dir, 'init', '--quiet', '--bare', '--initial-branch=main', origin);
-  git(dir, 'clone', '--quiet', origin, checkout);
-  writeFileSync(join(checkout, '.gitignore'), '.worktrees/\nnode_modules/\n');
-  writeFileSync(join(checkout, 'README.md'), 'hi\n');
-  git(checkout, 'add', '.');
-  git(checkout, 'commit', '--quiet', '-m', 'init');
-  git(checkout, 'push', '--quiet', 'origin', 'HEAD:main');
-  return { dir, checkout, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
-}
-
-const charter = (checkout: string, status = 'active', machine = hostname()) => `---
-project: proj
-status: ${status}
-repo: hive-owner/proj
-machine: ${machine}
-checkouts:
-  - name: proj
-    path: ${checkout}
-    default_branch: main
-worktree_dir: .worktrees
-commands:
-  test: npm test
-ci: required
-ci_check: company-ci
-deviations: []
-monitoring: []
-grants: []
----
-
-# proj
-`;
 
 test('readCharter: checkouts, commands and ci_check from the frontmatter; ~ is expanded', () => {
   const d = mkdtempSync(join(tmpdir(), 'ch-'));

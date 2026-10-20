@@ -2,6 +2,7 @@
 // its worker, state and project; closed task teams are gone from org; project teams list their workers.
 import 'package:agent_company/data/hq_backend.dart';
 import 'package:agent_company/model/models.dart';
+import 'package:agent_company/ui/org/org_screen.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Map<String, dynamic> _id(String id, String name, String team, String kind, String lifecycle, String status, {String? project, String title = ''}) =>
@@ -133,5 +134,24 @@ void main() {
     expect(old.tickets, isEmpty);
     expect(old.projects, isEmpty);
     expect(old.orgTeams.map((t) => t.teamId), isNot(contains('ac-t16')));
+  });
+
+  test('a standing worker shows the task it is on and how many wait for it', () {
+    final gal = {
+      ..._id('ido', 'עידו', 'lumo', 'project', 'dormant', 'working', project: 'lumo', title: 'אחראי שרת'),
+      'task': {'id': 30, 'ref': null, 'title': 'משימה ישנה', 'state': 'done'},
+      'current_task': {'id': 31, 'ref': null, 'title': 'שדרוג השרת', 'state': 'running'},
+      'queued': 2,
+    };
+    final m = mapSnapshot(board: [...board, gal], inbox: const [], asks: const [], toggles: const []);
+    final pr = m.presence['ido']!;
+    expect(pr.currentTask, 'שדרוג השרת');
+    expect(pr.activity, 'שדרוג השרת', reason: 'the current task, not the last one');
+    expect(pr.queued, 2);
+    expect(memberLine('אחראי שרת', pr), 'אחראי שרת · משימה: שדרוג השרת');
+    final idle = mapSnapshot(board: board, inbox: const [], asks: const [], toggles: const []).presence['adi']!;
+    expect(idle.currentTask, isNull);
+    expect(idle.queued, 0, reason: 'an older hq without the fields');
+    expect(memberLine('מנכ"לית', idle), 'מנכ"לית');
   });
 }

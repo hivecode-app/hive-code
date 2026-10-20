@@ -38,28 +38,39 @@ function howWeTalk(i: IdentityRow, managerId: string): string {
 }
 
 /**
- * Review and merge go by the project's charter: its merge_instructions replace the company's default steps
- * (a project with its own reviewer and merge guard, e.g. lumo), else the company skills, by absolute path
- * since the worker runs in another project's checkout.
+ * The steps of a code task, numbered. Review and merge go by the project's charter: its merge_instructions replace
+ * the company's default steps (a project with its own reviewer and merge guard, e.g. lumo), else the company
+ * skills, by absolute path since the worker runs in another project's checkout. A standing worker (open_team
+ * `assignee`) gets them with its task, and writes a handoff before closing: its next task starts from it.
  */
-function taskWorker(i: IdentityRow, companyDir: string): string {
-  const ch = i.project ? readCharter(companyDir, i.project) : null;
+export function taskSteps(project: string | null, companyDir: string, o: { standing?: boolean; opener?: string } = {}): string[] {
+  const ch = project ? readCharter(companyDir, project) : null;
   const skill = (name: string) => `\`${join(companyDir, 'skills', name, 'SKILL.md')}\``;
   const ci = ch?.ciCheck ? `בדיקת ה-CI שבאמנה (\`${ch.ciCheck}\`)` : 'בדיקת ה-CI שבאמנה (`ci_check`)';
   const review = ch?.mergeInstructions
-    ? ch.mergeInstructions.map((m, n) => `${n + 3}. ${n === 0 ? 'סקירה ומיזוג לפי האמנה של הפרויקט, לא לפי ה-skills של החברה. ' : ''}${m}`)
+    ? ch.mergeInstructions.map((m, n) => `${n === 0 ? 'סקירה ומיזוג לפי האמנה של הפרויקט, לא לפי ה-skills של החברה. ' : ''}${m}`)
     : [
-      `3. סקירה בלתי תלויה בהקשר נקי, לפי ${skill('reviewer')} (סוכן משנה בלי כלי עריכה). מתקנים מה שעלה.`,
-      `4. ממזגים בעצמך: \`gh pr merge --squash --delete-branch\`, רק כשהסקירה אישרה ו${ci} ירוקה. לפי ${skill('ship')}.`,
+      `סקירה בלתי תלויה בהקשר נקי, לפי ${skill('reviewer')} (סוכן משנה בלי כלי עריכה). מתקנים מה שעלה.`,
+      `ממזגים בעצמך: \`gh pr merge --squash --delete-branch\`, רק כשהסקירה אישרה ו${ci} ירוקה. לפי ${skill('ship')}.`,
     ];
+  const to = o.opener ? `ל-\`${o.opener}\`` : 'למי ששלח את המשימה';
+  const steps = [
+    'עובדים ב-worktree שבהודעת המשימה ("איפה עובדים"): hq פתח אותו בשבילך מה-checkout שבאמנה, על ענף משלו, והוא ה-cwd שלך. לא פותחים worktree נוסף, לא מסירים אותו (hq שומר ומסיר בסגירה), ולא נוגעים ב-checkout הראשי. רק אם בהודעה אין worktree: `git worktree add -b <branch> .worktrees/<task>` מתוך ה-repo.',
+    'PR עם `gh`. גוף ה-PR בעברית.',
+    ...review,
+    o.standing
+      ? `מדווחים במשפט-שניים ב-\`tell\` ${to} (עם קישור ל-PR), כותבים \`handoff\` (מה נעשה, מה נשאר, מה למדת), ואז \`status\` עם \`state: "done"\`. זה סוגר את המשימה ואת המשמרת. המשימה הבאה שלך מתחילה ב-session נקי, מהתיק, מהזיכרון ומה-handoff.`
+      : `מדווחים במשפט-שניים ב-\`tell\` ${to} (עם קישור ל-PR), ואז \`status\` עם \`state: "done"\`. זה סוגר את המשימה ואת המשמרת.`,
+  ];
+  return steps.map((x, n) => `${n + 1}. ${x}`);
+}
+
+function taskWorker(i: IdentityRow, companyDir: string): string {
   return [
     `# אתה ${i.name}${i.title ? `, ${i.title}` : ''}, בצוות משימה (\`${i.id}\`)`,
     '',
     `צוות משימה חד-פעמי${i.project ? ` בפרויקט \`${i.project}\`` : ''}. המשימה מגיעה בהודעה הראשונה. עושים אותה לפי אמנת הפרויקט:`,
-    '1. עובדים ב-worktree שבהודעת המשימה ("איפה עובדים"): hq פתח אותו בשבילך מה-checkout שבאמנה, על ענף משלו, והוא ה-cwd שלך. לא פותחים worktree נוסף, לא מסירים אותו (hq שומר ומסיר בסגירה), ולא נוגעים ב-checkout הראשי. רק אם בהודעה אין worktree: `git worktree add -b <branch> .worktrees/<task>` מתוך ה-repo.',
-    '2. PR עם `gh`. גוף ה-PR בעברית.',
-    ...review,
-    `${review.length + 3}. מדווחים במשפט-שניים ב-\`tell\` למי ששלח את המשימה (עם קישור ל-PR), ואז \`status\` עם \`state: "done"\`. זה סוגר את המשימה ואת המשמרת.`,
+    ...taskSteps(i.project, companyDir),
   ].join('\n');
 }
 

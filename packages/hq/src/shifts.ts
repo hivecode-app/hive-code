@@ -10,7 +10,7 @@ import { HostClient, type HostConnection } from './host-client.ts';
 import { procStart, sessionIdFor } from './proc.ts';
 import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
-import { getIdentity, type IdentityRow } from './org.ts';
+import { getIdentity, isStandingWorker, type IdentityRow } from './org.ts';
 import { buildSystemPrompt, writeSystemPrompt } from './system-prompt.ts';
 import { noWorkers, readCharter, Workspaces } from './workspace.ts';
 
@@ -55,7 +55,12 @@ export interface RequestOpts {
   cwd?: string;
   /** Run on this account (B.7 switch); default: the account manager's pick. */
   account?: string;
+  /** forceNew, but never over a turn in progress or a shift still starting: ShiftBusyError instead. */
+  spareTurn?: boolean;
 }
+
+/** request({forceNew, spareTurn}) found the identity's current shift in the middle of something. */
+export class ShiftBusyError extends Error {}
 
 /** The account a new run goes to (B.7). configDir null = the CLI's own ~/.claude login (dir-0016). */
 export interface AccountChoice { name: string; configDir: string | null }
@@ -230,15 +235,20 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       if (!this.conns.get(cur.id)?.connected) this.store.bg(this.attach(cur), 'shift.attach');
       return cur;
     }
+    if (cur && opts.forceNew && opts.spareTurn && this.midTurn(cur)) throw new ShiftBusyError(`${identity} is in the middle of a turn`);
     if (cur && opts.forceNew) await this.stopUnlocked(cur.id, opts.reason);
     // Checked under the identity's lock: a request queued before close_team/status done never launches a closed task.
     if (opts.reason !== 'manual' && this.taskClosed(identity, opts.taskId)) throw new Error(`task of ${identity} is done: not starting a shift for it`);
 
     const last = this.last(identity);
+    // A standing worker woken with no task named (a message, the watchdog) while a task of its is under way works on
+    // that task, in its worktree: never in the checkout beside it, and never in a conversation's session.
+    const ownTask = opts.taskId == null ? this.standingTask(identity) : undefined;
     // A shift number whose session never ran (launch/stop failed before any frame) is reused as new.
     const neverRan = !!last && last.host_seq === 0 && last.run_start_seq == null;
-    const wouldResume = !!last && !neverRan && !opts.forceNew && !NEW_SHIFT_REASONS.has(last.end_reason ?? '');
-    const cwd = opts.cwd ?? this.taskCwd(opts.taskId ?? (wouldResume ? last!.task_id : null), identity) ?? this.projectCwd(identity) ?? this.cfg.defaultCwd;
+    const wouldResume = !!last && !neverRan && !opts.forceNew && !NEW_SHIFT_REASONS.has(last.end_reason ?? '')
+      && !this.pastTask(identity, last.task_id) && (!ownTask || last.task_id === ownTask.id);
+    const cwd = opts.cwd ?? this.taskCwd(opts.taskId ?? ownTask?.id ?? (wouldResume ? last!.task_id : null), identity) ?? this.projectCwd(identity) ?? this.cfg.defaultCwd;
     // The session lives where it ran (Claude Code keeps sessions per cwd): elsewhere, a new shift. Rows from
     // before v7 have no cwd and resume as before (on hq-host defaultCwd is the agent-company checkout itself).
     const moved = !!last?.cwd && last.cwd !== cwd;
@@ -249,7 +259,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     const sessionId = sessionIdFor(identity, shiftNo);
     const now = this.store.now();
     const kind: ShiftKind = opts.kind ?? last?.kind ?? (this.cfg.capacity.residents.includes(identity) ? 'resident' : 'work');
-    const taskId = opts.taskId ?? (resume ? last!.task_id : null);
+    const taskId = opts.taskId ?? ownTask?.id ?? (resume ? last!.task_id : null);
     this.store.db.prepare(`INSERT INTO shifts (id, identity, shift_no, session_id, state, kind, socket_path, task_id, started_at, last_event_at, cwd)
         VALUES (?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET state='starting', kind=excluded.kind, started_at=excluded.started_at, ended_at=NULL,
@@ -288,6 +298,28 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     }
     this.store.bg(this.attach(row), 'shift.attach');
     return this.get(shiftId)!;
+  }
+
+  /** A standing worker's task that is under way (running, resting, or started and interrupted), if any. */
+  private standingTask(identity: string): { id: number } | undefined {
+    if (!isStandingWorker(getIdentity(this.store, identity), this.cfg.managerId)) return undefined;
+    return this.store.db.prepare(`SELECT id FROM tasks WHERE identity = ? AND (state IN ('running','resting')
+      OR (state IN ('open','interrupted') AND started_at IS NOT NULL)) ORDER BY updated_at DESC LIMIT 1`).get(identity) as { id: number } | undefined;
+  }
+
+  /** In a turn or still starting (a message just woke it): stopping it now would cut an answer. */
+  midTurn(s: ShiftRow): boolean {
+    return s.in_turn === 1 || s.state === 'starting';
+  }
+
+  /**
+   * The last run belonged to a task that is now done (closed while its standing worker rested): a message after
+   * it wakes a new session in the project checkout, not the task's session in a worktree that is gone. A task
+   * worker exists only for its task, so this never applies to one.
+   */
+  private pastTask(identity: string, taskId: number | null): boolean {
+    if (taskId == null || !isStandingWorker(getIdentity(this.store, identity), this.cfg.managerId)) return false;
+    return (this.store.db.prepare('SELECT state FROM tasks WHERE id = ?').get(taskId) as { state: string } | undefined)?.state === 'done';
   }
 
   /**

@@ -71,13 +71,16 @@ export const TOOLS: readonly ToolDef[] = [
     state: s('מצב, e.g. working | blocked | idle / state'),
     note: s('הערה קצרה / short note'),
   }, ['state']),
-  tool('open_team', 'פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. אם hq דוחה (למשל פרויקט רדום), הדחייה והסיבה חוזרות כשגיאה. '
-    + 'Open a task team: queued; a fresh worker starts in a free slot and reports back to you when done. A rejection by hq comes back as an error with the reason.', {
+  tool('open_team', 'פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. עם assignee המשימה הולכת לעובד הקבוע שהתחום שלו: '
+    + 'worktree משלה ו-session נקי, ואם הוא באמצע משימה אחרת היא מחכה בתור שלו. אם hq דוחה (למשל פרויקט רדום או assignee לא חוקי), הדחייה והסיבה חוזרות כשגיאה. '
+    + 'Open a task team: queued; a fresh worker starts in a free slot and reports back to you when done. With assignee it goes to that standing '
+    + 'worker (own worktree, fresh session, one task at a time). A rejection by hq comes back as an error with the reason.', {
     name: s('כותרת המשימה / task title'),
     purpose: s('מה בדיוק לעשות ואיך יודעים שזה גמור / what to do and the definition of done'),
     project: s('הפרויקט, e.g. agent-company (ברירת מחדל: הפרויקט שלך) / project (default: yours)'),
     ref: s('טיקט, e.g. hivecode-app/hive-code#11 / issue reference'),
     repo: s('ה-checkout מהאמנה (name), אם יש בפרויקט יותר מאחד. ברירת מחדל: הראשון / charter checkout name, default the first'),
+    assignee: s('העובד הקבוע בפרויקט שהתחום שלו, e.g. ido. בלי: עובד זמני / standing worker of the project; default a temporary worker'),
     members: strs('identities של חברי הצוות / member identities'),
   }, ['name', 'purpose']),
   tool('close_team', 'סגירת צוות משימה: המשימה נסגרת, המשמרת נעצרת והעבודה נשמרת. רק מי שפתח, המנהל שלו, המנהל של העובד או יואב. '

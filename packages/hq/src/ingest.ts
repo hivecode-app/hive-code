@@ -16,6 +16,7 @@ import {
 } from '@company/shared';
 import type { Hq } from './hq.ts';
 import { noWorkers, readCharter } from './workspace.ts';
+import { getIdentity, isStandingWorker } from './org.ts';
 import { HandoffError } from './tab/handoffs.ts';
 
 const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket']);
@@ -132,7 +133,21 @@ export class Ingest {
         // opener is who the worker reports to (labels opened-by:<id>). Deduped on ref (e.g. an issue).
         const db = this.hq.store.db;
         const own = (db.prepare('SELECT project FROM identities WHERE id = ?').get(e.identity) as { project: string | null } | undefined)?.project;
-        const project = s(a.project) ?? own ?? undefined;
+        // assignee: the project's standing worker whose domain it is (the lead picks). Without one, a temporary worker.
+        const assignee = s(a.assignee)?.trim() || undefined;
+        const worker = assignee ? getIdentity(this.hq.store, assignee) : undefined;
+        if (assignee && (!worker || !worker.active)) {
+          throw new IngestError(400, `open_team: unknown assignee ${assignee}`, `אין עובד קבוע בשם \`${assignee}\` (ה-assignee הוא identity מ-org.yaml, למשל \`ido\`)`);
+        }
+        if (worker && !isStandingWorker(worker, this.hq.cfg.managerId)) {
+          throw new IngestError(400, `open_team: ${assignee} is not a standing worker (lead, resident, manager or task worker)`,
+            `\`${assignee}\` הוא לא עובד קבוע בצוות (ראש צוות, ${this.hq.cfg.managerId} ועובד משימה לא מקבלים משימה כ-assignee). בלי assignee נפתח עובד זמני`);
+        }
+        const project = s(a.project) ?? (worker ? worker.project ?? undefined : own ?? undefined);
+        if (worker && (worker.project ?? undefined) !== project) {
+          throw new IngestError(400, `open_team: ${assignee} is not in project ${project ?? '(none)'}`,
+            `\`${assignee}\` לא שייך לפרויקט \`${project ?? '(בלי פרויקט)'}\`${worker.project ? ` אלא ל-\`${worker.project}\`` : ''}`);
+        }
         // 4xx, not a thrown 500: the WAL retries 5xx at its head forever and would hold back every later op.
         if (project != null && (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(project)
           || (!existsSync(join(this.hq.cfg.companyDir, 'projects', `${project}.md`)) && !db.prepare('SELECT 1 FROM identities WHERE project = ?').get(project)))) {
@@ -150,6 +165,7 @@ export class Ingest {
         const ref = open?.ref ?? (taken ? `${base} · ${e.id}` : base);
         const task = this.hq.scheduler.addTask({
           title: need('name'), body: need('purpose'), project, ref, labels: [`opened-by:${e.identity}`, ...(s(a.repo) ? [`repo:${s(a.repo)}`] : [])],
+          identity: worker?.id,
         });
         return { ok: true, id: e.id, ref: `task-${task.id}`, result: { task: task.id, state: task.state } };
       }
@@ -178,12 +194,19 @@ export class Ingest {
         }
         if (t!.state === 'done') return { ok: true, id: e.id, ref: `task-${t!.id}`, result: { task: t!.id, state: 'done', already: true } };
         const worker = t!.identity;
+        // A standing worker writes its handoff first (its next task starts from it); closed by the sweep after the grace.
+        if (this.hq.scheduler.closeWithHandoff(t!.id, e.identity, reason)) {
+          return { ok: true, id: e.id, ref: `task-${t!.id}`, result: { task: t!.id, state: 'closing', handoff_grace_ms: this.hq.cfg.timers.handoffGraceMs } };
+        }
         queueMicrotask(() => {
           // The reason reaches the worker before its shift stops (same host connection, written first).
+          // A standing worker's task that never started: it is busy with another one, and that shift goes on.
+          const waiting = t!.started_at == null && !!worker && isStandingWorker(getIdentity(this.hq.store, worker), this.hq.cfg.managerId);
           if (worker && reason) {
             try {
-              mailbox.tell({ msg_id: `${e.id}-close`, from: e.identity, to: worker, kind: 'system', priority: 'now', ref: e.id,
-                body: `הצוות נסגר על ידי ${mailbox.label(e.identity)}: ${reason}\nהמשמרת נעצרת עכשיו.` });
+              mailbox.tell({ msg_id: `${e.id}-close`, from: e.identity, to: worker, kind: 'system', priority: waiting ? 'next' : 'now', ref: e.id,
+                body: waiting ? `המשימה ${t!.ref ?? `#${t!.id}`} (${t!.title}) שחיכתה לך בתור בוטלה על ידי ${mailbox.label(e.identity)}: ${reason}`
+                  : `הצוות נסגר על ידי ${mailbox.label(e.identity)}: ${reason}\nהמשמרת נעצרת עכשיו.` });
             } catch { /* best effort */ }
           }
           this.hq.store.bg(this.hq.scheduler.completeTask(t!.id), 'task.close');

@@ -1034,7 +1034,9 @@ CompanyData mapSnapshot({
       blockedOn: b['blocked_on'] as String?,
       shift: shiftNo,
       shiftSince: shift?['started_at'] is int ? _hm(shift!['started_at'] as int) : null,
-      activity: (b['task'] as Map?)?['title'] as String?,
+      activity: ((b['current_task'] ?? b['task']) as Map?)?['title'] as String?,
+      currentTask: (b['current_task'] as Map?)?['title'] as String?,
+      queued: b['queued'] is int ? b['queued'] as int : 0,
     );
   }
 

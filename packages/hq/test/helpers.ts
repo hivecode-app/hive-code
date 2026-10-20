@@ -2,7 +2,8 @@
 import { createServer, type Server, type Socket } from 'node:net';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   LineSplitter, decodeHqFrame, encodeFrame, type HostToHq, type HqToHost, type LoggedFrame, type EngineEvent,
@@ -282,11 +283,11 @@ export interface TestEnv {
   cleanup(): Promise<void>;
 }
 
-export async function makeEnv(opts: { cfg?: Partial<HqConfig>; deps?: HqDeps; projects?: Record<string, string>; noStart?: boolean } = {}): Promise<TestEnv> {
+export async function makeEnv(opts: { cfg?: Partial<HqConfig>; deps?: HqDeps; projects?: Record<string, string>; noStart?: boolean; org?: string } = {}): Promise<TestEnv> {
   const dir = mkdtempSync(join(tmpdir(), 'hq-'));
   const company = join(dir, 'company');
   mkdirSync(join(company, 'projects'), { recursive: true });
-  writeFileSync(join(company, 'org.yaml'), ORG_YAML);
+  writeFileSync(join(company, 'org.yaml'), opts.org ?? ORG_YAML);
   for (const [p, md] of Object.entries(opts.projects ?? {})) writeFileSync(join(company, 'projects', `${p}.md`), md);
   // claudeHome: never the real ~/.claude (its token would go to /api/oauth/profile from a test).
   const cfg = loadConfig({ stateDir: join(dir, 'state'), companyDir: company, port: 0, claudeHome: join(dir, 'claude-home'), appReleaseDir: join(dir, 'app-release'), ...opts.cfg });
@@ -324,3 +325,44 @@ export async function until(cond: () => boolean, ms = 3000, what = 'condition'):
     await new Promise((r) => setTimeout(r, 10));
   }
 }
+
+// A real temp repository and a charter over it, for worktree tests (B.5).
+const ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+export const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: ENV, encoding: 'utf8' }).trim();
+
+/** origin (bare) + a checkout on main with one commit and .worktrees/ ignored. */
+export function repo() {
+  const dir = mkdtempSync(join(tmpdir(), 'ws-'));
+  const origin = join(dir, 'origin.git');
+  const checkout = join(dir, 'proj');
+  git(dir, 'init', '--quiet', '--bare', '--initial-branch=main', origin);
+  git(dir, 'clone', '--quiet', origin, checkout);
+  writeFileSync(join(checkout, '.gitignore'), '.worktrees/\nnode_modules/\n');
+  writeFileSync(join(checkout, 'README.md'), 'hi\n');
+  git(checkout, 'add', '.');
+  git(checkout, 'commit', '--quiet', '-m', 'init');
+  git(checkout, 'push', '--quiet', 'origin', 'HEAD:main');
+  return { dir, checkout, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+export const charter = (checkout: string, status = 'active', machine = hostname()) => `---
+project: proj
+status: ${status}
+repo: hive-owner/proj
+machine: ${machine}
+checkouts:
+  - name: proj
+    path: ${checkout}
+    default_branch: main
+worktree_dir: .worktrees
+commands:
+  test: npm test
+ci: required
+ci_check: company-ci
+deviations: []
+monitoring: []
+grants: []
+---
+
+# proj
+`;

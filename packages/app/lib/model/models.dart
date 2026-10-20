@@ -60,8 +60,23 @@ extension on String {
 }
 
 class Presence {
-  const Presence({required this.status, this.activity, this.blockedOn, this.shift, this.shiftSince, this.contextPct});
+  const Presence({
+    required this.status,
+    this.activity,
+    this.blockedOn,
+    this.shift,
+    this.shiftSince,
+    this.contextPct,
+    this.currentTask,
+    this.queued = 0,
+  });
   final WorkerStatus status;
+
+  /// The task it is on now (hq `current_task`), for a standing worker on the org tab; null between tasks.
+  final String? currentTask;
+
+  /// Tasks handed to it that wait their turn (hq `queued`): a standing worker takes one at a time.
+  final int queued;
 
   /// What the worker is doing right now, in words: "מריץ בדיקות", "כותבת".
   final String? activity;
@@ -77,6 +92,8 @@ class Presence {
         shift: shift,
         shiftSince: shiftSince,
         contextPct: contextPct,
+        currentTask: currentTask,
+        queued: queued,
       );
 }
 

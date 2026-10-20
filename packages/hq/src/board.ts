@@ -12,6 +12,10 @@ export interface BoardEntry {
   status: DerivedStatus; status_symbol: string; blocked_on: string | null; live: boolean;
   shift: { id: string; state: string; started_at: number; last_event_at: number | null; in_turn: boolean } | null;
   task: { id: number; ref: string | null; title: string; state: string } | null;
+  /** The task it is on now (running, resting on a message, interrupted mid-way); null between tasks. */
+  current_task: { id: number; ref: string | null; title: string; state: string } | null;
+  /** Tasks handed to it that wait their turn (a standing worker takes one at a time). */
+  queued: number;
   open_asks: number; queued_messages: number;
   /** When this status was derived and when the shift last proved alive — the board shows "updated X s ago" (bet 4). */
   derived_at: number; last_seen_at: number | null;
@@ -48,6 +52,9 @@ export function board(store: Store, unresponsiveAfterMs?: number): BoardEntry[] 
   const endedQ = store.db.prepare(`SELECT 1 FROM events WHERE type = 'shift.state' AND identity = ?
     AND json_extract(data, '$.state') IN ('ended', 'dead') LIMIT 1`);
   const taskQ = store.db.prepare(`SELECT id, ref, title, state FROM tasks WHERE identity = ? ORDER BY CASE state WHEN 'running' THEN 0 ELSE 1 END, updated_at DESC LIMIT 1`);
+  const currentQ = store.db.prepare(`SELECT id, ref, title, state FROM tasks WHERE identity = ? AND (state IN ('running','resting')
+    OR (state IN ('open','interrupted') AND started_at IS NOT NULL)) ORDER BY CASE state WHEN 'running' THEN 0 ELSE 1 END, updated_at DESC LIMIT 1`);
+  const queuedQ = store.db.prepare(`SELECT COUNT(*) n FROM tasks WHERE identity = ? AND state = 'queued'`);
   return listIdentities(store).map((i) => {
     const [latest, older] = shiftQ.all(i.id) as ShiftRow[];
     const live = latest && (latest.state === 'starting' || latest.state === 'live') ? latest : undefined;
@@ -61,7 +68,8 @@ export function board(store: Store, unresponsiveAfterMs?: number): BoardEntry[] 
       reports_to: i.reports_to, lifecycle: i.lifecycle, status: d.status, status_symbol: STATUS_SYMBOL[d.status], blocked_on: d.blocked_on,
       live: !!live,
       shift: latest ? { id: latest.id, state: latest.state, started_at: latest.started_at, last_event_at: latest.last_event_at, in_turn: latest.in_turn === 1 } : null,
-      task: task ?? null, open_asks: openAsks, queued_messages: (msgQ.get(i.id) as { n: number }).n,
+      task: task ?? null, current_task: (currentQ.get(i.id) as BoardEntry['current_task'] | undefined) ?? null,
+      queued: (queuedQ.get(i.id) as { n: number }).n, open_asks: openAsks, queued_messages: (msgQ.get(i.id) as { n: number }).n,
       derived_at: now, last_seen_at: latest ? Math.max(latest.last_ping_ok_at ?? 0, latest.last_event_at ?? 0) || null : null,
     };
   });

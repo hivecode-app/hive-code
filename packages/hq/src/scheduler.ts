@@ -5,9 +5,9 @@
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import type { Mailbox } from './mailbox.ts';
-import type { ShiftManager } from './shifts.ts';
-import { ensureRuntimeIdentity, getIdentity, projectLead, taskWorkerName } from './org.ts';
-import { HELPER_TEAM } from './system-prompt.ts';
+import { ShiftBusyError, type ShiftManager } from './shifts.ts';
+import { ensureRuntimeIdentity, getIdentity, isStandingWorker, projectLead, taskWorkerName } from './org.ts';
+import { HELPER_TEAM, taskSteps } from './system-prompt.ts';
 import { memInfoMb } from './proc.ts';
 import { dirname, join } from 'node:path';
 import { noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
@@ -50,6 +50,16 @@ const QUEUE_SQL = `
     AND (@scope IS NULL OR t.project IN (SELECT value FROM json_each(@scope)))
   ORDER BY bucket, t.priority, CASE WHEN bucket = 4 THEN -t.night_weight ELSE 0 END, t.created_at, t.id`;
 
+/**
+ * SQL over tasks t JOIN identities i: t is the task a standing worker (org.ts isStandingWorker) is on now. close_team
+ * finds it by the worker's identity or name.
+ */
+const STANDING_TASK = `(i.source = 'org' AND i.active = 1 AND i.team_kind != 'task' AND i.lifecycle NOT IN ('lead','resident') AND i.id != @mgr
+  AND (t.state IN ('running','resting') OR (t.state IN ('open','interrupted') AND t.started_at IS NOT NULL)))`;
+
+/** Label on a standing worker's task that close_team is closing: the time it was asked for its handoff. */
+const CLOSING = 'closing-at:';
+
 export class Scheduler {
   memInfo: () => { totalMb: number; availableMb: number } = memInfoMb;
   /** Night mode (night.ts) plugs in here: the scope filter, a note for every task prompt, and a look after each fill. */
@@ -78,7 +88,8 @@ export class Scheduler {
     shifts.on('live', (row) => {
       if (row.task_id == null) return;
       const t = this.task(row.task_id);
-      if (t && t.state === 'resting') this.setTaskState(t.id, 'running');
+      // A standing worker woken on its interrupted task (shifts.request binds it) is back on it too.
+      if (t && (t.state === 'resting' || (t.state === 'interrupted' && this.standing(row.identity)))) this.setTaskState(t.id, 'running');
     });
   }
 
@@ -162,10 +173,17 @@ export class Scheduler {
       do {
         this.refill = false;
         let free = this.slots().free;
+        // A standing worker takes one task at a time: one starting in this fill holds it too.
+        const busy = new Set([...this.starting].map((id) => this.task(id)?.identity).filter((x): x is string => !!x));
         for (const t of this.queue()) {
           if (free <= 0) break;
           if (this.starting.has(t.id)) continue;
           try {
+            // Its next task waits in its own queue; the slot goes on to the next task in line.
+            if (t.identity && this.standing(t.identity)) {
+              if (busy.has(t.identity) || this.workerBusy(t.identity, t.id)) continue;
+              busy.add(t.identity);
+            }
             // A dormant project (charter status) gets no workers until it moves to the company (D phase 3).
             if (this.dormant(t.project)) continue;
             // Backoff: a task that just started (and crashed or failed to launch) waits before the next try.
@@ -204,6 +222,22 @@ export class Scheduler {
     return started;
   }
 
+  private standing(identity: string): boolean {
+    return isStandingWorker(getIdentity(this.store, identity), this.cfg.managerId);
+  }
+
+  /**
+   * A standing worker is busy with another task (running, resting on a message, or interrupted mid-way), or is in
+   * the middle of a conversation woken by a message between tasks. Its task waits; the conversation is not cut.
+   */
+  private workerBusy(identity: string, taskId: number): boolean {
+    const other = this.store.db.prepare(`SELECT 1 FROM tasks WHERE identity = ? AND id != ? AND (state IN ('running','resting')
+      OR (state IN ('open','interrupted') AND started_at IS NOT NULL)) LIMIT 1`).get(identity, taskId);
+    if (other) return true;
+    const cur = this.shifts.current(identity);
+    return !!cur && cur.task_id !== taskId && (cur.task_id != null || this.shifts.midTurn(cur));
+  }
+
   /**
    * Open a task worker under the project CEO (B.16) and hand it the task as its first prompt. False when the
    * task was closed while its worktree was being set up (no worker then).
@@ -219,8 +253,10 @@ export class Scheduler {
         reports_to: openedBy ?? lead ?? this.cfg.managerId });
       this.store.db.prepare('UPDATE tasks SET identity = ? WHERE id = ?').run(identity, t.id);
     }
-    // A task handed to a standing identity (yoav, a lead…) runs where that identity runs: no worktree.
-    const taskIdentity = !t.identity || (getIdentity(this.store, identity)?.team_kind === 'task');
+    // A task handed to a standing worker (open_team assignee) runs like a task worker's: its own worktree and a
+    // new session. One handed to a lead or yoav runs where that identity runs: no worktree.
+    const assigned = !!t.identity && this.standing(identity);
+    const taskIdentity = !t.identity || assigned || (getIdentity(this.store, identity)?.team_kind === 'task');
     let ws: { path: string; note: string } | null = null;
     if (taskIdentity) {
       try {
@@ -241,7 +277,18 @@ export class Scheduler {
         return false;
       }
     }
-    const row = await this.shifts.request(identity, { kind: 'work', reason: 'task', taskId: t.id, cwd: ws?.path });
+    // A standing worker starts each task clean: a new session, not its previous task's or a conversation's. A
+    // restart of this same task (crash, stuck) follows the usual resume rules.
+    const fresh = assigned && this.shifts.last(identity)?.task_id !== t.id;
+    let row;
+    try {
+      // spareTurn: a message may have started a turn during the worktree setup. The task waits for it, no backoff.
+      row = await this.shifts.request(identity, { kind: 'work', reason: 'task', taskId: t.id, cwd: ws?.path, forceNew: fresh, spareTurn: fresh });
+    } catch (e) {
+      if (!(e instanceof ShiftBusyError)) throw e;
+      this.lastStartAt.delete(t.id);
+      return false;
+    }
     // The identity already had a live shift (no new launch): bind the task to it so its end closes the loop.
     if (row.task_id !== t.id) this.shifts.setFields(row.id, { task_id: t.id });
     const set = this.store.db.prepare(`UPDATE tasks SET state = 'running', shift_id = ?, started_at = COALESCE(started_at, ?), updated_at = ?
@@ -254,8 +301,14 @@ export class Scheduler {
     this.store.emit('task.state', identity, { id: t.id, state: 'running', shift: row.id });
     // One prompt per run of the shift: a resumed run gets the task again (the old prompt id would be a no-op).
     this.mailbox.tell({ msg_id: `task-${t.id}-${row.id}-${row.started_at}`, from: openedBy ?? lead ?? 'hq', to: identity, priority: 'next',
-      body: [`משימה ${t.ref ?? `#${t.id}`}: ${t.title}`, ws?.note, t.body, this.promptNote()].filter(Boolean).join('\n\n') });
+      body: [`משימה ${t.ref ?? `#${t.id}`}: ${t.title}`, ws?.note, assigned ? this.standingNote(t, openedBy ?? lead) : null, t.body, this.promptNote()]
+        .filter(Boolean).join('\n\n') });
     return true;
+  }
+
+  /** A standing worker has no task-worker prompt: how this task is done and closed comes with the task. */
+  private standingNote(t: TaskRow, opener: string | undefined): string {
+    return ['**איך סוגרים את המשימה:**', ...taskSteps(t.project, this.cfg.companyDir, { standing: true, opener })].join('\n');
   }
 
   private invalidReported = new Map<string, number>();
@@ -391,12 +444,47 @@ export class Scheduler {
       this.setTaskState(id, 'done');
       this.closeWorktree(id);
     }
+    // A standing worker's next task may be waiting for this one.
+    queueMicrotask(() => this.store.bg(this.fill(), 'scheduler.fill'));
     return this.task(id);
   }
 
   /**
+   * close_team on a standing worker's task: its next task starts from its handoff, so it gets handoffGraceMs to write
+   * one (a message wakes it if it rests) and close with status done. Then the task is closed anyway (sweep). The
+   * label keeps the deadline across an hq restart. Returns false when there is no one to ask (no standing worker, or
+   * a task of its that has not started): the caller closes it at once.
+   */
+  closeWithHandoff(id: number, by: string, reason: string | undefined): boolean {
+    const t = this.task(id);
+    if (!t || t.state === 'done' || !t.identity || !this.standing(t.identity)) return false;
+    // Only the task it is on: one still waiting in its queue has nothing to hand off, and closes at once.
+    const onIt = ['running', 'resting'].includes(t.state) || (['open', 'interrupted'].includes(t.state) && t.started_at != null);
+    if (!onIt) return false;
+    const labels = JSON.parse(t.labels || '[]') as string[];
+    if (!labels.some((l) => l.startsWith(CLOSING))) {
+      labels.push(`${CLOSING}${this.store.now()}`);
+      this.store.db.prepare('UPDATE tasks SET labels = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(labels), this.store.now(), id);
+    }
+    this.mailbox.tell({ msg_id: `task-${id}-closing`, from: by, to: t.identity, kind: 'system', priority: 'now',
+      body: [`המשימה ${t.ref ?? `#${id}`} (${t.title}) נסגרת${reason ? `: ${reason}` : ''}.`,
+        `כתוב עכשיו \`handoff\` (מה נעשה, מה נשאר, מה למדת), ואז \`status\` עם \`state: "done"\`. בעוד ${Math.round(this.cfg.timers.handoffGraceMs / 60_000)} דקות המשמרת נעצרת בכל מקרה.`].join('\n') });
+    return true;
+  }
+
+  /** Tasks close_team is closing whose grace is over: closed now. */
+  async closeOverdue(): Promise<void> {
+    const rows = this.store.db.prepare(`SELECT id, labels FROM tasks WHERE state != 'done' AND labels LIKE '%"${CLOSING}%'`).all() as { id: number; labels: string }[];
+    for (const r of rows) {
+      const at = Number((JSON.parse(r.labels) as string[]).find((l) => l.startsWith(CLOSING))!.slice(CLOSING.length));
+      if (this.store.now() - at >= this.cfg.timers.handoffGraceMs) await this.completeTask(r.id);
+    }
+  }
+
+  /**
    * close_team's `team` → its task: `t22` / `task-22` / `#22` / `22`, the task worker's identity (`lumo-t22`) or a
-   * shift of it (`lumo-t22-2`), the task's ref, or the worker's display name. An open task wins over a done one;
+   * shift of it (`lumo-t22-2`), the task's ref, or the worker's display name; a standing worker's identity or name
+   * finds its current task. An open task wins over a done one;
    * two open tasks behind one name are ambiguous (the caller says which).
    */
   findTeam(team: string): { task?: TaskRow; ambiguous?: TaskRow[] } {
@@ -406,9 +494,9 @@ export class Scheduler {
     if (num) { const t = this.task(Number(num[1])); return t ? { task: t } : {}; }
     const shiftTask = (db.prepare('SELECT task_id FROM shifts WHERE id = ?').get(q) as { task_id: number | null } | undefined)?.task_id ?? null;
     const rows = db.prepare(`SELECT t.* FROM tasks t LEFT JOIN identities i ON i.id = t.identity
-      WHERE (t.identity = @q AND i.team_kind = 'task') OR t.ref = @q OR t.id = @shiftTask OR (i.name = @q AND i.team_kind = 'task')
+      WHERE (t.identity = @q AND i.team_kind = 'task') OR (t.identity = @q AND ${STANDING_TASK}) OR t.ref = @q OR t.id = @shiftTask OR (i.name = @q AND (i.team_kind = 'task' OR ${STANDING_TASK}))
       ORDER BY CASE WHEN t.state = 'done' THEN 1 ELSE 0 END, t.id DESC`)
-      .all({ q, shiftTask }) as TaskRow[];
+      .all({ q, shiftTask, mgr: this.cfg.managerId }) as TaskRow[];
     const open = rows.filter((t) => t.state !== 'done');
     if (open.length > 1) return { ambiguous: open };
     return rows[0] ? { task: rows[0] } : {};
@@ -496,6 +584,7 @@ export class Scheduler {
     const now = this.store.now();
     this.escalateAsks();
     await this.ensureResidents();
+    await this.closeOverdue();
     await this.fill();
     // Empty-slot measurement (metric.empty_slot) is night.ts: per interval, with its reason.
     await this.retryCloses();

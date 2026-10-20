@@ -105,10 +105,13 @@ class _OrgScreenState extends State<OrgScreen> {
                   Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(who.name, style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.35, fontWeight: FontWeight.w500, color: p.text)),
-                      Text(m.line, style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, color: p.text2)),
+                      Text(memberLine(m.line, pr),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, color: p.text2)),
                     ]),
                   ),
-                  StatusWord.of(pr, who.gender),
+                  StatusWord.of(pr, who.gender, suffix: pr.queued > 0 ? '${pr.queued} בתור' : null),
                 ]),
               ),
             ),
@@ -246,3 +249,6 @@ class Toggle extends StatelessWidget {
     );
   }
 }
+
+/// A standing worker's row on the org tab: its role, then the task it is on now ("אחראי שרת · משימה: שדרוג השרת").
+String memberLine(String line, Presence pr) => pr.currentTask == null ? line : '$line · משימה: ${pr.currentTask}';

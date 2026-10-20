@@ -189,6 +189,16 @@ export function ensureRuntimeIdentity(store: Store, p: { id: string; name: strin
     .run(p.id, p.name, p.title, p.symbol ?? '', p.id, p.project, p.reports_to, store.now());
 }
 
+/**
+ * A standing worker: a permanent identity from org.yaml that is not a lead, not resident and not the manager
+ * (e.g. lumo's ido). A task assigned to one (open_team `assignee`) runs in its own worktree and a fresh session,
+ * one task at a time; between tasks it rests like a lead.
+ */
+export function isStandingWorker(i: IdentityRow | undefined, managerId: string): i is IdentityRow {
+  return !!i && i.active === 1 && i.source === 'org' && i.team_kind !== 'task' && i.lifecycle !== 'lead' && i.lifecycle !== 'resident'
+    && i.id !== managerId;
+}
+
 export function projectLead(store: Store, project: string): string | undefined {
   const r = store.db.prepare(`SELECT id FROM identities WHERE project = ? AND team_kind = 'project' AND lifecycle IN ('lead','resident') AND active = 1 LIMIT 1`)
     .get(project) as { id: string } | undefined;
