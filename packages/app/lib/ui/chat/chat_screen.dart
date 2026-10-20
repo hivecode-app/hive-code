@@ -49,6 +49,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   bool _opened = false;
+  Backend? _backend;
   Conversation? _seenChat;
 
   @override
@@ -58,11 +59,13 @@ class _ChatScreenState extends State<ChatScreen> {
     // This runs on every store change. Opening the conversation (a fetch that replaces it) belongs
     // to the first time only: doing it here every time refetched in a loop, dropped messages just
     // sent and kept the CPU busy.
+    _backend = store.backend;
     if (!_opened) {
       _opened = true;
       final chat = store.data?.chats[widget.identityId];
       if (chat != null && controller.text.isEmpty && chat.draft.isNotEmpty) controller.text = chat.draft;
       seenCount = chat?.items.length ?? 0;
+      store.backend.showConversation(widget.identityId);
       store.backend.openConversation(widget.identityId);
     }
     if (ChatScreen.pendingQuote.containsKey(widget.identityId)) {
@@ -76,6 +79,8 @@ class _ChatScreenState extends State<ChatScreen> {
     super.didUpdateWidget(old);
     if (old.identityId != widget.identityId) {
       final store = StoreScope.read(context);
+      store.backend.closeConversation(old.identityId);
+      store.backend.showConversation(widget.identityId);
       final chat = store.data?.chats[widget.identityId];
       seenCount = chat?.items.length ?? 0;
       store.backend.openConversation(widget.identityId);
@@ -90,6 +95,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _backend?.closeConversation(widget.identityId);
     controller.dispose();
     focus.dispose();
     scroll.dispose();

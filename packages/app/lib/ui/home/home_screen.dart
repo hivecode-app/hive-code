@@ -175,13 +175,7 @@ class WaitRow extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.only(top: 2),
-              child: Rich(item.body,
-                  style: TextStyle(
-                      fontFamily: kFont,
-                      fontSize: 14.5,
-                      height: 1.45,
-                      color: p.text,
-                      fontWeight: item.blocking ? FontWeight.w400 : FontWeight.w400)),
+              child: _ClampedBody(item.body, style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text)),
             ),
             AnimatedSize(duration: const Duration(milliseconds: 150), alignment: AlignmentDirectional.topStart, child: tail),
           ]),
@@ -335,5 +329,48 @@ class _ActivityRow extends StatelessWidget {
         ]),
       ),
     );
+  }
+}
+
+/// A waiting item's text, up to 5 lines with "עוד" to open the rest. A GO request carries its
+/// whole description (what's in, risk, rollback, PR); in full, two of them filled the home screen.
+class _ClampedBody extends StatefulWidget {
+  const _ClampedBody(this.text, {required this.style});
+  final String text;
+  final TextStyle style;
+  @override
+  State<_ClampedBody> createState() => _ClampedBodyState();
+}
+
+class _ClampedBodyState extends State<_ClampedBody> {
+  static const _lines = 5;
+  bool open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return LayoutBuilder(builder: (context, c) {
+      final style = DefaultTextStyle.of(context).style.merge(widget.style); // as Text.rich draws it
+      final tp = TextPainter(
+        text: TextSpan(children: Rich.spans(context, widget.text, style), style: style),
+        textDirection: paragraphDirection(widget.text),
+        maxLines: _lines,
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout(maxWidth: c.maxWidth);
+      final long = tp.didExceedMaxLines;
+      tp.dispose();
+      if (!long) return Rich(widget.text, style: widget.style);
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Rich(widget.text, style: widget.style, maxLines: open ? null : _lines),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() => open = !open),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 2),
+            child: Text(open ? 'פחות' : 'עוד', style: widget.style.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+          ),
+        ),
+      ]);
+    });
   }
 }

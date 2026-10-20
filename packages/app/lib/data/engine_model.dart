@@ -18,6 +18,7 @@ class EngineModel {
   final _streams = <String, TextMsg>{};
   ToolGroup? _group;
   final _groupTools = <String, int>{}; // toolUseId -> index in group.tools
+  final _hiddenTools = <String>{}; // toolUseIds with no row (hiddenTool)
   final _toolNames = <String, List<String>>{}; // group id -> tool names in order
   final _toolStarted = <String, DateTime>{};
   int? _shiftNo;
@@ -84,6 +85,14 @@ class EngineModel {
         if (reachesOwner(name, ev['input'])) _turnToldOwner = true;
         final id = ev['toolUseId'] as String? ?? '$seq';
         final input = (ev['input'] as Map?)?.cast<String, dynamic>() ?? const {};
+        // A message to the owner, a question or a GO request shows as its own item, and tool
+        // housekeeping means nothing to him: no tool row for those (it read "השתמש בכלים" between
+        // every two messages), and no row that appears and then vanishes.
+        if (hiddenTool(name, input)) {
+          _hiddenTools.add(id);
+          onLive?.call(LiveState(phase: LivePhase.tool, label: liveLabel(name, input, gender)));
+          return;
+        }
         final g = _group ??= _newGroup(ts, seq);
         _groupTools[id] = g.tools.length;
         _toolStarted[id] = ts;
@@ -95,6 +104,10 @@ class EngineModel {
         onLive?.call(LiveState(phase: LivePhase.tool, label: g.liveLabel, runningCommand: name == 'Bash' ? (input['command'] as String?) : null));
       case 'tool_result':
         final id = ev['toolUseId'] as String? ?? '';
+        if (_hiddenTools.remove(id)) {
+          onLive?.call(const LiveState(phase: LivePhase.thinking));
+          return;
+        }
         final g = _group;
         final i = _groupTools[id];
         if (g == null || i == null) return;
@@ -151,6 +164,9 @@ class EngineModel {
   }
 }
 
+/// No tool row for these: the owner sees their result as its own item, or they are bookkeeping.
+bool hiddenTool(String name, Object? input) => reachesOwner(name, input) || const {'ToolSearch', 'TodoWrite', 'ExitPlanMode'}.contains(name);
+
 /// A company tool whose result the owner sees as its own item (a message, an ask card, a GO card).
 bool reachesOwner(String name, Object? input) =>
     name == 'mcp__company__ask' ||
@@ -196,6 +212,10 @@ String liveLabel(String name, Map<String, dynamic> input, Gender g) {
     'Grep' || 'Glob' => f ? 'מחפשת' : 'מחפש',
     'Edit' || 'Write' || 'MultiEdit' => f ? 'עורכת' : 'עורך',
     'Task' || 'Agent' => f ? 'שולחת עוזר' : 'שולח עוזר',
+    'mcp__company__tell' => f ? 'כותבת' : 'כותב',
+    'mcp__company__ask' => f ? 'שואלת' : 'שואל',
+    'mcp__company__remember' => f ? 'רושמת לזיכרון' : 'רושם לזיכרון',
+    'mcp__company__open_team' => f ? 'פותחת צוות' : 'פותח צוות',
     _ => f ? 'עובדת' : 'עובד',
   };
 }
@@ -216,6 +236,10 @@ String summarizeTools(List<String> names, Gender g, {List<String> files = const 
   final bash = count((n) => n == 'Bash');
   final agents = count((n) => n == 'Task' || n == 'Agent');
   final web = count((n) => n == 'WebFetch' || n == 'WebSearch');
+  // (Owner-facing company tools and housekeeping never get here: hiddenTool keeps them out.)
+  final tells = count((n) => n == 'mcp__company__tell');
+  final memory = count((n) => n == 'mcp__company__remember');
+  final teams = count((n) => n == 'mcp__company__open_team');
   if (reads > 0) parts.add('${f ? 'קראה' : 'קרא'} ${reads == 1 ? 'קובץ' : '$reads קבצים'}');
   if (searches > 0) parts.add('${f ? 'חיפשה' : 'חיפש'} ${_times(searches, f)}');
   if (edits.length == 1) parts.add('${f ? 'ערכה' : 'ערך'} `${edits.first}`');
@@ -223,7 +247,10 @@ String summarizeTools(List<String> names, Gender g, {List<String> files = const 
   if (bash > 0) parts.add('${f ? 'הריצה' : 'הריץ'} ${bash == 1 ? 'פקודה' : '$bash פקודות'}${failed ? ' · נכשל' : ''}');
   if (agents > 0) parts.add(f ? 'שלחה עוזר' : 'שלח עוזר');
   if (web > 0) parts.add(f ? 'קראה ברשת' : 'קרא ברשת');
-  final other = names.length - reads - searches - count((n) => n == 'Edit' || n == 'Write' || n == 'MultiEdit') - bash - agents - web;
+  if (tells > 0) parts.add('${f ? 'שלחה' : 'שלח'} ${tells == 1 ? 'הודעה' : '$tells הודעות'}');
+  if (memory > 0) parts.add(f ? 'רשמה לזיכרון' : 'רשם לזיכרון');
+  if (teams > 0) parts.add(f ? 'פתחה צוות' : 'פתח צוות');
+  final other = names.length - reads - searches - count((n) => n == 'Edit' || n == 'Write' || n == 'MultiEdit') - bash - agents - web - tells - memory - teams;
   if (other > 0) parts.add(f ? 'השתמשה בכלים' : 'השתמש בכלים');
   if (seconds != null && seconds > 0) parts.add("$seconds שנ'");
   return parts.join(' · ');

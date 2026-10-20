@@ -120,4 +120,12 @@ abstract class Backend extends ChangeNotifier {
 
   /// Called when a conversation opens (hq: replay events for that identity).
   Future<void> openConversation(String identityId) async {}
+
+  /// A chat screen for [identityId] is now on screen (pushed, or switched to on desktop). Paired
+  /// with [closeConversation]; the most recent one still on screen is the open conversation.
+  void showConversation(String identityId) {}
+
+  /// That screen left: what arrives for it from now on is not "read" (unless another screen for
+  /// the same worker is still showing).
+  void closeConversation(String identityId) {}
 }

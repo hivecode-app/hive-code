@@ -12,6 +12,7 @@ import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../model/models.dart';
+import '../theme/icons.dart';
 import 'backend.dart';
 import 'engine_model.dart';
 
@@ -170,6 +171,7 @@ class HqBackend extends Backend {
     _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, previous: prev);
     final open = openIdentity, openChat = open == null ? null : _data!.chats[open];
     if (open != null && openChat != null && !_midFetch.containsKey(open)) _syncAsks(openChat, open, _data!);
+    if (open != null && _openFailed.contains(open)) unawaited(openConversation(open));
     for (final b in board) {
       final sh = b['shift'] as Map?;
       if (sh != null && sh['state'] == 'live') _boardShift[b['id'] as String] = sh['id'] as String;
@@ -403,7 +405,11 @@ class HqBackend extends Backend {
       );
 
   /// The conversation on screen (read = handled for what arrives while it is open).
-  String? openIdentity;
+  String? get openIdentity => _shown.lastOrNull;
+  final _shown = <String>[];
+
+  @override
+  void showConversation(String identityId) => _shown.add(identityId);
 
   void _bumpConversation(String id, String line, int ts) {
     final d = _data;
@@ -427,7 +433,6 @@ class HqBackend extends Backend {
 
   @override
   Future<void> openConversation(String identityId) async {
-    openIdentity = identityId;
     if (!_opening.add(identityId)) return; // already fetching it
     try {
       await _openConversation(identityId);
@@ -461,7 +466,7 @@ class HqBackend extends Backend {
           unawaited(_send('POST', '/api/messages/${Uri.encodeComponent(m['id'] as String)}/handled'));
         }
       }
-      _syncAsks(chat, identityId, d);
+      _syncAsks(chat, identityId, _data ?? d); // the snapshot may have moved on while this loaded
       // Messages sent from here: keep the furthest delivery state either copy has seen, and keep
       // the ones hq doesn't have yet (in the queue, waiting for the link, or failed).
       final mine = {for (final m in chat.items.whereType<UserMsg>()) m.id: m};
@@ -496,6 +501,12 @@ class HqBackend extends Backend {
   }
 
   final _openFailed = <String>{};
+
+  @override
+  void closeConversation(String identityId) {
+    final i = _shown.lastIndexOf(identityId);
+    if (i >= 0) _shown.removeAt(i);
+  }
 
   /// Question cards follow the inbox: one appears when a worker asks while the chat is open, and
   /// one answered elsewhere (home, another device, a manager) stops asking here.
@@ -675,14 +686,22 @@ CompanyData mapSnapshot({
   CompanyData? previous,
 }) {
   const teamNames = {'mgmt': 'הנהלה', 'management': 'הנהלה', 'monitor': 'ניטור', 'monitoring': 'ניטור', 'personal': 'הצוות האישי', 'improve': 'מחלקת השיפור', 'improvement': 'מחלקת השיפור', 'lumo': 'לומו', 'tikibot': 'טיקיבוט', 'voice': 'voice-bot', 'agent-company': 'החברה'};
-  const teamSymbols = {'mgmt': 'explore', 'monitor': 'shield', 'personal': 'folder_shared', 'improve': 'build', 'lumo': 'local_shipping', 'tikibot': 'smart_toy', 'voice': 'graphic_eq'};
+  // The team badge on every monogram. By team id first (hq's real ids and the older short ones),
+  // then a member's own symbol if the app has that icon; never an icon it doesn't have (that drew
+  // "?" on the whole personal team, QA-LOG item 3).
+  const teamSymbols = {
+    'management': 'explore', 'mgmt': 'explore', 'monitoring': 'shield', 'monitor': 'shield', 'personal': 'folder_shared',
+    'improvement': 'build', 'improve': 'build', 'agent-company': 'architecture', 'lumo': 'local_shipping',
+    'tikibot': 'smart_toy', 'voice': 'graphic_eq', 'voice-bot': 'graphic_eq',
+  };
   final teams = <String, Team>{};
   final ids = <String, Identity>{};
   final presence = <String, Presence>{};
   for (final b in board) {
     final id = b['id'] as String;
     final team = (b['team'] as String?) ?? 'company';
-    final symbol = (b['symbol'] as String?)?.isNotEmpty == true && RegExp(r'^[a-z_]+$').hasMatch(b['symbol'] as String) ? b['symbol'] as String : (teamSymbols[team] ?? 'build');
+    final own = b['symbol'] as String?;
+    final symbol = teamSymbols[team] ?? (own != null && kIcons.containsKey(own) ? own : 'build');
     teams.putIfAbsent(team, () => Team(id: team, name: teamNames[team] ?? team, symbol: symbol, permanent: b['team_kind'] == 'permanent'));
     if (b['lifecycle'] == 'lead' && teams[team]!.leadId == null) {
       teams[team] = Team(id: team, name: teams[team]!.name, symbol: teams[team]!.symbol, leadId: id, permanent: teams[team]!.permanent);
@@ -769,7 +788,8 @@ CompanyData mapSnapshot({
     for (final b in board)
       ConversationSummary(
         identityId: b['id'] as String,
-        lastLine: ((b['task'] as Map?)?['title'] as String?) ?? (ids[b['id']]?.title ?? ''),
+        // Nothing said yet: no second line (it used to repeat the title right above it).
+        lastLine: ((b['task'] as Map?)?['title'] as String?) ?? '',
         time: b['last_seen_at'] is int ? _hm(b['last_seen_at'] as int) : '',
         pinned: b['id'] == 'yoav',
       ),

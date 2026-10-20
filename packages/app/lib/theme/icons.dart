@@ -84,4 +84,12 @@ const Map<String, IconData> kIcons = {
   'passkey': Symbols.passkey_rounded,
   'link': Symbols.link_rounded,
   'logout': Symbols.logout_rounded,
+  'architecture': Symbols.architecture_rounded,
+  'payments': Symbols.payments_rounded,
+  'flight': Symbols.flight_rounded,
+  'health_and_safety': Symbols.health_and_safety_rounded,
+  'monitor_heart': Symbols.monitor_heart_rounded,
+  'group': Symbols.group_rounded,
+  'domain': Symbols.domain_rounded,
+  'expand_less': Symbols.expand_less_rounded,
 };

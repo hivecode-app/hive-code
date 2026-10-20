@@ -92,6 +92,7 @@ void main() {
 
   test('a question asked while the chat is open appears; one answered elsewhere closes', () async {
     final (b, hq) = await up();
+    b.showConversation('yoav'); // as ChatScreen does
     await b.openConversation('yoav');
     expect(b.data!.chats['yoav']!.items.whereType<AskCard>(), isEmpty);
 
@@ -112,6 +113,7 @@ void main() {
 
   test('the owner\'s message from another device, system lines and worker messages show live', () async {
     final (b, hq) = await up();
+    b.showConversation('yoav'); // as ChatScreen does
     await b.openConversation('yoav');
     hq.send(msgNew('m-other-device', 'owner', 'yoav', 'מהמחשב'));
     hq.send(msgNew('sys1', 'yoav', 'owner', 'המשמרת התחלפה', kind: 'system'));
@@ -119,6 +121,35 @@ void main() {
     await until(() => ids(b).contains('msg:w1'));
     expect(ids(b), containsAll(['m-other-device', 'msg:sys1', 'msg:w1']));
     expect(b.data!.chats['yoav']!.items.whereType<UserMsg>().single.text, 'מהמחשב');
+  }, timeout: const Timeout(Duration(seconds: 20)));
+
+  test('a message sent while the history loads stays on screen', () async {
+    final (b, hq) = await up();
+    hq.messagesDelay = const Duration(milliseconds: 400);
+    final opening = b.openConversation('yoav');
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    await b.send('yoav', UserMsg(id: 'm-mid', ts: DateTime.fromMillisecondsSinceEpoch(6000), text: 'באמצע'));
+    await opening;
+    expect(ids(b), contains('m-mid'));
+  }, timeout: const Timeout(Duration(seconds: 20)));
+
+  test('a closed chat is no longer "open": what arrives for it stays unread', () async {
+    final (b, hq) = await up();
+    b.showConversation('yoav');
+    await b.openConversation('yoav');
+    expect(b.openIdentity, 'yoav');
+    b.closeConversation('dana');
+    expect(b.openIdentity, 'yoav', reason: 'closing another chat changes nothing');
+    // Yoav → Dana → back: Yoav is open again. Yoav twice (a second Yoav pushed) → back: still open.
+    b.showConversation('dana');
+    expect(b.openIdentity, 'dana');
+    b.closeConversation('dana');
+    expect(b.openIdentity, 'yoav');
+    b.showConversation('yoav');
+    b.closeConversation('yoav');
+    expect(b.openIdentity, 'yoav');
+    b.closeConversation('yoav');
+    expect(b.openIdentity, isNull);
   }, timeout: const Timeout(Duration(seconds: 20)));
 
   test('a late copy never moves a delivery tick back', () {

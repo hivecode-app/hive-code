@@ -26,6 +26,7 @@ class ConversationsScreen extends StatefulWidget {
 class _ConversationsScreenState extends State<ConversationsScreen> {
   bool searching = false;
   String q = '';
+  bool showClosed = false;
 
   bool _match(CompanyData d, ConversationSummary c) {
     if (q.isEmpty) return true;
@@ -39,10 +40,18 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     final d = store.data;
     final p = context.p;
     if (d == null) return const SizedBox.shrink();
-    final list = [
+    final all = [
       ...d.conversations.where((c) => c.pinned),
       ...d.conversations.where((c) => !c.pinned),
     ].where((c) => _match(d, c)).toList();
+    // Task teams that finished go to the end, folded (APP-SPEC §4.3); a search shows everything.
+    // Not folded: unread, the selected one, or anything in the desktop sidebar (no room for a toggle).
+    bool closed(ConversationSummary c) =>
+        d.who(c.identityId).temp && d.presence[c.identityId]?.status == WorkerStatus.done && c.unread == 0 && c.identityId != store.selectedConversation;
+    final fold = q.isEmpty && !widget.compact;
+    final list = fold ? all.where((c) => !closed(c)).toList() : all;
+    final done = fold ? all.where(closed).toList() : const <ConversationSummary>[];
+    final doneTeams = {for (final c in done) d.who(c.identityId).teamId}.length;
 
     if (widget.compact) {
       return Container(
@@ -90,9 +99,14 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         Expanded(
           child: ListView(padding: EdgeInsets.zero, children: [
             ListBlock(top: false, children: [for (final c in list) ConversationRow(c: c)]),
-            if (q.isEmpty) ...[
-              const MoreRow(icon: 'expand_more', bold: 'לפי צוות', rest: 'עוד 6 עובדים'),
-              const MoreRow(icon: 'history', bold: '', rest: 'נסגרו השבוע · 4 צוותי משימה', top: false),
+            if (done.isNotEmpty) ...[
+              MoreRow(
+                icon: showClosed ? 'expand_less' : 'history',
+                bold: '',
+                rest: 'נסגרו · ${doneTeams == 1 ? 'צוות משימה אחד' : '$doneTeams צוותי משימה'}',
+                onTap: () => setState(() => showClosed = !showClosed),
+              ),
+              if (showClosed) ListBlock(top: false, children: [for (final c in done) ConversationRow(c: c)]),
             ],
             const SizedBox(height: 80),
           ]),
@@ -244,7 +258,7 @@ class ConversationRow extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(c.time, style: T.meta.copyWith(color: p.text3)),
                   ]),
-                  if (!compact)
+                  if (!compact && c.lastLine.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Row(children: [

@@ -390,7 +390,7 @@ class _WaitingPeek extends StatelessWidget {
     final d = StoreScope.of(context).data!;
     return ListView(padding: EdgeInsets.zero, children: [
       Section('מחכה לך', count: '${d.waitingCount}'),
-      ListBlock(children: [for (final w in d.waiting) WaitRow(item: w)]),
+      ListBlock(children: [for (final w in d.waiting) WaitRow(key: ValueKey(w.id), item: w)]),
     ]);
   }
 }

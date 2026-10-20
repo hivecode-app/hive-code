@@ -110,6 +110,27 @@ void main() {
     expect(items.whereType<TextMsg>().map((t) => t.text), ['בטח.']);
   });
 
+  // QA-LOG item 5: every reply from Yoav had a "השתמש בכלים ✓" row above it, for the tell itself.
+  test('a message to the owner leaves no tool row; other company tools say what they did', () {
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.m);
+    m.apply(ev(1, 'tool_use', {'toolUseId': 'a', 'name': 'ToolSearch', 'input': {'query': 'tell'}}));
+    m.apply(ev(2, 'tool_result', {'toolUseId': 'a', 'isError': false}));
+    m.apply(ev(3, 'tool_use', {'toolUseId': 'b', 'name': 'mcp__company__tell', 'input': {'to': 'owner', 'body': 'קיבלתי'}}));
+    m.apply(ev(4, 'tool_result', {'toolUseId': 'b', 'isError': false}));
+    m.apply(ev(5, 'result', {'subtype': 'success', 'isError': false}));
+    expect(items.whereType<ToolGroup>(), isEmpty);
+
+    m.apply(ev(6, 'tool_use', {'toolUseId': 'c', 'name': 'Read', 'input': {'file_path': '/a/b.md'}}));
+    m.apply(ev(7, 'tool_result', {'toolUseId': 'c', 'isError': false}));
+    m.apply(ev(8, 'tool_use', {'toolUseId': 'd', 'name': 'mcp__company__tell', 'input': {'to': 'dana', 'body': 'תבדקי'}}));
+    m.apply(ev(9, 'tool_result', {'toolUseId': 'd', 'isError': false}));
+    m.apply(ev(10, 'tool_use', {'toolUseId': 'e', 'name': 'mcp__company__remember', 'input': {'text': 'x'}}));
+    m.apply(ev(11, 'tool_result', {'toolUseId': 'e', 'isError': false}));
+    m.apply(ev(12, 'result', {'subtype': 'success', 'isError': false}));
+    expect(items.whereType<ToolGroup>().single.summary, 'קרא קובץ · שלח הודעה · רשם לזיכרון');
+  });
+
   test('a reply hq stored from the streamed text (text_ref) is the same bubble, not a second one', () {
     final items = <ChatItem>[];
     final m = EngineModel(items: items, gender: Gender.m);
