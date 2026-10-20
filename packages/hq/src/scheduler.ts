@@ -469,6 +469,29 @@ export class Scheduler {
     return started;
   }
 
+  /**
+   * #68: a lead (team head or project CEO) that is in org.yaml but never had a shift was only woken by the
+   * first message someone happened to send it. hq wakes it once itself: a system message whose id is fixed
+   * per identity, so a restart or a second call never sends it again. Returns the leads it woke.
+   */
+  wakeNewLeads(): string[] {
+    const rows = this.store.db.prepare(`SELECT id, name, title FROM identities i WHERE lifecycle = 'lead' AND active = 1
+      AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.identity = i.id)`).all() as { id: string; name: string; title: string }[];
+    const woke: string[] = [];
+    for (const r of rows) {
+      const msgId = `hq-lead-up-${r.id}`;
+      if (this.mailbox.get(msgId)) continue;
+      this.mailbox.tell({ msg_id: msgId, from: 'hq', to: r.id, kind: 'system', priority: 'next',
+        body: [
+          `קמת לראשונה: נוספת ל-\`org.yaml\` בתור ${r.title || 'ראש צוות'}, ו-hq העיר אותך אחרי שנטען.`,
+          'כתוב לרן ב-`tell` (`to: "owner"`) משפט-שניים: שקמת, מי אתה ומה הצוות שלך עושה. אחר כך המשך לפי התיק שלך.',
+        ].join('\n') });
+      this.store.emit('scheduler.lead_woken', r.id, { msg: msgId });
+      woke.push(r.id);
+    }
+    return woke;
+  }
+
   async sweep(): Promise<void> {
     const now = this.store.now();
     this.escalateAsks();

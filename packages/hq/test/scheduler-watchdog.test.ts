@@ -243,3 +243,36 @@ test('task lifecycle: rest parks the task (no restart loop), a message wakes it,
     assert.equal(hq.board().find((b) => b.id === `agent-company-t${t.id}`)!.status, 'done');
   } finally { await env.cleanup(); }
 });
+
+test('a lead added to org.yaml wakes once after hq loads, told to write to ran (#68)', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    // eli already ran once: only leads that never had a shift are new.
+    await hq.shifts.request('eli', { reason: 'manual' });
+    await until(() => hq.shifts.get('eli-1')?.state === 'live', 3000, 'eli up');
+    const woke = hq.scheduler.wakeNewLeads();
+    assert.deepEqual(woke.sort(), ['ac-ceo', 'rotem'], 'leads only, never-run only (not yoav the resident, not amit)');
+    await until(() => !!hq.shifts.get('ac-ceo-1') && !!hq.shifts.get('rotem-1'), 3000, 'leads up');
+    const m = hq.mailbox.get('hq-lead-up-ac-ceo')!;
+    assert.equal(m.from_identity, 'hq');
+    assert.equal(m.kind, 'system');
+    assert.match(m.body, /tell/);
+    assert.match(m.body, /owner/);
+    assert.equal((hq.store.db.prepare(`SELECT json_extract(data, '$.reason') r FROM events WHERE type = 'shift.state' AND identity = 'ac-ceo'
+      ORDER BY seq LIMIT 1`).get() as { r: string }).r, 'message');
+    // Once: a second load (restart) wakes nobody again, also after the lead's shift ended.
+    await hq.shifts.stop(hq.shifts.get('ac-ceo-1')!.id, 'rest');
+    assert.deepEqual(hq.scheduler.wakeNewLeads(), []);
+    assert.equal(launcher.launches.filter((l) => l.identity === 'ac-ceo').length, 1);
+  } finally { await env.cleanup(); }
+});
+
+test('hq start (with its loops) wakes a never-run lead by itself (#68)', async () => {
+  const env = await makeEnv({ noStart: true });
+  try {
+    await env.hq.start({ listen: false });
+    await until(() => !!env.hq.shifts.get('ac-ceo-1'), 3000, 'ac-ceo woken by start');
+    assert.ok(env.hq.mailbox.get('hq-lead-up-ac-ceo'));
+  } finally { await env.cleanup(); }
+});

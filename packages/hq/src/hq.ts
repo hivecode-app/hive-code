@@ -178,6 +178,8 @@ export class Hq {
       });
       // First quota read right away, so placement doesn't wait 10 minutes for numbers.
       if (this.store.toggle('yoav/accounts')) this.store.bg(this.accounts.refresh(), 'accounts.refresh');
+      // A lead that was added to org.yaml and never ran wakes now, not on the first message it happens to get (#68).
+      this.scheduler.wakeNewLeads();
       await this.scheduler.sweep();
     }
     if (opts.listen !== false) {
