@@ -25,6 +25,7 @@ import app.hivecode.hq.HqClient
 import app.hivecode.hq.HqLinkService
 import app.hivecode.hq.HqSync
 import app.hivecode.hq.Prefs
+import app.hivecode.update.AppUpdater
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -34,7 +35,8 @@ import kotlin.concurrent.thread
 /**
  * The `company/native` MethodChannel (Dart side: lib/native/native_bridge.dart).
  * Dart -> native: the methods in [onMethodCall]. Native -> Dart: "route" (a notification or
- * shortcut tap while the app runs) and "shared" (a share into the app while it runs).
+ * shortcut tap while the app runs), "shared" (a share into the app while it runs) and "update"
+ * (progress of the in-app update, update/AppUpdater.kt).
  */
 class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) : MethodChannel.MethodCallHandler {
     private val channel = MethodChannel(messenger, CHANNEL).also { it.setMethodCallHandler(this) }
@@ -143,6 +145,31 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
                         main.post { result.success(image) }
                     }
                 }
+            }
+            // The in-app update (update/AppUpdater.kt).
+            "appVersionCode" -> result.success(AppUpdater.versionCode(ctx))
+            "canInstallPackages" -> result.success(AppUpdater.canInstall(ctx))
+            "installUpdate" -> {
+                val path = call.argument<String>("path").orEmpty()
+                val sha256 = call.argument<String>("sha256").orEmpty()
+                val bytes = call.argument<Number>("bytes")?.toLong() ?: 0L
+                if (!path.startsWith("/api/app/apk/") || !Regex("^[0-9a-fA-F]{64}$").matches(sha256) || bytes <= 0) {
+                    result.error("bad_update", "path, sha256 and bytes from /api/app/latest", null)
+                    return
+                }
+                // Android asks once to let this app install apps; he comes back and taps again.
+                if (!AppUpdater.canInstall(ctx)) {
+                    AppUpdater.openInstallPermission(activity)
+                    result.success("needs_permission")
+                    return
+                }
+                val started = AppUpdater.start(activity, path, sha256, bytes) { ev -> main.post { channel.invokeMethod("update", ev) } }
+                result.success(if (started) "started" else "busy")
+            }
+            "reopenUpdate" -> result.success(AppUpdater.reopen(activity))
+            "cancelUpdate" -> {
+                AppUpdater.cancel()
+                result.success(null)
             }
             "passkeyCreate" -> passkeys.create(call.argument<String>("json").orEmpty(), result)
             "passkeyGet" -> passkeys.get(call.argument<String>("json").orEmpty(), result)

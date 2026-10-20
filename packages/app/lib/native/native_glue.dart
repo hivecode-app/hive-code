@@ -1,6 +1,6 @@
 // Glue between the Android layer (native_bridge.dart) and the app: routes from notifications,
 // bubbles and the widget; the launcher badge = things waiting for you (APP-SPEC §5.6); and the
-// share target ("שתף אל… ← עובד", chat.md §3). No-ops on the web.
+// share target ("שתף אל… ← עובד", chat.md §3); the in-app update (app_update.dart). No-ops on the web.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -15,6 +15,7 @@ import '../theme/tokens.dart';
 import '../ui/chat/chat_screen.dart';
 import '../ui/common.dart';
 import '../ui/nav.dart';
+import 'app_update.dart';
 import 'native_bridge.dart';
 
 /// The running app's glue (settings and the system strip read it).
@@ -30,6 +31,10 @@ class NativeGlue {
   /// Whether Android notifications are allowed; drives the "ההתראות כבויות" strip (§4.1).
   final notificationsOff = ValueNotifier<bool>(false);
 
+  /// A newer APK on hq; drives the update strip (§4.1).
+  final update = AppUpdate();
+  AppLifecycleListener? _life;
+
   Future<void> start() async {
     final b = NativeBridge.instance;
     if (!b.supported) return;
@@ -38,6 +43,8 @@ class NativeGlue {
     _subs.add(b.onShared.listen(_share));
     notificationsOff.value = !(await b.notificationsEnabled());
     await syncConfig();
+    unawaited(update.check(force: true));
+    _life = AppLifecycleListener(onResume: () => unawaited(update.resumed()));
     // Cold start from a notification or a share: wait for the first frame, then go there.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final r = await b.getInitialRoute();
@@ -66,12 +73,16 @@ class NativeGlue {
       final current = await b.getConfig();
       if (current?.baseUrl == url && current?.token == token) return;
       await b.configure(baseUrl: url, token: token);
+      // Just signed in (or moved server): ask that hq about a newer version now.
+      unawaited(update.check(force: true));
     } on PlatformException {
       // A malformed URL in settings: native keeps what it had; the settings screen shows the error.
     }
   }
 
   void dispose() {
+    _life?.dispose();
+    update.dispose();
     store.removeListener(_syncCount);
     for (final s in _subs) {
       s.cancel();

@@ -88,6 +88,7 @@ const Map<String, IconData> kIcons = {
   'passkey': Symbols.passkey_rounded,
   'link': Symbols.link_rounded,
   'logout': Symbols.logout_rounded,
+  'system_update': Symbols.system_update_rounded,
   'architecture': Symbols.architecture_rounded,
   'payments': Symbols.payments_rounded,
   'flight': Symbols.flight_rounded,

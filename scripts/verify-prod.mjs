@@ -7,7 +7,8 @@
 //     test device is revoked and its token is refused. The device is revoked even when a step fails.
 //   - dictation: only through hq and only with a device token; the old open /dictate route is gone.
 //   - the app: the root loads, assetlinks.json is there, the APK is downloadable, big enough, and
-//     signed with the release key that hq trusts (packages/hq/src/config.ts).
+//     signed with the release key that hq trusts (packages/hq/src/config.ts); hq's /api/app/latest
+//     offers that same APK for the in-app update.
 //   - the old secret path, while deploy/caddy/agent-company.caddy still has it: 301 to the root.
 // Prints one Hebrew line per check; exit 1 when any check fails.
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
@@ -147,6 +148,14 @@ const dictate = (url, token) => {
     bad(`אין apksigner (${apksigner}), ולכן החתימה לא נבדקה`);
   }
   if (bytes.length) console.log(`  sha256 של ה-APK: ${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}…`);
+
+  // The in-app update: hq offers exactly the APK that is up for download (packages/hq/src/app-release.ts).
+  const lr = await req(`${LOCAL}/api/app/latest`, { headers: bearer(admin) });
+  const latest = lr.status === 200 ? (await lr.json()).latest : null;
+  const sum = createHash('sha256').update(bytes).digest('hex');
+  expect(latest?.sha256 === sum && latest?.bytes === bytes.length,
+    `hq מציע לאפליקציה את הגרסה הזו לעדכון (versionCode ${latest?.version_code})`,
+    lr.status !== 200 ? `‏/api/app/latest ענה ${lr.status}` : latest ? `hq מציע APK אחר (${latest.sha256?.slice(0, 16)}…)` : 'hq לא מציע גרסה לעדכון');
 }
 
 // ── tab.hq: hq's handoff listener answers, and only for /h/ and /ws/ ─────────

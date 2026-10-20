@@ -2,9 +2,10 @@
 // /api/auth/* (getting a device token: passkey or pairing code, auth.ts). A token is either hq's own
 // api-token (stays on the server) or a device token. The app uses this through Caddy; mcp-company and
 // hooks use it for writes (idempotent by msg_id). POST /api/dictate/transcribe streams to dictate-server (dictate.ts).
+// GET /api/app/latest and /api/app/apk/:code: the in-app update of the Android app (app-release.ts).
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { timingSafeEqual, randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Hq } from './hq.ts';
@@ -285,6 +286,9 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   route('POST', '/api/accounts/refresh', async () => { await hq.accounts.refresh(); return hq.accounts.view(); });
 
   // Devices and passkeys (settings → devices). The caller's own device is marked `current`.
+  // The in-app update (app-release.ts): the newest APK deploy put out, or null.
+  route('GET', '/api/app/latest', () => ({ latest: hq.appReleases.latest()?.release ?? null }));
+
   route('GET', '/api/devices', ({ caller }) => {
     const d = hq.auth.devices();
     return { ...d, devices: d.devices.map((x) => ({ ...x, current: caller.kind === 'device' && caller.id === x.id })) };
@@ -374,6 +378,16 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
         res.writeHead(200, { 'content-type': f.upload.mime, 'content-length': f.data.length, 'cache-control': 'private, max-age=31536000, immutable',
           'x-content-type-options': 'nosniff' });
         return res.end(f.data);
+      }
+      const apk = req.method === 'GET' ? /^\/api\/app\/apk\/(\d+)$/.exec(url.pathname) : null;
+      if (apk) {
+        const r = hq.appReleases.apk(Number(apk[1]));
+        if (!r) return json(res, 404, { error: 'no such version' });
+        res.writeHead(200, { 'content-type': 'application/vnd.android.package-archive', 'content-length': r.release.bytes,
+          'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+        const s = createReadStream(r.file);
+        s.on('error', () => res.destroy());
+        return void s.pipe(res);
       }
       if (await hq.ingest.handle(req, res, () => readBody(req))) return;
       if (await dispatch(routes, req, res, url, c)) return;

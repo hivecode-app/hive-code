@@ -7,6 +7,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- The in-app update (update/AppUpdater.kt): Android still asks once, and confirms every install. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Android 12+: once the app installed itself, later updates may skip the confirm dialog. -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <application
         android:label="החברה"
@@ -91,6 +95,11 @@
         <!-- Every notification button. Not exported: only our own PendingIntents reach it. -->
         <receiver
             android:name=".notify.ActionReceiver"
+            android:exported="false" />
+
+        <!-- PackageInstaller's result for the in-app update. Not exported: only our own PendingIntent reaches it. -->
+        <receiver
+            android:name=".update.UpdateReceiver"
             android:exported="false" />
 
         <receiver

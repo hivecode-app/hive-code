@@ -58,6 +58,7 @@ class NativeBridge {
 
   final StreamController<String> _routes = StreamController<String>.broadcast();
   final StreamController<SharedPayload> _shared = StreamController<SharedPayload>.broadcast();
+  final StreamController<Map<String, Object?>> _update = StreamController<Map<String, Object?>>.broadcast();
   bool _listening = false;
 
   void _listen() {
@@ -71,6 +72,9 @@ class NativeBridge {
         case 'shared':
           final p = SharedPayload.fromMap(call.arguments);
           if (p != null) _shared.add(p);
+        case 'update':
+          final e = call.arguments;
+          if (e is Map) _update.add(e.cast<String, Object?>());
       }
       return null;
     });
@@ -86,6 +90,13 @@ class NativeBridge {
   Stream<SharedPayload> get onShared {
     _listen();
     return _shared.stream;
+  }
+
+  /// Progress of the in-app update (AppUpdater.kt): {state: downloading, received, total},
+  /// {state: installing | cancelled | aborted}, {state: failed, reason}.
+  Stream<Map<String, Object?>> get onUpdate {
+    _listen();
+    return _update.stream;
   }
 
   Future<T?> _call<T>(String method, [Map<String, Object?>? args]) async {
@@ -148,6 +159,23 @@ class NativeBridge {
     if (bytes is! Uint8List || mime is! String) return null;
     return (bytes: bytes, mime: mime, name: name is String ? name : 'image');
   }
+
+  /// The versionCode of the installed APK; null off-Android.
+  Future<int?> appVersionCode() => _call<int>('appVersionCode');
+
+  /// Whether Android lets this app install updates ("install unknown apps").
+  Future<bool> canInstallPackages() async => await _call<bool>('canInstallPackages') ?? false;
+
+  /// Downloads [path] from hq, checks it, and hands it to Android's installer. Returns `started`,
+  /// `busy`, or `needs_permission` (the system settings page is open; tap again after it).
+  Future<String?> installUpdate({required String path, required String sha256, required int bytes}) =>
+      _call<String>('installUpdate', {'path': path, 'sha256': sha256, 'bytes': bytes});
+
+  /// Back in the app during "installing": `shown` (Android's dialog is open again), `waiting`
+  /// (Android has not answered yet) or `none` (nothing pending).
+  Future<String?> reopenUpdate() => _call<String>('reopenUpdate');
+
+  Future<void> cancelUpdate() => _call<void>('cancelUpdate');
 
   /// The in-app waiting counter is the source of truth for the launcher badge (APP-SPEC §5.6).
   Future<void> setWaitingCount(int count) => _call<void>('setWaitingCount', {'count': count});

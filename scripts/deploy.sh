@@ -25,6 +25,7 @@ WWW=/var/www/hq-app
 APP_URL=https://app.hq.example.com
 FLUTTER="${FLUTTER:-$HOME/flutter/bin/flutter}"
 APKSIGNER="${APKSIGNER:-/opt/android-sdk/build-tools/36.0.0/apksigner}"
+AAPT2="${AAPT2:-/opt/android-sdk/build-tools/36.0.0/aapt2}"
 DICTATE_ENV="${DICTATE_ENV:-$HOME/projects/dictate-server/server/.env}"
 UNITS="$HOME/.config/systemd/user"
 # Hand-made backups of our Caddy blocks from before this script (20/10/2026). Same list in drift-check.sh.
@@ -198,11 +199,15 @@ deploy_hq() {
 deploy_app() {
   step "app"
   # A new dir per build (sha + time): a rerun at the same commit never touches the live release.
-  local rel="$WWW/releases/$sha-$(date +%Y%m%d%H%M%S)" apk size hex got want
+  local rel="$WWW/releases/$sha-$(date +%Y%m%d%H%M%S)" apk size hex got want build code name
   # One APK per ABI keeps the download small; the owner's phone (OnePlus 13) is arm64.
+  # The build number is the commit count of main, so every deploy has a higher versionCode than the
+  # one before (Android adds 1000 x ABI on top); the in-app update compares exactly that number.
+  [[ "$(git rev-parse --is-shallow-repository)" == false ]] || fail "ה-checkout רדוד, ולכן מספר ה-build לא אמין"
+  build="$(git rev-list --count HEAD)"
   (cd packages/app \
     && "$FLUTTER" build web --release --base-href / --no-web-resources-cdn >/dev/null \
-    && "$FLUTTER" build apk --release --split-per-abi --dart-define=HQ_URL="$APP_URL/hq" >/dev/null) || fail "flutter build"
+    && "$FLUTTER" build apk --release --split-per-abi --build-number="$build" --dart-define=HQ_URL="$APP_URL/hq" >/dev/null) || fail "flutter build"
   apk=packages/app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
   size="$(stat -c %s "$apk")"
   ((size > 5 * 1024 * 1024)) || fail "ה-APK קטן מדי ($size bytes)"
@@ -210,11 +215,23 @@ deploy_app() {
   got="$(echo -n "$hex" | xxd -r -p | base64 -w0 | tr '+/' '-_' | tr -d '=')"
   want="$(grep -o 'android:apk-key-hash:[A-Za-z0-9_-]\+' packages/hq/src/config.ts | head -1 | cut -d: -f3)"
   [[ -n "$got" && "$got" == "$want" ]] || fail "ה-APK לא חתום במפתח השחרור ($got, ציפיתי ל-$want)"
+  # The versionCode Android will see, read from the APK itself (not from what we asked Flutter for).
+  code="$("$AAPT2" dump badging "$apk" | sed -n "s/^package: .* versionCode='\([0-9]*\)'.*/\1/p")"
+  name="$("$AAPT2" dump badging "$apk" | sed -n "s/^package: .* versionName='\([^']*\)'.*/\1/p")"
+  [[ "$code" =~ ^[0-9]+$ ]] || fail "לא הצלחתי לקרוא את ה-versionCode של ה-APK"
+  # A lower or equal versionCode would never be offered (and Android would not install it over the live one).
+  local live
+  live="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).version_code||0)}catch{console.log(0)}' "$WWW/current/app-release.json")"
+  ((code > live)) || fail "ה-versionCode החדש ($code) לא גבוה מזה שבאוויר ($live)"
 
   sudo -n install -d -o "$(id -un)" -m755 "$WWW/releases"
   mkdir -p "$rel.tmp/.well-known"
   rsync -a packages/app/build/web/ "$rel.tmp/"
   cp "$apk" "$rel.tmp/agent-company.apk"
+  # What hq offers the app as "the newest version" (packages/hq/src/app-release.ts).
+  node -e 'const [code, name, sha, sha256, bytes] = process.argv.slice(1);
+    console.log(JSON.stringify({ version_code: +code, version_name: name, sha, apk: "agent-company.apk", sha256, bytes: +bytes }))' \
+    "$code" "$name" "$sha" "$(sha256sum "$apk" | cut -c1-64)" "$size" >"$rel.tmp/app-release.json"
   cp deploy/caddy/assetlinks.json "$rel.tmp/.well-known/assetlinks.json"
   echo "$sha" >"$rel.tmp/.deployed-sha"
   chmod -R a+rX "$rel.tmp"
@@ -234,7 +251,7 @@ deploy_app() {
     d="${d%/}"
     grep -qxF "$d" <<<"$keep" || rm -rf "$d"
   done
-  say "האפליקציה ($APP_URL/) וה-APK ($((size / 1048576)) MB, חתימה תקינה) מ-${sha:0:7}"
+  say "האפליקציה ($APP_URL/) וה-APK ($((size / 1048576)) MB, חתימה תקינה, versionCode $code) מ-${sha:0:7}"
 }
 
 # ── caddy ────────────────────────────────────────────────────────────────────

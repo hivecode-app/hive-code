@@ -11,7 +11,7 @@ names=(
   close lock sms dark_mode light_mode settings sync wifi_off notifications_off cloud_off image picture_as_pdf
   draft reply arrow_downward keyboard_arrow_down chevron_left nights_stay info terminal undo bug_report palette
   quickreply format_quote select_all share keyboard person devices tune text_fields help
-  fingerprint passkey link logout
+  fingerprint passkey link logout system_update
   architecture payments flight health_and_safety monitor_heart group domain expand_less sort
 )
 {

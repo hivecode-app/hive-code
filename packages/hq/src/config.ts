@@ -64,6 +64,8 @@ export interface HqConfig {
   claudeHome: string;
   /** B.9 tab handoff: the phone page listener (tab.hq behind Caddy) and the shared Chrome's CDP. */
   tab: TabConfig;
+  /** The live app release dir (scripts/deploy.sh app): its app-release.json and APK feed the in-app update. null = none. */
+  appReleaseDir: string | null;
 }
 
 export interface AccountDef {
@@ -126,6 +128,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     ],
     claudeHome: join(homedir(), '.claude'),
     tab: { listen: '127.0.0.1:7422', baseUrl: 'https://tab.hq.example.com', cdpUrl: 'http://127.0.0.1:9222', ttlMin: 10 },
+    appReleaseDir: '/var/www/hq-app/current',
   };
   const file = join(stateDir, 'hq.config.json');
   let fromFile: Partial<HqConfig> = {};

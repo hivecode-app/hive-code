@@ -9,6 +9,7 @@ import '../data/store.dart';
 import '../model/models.dart';
 import '../theme/tokens.dart';
 import 'common.dart';
+import '../native/app_update.dart';
 import '../native/native_bridge.dart';
 import '../native/native_glue.dart';
 
@@ -50,7 +51,8 @@ class _SystemBarState extends State<SystemBar> {
       LinkState.connecting || LinkState.offline =>
         ('cloud_off', 'אין חיבור לשרת${st.since != null ? ' מ-${st.since}' : ''}. ההתראות הדחופות ממשיכות בטלגרם.', false),
     };
-    if (text == null) return const _NotificationsOff();
+    // Offline: no update strip either, it could not download anyway.
+    if (text == null) return const Column(mainAxisSize: MainAxisSize.min, children: [_NotificationsOff(), _GlueUpdateStrip()]);
     Widget ic = Ic(icon!, size: 17, color: p.text2);
     if (spin) ic = Spin(child: ic);
     return Semantics(
@@ -148,5 +150,108 @@ class _NotificationsOff extends StatelessWidget {
               ]),
             ),
     );
+  }
+}
+
+class _GlueUpdateStrip extends StatelessWidget {
+  const _GlueUpdateStrip();
+  @override
+  Widget build(BuildContext context) {
+    final g = kGlue;
+    return g == null || !g.update.supported ? const SizedBox.shrink() : UpdateStrip(update: g.update);
+  }
+}
+
+/// A newer APK on hq (app_update.dart): "עדכון" downloads it and opens Android's installer. A strip
+/// with a close button, never a bar that vanishes by itself; the download is a ring with an X in
+/// the middle that cancels, like WhatsApp (design-taste §6).
+class UpdateStrip extends StatelessWidget {
+  const UpdateStrip({super.key, required this.update});
+  final AppUpdate update;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(listenable: update, builder: (context, _) {
+      final p = context.p;
+      final meta = T.meta.copyWith(color: p.text2);
+      Widget action(String label, VoidCallback onTap) =>
+          TextButton(onPressed: onTap, child: Text(label, style: T.meta.copyWith(color: p.accent, fontWeight: FontWeight.w700)));
+      final close = IconButton(
+        onPressed: update.dismiss,
+        tooltip: 'לא עכשיו',
+        visualDensity: VisualDensity.compact,
+        icon: Ic('close', size: 17, color: p.text2),
+      );
+      final pct = (update.progress * 100).floor();
+      final List<Widget> row = switch (update.phase) {
+        UpdatePhase.none => const [],
+        UpdatePhase.available => [
+            Ic('system_update', size: 17, color: p.text2),
+            const SizedBox(width: 6),
+            Expanded(child: Text('יש גרסה חדשה של האפליקציה.', style: meta)),
+            action('עדכון', update.install),
+            close,
+          ],
+        UpdatePhase.needsPermission => [
+            Ic('system_update', size: 17, color: p.text2),
+            const SizedBox(width: 6),
+            Expanded(child: Text('יש לאשר התקנת עדכונים בהגדרות.', style: meta)),
+            action('הגדרות', update.install),
+            close,
+          ],
+        UpdatePhase.downloading => [
+            Tooltip(
+              message: 'ביטול ההורדה',
+              child: InkResponse(
+                onTap: update.cancel,
+                radius: 18,
+                child: SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: Stack(alignment: Alignment.center, children: [
+                    SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        value: update.progress > 0 ? update.progress : null,
+                        strokeWidth: 2,
+                        color: p.accent,
+                        backgroundColor: p.line,
+                      ),
+                    ),
+                    Ic('close', size: 12, color: p.text2),
+                  ]),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(child: Text('הורדת הגרסה החדשה · $pct%', style: meta)),
+          ],
+        UpdatePhase.installing => [
+            Spin(child: Ic('progress_activity', size: 17, color: p.text2)),
+            const SizedBox(width: 6),
+            Expanded(child: Text('יש לאשר את ההתקנה בחלון של אנדרואיד.', style: meta)),
+            close,
+          ],
+        UpdatePhase.failed => [
+            Ic('error', size: 17, color: p.text2),
+            const SizedBox(width: 6),
+            Expanded(child: Text('העדכון לא הצליח.', style: meta)),
+            action('לנסות שוב', update.install),
+            close,
+          ],
+      };
+      if (row.isEmpty) return const SizedBox.shrink();
+      return Semantics(
+        liveRegion: true,
+        child: Container(
+          width: double.infinity,
+          constraints: const BoxConstraints(minHeight: 40),
+          padding: const EdgeInsetsDirectional.fromSTEB(16, 2, 4, 2),
+          color: p.surface2,
+          child: Row(children: row),
+        ),
+      );
+    });
   }
 }

@@ -2,6 +2,7 @@ package app.hivecode.hq
 
 import android.content.Context
 import app.hivecode.notify.Wording
+import okhttp3.Call
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -59,6 +60,12 @@ class HqClient(private val baseUrl: String, private val token: String) {
     /** The live shift of a worker, read fresh so "עצירה" never interrupts a shift that already ended. */
     fun liveShiftId(identityId: String): String? =
         HqJson.board(boardJson())[identityId]?.takeIf { it.shiftLive }?.shiftId
+
+    /** A raw GET for a big body (the update APK, update/AppUpdater.kt); null when the base URL is unusable. */
+    fun download(path: String): Call? {
+        val url = (baseUrl + path).toHttpUrlOrNull() ?: return null
+        return downloads.newCall(Request.Builder().url(url).header("Authorization", "Bearer $token").build())
+    }
 
     /** Null when the stored base URL is unusable (validated in [isValidBaseUrl] on configure). */
     fun wsRequest(afterSeq: Long): Request? {
@@ -126,6 +133,12 @@ class HqClient(private val baseUrl: String, private val token: String) {
             .callTimeout(0, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.SECONDS)
             .pingInterval(90, TimeUnit.SECONDS)
+            .build()
+
+        /** A 20 MB APK on a phone network: no call timeout, but a stalled read still fails. */
+        val downloads: OkHttpClient = http.newBuilder()
+            .callTimeout(0, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
             .build()
 
         /** http(s) with a host. Checked on configure so a bad value never reaches the service. */
