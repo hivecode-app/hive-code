@@ -3,9 +3,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { APK_ORIGIN, loadConfig } from '../src/config.ts';
+import { APK_ORIGIN, companyLocation, loadConfig, type HqConfig } from '../src/config.ts';
+import { makeEnv, ORG_YAML } from './helpers.ts';
 
 const REPO = join(import.meta.dirname, '..', '..', '..');
 
@@ -85,4 +86,46 @@ test('org.yaml gives manager, monitoring lead and residents; hq.config.json stil
     assert.equal(both.managerId, 'dana');
     assert.deepEqual(both.auth.origins, ['https://x.example', APK_ORIGIN]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('COMPANY_HOME: one source for company/ and memory/, the legacy companyDir still works, nothing set = the engine repo', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hq-config-'));
+  try {
+    const home = join(dir, 'acme');
+    mkdirSync(join(home, 'company'), { recursive: true });
+    writeFileSync(join(home, 'company', 'org.yaml'), 'version: 1\nowner: dana\nmanager: noa\nidentities: []\n');
+    mkdirSync(join(dir, 'state'));
+    writeFileSync(join(dir, 'state', 'hq.config.json'), JSON.stringify({ companyHome: home }));
+    const prev = process.env.COMPANY_HOME;
+    delete process.env.COMPANY_HOME; // a worker's shell has it (shift-host): this checks the file
+    let cfg: HqConfig;
+    try { cfg = loadConfig({ stateDir: join(dir, 'state') }); } finally { if (prev !== undefined) process.env.COMPANY_HOME = prev; }
+    assert.deepEqual([cfg.companyHome, cfg.companyDir, cfg.managerId], [home, join(home, 'company'), 'noa'], 'org.yaml read from COMPANY_HOME');
+    // First match wins: overrides, env, the file, the legacy companyDir/AGENT_COMPANY_DIR, the engine.
+    const at = (o: Partial<HqConfig>, f: Partial<HqConfig>, env: NodeJS.ProcessEnv = {}) => companyLocation(o, f, env, '/eng');
+    assert.deepEqual(at({}, {}), { companyHome: '/eng', companyDir: '/eng/company' });
+    assert.deepEqual(at({}, {}, { AGENT_COMPANY_DIR: '/srv/a/company' }), { companyHome: '/srv/a', companyDir: '/srv/a/company' });
+    assert.deepEqual(at({}, { companyDir: '/f/company' }, { AGENT_COMPANY_DIR: '/srv/a/company' }).companyHome, '/f');
+    assert.deepEqual(at({}, { companyHome: '/h', companyDir: '/f/company' }).companyDir, '/h/company');
+    assert.deepEqual(at({}, { companyHome: '/h' }, { COMPANY_HOME: '/e' }).companyHome, '/e');
+    assert.deepEqual(at({ companyDir: '/t/company' }, { companyHome: '/h' }, { COMPANY_HOME: '/e' }).companyHome, '/t', 'a test override beats a worker\'s env');
+    assert.deepEqual(at({ companyHome: '/o' }, {}, { COMPANY_HOME: '/e' }).companyHome, '/o');
+    assert.equal(at({}, { companyHome: '~/c' }).companyHome, join(homedir(), 'c'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('hq reads memory and runs registries in COMPANY_HOME, not companyDir/.. of the engine', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hq-chome-'));
+  const home = join(dir, 'home');
+  mkdirSync(join(home, 'company', 'projects'), { recursive: true });
+  writeFileSync(join(home, 'company', 'org.yaml'), ORG_YAML);
+  mkdirSync(join(home, 'memory', 'company'), { recursive: true });
+  writeFileSync(join(home, 'memory', 'company', 'zebra.md'), '# זברה\n\nzebrafact lives in COMPANY_HOME\n');
+  const env = await makeEnv({ noStart: true, cfg: { companyHome: home } });
+  try {
+    assert.equal(env.cfg.companyDir, join(home, 'company'));
+    const r = env.hq.ingest.recall({ identity: 'eli', shift: 'eli-1', query: 'zebrafact' });
+    assert.equal(r.items[0]?.ref, 'memory/company/zebra.md');
+    assert.equal(env.hq.memoryFiles.repoDir, home, 'registries and the memory PR go to the company repo');
+  } finally { await env.cleanup(); rmSync(dir, { recursive: true, force: true }); }
 });

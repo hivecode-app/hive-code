@@ -3,7 +3,7 @@
 # the server: everything below comes from this repo at origin/main.
 #
 #   scripts/deploy.sh hq      hq + its user units, hq.env and hq.config.json, safe restart: live shifts survive
-#   scripts/deploy.sh app     the app: web at the appUrl of company/hq.config.json, and the APK
+#   scripts/deploy.sh app     the app: web at the appUrl of the company's hq.config.json (COMPANY_HOME), and the APK
 #   scripts/deploy.sh caddy   deploy/caddy/agent-company.caddy -> /etc/caddy/sites/, validate, reload
 #   scripts/deploy.sh all     hq, app, caddy, in that order
 #
@@ -22,8 +22,10 @@ repo="$(cd "$(dirname "$0")/.." && pwd -P)"
 STATE="$HOME/.local/state/agent-company"
 DSTATE="$STATE/deploy"
 WWW=/var/www/hq-app
-# This company's own values (domains, names, accounts): company/hq.config.json, read after the preflight.
-HQ_CONFIG_SRC=company/hq.config.json
+# The company (company/, memory/) is at COMPANY_HOME (scripts/company-home.mjs): env, else hq.config.json's companyHome,
+# else this checkout. Its own values (domains, names, accounts): <COMPANY_HOME>/company/hq.config.json, read after the preflight.
+CHOME=""
+HQ_CONFIG_SRC=""
 APP_URL=""
 API_URL=""
 FLUTTER="${FLUTTER:-$HOME/flutter/bin/flutter}"
@@ -47,7 +49,7 @@ say() { summary+=("$1"); echo "• $1"; }
 step() { echo; echo "── $1"; }
 
 # What this run changed, for the rollback.
-prev_sha=""; sha=""; moved_checkout=0; lock_changed=1; hq_restarted=0; app_swapped=0; prev_release=""; caddy_changed=0; config_changed=0
+prev_sha=""; sha=""; moved_checkout=0; company_prev=""; moved_company=0; lock_changed=1; hq_restarted=0; app_swapped=0; prev_release=""; caddy_changed=0; config_changed=0
 
 finish() {
   local rc=$1
@@ -87,6 +89,10 @@ rollback() {
       rm -f "$STATE/hq.config.json"
       say "hq.config.json הוסר (לא היה לפני הפריסה)"
     fi
+  fi
+  if ((moved_company)); then
+    git -C "$CHOME" reset -q --keep "$company_prev"
+    say "החברה ב-$CHOME חזרה ל-${company_prev:0:7}"
   fi
   if ((moved_checkout)); then
     git reset -q --keep "$prev_sha"
@@ -142,7 +148,24 @@ if [[ -d node_modules && ! -f "$DSTATE/npm-lock.sha256" ]] && git diff --quiet "
   lock_changed=0
   echo "$lock_hash" >"$DSTATE/npm-lock.sha256"
 fi
-# The URLs come from the checked-out company/hq.config.json (the one this run installs).
+# The company: COMPANY_HOME. When it is a checkout of its own (after the split, docs/generic/split-runbook.md), it
+# moves to its origin/main here too, like this one: a contract change takes effect with the deploy, as before.
+CHOME="$(node scripts/company-home.mjs "$STATE")"
+HQ_CONFIG_SRC="$CHOME/company/hq.config.json"
+if [[ "$CHOME" != "$repo" ]]; then
+  git -C "$CHOME" rev-parse --git-dir >/dev/null 2>&1 || fail "COMPANY_HOME ($CHOME) הוא לא checkout של git"
+  [[ "$(git -C "$CHOME" rev-parse --abbrev-ref HEAD)" == main ]] || fail "החברה ב-$CHOME לא על main"
+  [[ -z "$(git -C "$CHOME" status --porcelain)" ]] || fail "החברה ב-$CHOME לא נקייה: $(git -C "$CHOME" status --short | head -3 | tr '\n' ' ')"
+  git -C "$CHOME" fetch -q origin main
+  company_prev="$(git -C "$CHOME" rev-parse HEAD)"
+  if [[ "$company_prev" != "$(git -C "$CHOME" rev-parse origin/main)" ]]; then
+    git -C "$CHOME" merge-base --is-ancestor HEAD origin/main || fail "main של החברה ב-$CHOME התפצל מ-origin/main"
+    git -C "$CHOME" merge -q --ff-only origin/main
+    moved_company=1
+  fi
+  say "החברה מ-$CHOME ($(git -C "$CHOME" rev-parse --short HEAD))"
+fi
+# The URLs come from the company's hq.config.json (the one this run installs).
 cfg_get() { node -e 'const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const v = process.argv[2].split(".").reduce((o, k) => o?.[k], c); if (typeof v === "string" && v) console.log(v.replace(/\/+$/, ""))' "$HQ_CONFIG_SRC" "$1"; }
 [[ -f "$HQ_CONFIG_SRC" ]] || fail "אין $HQ_CONFIG_SRC: בלי הערכים של החברה hq רץ עם ברירות מחדל גנריות"
 APP_URL="$(cfg_get auth.appUrl)" || fail "$HQ_CONFIG_SRC לא JSON תקין"

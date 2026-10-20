@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shiftDir, statePaths } from '@company/shared';
+import { shiftCompanyHome, shiftDir, statePaths } from '@company/shared';
 import { buildMcpConfig, buildSettings, shiftSessionId, type ShiftSpec } from '@company/adapter';
 import { ShiftHost } from './host.ts';
 
@@ -32,7 +32,8 @@ const OPTIONS = {
     'claude-bin': { type: 'string' },
     'oauth-token-file': { type: 'string' },
     'config-dir': { type: 'string' },           // managed CLAUDE_CONFIG_DIR of the account hq picked (B.7)
-    'company-repo': { type: 'string' },
+    'company-repo': { type: 'string' },         // the engine's main checkout (COMPANY_REPO, the hooks guard)
+    'company-home': { type: 'string' },         // COMPANY_HOME by hand; else env, else hq.config.json's companyHome
     'linger-ms': { type: 'string' },
     'args-file': { type: 'string' },            // JSON {flag: value} written by hq (template unit)
 } as const;
@@ -98,13 +99,20 @@ if (v['oauth-token-file']) {
   oauthToken = readFileSync(v['oauth-token-file'], 'utf8').trim();
 }
 
+const companyHome = shiftCompanyHome(v['company-home'], process.env, stateRoot);
+
 const spec: ShiftSpec = {
   identity, shift, sessionId, resume: v.resume === true, cwd, stateRoot,
   model: v.model, effort: v.effort,
   appendSystemPromptFile: v['append-system-prompt-file'],
   mcpConfigFile, settingsFile, oauthToken, configDir: v['config-dir'],
   claudeBin: v['claude-bin'],
-  env: { COMPANY_REPO: v['company-repo'] ?? process.env.COMPANY_REPO ?? repoRoot },
+  env: {
+    COMPANY_REPO: v['company-repo'] ?? process.env.COMPANY_REPO ?? repoRoot,
+    // COMPANY_HOME from the same hq.config.json hq reads, at every start: a `systemctl restart` of the shift follows a
+    // change (the split, a rollback). Not configured: no COMPANY_HOME, and the worker reads the engine repo as before.
+    ...(companyHome ? { COMPANY_HOME: companyHome } : {}),
+  },
 };
 
 /** B.3: the owner's permission-authority hook rides along via --settings. */

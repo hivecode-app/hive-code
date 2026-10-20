@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bashWrite, checkToolUse, GUARD_MATCHER, protectedRoot } from '../src/index.ts';
+import { bashWrite, checkToolUse, companyRoot, GUARD_MATCHER, protectedRoot } from '../src/index.ts';
 
 const HOME = '/home/u';
 const ROOT = `${HOME}/projects/agent-company`;
@@ -159,4 +159,19 @@ test('CLI: a write into the main checkout is denied with the Hebrew reason and s
   const garbage = await runCli('not json', e);
   assert.equal(garbage.code, 0);
   assert.equal(garbage.stdout, '');
+});
+
+test('COMPANY_HOME outside the engine is protected too; inside it (before the split) or a worktree adds nothing', () => {
+  const CO = `${HOME}/company`;
+  const e = { home: HOME, identity: 'adi', company: '~/company' };
+  assert.equal(companyRoot(e), CO);
+  assert.match(checkToolUse({ tool_name: 'Write', tool_input: { file_path: `${CO}/memory/x.md` } }, e)!, /COMPANY_HOME/);
+  assert.match(checkToolUse({ tool_name: 'Bash', tool_input: { command: 'echo x >> memory/a.md' }, cwd: CO }, e)!, /COMPANY_HOME/);
+  assert.match(checkToolUse({ tool_name: 'Bash', tool_input: { command: `git -C ${CO} commit -m x` }, cwd: '/tmp' }, e)!, /COMPANY_HOME/);
+  assert.match(checkToolUse({ tool_name: 'Write', tool_input: { file_path: `${ROOT}/a` } }, e)!, /agent-company/, 'the engine is still guarded');
+  assert.equal(checkToolUse({ tool_name: 'Write', tool_input: { file_path: `${CO}/.worktrees/t1/memory/x.md` } }, e), null);
+  assert.equal(checkToolUse({ tool_name: 'Bash', tool_input: { command: 'scripts/deploy.sh hq' }, cwd: ROOT }, e), null, 'the deployer still deploys');
+  assert.equal(companyRoot({ home: HOME, company: ROOT }), null, 'before the split COMPANY_HOME is the engine repo');
+  assert.equal(companyRoot({ home: HOME, company: `${CO}/.worktrees/t1` }), null);
+  assert.equal(companyRoot({ home: HOME }), null);
 });

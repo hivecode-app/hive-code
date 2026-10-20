@@ -8,7 +8,7 @@
 //
 // Sources: --bet9 = the bet-9 corpus (owner's Claude memory dirs, `memoryImport` in
 // <state>/hq.config.json); else
-// <repo>/memory (--repo, COMPANY_REPO or cwd) + COMPANY_L3_EXTRA_SOURCES.
+// <home>/memory (--repo, else COMPANY_HOME: env, hq.config.json's companyHome, the engine repo) + COMPANY_L3_EXTRA_SOURCES.
 import { spawn } from 'node:child_process';
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -17,7 +17,7 @@ import { parseArgs } from 'node:util';
 import {
   bet9Sources, defaultStateRoot, extraSourcesFromEnv, keywordCachePath, loadKeywordCache, loadRecords,
 } from '../packages/mcp-company/src/l3.ts';
-import { DEFAULT_NAMES, loadNames } from '../packages/shared/src/index.ts';
+import { DEFAULT_NAMES, loadNames, resolveCompanyHome } from '../packages/shared/src/index.ts';
 
 const { values: opt } = parseArgs({
   options: {
@@ -36,7 +36,7 @@ const CLAUDE = join(HOME, '.local/share/agent-company/claude/current/claude');
 const LAB = join(HOME, '.local/state/agent-company/lab/keywords');
 const stateRoot = opt.state ?? defaultStateRoot();
 const cachePath = keywordCachePath(stateRoot);
-const repo = opt.repo ?? process.env.COMPANY_REPO ?? process.cwd();
+const repo = opt.repo ?? resolveCompanyHome({ stateRoot });
 const sources = opt.bet9
   ? bet9Sources(stateRoot)
   : [{ dir: join(repo, 'memory') }, ...extraSourcesFromEnv()];

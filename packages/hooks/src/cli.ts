@@ -54,7 +54,7 @@ async function main(): Promise<void> {
     // every other tool call passes silently.
     let reason: string | null = null;
     try {
-      reason = checkToolUse((payload ?? {}) as object, { repo: process.env[ENV.repo], identity: process.env[ENV.identity] });
+      reason = checkToolUse((payload ?? {}) as object, { repo: process.env[ENV.repo], company: process.env[ENV.home], identity: process.env[ENV.identity] });
     } catch (e) { logError('guard', e); }
     if (!reason) return;
     try { appendSpool(stateRoot, shift, { ts: new Date().toISOString(), event: 'PreToolUse.denied', pid: process.pid, payload }); }

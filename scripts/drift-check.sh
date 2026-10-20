@@ -80,8 +80,19 @@ for u in vscode-workspace.service vscode-workspace.timer; do
   cmp -s "deploy/$u" "$UNITS/$u" || d "היחידה $u המותקנת שונה מה-repo"
 done
 systemctl --user is-enabled -q agent-company-drift.timer || d "agent-company-drift.timer לא מופעל"
-git show "$main:company/hq.config.json" 2>/dev/null | cmp -s - "$STATE/hq.config.json" \
-  || d "$STATE/hq.config.json שונה מ-company/hq.config.json ב-main (או חסר: אז hq רץ עם ברירות מחדל גנריות)"
+# The company (COMPANY_HOME, scripts/company-home.mjs): this checkout, or its own checkout after the split.
+chome="$(node scripts/company-home.mjs "$STATE")"
+if [[ "$chome" == "$(pwd -P)" ]]; then
+  cmain="$main"; cgit=(git)
+else
+  cgit=(git -C "$chome")
+  "${cgit[@]}" fetch -q origin main 2>/dev/null || d "git fetch של החברה ב-$chome נכשל, ולכן ההשוואה היא מול origin/main הישן"
+  cmain="$("${cgit[@]}" rev-parse origin/main 2>/dev/null)" || d "אין origin/main בחברה ב-$chome"
+  [[ "$("${cgit[@]}" rev-parse HEAD 2>/dev/null)" == "$cmain" ]] || d "החברה ב-$chome לא ב-origin/main (פריסה מעדכנת אותה)"
+  [[ -z "$("${cgit[@]}" status --porcelain 2>/dev/null)" ]] || d "החברה ב-$chome לא נקייה"
+fi
+"${cgit[@]}" show "$cmain:company/hq.config.json" 2>/dev/null | cmp -s - "$STATE/hq.config.json" \
+  || d "$STATE/hq.config.json שונה מ-company/hq.config.json ב-main של החברה ($chome) (או חסר: אז hq רץ עם ברירות מחדל גנריות)"
 envf="$HOME/.config/agent-company/hq.env"
 if [[ ! -f "$envf" ]]; then
   d "אין $envf (הטוקן של dictate-server בשביל hq)"

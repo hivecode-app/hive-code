@@ -219,3 +219,24 @@ test('open_team answers with hq\'s verdict: a rejection comes back as a tool err
     await c.close();
   } finally { hq.close(); }
 });
+
+test('recall reads memory from COMPANY_HOME, not from COMPANY_REPO (the engine checkout)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mcp-srv-'));
+  const mk = (name: string, text: string) => {
+    const d = mkdtempSync(join(tmpdir(), `mcp-${name}-`));
+    mkdirSync(join(d, 'memory', 'company'), { recursive: true });
+    writeFileSync(join(d, 'memory', 'company', 'where.md'), `---\nname: where\ndescription: where memory lives\n---\n${text}\n`);
+    return d;
+  };
+  const home = mk('home', 'okapifact from the company home');
+  const engine = mk('engine', 'okapifact from the engine repo');
+  const c = new Client({ COMPANY_STATE_DIR: root, COMPANY_SHIFT: 'eli-1', COMPANY_IDENTITY: 'eli', COMPANY_HQ_URL: 'http://127.0.0.1:1',
+    COMPANY_REPO: engine, COMPANY_HOME: home });
+  try {
+    const rec = await c.call('tools/call', { name: 'recall', arguments: { query: 'okapifact' } });
+    const items = (JSON.parse(rec.result.content[0].text) as { items: Array<{ text: string }> }).items;
+    assert.ok(items.length > 0);
+    assert.ok(items.every((i) => !i.text.includes('engine repo')), JSON.stringify(items));
+    assert.ok(items[0]!.text.includes('company home'));
+  } finally { await c.close(); }
+});

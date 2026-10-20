@@ -1,5 +1,5 @@
 // PreToolUse guard (#115): no shift writes into the main agent-company checkout, the one hq runs and
-// deploys from. Work happens in a worktree under <checkout>/.worktrees/, memory files change through
+// deploys from, nor into the company's own checkout (COMPANY_HOME), the one hq reads the contract and memory from. Work happens in a worktree under <checkout>/.worktrees/, memory files change through
 // `remember` with `file` (hq folds them into a PR). Pure and synchronous: it runs before every tool call.
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve, sep } from 'node:path';
@@ -17,6 +17,8 @@ export interface GuardInput {
 export interface GuardEnv {
   /** The main checkout (COMPANY_REPO); default ~/projects/agent-company. */
   repo?: string;
+  /** The company's checkout (COMPANY_HOME), when it is outside the engine's. */
+  company?: string;
   identity?: string;
   home?: string;
 }
@@ -30,11 +32,28 @@ export const GUARD_REASON = (what: string, root: string): string =>
   + 'ו-hq מכניס אותו ב-PR מאוחד. שינוי אחר: PR מ-worktree משלך (`git worktree add -b <ענף> .worktrees/<שם>` מתוך ה-repo), '
   + 'ועורכים רק בתוך `.worktrees/<שם>`.';
 
+export const COMPANY_GUARD_REASON = (what: string, root: string): string =>
+  `${what} נחסם: זה ה-checkout הראשי של החברה (\`${root}\`, \`COMPANY_HOME\`), שממנו hq קורא את החוזה והזיכרון. `
+  + 'עדכון לקובץ זיכרון (מה פתוח, לקחים, יומן): `remember` עם `file` (נתיב תחת `memory/`) ו-`mode` (`append` או `replace`), '
+  + 'ו-hq מכניס אותו בעצמו. שינוי אחר בחוזה: PR מ-worktree משלך ב-repo של החברה (`git worktree add -b <ענף> .worktrees/<שם>` מתוכו), '
+  + 'ועורכים רק בתוך `.worktrees/<שם>`.';
+
 /** The protected root, or null when there is none (a dev worktree set as COMPANY_REPO protects nothing). */
 export function protectedRoot(env: GuardEnv): string | null {
   const home = env.home ?? homedir();
   const root = resolve(expandHome(env.repo || join(home, 'projects', 'agent-company'), home));
   return root.split(sep).includes('.worktrees') ? null : root;
+}
+
+/** The company's checkout to protect too: COMPANY_HOME when set, not a worktree, and not inside the engine root
+ *  (which already covers it, as before the split). */
+export function companyRoot(env: GuardEnv): string | null {
+  if (!env.company) return null;
+  const home = env.home ?? homedir();
+  const c = resolve(expandHome(env.company, home));
+  if (c.split(sep).includes('.worktrees')) return null;
+  const engine = protectedRoot(env);
+  return engine && inMainCheckout(c, engine) ? null : c;
 }
 
 function expandHome(p: string, home: string): string {
@@ -52,8 +71,14 @@ export function inMainCheckout(path: string, root: string): boolean {
 
 /** Returns the Hebrew reason when the call writes into the main checkout, otherwise null. */
 export function checkToolUse(input: GuardInput, env: GuardEnv): string | null {
-  const root = protectedRoot(env);
-  if (!root) return null;
+  const engine = protectedRoot(env);
+  const company = companyRoot(env);
+  if (engine) { const r = checkRoot(input, env, engine, GUARD_REASON, env.identity === DEPLOYER); if (r) return r; }
+  return company ? checkRoot(input, env, company, COMPANY_GUARD_REASON, false) : null;
+}
+
+function checkRoot(input: GuardInput, env: GuardEnv, root: string, reason: (what: string, root: string) => string,
+  deployer: boolean): string | null {
   const home = env.home ?? homedir();
   const tool = typeof input.tool_name === 'string' ? input.tool_name : '';
   const ti = (input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {}) as Record<string, unknown>;
@@ -64,11 +89,11 @@ export function checkToolUse(input: GuardInput, env: GuardEnv): string | null {
     const p = ti.file_path ?? ti.notebook_path;
     if (typeof p !== 'string' || !p) return null;
     const target = abs(p);
-    return inMainCheckout(target, root) ? GUARD_REASON(`\`${tool}\` ל-\`${target}\``, root) : null;
+    return inMainCheckout(target, root) ? reason(`\`${tool}\` ל-\`${target}\``, root) : null;
   }
   if (tool === 'Bash' && typeof ti.command === 'string') {
-    const hit = bashWrite(ti.command, cwd, root, home, env.identity === DEPLOYER);
-    return hit ? GUARD_REASON(`\`Bash\` (${hit})`, root) : null;
+    const hit = bashWrite(ti.command, cwd, root, home, deployer);
+    return hit ? reason(`\`Bash\` (${hit})`, root) : null;
   }
   return null;
 }

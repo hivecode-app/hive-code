@@ -129,3 +129,4 @@ export * from './shift-protocol.ts';
 export * from './company-api.ts';
 export * from './hebrew.ts';
 export * from './names.ts';
+export * from './company-home.ts';

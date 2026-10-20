@@ -7,7 +7,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, normalize, resolve } from 'node:path';
+import { dirname, join, normalize } from 'node:path';
 import type { Hq } from './hq.ts';
 import { MemoryRegistry } from './memory-registry.ts';
 
@@ -56,11 +56,11 @@ export interface Pending { id: string; identity: string; file: string; mode: Fil
 export class MemoryFiles {
   private hq: Hq;
   run: Run;
-  /** The company repository (company/ and memory/ live in it). */
+  /** The company repository, COMPANY_HOME (company/ and memory/ live in it). */
   repoDir: string;
   /** Registries: straight to main through one queue. */
   readonly registry: MemoryRegistry;
-  constructor(hq: Hq, run: Run = execRun, repoDir = resolve(hq.cfg.companyDir, '..')) {
+  constructor(hq: Hq, run: Run = execRun, repoDir = hq.cfg.companyHome) {
     this.hq = hq;
     this.run = run;
     this.repoDir = repoDir;

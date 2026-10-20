@@ -7,13 +7,16 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parse } from 'yaml';
+import { COMPANY_HOME_ENV, ENGINE_ROOT, companyDirOf, expandHome } from '@company/shared';
 import type { TabConfig } from './tab/handoffs.ts';
 import type { DictateConfig } from './dictate.ts';
 
 export interface HqConfig {
   stateDir: string;
   dbPath: string;
-  companyDir: string;            // the contract: company/org.yaml, company/projects/*.md
+  /** COMPANY_HOME: the company's checkout, company/ and memory/ at its root (shared company-home.ts). */
+  companyHome: string;
+  companyDir: string;            // the contract: <companyHome>/company (org.yaml, projects/*.md)
   host: string;
   port: number;
   managerId: string;             // receives escalations (org.yaml `manager`)
@@ -110,6 +113,23 @@ export function orgDefaults(companyDir: string): OrgDefaults {
   } catch { return { residents: [] }; }
 }
 
+/** Where the company is, from one source (COMPANY_HOME, shared company-home.ts), first match wins: overrides
+ *  (companyHome, then the legacy companyDir), env COMPANY_HOME, the file's companyHome, the file's companyDir, env
+ *  AGENT_COMPANY_DIR, else the engine repo itself (company/ and memory/ still in it). A legacy companyDir means
+ *  home = its parent, as hq read memory/ before COMPANY_HOME. */
+export function companyLocation(overrides: Partial<HqConfig>, fromFile: Partial<HqConfig>,
+  env: NodeJS.ProcessEnv = process.env, engineRoot = ENGINE_ROOT): { companyHome: string; companyDir: string } {
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  const steps: [kind: 'home' | 'dir', v: string | undefined][] = [
+    ['home', str(overrides.companyHome)], ['dir', str(overrides.companyDir)], ['home', str(env[COMPANY_HOME_ENV])],
+    ['home', str(fromFile.companyHome)], ['dir', str(fromFile.companyDir)], ['dir', str(env.AGENT_COMPANY_DIR)],
+  ];
+  const hit = steps.find(([, v]) => v);
+  if (!hit) return { companyHome: engineRoot, companyDir: companyDirOf(engineRoot) };
+  const p = resolve(expandHome(hit[1]!));
+  return hit[0] === 'home' ? { companyHome: p, companyDir: companyDirOf(p) } : { companyHome: resolve(p, '..'), companyDir: p };
+}
+
 export function defaultStateDir(): string {
   return process.env.AGENT_COMPANY_STATE ?? join(homedir(), '.local', 'state', 'agent-company');
 }
@@ -119,13 +139,13 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
   const file = join(stateDir, 'hq.config.json');
   let fromFile: Partial<HqConfig> = {};
   if (existsSync(file)) fromFile = JSON.parse(readFileSync(file, 'utf8')) as Partial<HqConfig>;
-  const companyDir = overrides.companyDir ?? fromFile.companyDir
-    ?? resolve(process.env.AGENT_COMPANY_DIR ?? join(import.meta.dirname, '..', '..', '..', 'company'));
+  const { companyHome, companyDir } = companyLocation(overrides, fromFile);
   const org = orgDefaults(companyDir);
   const managerId = overrides.managerId ?? fromFile.managerId ?? org.manager ?? 'manager';
   const base: HqConfig = {
     stateDir,
     dbPath: join(stateDir, 'hq.db'),
+    companyHome,
     companyDir,
     host: '127.0.0.1',
     port: 7420,
@@ -182,6 +202,8 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     tab: { ...base.tab, ...fromFile.tab, ...overrides.tab },
     dictate: { ...base.dictate, ...fromFile.dictate, ...overrides.dictate },
   };
+  cfg.companyHome = companyHome;
+  cfg.companyDir = companyDir;
   if (!cfg.auth.origins.includes(APK_ORIGIN)) cfg.auth.origins = [...cfg.auth.origins, APK_ORIGIN];
   if (!overrides.dbPath && !fromFile.dbPath) cfg.dbPath = join(cfg.stateDir, 'hq.db');
   if (process.env.HQ_PORT) cfg.port = Number(process.env.HQ_PORT);

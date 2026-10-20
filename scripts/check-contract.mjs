@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Schema check for the company contract (company/, memory/). Node 22; needs `npm ci` (for `yaml`).
-// Usage: node scripts/check-contract.mjs [repoRoot]
+// Usage: node scripts/check-contract.mjs [repoRoot | --home]
+//   --home: the company at COMPANY_HOME (env, else hq.config.json's companyHome); nothing to do while it is this repo.
 // Exit 0 = valid (warnings allowed), 1 = errors found.
 
 import { readFileSync, existsSync, readdirSync, statSync, lstatSync } from 'node:fs';
@@ -9,8 +10,11 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { parse as yamlParse } from 'yaml';
+import { resolveCompanyHome } from '../packages/shared/src/company-home.ts';
 
-const root = resolve(process.argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), '..'));
+const engineRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const homeMode = process.argv[2] === '--home';
+const root = homeMode ? resolveCompanyHome({ fallback: engineRoot }) : resolve(process.argv[2] ?? engineRoot);
 const errors = [];
 const warnings = [];
 const err = (m) => errors.push(m);
@@ -222,6 +226,11 @@ function listMarkdown(dir) {
 }
 
 export function main() {
+  if (homeMode && root === engineRoot) {
+    console.log('check:contract --home: COMPANY_HOME is not set, the company is in this repo (checked above)');
+    return;
+  }
+  if (homeMode) console.log(`check:contract --home: ${root}`);
   const companyDir = join(root, 'company');
   const memoryDir = join(root, 'memory');
 

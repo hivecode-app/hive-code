@@ -10,18 +10,23 @@
 //     signed with the release key that hq trusts (packages/hq/src/config.ts); hq's /api/app/latest
 //     offers that same APK for the in-app update.
 //   - the old secret path, while deploy/caddy/agent-company.caddy still has it: 301 to the root.
-//   - hq.config.json: the one hq runs with is company/hq.config.json from this checkout; the public
+//   - hq.config.json: the one hq runs with is company/hq.config.json from the company (COMPANY_HOME); the public
 //     URLs checked here are its auth.appUrl, apiUrl and tab.baseUrl (env VERIFY_*_URL override them).
+//   - COMPANY_HOME: hq and every live worker read the contract and memory from it, not from this engine repo
+//     (scripts/company-home-check.mjs).
 // Prints one Hebrew line per check; exit 1 when any check fails.
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import WebSocket from 'ws';
+import { resolveCompanyHome } from '../packages/shared/src/company-home.ts';
+import { companyLocation } from '../packages/hq/src/config.ts';
+import { companyHomeFindings, liveReaders, procEnv } from './company-home-check.mjs';
 
-const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const LOCAL = 'http://127.0.0.1:7420';
 const state = process.env.COMPANY_STATE ?? join(homedir(), '.local/state/agent-company');
 const liveCfgText = existsSync(join(state, 'hq.config.json')) ? readFileSync(join(state, 'hq.config.json'), 'utf8') : null;
@@ -80,12 +85,24 @@ const dictate = (url, token) => {
   return req(url, { method: 'POST', headers: token ? bearer(token) : {}, body: f });
 };
 
+// ── COMPANY_HOME: hq and the workers read the company from it, not from the engine repo ──
+const companyHome = resolveCompanyHome({ stateRoot: state, fallback: repo });
+{
+  let hqEnv = {};
+  try {
+    const pid = execFileSync('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', 'agent-company-hq'], { encoding: 'utf8' }).trim();
+    if (pid && pid !== '0') hqEnv = procEnv(pid);
+  } catch { /* no systemd here: hq's env is unknown, its config still counts */ }
+  const hqHome = companyLocation({}, liveCfg, hqEnv, repo).companyHome;
+  for (const f of companyHomeFindings({ home: companyHome, engineRoot: repo, hqHome, readers: liveReaders() })) expect(f.ok, f.line, f.line);
+}
+
 // ── hq.config.json: this company's values, exactly as in git ─────────────────
 {
-  const src = join(repo, 'company/hq.config.json');
+  const src = join(companyHome, 'company/hq.config.json');
   const want = existsSync(src) ? readFileSync(src, 'utf8') : null;
-  expect(want != null && liveCfgText === want, 'hq.config.json של hq זהה ל-company/hq.config.json',
-    !want ? 'אין company/hq.config.json ב-checkout' : liveCfgText == null ? `אין ${join(state, 'hq.config.json')}: hq רץ עם ברירות מחדל גנריות` : 'hq.config.json של hq שונה מ-company/hq.config.json');
+  expect(want != null && liveCfgText === want, `hq.config.json של hq זהה ל-${src}`,
+    !want ? `אין ${src}` : liveCfgText == null ? `אין ${join(state, 'hq.config.json')}: hq רץ עם ברירות מחדל גנריות` : `hq.config.json של hq שונה מ-${src}`);
 }
 
 // ── api.hq: health, and nothing else without a token ─────────────────────────

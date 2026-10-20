@@ -28,7 +28,8 @@ const wal = new Wal({
 if (wal.pending().length) log(`replaying ${wal.pending().length} pending WAL entries`);
 wal.start();
 
-const repo = env[ENV.repo] || process.cwd();
+// The company (memory/ for recall, company/org.yaml for the names): COMPANY_HOME; before it, COMPANY_REPO or the cwd.
+const repo = env[ENV.home] || env[ENV.repo] || process.cwd();
 const server = createServer({
   ctx: { identity, shift, sessionId: env[ENV.sessionId] || null },
   // The names in the tool descriptions (the owner, the manager) come from the company's org.yaml.

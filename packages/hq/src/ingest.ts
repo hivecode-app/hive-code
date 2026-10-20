@@ -359,7 +359,7 @@ export class Ingest {
     const items: RecallItem[] = [];
     const score = (text: string) => { const l = text.toLowerCase(); return terms.reduce((n, t) => n + (l.includes(t) ? 1 : 0), 0); };
     const scope = r.scope ?? '';
-    const memDir = join(this.hq.cfg.companyDir, '..', 'memory');
+    const memDir = join(this.hq.cfg.companyHome, 'memory');
     for (const file of walk(memDir)) {
       const rel = relative(join(memDir, '..'), file);
       if (scope.startsWith('project:') && !rel.includes(`projects/${scope.slice(8)}`)) continue;
@@ -403,7 +403,7 @@ export class Ingest {
     if (project) items = [...items.filter((i) => i.ref.includes(`projects/${project}/`)), ...items.filter((i) => !i.ref.includes(`projects/${project}/`))];
     if (!items.length) return { others: [] };
     const [first, ...rest] = items;
-    const memRoot = join(this.hq.cfg.companyDir, '..');
+    const memRoot = this.hq.cfg.companyHome;
     const body = first!.ref.startsWith('memory/') ? readFileSync(join(memRoot, first!.ref), 'utf8') : first!.text;
     return { top: { ref: first!.ref, body }, others: rest.map((i) => i.ref) };
   }
