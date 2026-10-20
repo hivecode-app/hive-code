@@ -151,8 +151,11 @@ export class Ingest {
           throw new IngestError(400, `open_team: ${assignee} is not a standing worker (lead, resident, manager or task worker)`,
             `\`${assignee}\` הוא לא עובד קבוע בצוות (ראש צוות, ${this.hq.cfg.managerId} ועובד משימה לא מקבלים משימה כ-assignee). בלי assignee נפתח עובד זמני`);
         }
-        const project = s(a.project) ?? (worker ? worker.project ?? undefined : own ?? undefined);
-        if (worker && (worker.project ?? undefined) !== project) {
+        // A standing worker of a company-level permanent team (design's tom: no project) works on any project's
+        // app: the task is the opener's project (or the one named), and the worktree is in that project's checkout.
+        const companyWide = worker?.team_kind === 'permanent' && !worker.project;
+        const project = s(a.project) ?? (worker?.project ?? own ?? undefined);
+        if (worker && !companyWide && (worker.project ?? undefined) !== project) {
           throw new IngestError(400, `open_team: ${assignee} is not in project ${project ?? '(none)'}`,
             `\`${assignee}\` לא שייך לפרויקט \`${project ?? '(בלי פרויקט)'}\`${worker.project ? ` אלא ל-\`${worker.project}\`` : ''}`);
         }

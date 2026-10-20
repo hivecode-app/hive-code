@@ -55,7 +55,18 @@ test('open_team assignee: a standing worker of the project gets the task; anyone
     await no({ assignee: 'nobody' }, 'proj-ceo-1:01', /אין עובד קבוע/);
     await no({ assignee: 'proj-ceo' }, 'proj-ceo-1:02', /לא עובד קבוע/);
     await no({ assignee: 'yoav' }, 'proj-ceo-1:03', /לא עובד קבוע/);
-    await no({ assignee: 'amit', project: 'proj' }, 'proj-ceo-1:04', /לא שייך לפרויקט `proj`/);
+    // A standing worker of a company-level permanent team (amit, personal: no project) works in any project.
+    const wide = await post(sock, '/v1/ops', entry({ name: 'מחיר', purpose: 'y', assignee: 'amit', project: 'proj' }, 'proj-ceo-1:04'));
+    assert.equal(wide.status, 200);
+    assert.deepEqual([hq.scheduler.task(wide.json.result.task)!.identity, hq.scheduler.task(wide.json.result.task)!.project], ['amit', 'proj']);
+    // Without a project it is the opener's.
+    const own = await post(sock, '/v1/ops', entry({ name: 'מחיר 2', purpose: 'y', assignee: 'amit' }, 'proj-ceo-1:07'));
+    assert.equal(own.status, 200);
+    assert.equal(hq.scheduler.task(own.json.result.task)!.project, 'proj');
+    // yoav (no project) assigning it without one: a task without a project, as before.
+    const none = await post(sock, '/v1/ops', entry({ name: 'מחיר 3', purpose: 'y', assignee: 'amit' }, 'yoav-1:02', 'yoav'));
+    assert.equal(none.status, 200);
+    assert.equal(hq.scheduler.task(none.json.result.task)!.project, null);
     await no({ assignee: 'gal', project: 'agent-company' }, 'proj-ceo-1:05', /לא שייך לפרויקט `agent-company` אלא ל-`proj`/);
     // Without an assignee nothing changes: a temporary worker.
     const temp = await post(sock, '/v1/ops', entry({ name: 'זמני', purpose: 'y' }, 'proj-ceo-1:06'));
@@ -133,6 +144,28 @@ test('standing worker: own worktree and a new session per task, one at a time, t
     assert.equal(lm.cwd, r.checkout, 'the project checkout');
     assert.equal(lm.resume, false);
     assert.equal(lm.taskId, null);
+  } finally { await env.cleanup(); r.cleanup(); }
+});
+
+test('a company-level standing worker (no project) runs a project task in that project\'s worktree', async () => {
+  const r = repo();
+  const env = await makeEnv({ org: ORG, projects: { proj: charter(r.checkout) } });
+  try {
+    const { hq, launcher } = env;
+    const t = hq.scheduler.addTask({ title: 'מסך', project: 'proj', identity: 'amit', labels: ['opened-by:proj-ceo'] });
+    await until(() => hq.scheduler.task(t.id)!.state === 'running', 5000, 'task running');
+    const l = launcher.launches.at(-1)!;
+    assert.equal(l.identity, 'amit');
+    assert.equal(l.cwd, join(r.checkout, '.worktrees', `company-t${t.id}`));
+    assert.equal(l.resume, false);
+    // It has no project, so no charter in its system prompt: the task points at the project's.
+    const prompt = hq.mailbox.list('amit').find((m) => m.id.startsWith(`task-${t.id}-`))!;
+    assert.match(prompt.body, /\*\*האמנה:\*\* המשימה בפרויקט `proj`/);
+    assert.ok(prompt.body.includes(join(env.cfg.companyDir, 'projects', 'proj.md')));
+    // A worker of the project hears nothing new.
+    const g = hq.scheduler.addTask({ title: 'שרת', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'] });
+    await until(() => hq.scheduler.task(g.id)!.state === 'running', 5000, 'gal running');
+    assert.doesNotMatch(hq.mailbox.list('gal').find((m) => m.id.startsWith(`task-${g.id}-`))!.body, /\*\*האמנה:\*\*/);
   } finally { await env.cleanup(); r.cleanup(); }
 });
 

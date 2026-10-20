@@ -411,12 +411,12 @@ export class Scheduler {
    * The task's worktree (B.5): created on first start in the charter's checkout, reused (or brought back
    * on its branch) on a resume. A project without a checkout in its charter runs in hq's default cwd.
    */
-  async prepareWorktree(t: Pick<TaskRow, 'id' | 'project' | 'worktree' | 'labels' | 'started_at'>): Promise<{ path: string; note: string } | null> {
+  async prepareWorktree(t: Pick<TaskRow, 'id' | 'project' | 'worktree' | 'labels' | 'started_at'> & { identity?: string | null }): Promise<{ path: string; note: string } | null> {
     const ch = t.project ? readCharter(this.cfg.companyDir, t.project) : null;
     if (t.worktree) {
       const { c } = this.checkoutOf(t);
       if (!(await this.workspaces.ensure(t.worktree, c?.path, ch ?? undefined))) throw new Error(`task ${t.id}: worktree ${t.worktree} is gone and its branch too`);
-      return { path: t.worktree, note: worktreeNote(t.worktree, ch) };
+      return { path: t.worktree, note: worktreeNote(t.worktree, ch) + this.charterNote(t) };
     }
     // Started before hq made worktrees: its session and work live where it ran (hq's default cwd and
     // a worktree the worker made itself). Moving it would orphan both.
@@ -428,7 +428,18 @@ export class Scheduler {
     const w = await this.workspaces.create(ch, c, `company-t${t.id}`);
     this.store.db.prepare('UPDATE tasks SET worktree = ?, updated_at = ? WHERE id = ?').run(w.path, this.store.now(), t.id);
     this.store.emit('task.worktree', null, { id: t.id, path: w.path, branch: w.branch, base: w.base });
-    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) };
+    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) + this.charterNote(t) };
+  }
+
+  /**
+   * A company-level worker (design's tom) on another project's task: its system prompt has no charter (it has
+   * no project), so the task says where the charter is (skills, deviations, deploy).
+   */
+  private charterNote(t: { project: string | null; identity?: string | null }): string {
+    if (!t.project || !t.identity) return '';
+    const i = getIdentity(this.store, t.identity);
+    if (!i || i.project === t.project) return '';
+    return `\n**האמנה:** המשימה בפרויקט \`${t.project}\`. קרא את האמנה שלו לפני שמתחילים: \`${join(this.cfg.companyDir, 'projects', `${t.project}.md`)}\`.`;
   }
 
   /**
