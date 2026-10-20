@@ -28,6 +28,7 @@ class CompanyData {
     this.projects = const [],
     this.focus = false,
     this.night,
+    this.awaiting = const [],
   });
 
   final Map<String, Team> teams;
@@ -56,6 +57,9 @@ class CompanyData {
 
   /// "לילה · 3/3 משבצות · 7 בתור · 2 דולגו" when night mode runs.
   String? night;
+
+  /// "מה לבדוק" (#108): finished tasks that wait for a deploy or for him to check, newest first.
+  List<AwaitingTask> awaiting;
 
   int get waitingCount => waiting.where((w) => w.state == WaitState.open || w.state == WaitState.pending).length;
 
@@ -179,6 +183,16 @@ abstract class Backend extends ChangeNotifier {
 
   /// He left [screen] at [at]: what happens after it is "מאז שהיית פה" next time, on every device.
   Future<void> markSeen(String screen, DateTime at) async {}
+
+  /// "בדקתי" (#108): [t] leaves "מה לבדוק" at once, on every device; it comes back when the server didn't take it.
+  Future<CommandResult> checked(AwaitingTask t) async {
+    final d = data;
+    if (d != null) {
+      d.awaiting = [for (final x in d.awaiting) if (x.id != t.id) x];
+      notifyListeners();
+    }
+    return const CommandResult.ok();
+  }
 
   /// "השתקה" for 8 hours, a week or always, or its undo; kept on the server, the same on every device.
   Future<CommandResult> mute(String identityId, MuteFor duration) async => const CommandResult.fail('השתקה לא זמינה כאן.');

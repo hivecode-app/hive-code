@@ -552,5 +552,9 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
       Automation(key: 'backtest', team: 'מחלקת השיפור', sentence: 'נגה בודקת לאחור מודלים בכל יום ראשון', meta: "אחרונה א' 18/10 · הבאה א' 25/10"),
       Automation(key: 'reviews', team: 'לומו', sentence: 'דנה קוראת ביקורות חדשות ב-Play כל יום ב-10:00', meta: 'כובתה ידנית · 18/10', enabled: false),
     ],
+    awaiting: [
+      AwaitingTask(id: 3720, kind: AwaitingKind.check, title: 'אפליקציה: תמונות בצ\'אט', summary: 'התמונות בצ\'אט עולות גם מהטלפון', note: 'לשלוח תמונה מהטלפון ולראות שהיא עולה', identity: 'noa', project: 'lumo', at: at(13, 20)),
+      AwaitingTask(id: 3711, kind: AwaitingKind.deploy, title: 'לומו: שעת איסוף', summary: 'שעת איסוף "לא ידוע" לא נאמרת ללקוח', note: 'מחכה ל-GO שלך', identity: 'ido', project: 'lumo', at: at(11, 5)),
+    ],
   );
 }

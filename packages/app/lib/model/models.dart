@@ -636,6 +636,48 @@ class Ticket {
   String get doneLine => summary?.trim().isNotEmpty == true ? summary!.trim() : plainTitle(title);
 }
 
+/// "מה לבדוק" (hq `awaiting`, #108): a finished task that still waits on him. `deploy` = merged, waits for a GO
+/// or a deploy (a deploy that includes it clears it); `check` = live, he has to check something himself.
+enum AwaitingKind { deploy, check }
+
+class AwaitingTask {
+  const AwaitingTask({required this.id, required this.kind, required this.title, required this.at, this.project = '', this.summary, this.note, this.identity, this.pr});
+  final int id;
+  final AwaitingKind kind;
+  final String title;
+  final String project;
+
+  /// What it did, in his words (`tasks.summary`); the title when none.
+  final String? summary;
+
+  /// One line in his words: what waits, or what to check (`awaiting_note`).
+  final String? note;
+
+  /// The worker who did it: its conversation is where a tap goes.
+  final String? identity;
+  final String? pr;
+  final DateTime at;
+
+  String get line => summary?.trim().isNotEmpty == true ? summary!.trim() : plainTitle(title);
+
+  /// From `/api/board`'s `awaiting`; null for a kind this app does not know.
+  static AwaitingTask? fromHq(Map<String, dynamic> j) {
+    final kind = AwaitingKind.values.asNameMap()[j['awaiting']];
+    if (kind == null || j['id'] is! num) return null;
+    return AwaitingTask(
+      id: (j['id'] as num).toInt(),
+      kind: kind,
+      title: j['title'] as String? ?? '',
+      project: j['project'] as String? ?? '',
+      summary: j['summary'] as String?,
+      note: j['awaiting_note'] as String?,
+      identity: j['identity'] as String?,
+      pr: j['pr'] as String?,
+      at: DateTime.fromMillisecondsSinceEpoch(((j['awaiting_at'] as num?) ?? 0).toInt()),
+    );
+  }
+}
+
 /// A project from org.yaml (`projects:`) with its charter's status; the board's filter chips.
 class ProjectInfo {
   const ProjectInfo({required this.id, required this.active, String? name, this.teamId}) : name = name ?? id;

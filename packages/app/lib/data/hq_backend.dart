@@ -197,7 +197,7 @@ class HqBackend extends Backend {
     final asks = (results[2]['asks'] as List).cast<Map<String, dynamic>>();
     final toggles = (results[3]['toggles'] as List).cast<Map<String, dynamic>>();
     final prev = _data;
-    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), previous: prev);
+    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), awaiting: _list(results[0], 'awaiting'), previous: prev);
     // Order and last lines from the last messages fetch, right away: without them the list showed
     // board order, then jumped into recency order when the messages came back (on every event).
     final lines = _lastLines;
@@ -208,6 +208,8 @@ class HqBackend extends Backend {
         _lastLines = null; // never let a bad copy block every reload
       }
     }
+    // "בדקתי" still on its way: a board fetched before hq took it must not bring the row back for a moment.
+    if (_checking.isNotEmpty) _data!.awaiting = [for (final x in _data!.awaiting) if (!_checking.contains(x.id)) x];
     _snapshotRaw = {'board': results[0], 'inbox': results[1], 'asks': results[2], 'toggles': results[3]};
     _fromCache = null;
     if (!_fresh.isCompleted) _fresh.complete();
@@ -357,7 +359,7 @@ class HqBackend extends Backend {
       if (c['url'] != baseUrl) return;
       List<Map<String, dynamic>> list(String k, String f) => ((c[k] as Map)[f] as List).cast<Map<String, dynamic>>();
       _data = mapSnapshot(board: list('board', 'identities'), inbox: list('inbox', 'items'), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'),
-          tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'));
+          tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'), awaiting: _list(c['board'], 'awaiting'));
       final lines = c['messages'] as Map<String, dynamic>?;
       if (lines != null) {
         try {
@@ -515,7 +517,7 @@ class HqBackend extends Backend {
     final d = _data;
     if (d == null) return;
 
-    if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'task.new' || type == 'task.state' || type == 'toggle.changed' || type.startsWith('watchdog.')) {
+    if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'task.new' || type == 'task.state' || type == 'task.awaiting' || type == 'toggle.changed' || type.startsWith('watchdog.')) {
       _refreshSoon();
     }
     if (type == 'conv.read' || type == 'conv.muted') _refreshConvs();
@@ -905,6 +907,29 @@ class HqBackend extends Backend {
     return _after(r);
   }
 
+  /// Tasks whose "בדקתי" is on its way to hq.
+  final _checking = <int>{};
+
+  @override
+  Future<CommandResult> checked(AwaitingTask t) async {
+    final d = _data;
+    if (d == null) return const CommandResult.fail('אין חיבור לשרת.');
+    final orig = d.awaiting.where((x) => x.id == t.id).firstOrNull ?? t;
+    _checking.add(t.id);
+    d.awaiting = [for (final x in d.awaiting) if (x.id != t.id) x];
+    notifyListeners();
+    final r = await _send('POST', '/api/tasks/${t.id}/checked', {});
+    _checking.remove(t.id);
+    // Refused: back on the list as it was, in whatever snapshot is current now (a reload meanwhile kept it out).
+    final now = _data;
+    if (!r.ok && now != null && !now.awaiting.any((x) => x.id == t.id)) {
+      now.awaiting = [...now.awaiting, orig]..sort((a, b) => b.at.compareTo(a.at));
+      notifyListeners();
+    }
+    // Taken: one more board, so one fetched before hq took it (and finished after) is not the last word.
+    return _after(r);
+  }
+
   @override
   Future<CommandResult> notNow(WaitItem item) => _snooze(item, true);
 
@@ -1137,6 +1162,7 @@ CompanyData mapSnapshot({
   required List<Map<String, dynamic>> toggles,
   List<Map<String, dynamic>> tasks = const [],
   List<Map<String, dynamic>> projects = const [],
+  List<Map<String, dynamic>> awaiting = const [],
   CompanyData? previous,
   DateTime? now,
 }) {
@@ -1428,6 +1454,7 @@ CompanyData mapSnapshot({
     automations: automations,
     focus: focus,
     night: night ? 'לילה פעיל' : null,
+    awaiting: [for (final a in awaiting) ?AwaitingTask.fromHq(a)],
   );
 }
 

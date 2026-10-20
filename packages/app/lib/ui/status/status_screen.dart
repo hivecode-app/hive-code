@@ -1,11 +1,12 @@
-// Status (#53), the secondary screen: what waits for him, what finished since his last visit (one
-// line each), and one line per project with what runs there now.
+// Status (#53), the secondary screen: what waits for him, what still waits on him to check or deploy (#108),
+// what finished since his last visit (one line each), and one line per project with what runs there now.
 import 'package:flutter/material.dart';
 
 import '../../data/backend.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
+import '../blocks/awaiting.dart';
 import '../common.dart';
 import '../nav.dart';
 import '../system_bar.dart';
@@ -38,6 +39,20 @@ class StatusScreen extends StatelessWidget {
             if (waiting.isEmpty) const _Quiet(icon: 'check_circle', text: 'אין מה שמחכה לך')
             else for (final w in waiting) _WaitLine(item: w),
           ]),
+          // "מה לבדוק" (#108): only when something waits on him.
+          // The last one checked folds the section away, not a jump.
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeOutCubic,
+            transitionBuilder: (child, a) => SizeTransition(sizeFactor: a, alignment: Alignment.topCenter, child: child),
+            child: d.awaiting.isEmpty
+                ? const SizedBox(key: ValueKey('awaiting-none'), width: double.infinity)
+                : Column(key: const ValueKey('awaiting'), children: [
+                    Section('מה לבדוק', count: '${d.awaiting.length}'),
+                    ListBlock(children: [AwaitingBlock(data: AwaitingData.of(d), now: now)]),
+                  ]),
+          ),
           Section('מאז הביקור הקודם', count: 'מ-${_since(since, now)}'),
           ListBlock(inset: 16, children: [
             if (done.isEmpty) const _Quiet(icon: 'radio_button_unchecked', text: 'לא הסתיים כלום מאז')

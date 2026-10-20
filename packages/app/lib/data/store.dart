@@ -165,6 +165,9 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> notNow(WaitItem item) async => _check(await backend.notNow(item));
+
+  /// "בדקתי" on "מה לבדוק" (#108): off the list now; back, with the error, when the server didn't take it.
+  Future<void> checked(AwaitingTask t) async => _check(await backend.checked(t));
   Future<void> resume(WaitItem item) async => _check(await backend.resume(item));
   /// Closing is for good and wakes the worker: it waits the same 3 seconds as any one-tap answer.
   void dismiss(WaitItem item) =>
