@@ -5,6 +5,7 @@ import { appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { ENV, englishLines, hebrewReason, shiftDir, statePaths } from '@company/shared';
 import { writeCompactHandoff } from './compact.ts';
+import { checkToolUse } from './guard.ts';
 import { appendSpool, mkdirp, UNKNOWN_SHIFT } from './spool.ts';
 
 // Last-resort guard: a hook must never hold up the turn.
@@ -47,6 +48,22 @@ async function main(): Promise<void> {
 
   const p = payload as { hook_event_name?: unknown; source?: unknown } | null;
   const event = argEvent || (typeof p?.hook_event_name === 'string' ? p.hook_event_name : 'unknown');
+
+  if (event === 'PreToolUse') {
+    // #115: no writes into the main agent-company checkout. Only a block is spooled (the board sees it);
+    // every other tool call passes silently.
+    let reason: string | null = null;
+    try {
+      reason = checkToolUse((payload ?? {}) as object, { repo: process.env[ENV.repo], identity: process.env[ENV.identity] });
+    } catch (e) { logError('guard', e); }
+    if (!reason) return;
+    try { appendSpool(stateRoot, shift, { ts: new Date().toISOString(), event: 'PreToolUse.denied', pid: process.pid, payload }); }
+    catch (e) { logError('spool', e); }
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
+    }));
+    return;
+  }
 
   try {
     appendSpool(stateRoot, shift, { ts: new Date().toISOString(), event, pid: process.pid, payload });

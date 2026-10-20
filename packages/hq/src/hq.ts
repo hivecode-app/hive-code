@@ -21,6 +21,7 @@ import { Pusher, loadOrCreateVapid, telegramVia, type TelegramSend, type WebPush
 import { backupOnce } from './backup.ts';
 import { board } from './board.ts';
 import { Home } from './home.ts';
+import { MemoryFiles, type Run } from './memory-files.ts';
 import { startApi, loadOrCreateToken, health, type ApiServer } from './api.ts';
 import { Auth } from './auth.ts';
 import { Ingest, startIngestSocket, type Ticketer } from './ingest.ts';
@@ -42,6 +43,8 @@ export interface HqDeps {
   issues?: IssueSource;
   accounts?: AccountDeps;
   tabBrowser?: TabBrowser;
+  /** git/gh runner for the rolling memory PR (memory-files.ts). */
+  memoryRun?: Run;
   now?: () => number;
 }
 
@@ -80,6 +83,7 @@ export class Hq {
   readonly accounts: AccountManager;
   readonly tab: TabHandoffs;
   readonly home: Home;
+  readonly memoryFiles: MemoryFiles;
   private tabServer: TabServer | null = null;
   private ingestServer: Server | null = null;
   private timers: NodeJS.Timeout[] = [];
@@ -107,6 +111,7 @@ export class Hq {
     this.tab = new TabHandoffs(this.store, this.inbox, this.mailbox, cfg.tab, deps.tabBrowser ?? new CdpTabBrowser(cfg.tab.cdpUrl, tabLog));
     this.ingest = new Ingest(this, deps.ticketer);
     this.home = new Home(this);
+    this.memoryFiles = new MemoryFiles(this, deps.memoryRun);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
     this.awaiting = new AwaitingBoard(this.store);
@@ -202,6 +207,8 @@ export class Hq {
         for (const a of this.accounts.rows()) if (a.config_dir && a.health !== 'needs_login') await this.accounts.verify(a.name);
         await this.accounts.refresh();
       });
+      // #115: `remember` with `file` → the rolling memory PR (memory-files.ts), when enough waits or long enough.
+      this.every(10 * 60_000, 'memory-files', () => this.memoryFiles.sweep());
       this.every(T.backupMs, 'backup', async () => {
         if (!this.store.toggle('backup')) return;
         await backupOnce(this.store, join(this.cfg.stateDir, 'backups'), this.cfg.backupsKeep);

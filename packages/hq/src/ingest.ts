@@ -19,6 +19,7 @@ import { noWorkers, readCharter } from './workspace.ts';
 import { getIdentity, isStandingWorker } from './org.ts';
 import { HandoffError } from './tab/handoffs.ts';
 import { HomeError } from './home.ts';
+import { FILE_MODES, memoryFilePath } from './memory-files.ts';
 
 const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home']);
 
@@ -234,6 +235,19 @@ export class Ingest {
           throw err;
         }
       }
+      case 'remember': {
+        // #115: `file` updates a memory file through hq (memory-files.ts), never by editing the main checkout.
+        if (a.file === undefined) return { ok: true, id: e.id, result: { stored: true } };
+        const file = memoryFilePath(a.file);
+        if (!file) throw new IngestError(400, `remember: file must be memory/<path>.md, got ${String(a.file)}`,
+          `\`file\` צריך להיות נתיב יחסי לקובץ \`.md\` תחת \`memory/\`, למשל \`memory/projects/lumo-bot/open-ron.md\``);
+        if (a.mode !== undefined && !(FILE_MODES as readonly unknown[]).includes(a.mode)) {
+          throw new IngestError(400, `remember: mode must be append or replace`, '`mode` הוא `append` או `replace`');
+        }
+        need('text');
+        a.file = file;
+        return { ok: true, id: e.id, result: { stored: true, file, pr: 'pending' } };
+      }
       default:
         // remember / handoff / status: stored durably now (ops table),
         // consumed by memory consolidation, prime.json (handoff) and the board.
@@ -320,6 +334,20 @@ export class Ingest {
     return { items: items.slice(0, limit) };
   }
 
+  /**
+   * recall, and when a query is a memory file path (`memory/…/open-ron.md`), that file first, whole, as it will be
+   * once the updates waiting for the memory PR land (#115): what a worker reads before `remember` with `mode: replace`.
+   */
+  async recallWithFiles(raw: unknown): Promise<RecallResponse> {
+    const res = this.recall(raw);
+    const r = raw as Partial<RecallRequest> & { queries?: unknown };
+    const file = [r.query, ...strList(r.queries)].map(memoryFilePath).find((f): f is string => !!f);
+    if (!file) return res;
+    const text = await this.hq.memoryFiles.current(file);
+    if (text == null) return res;
+    return { ...res, items: [{ ref: file, scope: 'file', title: file, text, score: 100 }, ...res.items.filter((i) => i.ref !== file)] };
+  }
+
   /** For prime.json: the top record's full body (bet 9) plus the next refs as an index. */
   primeRecall(identity: string, query: string): { top?: { ref: string; body: string }; others: string[] } {
     const project = (this.hq.store.db.prepare('SELECT project FROM identities WHERE id = ?').get(identity) as { project: string | null } | undefined)?.project;
@@ -375,7 +403,7 @@ export class Ingest {
       }
       else {
         const body = await readBody();
-        out = path === '/v1/ops' ? this.op(body) : this.recall(body);
+        out = path === '/v1/ops' ? this.op(body) : await this.recallWithFiles(body);
       }
     } catch (e) {
       status = e instanceof IngestError || e instanceof HandoffError ? e.status : (e as { status?: number }).status ?? 500;

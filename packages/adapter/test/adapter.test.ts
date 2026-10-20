@@ -35,6 +35,8 @@ test('buildArgs/buildSettings follow B.5', () => {
   assert.equal(s.autoMemoryEnabled, false);
   assert.equal(s.hooks.SessionStart[0].hooks[0].command, 'node /h/cli.ts hook SessionStart');
   assert.equal(s.hooks.PostToolUse[0].matcher, 'SendMessage|Bash');
+  assert.equal(s.hooks.PreToolUse[0].matcher, 'Write|Edit|NotebookEdit|Bash');
+  assert.equal(s.hooks.PreToolUse[0].hooks[0].command, 'node /h/cli.ts hook PreToolUse');
   assert.equal(s.hooks.PermissionRequest[0].hooks[0].command, 'node /pa.mjs');
   for (const ev of Object.keys(s.hooks)) for (const h of s.hooks[ev]) for (const x of h.hooks) assert.equal(x.type, 'command');
   assert.throws(() => buildSettings({ hookCommand: 'x', extra: { hooks: { Stop: [{ hooks: [{ type: 'http', url: 'http://hq' }] }] } } }), /only command/);

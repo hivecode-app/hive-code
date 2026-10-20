@@ -35,6 +35,9 @@ export const SPOOLED_HOOK_EVENTS = [
   'PostToolUse',
 ] as const;
 
+/** Tools the PreToolUse guard checks (hooks guard.ts GUARD_MATCHER; kept here so the adapter needs no hooks import). */
+export const PRE_TOOL_USE_MATCHER = 'Write|Edit|NotebookEdit|Bash';
+
 export interface SettingsInput {
   /** Command prefix that runs the hooks CLI, e.g. `node /abs/packages/hooks/src/cli.ts`. */
   hookCommand: string;
@@ -60,6 +63,8 @@ export function buildSettings(inp: SettingsInput): Record<string, unknown> {
     if (ev === 'PostToolUse') entry.matcher = inp.postToolUseMatcher ?? 'SendMessage|Bash';
     hooks[ev] = [entry];
   }
+  // #115: the main-checkout write guard (packages/hooks/src/guard.ts) answers before the tool runs.
+  hooks.PreToolUse = [{ matcher: PRE_TOOL_USE_MATCHER, hooks: [{ type: 'command', command: cmd('PreToolUse'), timeout: 10 }] }];
   if (inp.permissionRequestCommands?.length) {
     hooks.PermissionRequest = [{ hooks: inp.permissionRequestCommands.map((c) => ({ type: 'command' as const, command: c, timeout: 15 })) }];
   }

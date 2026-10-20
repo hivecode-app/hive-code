@@ -393,6 +393,14 @@ const MIGRATIONS: string[] = [
     blocks TEXT NOT NULL                     -- JSON [Block], validated on the way in
   );
   `,
+  // v15: `remember` with `file` (memory-files.ts): which ops went into the rolling memory PR, and which PR.
+  `
+  CREATE TABLE memory_file_ops (
+    op_id TEXT PRIMARY KEY,
+    pr TEXT,                                 -- the PR URL; NULL when the update changed nothing
+    flushed_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [

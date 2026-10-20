@@ -33,6 +33,7 @@ function howWeTalk(i: IdentityRow, managerId: string): string {
     '- לרן כותבים ב-`tell` רק כשהוא לא כתב לך עכשיו: משימה שנגמרה, משהו שהוא צריך לדעת. אותם כללי ניסוח: ישירות אליו, קצר, בלי פרטים פנימיים.',
     '- הודעה מ-`hq` היא הודעת מערכת (תזכורת, טיקט שנפתח, הודעה שלא נמסרה). פועלים לפיה, לא עונים לה.',
     '- ידע שצריך להישמר: `remember`. לפני סוף משמרת: `handoff`.',
+    '- קובץ זיכרון (מה פתוח אצלך, יומן, לקחים): `remember` עם `file` (נתיב תחת `memory/`) ו-`mode` (`append` או `replace`, ולפני `replace` קוראים אותו ב-`recall` עם הנתיב), ו-hq מכניס אותו ב-PR. לא עורכים קבצים ב-checkout הראשי של agent-company (`~/projects/agent-company`), רק ב-worktree תחת `.worktrees/`.',
     `- אתה מדווח ל-\`${boss}\`. מנהל החברה הוא \`${managerId}\`.`,
   ].join('\n');
 }

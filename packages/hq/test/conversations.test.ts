@@ -166,6 +166,7 @@ test('migration: what was there before counts as read', () => {
     s.db.exec('DROP INDEX tasks_awaiting; DROP TABLE deploys');
     for (const c of ['awaiting', 'awaiting_note', 'awaiting_at', 'pr']) s.db.exec(`ALTER TABLE tasks DROP COLUMN ${c}`);
     s.db.exec('DROP TABLE home_recipes'); // v14
+    s.db.exec('DROP TABLE memory_file_ops'); // v15
     s.db.pragma('user_version = 10');
     s.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, body, created_at) VALUES ('a', 'eli', 'owner', 'ישן', 100), ('b', 'eli', 'owner', 'ישן יותר', 50)`).run();
     (s as unknown as { migrate(): void }).migrate();

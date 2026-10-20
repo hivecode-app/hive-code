@@ -55,6 +55,11 @@ export const TOOLS: readonly ToolDef[] = [
     source: s('מקור, e.g. m-8812 / source reference'),
     project: s('פרויקט כש-scope=project / project when scope=project'),
     domain: s('תחום כש-scope=personal / domain when scope=personal'),
+    file: s('עדכון לקובץ זיכרון: נתיב יחסי תחת memory/, למשל memory/projects/lumo-bot/open-ron.md. hq מכניס אותו ב-PR מאוחד; '
+      + 'לא עורכים קבצים ב-checkout הראשי / update a memory file (path under memory/); hq folds it into one rolling PR'),
+    mode: oneOf(['append', 'replace'], 'עם file: append מוסיף את text לסוף הקובץ (ברירת מחדל), replace מחליף את כל הקובץ ב-text. '
+      + 'לפני replace קוראים את הקובץ ב-recall עם הנתיב כ-query: הוא חוזר שלם, כולל עדכונים שעוד לא מוזגו / '
+      + 'with file: append adds text at the end (default), replace makes text the whole file; before replace, recall the path to read it with pending updates'),
   }, ['scope', 'kind', 'text']),
   tool('recall', 'חיפוש בזיכרון החברה. בקריאה אחת שלחו ב-queries גם ניסוח בעברית וגם ניסוח באנגלית של אותה שאלה (הזיכרון כתוב בשתי השפות). '
     + 'Search company memory. In ONE call pass both a Hebrew and an English phrasing in `queries` '

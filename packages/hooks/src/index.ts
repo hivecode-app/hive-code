@@ -3,3 +3,4 @@ export {
   buildAdditionalContext, primePath, readPrimeFile, truncate, writePrimeFile, TRUNCATION_MARK,
 } from './prime.ts';
 export * from './compact.ts';
+export * from './guard.ts';
