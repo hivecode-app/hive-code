@@ -9,7 +9,7 @@ import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
 import type { Inbox } from './inbox.ts';
 import type { ShiftManager, ShiftRow } from './shifts.ts';
-import { getIdentity } from './org.ts';
+import { getIdentity, isStandingWorker } from './org.ts';
 import { toDTO, type AttachmentDTO, type Uploads } from './uploads.ts';
 
 export interface MessageRow {
@@ -182,6 +182,10 @@ export class Mailbox {
       this.setState(id, 'delivered');
       return;
     }
+    // A standing worker's message about one task of its (its prompt, close_team's handoff ask) dies with that task:
+    // it never reaches the session of the next task, and never wakes the worker in the checkout after the close.
+    const bound = this.boundTask(m);
+    if (bound != null && this.taskDone(bound)) { this.failBound(m); return; }
     const shift = this.shifts.current(m.to_identity);
     if (shift?.kind === 'foreign') {
       try {
@@ -212,8 +216,10 @@ export class Mailbox {
       if (this.taskClosed(m.to_identity)) { this.failClosed(m); return; }
       // Resting or dead: wake it. The message becomes the first prompt once the host is live (flush on `live`).
       try {
-        await this.shifts.request(m.to_identity, { reason: 'message' });
+        // Bound to its task: shifts.request refuses under the identity's lock if close_team got there first.
+        await this.shifts.request(m.to_identity, { reason: 'message', ...(bound != null ? { taskId: bound } : {}) });
       } catch (e) {
+        if (bound != null && this.taskDone(bound)) { this.failBound(m); return; }
         this.store.db.prepare('UPDATE messages SET error = ? WHERE id = ?').run(`wake failed: ${(e as Error).message}`, id);
       }
     }
@@ -313,6 +319,7 @@ export class Mailbox {
       ORDER BY created_at, rowid`).all(cutoff) as StoredRow[]).map(hydrate);
     // A task worker whose task closed meanwhile is not resurrected: its messages close as failed, with why.
     for (const m of stale.filter((x) => !this.shifts.current(x.to_identity) && this.taskClosed(x.to_identity))) this.failClosed(m);
+    for (const m of stale) { const b = this.boundTask(m); if (b != null && this.taskDone(b)) this.failBound(m); }
     for (const m of stale.filter((x) => x.resurrected && this.get(x.id)!.state === 'queued')) this.fail(m);
     // One resurrection per identity, however many of its messages are stale.
     const byIdentity = new Map<string, MessageRow[]>();
@@ -350,6 +357,21 @@ export class Mailbox {
     const r = this.store.db.prepare(`SELECT t.state FROM tasks t JOIN identities i ON i.id = t.identity
       WHERE t.identity = ? AND i.team_kind = 'task' ORDER BY t.id DESC LIMIT 1`).get(identity) as { state: string } | undefined;
     return r?.state === 'done';
+  }
+
+  /** The task a message to a standing worker belongs to (`task-<id>-…`: the scheduler's task prompt and handoff ask), if it is that worker's. */
+  private boundTask(m: MessageRow): number | null {
+    const id = /^task-(\d+)-/.exec(m.id)?.[1];
+    if (!id || !isStandingWorker(getIdentity(this.store, m.to_identity), this.cfg.managerId)) return null;
+    const t = this.store.db.prepare('SELECT identity FROM tasks WHERE id = ?').get(Number(id)) as { identity: string | null } | undefined;
+    return t?.identity === m.to_identity ? Number(id) : null;
+  }
+  private taskDone(id: number): boolean {
+    return (this.store.db.prepare('SELECT state FROM tasks WHERE id = ?').get(id) as { state: string } | undefined)?.state === 'done';
+  }
+  /** Nothing to report: the task it was about is closed, and the sender knows (it closed it, or the worker did). */
+  private failBound(m: MessageRow): void {
+    this.setState(m.id, 'failed', { error: 'המשימה כבר נסגרה' });
   }
 
   /** A message to a closed task's worker: failed with the reason, and the sender hears the task is closed. */

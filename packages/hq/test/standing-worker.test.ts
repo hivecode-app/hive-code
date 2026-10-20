@@ -249,3 +249,41 @@ test('a lead whose task closed while it rested still resumes its session', async
     assert.equal(launcher.launches.at(-1)!.resume, true);
   } finally { await env.cleanup(); }
 });
+
+test('close_team on a standing worker: a handoff ask still queued at the close never wakes it again (#99)', async () => {
+  const r = repo();
+  const env = await makeEnv({ org: ORG, projects: { proj: charter(r.checkout) } });
+  try {
+    const { hq, launcher, clock, cfg } = env;
+    // Its host never comes up: the ask waits in the queue, like a shift that goes live only after the close.
+    const launch = launcher.launch.bind(launcher);
+    launcher.launch = async (spec) => (spec.identity === 'gal' ? (launcher.launches.push(spec), { unit: spec.unit }) : launch(spec));
+    const t = hq.scheduler.addTask({ title: 'משימה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'] });
+    await until(() => hq.scheduler.task(t.id)!.state === 'running', 5000, 'running');
+    assert.equal(hq.scheduler.closeWithHandoff(t.id, 'proj-ceo', 'עדיפות אחרת'), true);
+    const ask = `task-${t.id}-closing`;
+    assert.equal(hq.mailbox.get(ask)!.state, 'queued');
+    const galLaunches = () => launcher.launches.filter((l) => l.identity === 'gal').length;
+    const launches = galLaunches();
+
+    clock.advance(cfg.timers.handoffGraceMs);
+    await hq.scheduler.sweep();
+    assert.equal(hq.scheduler.task(t.id)!.state, 'done');
+    assert.equal(hq.shifts.current('gal'), undefined);
+    // A delivery attempt after the close (one in flight, the mailbox sweep, a closing asked again): no shift.
+    await hq.mailbox.deliver(ask);
+    assert.equal(hq.scheduler.closeWithHandoff(t.id, 'proj-ceo', 'שוב'), false, 'one grace only');
+    clock.advance(cfg.timers.deliveryTimeoutMs);
+    await hq.mailbox.sweep();
+    assert.equal(hq.shifts.current('gal'), undefined, 'not woken in the checkout');
+    assert.equal(galLaunches(), launches);
+    assert.equal(hq.mailbox.get(ask)!.state, 'failed');
+    assert.equal(hq.mailbox.list('proj-ceo').some((m) => m.ref === ask), false, 'nothing to report to the closer');
+
+    // A plain message after the close still wakes it, in the checkout.
+    launcher.launch = launch;
+    hq.mailbox.tell({ msg_id: 'm-1', from: 'proj-ceo', to: 'gal', body: 'מה למדת?' });
+    await until(() => hq.mailbox.get('m-1')!.state === 'delivered', 3000, 'woken by a message');
+    assert.equal(launcher.launches.at(-1)!.cwd, r.checkout);
+  } finally { await env.cleanup(); r.cleanup(); }
+});
