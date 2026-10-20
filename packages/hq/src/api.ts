@@ -110,7 +110,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     const key = str(b.msg_id, 'msg_id', false);
     return { item: hq.inbox.add({ kind, from_identity: from, title: str(b.title, 'title')!, body: str(b.body, 'body', false),
       urgency: oneOf(b.urgency, URGENCIES, 'urgency'), blocking: b.blocking !== false, ref: str(b.ref, 'ref', false),
-      dedupe_key: key ? `api:${key}` : null }) };
+      headline: str(b.headline, 'headline', false), dedupe_key: key ? `api:${key}` : null }) };
   });
   // He finished it ("סיימתי") or declined: the requester hears it now, through its mailbox.
   route('POST', '/api/inbox/:id/done', async ({ params, body }) => {
@@ -119,6 +119,16 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     if (await hq.tab.fromInbox(Number(params[0]), false)) return { item: hq.inbox.get(Number(params[0])), message: null };
     try { return hq.mailbox.complete(Number(params[0]), { note: str(b.note, 'note', false) }); }
     catch (e) { throw new HttpError(404, (e as Error).message); }
+  });
+  // His own words on an open question or GO, typed in the conversation: the item closes with them.
+  route('POST', '/api/inbox/:id/answer', async ({ params, body }) => {
+    const b = await body();
+    const answer = str(b.answer, 'answer', !hasFiles(b)) ?? '';
+    try { return hq.mailbox.reply(Number(params[0]), answer, strings(b.attachments, 'attachments')); }
+    catch (e) {
+      const why = (e as Error).message;
+      throw new HttpError(/no inbox item/.test(why) ? 404 : /already handled/.test(why) ? 409 : 400, why);
+    }
   });
   route('POST', '/api/inbox/:id/dismiss', async ({ params, body }) => {
     const b = await body();
@@ -147,7 +157,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     const b = await body();
     return { ask: hq.mailbox.ask({
       msg_id: str(b.msg_id, 'msg_id', false), from: str(b.from, 'from')!, question: str(b.question, 'question')!,
-      options: Array.isArray(b.options) ? b.options.map(String) : [], blocking: b.blocking === true,
+      headline: str(b.headline, 'headline', false), options: Array.isArray(b.options) ? b.options.map(String) : [], blocking: b.blocking === true,
       urgency: oneOf(b.urgency, URGENCIES, 'urgency'),
     }) };
   });

@@ -26,12 +26,17 @@ export const TOOLS: readonly ToolDef[] = [
     urgency: oneOf(['now', 'next', 'later'], 'now מפריע, next ברירת מחדל, later לסוף התור / delivery priority'),
     ref: s('מזהה הודעה שעליה עונים, e.g. m-8812 / message id being answered'),
   }, ['to', 'body']),
-  tool('ask', 'שאלה לרן או למנהל. Ask the owner/manager a question.', {
-    question: s('השאלה / the question'),
+  tool('ask', 'שאלה לרן או למנהל. מופיעה אצלו כהודעה בשיחה איתך: קודם headline, מתחתיה כפתורים מ-options, '
+    + 'והפרטים (question) מקופלים. מה שהוא כותב בשיחה כשהשאלה פתוחה הוא התשובה. '
+    + 'Ask the owner/manager a question. He sees it as a message in his chat with you: the headline first, '
+    + 'buttons from options under it, the question folded as details. Whatever he types in that chat while it is open is the answer.', {
+    headline: s('שורה ראשונה קצרה במילים שלו: מה משתנה אצלו או מה צריך ממנו, בלי מונחים טכניים, '
+      + 'e.g. "עדכון לאפליקציה: תמונות בצ\'אט" / one short line in his words: what changes for him'),
+    question: s('השאלה עם הפרטים (מקופלים מתחת ל-headline) / the question with the details, folded under the headline'),
     blocking: { type: 'boolean', description: 'האם העבודה עוצרת עד תשובה / work is blocked until answered' },
     options: strs('תשובות אפשריות / suggested answers'),
     ref: s('הקשר / related message or task id'),
-  }, ['question']),
+  }, ['headline', 'question']),
   tool('remember', 'שמירת ידע בזיכרון החברה. Store knowledge in company memory.', {
     scope: oneOf(['company', 'project', 'personal'], 'היקף / scope'),
     kind: oneOf(['directive', 'lesson', 'decision', 'fact', 'trap', 'command'], 'סוג / kind'),
@@ -79,11 +84,16 @@ export const TOOLS: readonly ToolDef[] = [
     team: s('שם או מזהה הצוות / team name or id'),
     reason: s('סיבה / reason'),
   }, ['team']),
-  tool('request_go', 'בקשת אישור לפעולה. Request a go-ahead before acting.', {
-    what: s('מה מבקשים לעשות / what needs approval'),
+  tool('request_go', 'בקשת אישור לפעולה. מופיעה אצלו כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. '
+    + 'מה שהוא כותב בשיחה כשהבקשה פתוחה הוא התשובה. '
+    + 'Request a go-ahead before acting. He sees it as a message in his chat with you with a GO button: the headline first, '
+    + 'the details (what) folded. Whatever he types in that chat while it is open is the answer.', {
+    headline: s('שורה ראשונה קצרה במילים שלו: מה משתנה אצלו, בלי מונחים טכניים, '
+      + 'e.g. "עדכון לאפליקציה: תמונות בצ\'אט" / one short line in his words: what changes for him'),
+    what: s('הפרטים: מה נכנס, סיכון ואיך חוזרים אחורה (מקופלים) / details: what ships, risk, rollback (folded)'),
     pr: s('קישור או מספר PR / PR url or number'),
     risk: oneOf(['low', 'medium', 'high'], 'רמת סיכון / risk level'),
-  }, ['what']),
+  }, ['headline', 'what']),
   tool('open_ticket', 'פתיחת כרטיס ב-repo. Open an issue in a repo.', {
     repo: s('owner/repo'),
     title: s('כותרת / title'),
@@ -130,7 +140,9 @@ export function validateArgs(def: ToolDef, args: unknown): string | null {
 const HEBREW_TEXT: Partial<Record<ToolDef['name'], string[]>> = {
   tell: ['body'], ask: ['question'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'],
 };
-const HEBREW_TITLE: Partial<Record<ToolDef['name'], string[]>> = { open_team: ['name'], open_ticket: ['title'] };
+const HEBREW_TITLE: Partial<Record<ToolDef['name'], string[]>> = {
+  open_team: ['name'], open_ticket: ['title'], ask: ['headline'], request_go: ['headline'],
+};
 
 /** The rewrite request when a field that a person reads is English, else null. */
 export function hebrewProblem(def: ToolDef, args: Record<string, unknown>): string | null {

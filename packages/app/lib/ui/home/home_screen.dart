@@ -9,6 +9,7 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../chat/chat_screen.dart';
 import '../nav.dart';
 import '../system_bar.dart';
 
@@ -182,7 +183,8 @@ class WaitRow extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.only(top: 2),
-              child: _ClampedBody(item.body, style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text)),
+              // The headline in his words when the worker gave one; the details are in the conversation.
+              child: _ClampedBody(item.headline ?? item.body, style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text)),
             ),
             AnimatedSize(duration: const Duration(milliseconds: 150), alignment: AlignmentDirectional.topStart, child: tail),
           ]),
@@ -302,7 +304,11 @@ class WaitRow extends StatelessWidget {
 void openWait(BuildContext context, WaitItem item) {
   if (item.kind == WaitKind.login) return Nav.handoff(context, item);
   final d = StoreScope.read(context).data;
-  if (d != null && d.canChat(item.from)) return Nav.chat(context, item.from);
+  if (d != null && d.canChat(item.from)) {
+    // Straight to its message in the conversation, where the answer buttons are.
+    if (item.askId != null) ChatScreen.pendingTarget[item.from] = item.askId!;
+    return Nav.chat(context, item.from);
+  }
   Nav.waitItem(context, item);
 }
 

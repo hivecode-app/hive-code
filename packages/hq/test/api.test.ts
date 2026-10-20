@@ -69,6 +69,18 @@ test('API: org/board with derived status, tell, asks/answer, toggles, tasks, inb
     assert.equal(ans.json.ask.state, 'answered');
     assert.equal((await call('POST', '/api/asks/nope/answer', { answer: 'x' })).status, 404);
 
+    // Words typed on an open GO in the conversation: the item closes with them, the worker gets them.
+    const go = await call('POST', '/api/inbox', { kind: 'go', from: 'eli', title: 'GO: פריסה', headline: 'עדכון לאפליקציה', body: 'פריסה' });
+    assert.equal(go.json.item.headline, 'עדכון לאפליקציה');
+    const wrote = await call('POST', `/api/inbox/${go.json.item.id}/answer`, { answer: 'לא, בלי הבוטים' });
+    assert.equal(wrote.status, 200);
+    assert.equal(wrote.json.item.state, 'resolved');
+    assert.equal(wrote.json.message.to_identity, 'eli');
+    assert.match(wrote.json.message.body, /לא, בלי הבוטים/);
+    assert.equal((await call('POST', `/api/inbox/${go.json.item.id}/answer`, { answer: 'שוב' })).status, 409, 'already handled');
+    assert.equal((await call('POST', '/api/inbox/99999/answer', { answer: 'x' })).status, 404);
+    assert.equal((await call('POST', `/api/inbox/${go.json.item.id}/answer`, {})).status, 400);
+
     const login = await call('POST', '/api/inbox', { kind: 'login', from: 'eli', title: 'כניסה ל-Cloudflare', ref: 'tab-1', msg_id: 'tab-1' });
     const again = await call('POST', '/api/inbox', { kind: 'login', from: 'eli', title: 'כניסה ל-Cloudflare', ref: 'tab-1', msg_id: 'tab-1' });
     assert.equal(again.json.item.id, login.json.item.id, 'idempotent');

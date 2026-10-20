@@ -40,7 +40,7 @@ export const noForeignInjector: ForeignInjector = {
 
 const URGENCY_HE: Record<Urgency, string> = { urgent: 'דחופה', normal: 'רגילה', low: 'נמוכה' };
 
-interface AskRow { id: string; from_identity: string; question: string; options: string; blocking: number; urgency: Urgency;
+interface AskRow { id: string; from_identity: string; question: string; headline: string | null; options: string; blocking: number; urgency: Urgency;
   state: AskDTO['state']; answer: string | null; answered_by: AskDTO['answered_by']; created_at: number; escalated_at: number | null }
 
 export class Mailbox {
@@ -380,6 +380,40 @@ export class Mailbox {
     return { item: this.inbox.get(itemId), message };
   }
 
+  /**
+   * He wrote an answer of his own on an open item in the conversation ("לא, בלי הבוטים"). A question is
+   * answered with it; a GO closes with his text, and the requester gets the text itself, not "GO".
+   */
+  reply(itemId: number, text: string, attachments: string[] = []): { item: ReturnType<Inbox['get']>; message: MessageRow | null } {
+    const item = this.inbox.get(itemId);
+    if (!item) throw new Error(`no inbox item ${itemId}`);
+    // Closed elsewhere a moment ago (another device, Telegram): his words would reach no one. Say so.
+    const open = item.kind === 'ask' && item.ref && this.getAsk(item.ref)
+      ? ['open', 'escalated'].includes(this.getAsk(item.ref)!.state)
+      : item.state === 'open';
+    if (!open) throw new Error(`inbox item ${itemId} is already handled`);
+    if (item.kind === 'ask' && item.ref && this.getAsk(item.ref)) {
+      const a = this.answer(item.ref, text, 'owner', undefined, attachments);
+      return { item: this.inbox.get(itemId), message: this.get(`${a.id}-answer`) ?? null };
+    }
+    const requester = item.from_identity;
+    if (!requester || requester === OWNER || requester === 'hq' || !getIdentity(this.store, requester)) {
+      throw new Error(`inbox item ${itemId} has no worker to answer`);
+    }
+    this.attachmentsFor(attachments);
+    if (!text && attachments.length) text = '(תמונה מצורפת)';
+    if (!text) throw new Error('answer must be text or an image');
+    this.inbox.resolve(itemId, 'resolved');
+    const what = item.kind === 'go' ? 'לבקשת ה-GO' : 'על';
+    const message = this.tell({
+      msg_id: `inbox-${itemId}-reply`, from: OWNER, to: requester, kind: 'answer', ref: item.ref ?? `inbox-${itemId}`,
+      priority: 'now', urgency: item.urgency, attachments,
+      body: `תשובה של רן ${what} "${item.headline ?? item.title}": ${text}`,
+    });
+    this.store.emit('inbox.completed', requester, { id: itemId, declined: false, message: message.id });
+    return { item: this.inbox.get(itemId), message };
+  }
+
   // ── asks (B.4: a question to the owner is a message of kind `ask`) ─────────
   ask(req: AskRequest): AskDTO {
     const id = req.msg_id ?? `ask-${randomUUID().slice(0, 8)}`;
@@ -387,12 +421,13 @@ export class Mailbox {
     if (ex) return ex;
     if (!req.from || !req.question) throw new Error('from and question are required');
     const now = this.store.now();
-    this.store.db.prepare(`INSERT INTO asks (id, from_identity, question, options, blocking, urgency, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, req.from, req.question, JSON.stringify(req.options ?? []), req.blocking ? 1 : 0,
+    const headline = req.headline?.trim() || null;
+    this.store.db.prepare(`INSERT INTO asks (id, from_identity, question, headline, options, blocking, urgency, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, req.from, req.question, headline, JSON.stringify(req.options ?? []), req.blocking ? 1 : 0,
       req.urgency ?? 'normal', now);
     // He comes first, directly from whoever asks (A.4) — the inbox item, not a relay through the manager.
     this.inbox.add({ kind: 'ask', title: `${this.label(req.from)} שואל/ת`, body: req.question, from_identity: req.from,
-      urgency: req.urgency ?? 'normal', blocking: !!req.blocking, ref: id, dedupe_key: `ask:${id}` });
+      urgency: req.urgency ?? 'normal', blocking: !!req.blocking, ref: id, headline, dedupe_key: `ask:${id}` });
     const a = this.getAsk(id)!;
     this.store.emit('ask.new', req.from, a);
     return a;

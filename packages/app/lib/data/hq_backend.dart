@@ -486,8 +486,10 @@ class HqBackend extends Backend {
 
   /// One stored message as a chat item, the same way whether it came in the history or live.
   /// Null when the worker's streamed text already shows it.
-  ChatItem? _messageItem(Map<String, dynamic> m, CompanyData d, List<ChatItem> existing) {
+  ChatItem? _messageItem(Map<String, dynamic> m, CompanyData d, List<ChatItem> existing, {List<UserMsg> typed = const []}) {
     final ts = DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int);
+    final card = m['from_identity'] == 'owner' && m['kind'] == 'answer' ? cardFor(existing, m['ref'] as String?) : null;
+    if (card != null) return answerItem(m, card, d.who(card.from).name, [...existing, ...typed]);
     if (m['from_identity'] == 'owner') {
       return UserMsg(
         id: m['id'] as String,
@@ -585,11 +587,16 @@ class HqBackend extends Backend {
       final old = d.chats[identityId];
       final chat = Conversation(identityId: identityId, items: [], draft: old?.draft ?? '');
       final eng = EngineModel(items: chat.items, gender: d.who(identityId).gender, onLive: (l) => chat.live = l);
-      for (final e in (res[1]['events'] as List).cast<Map<String, dynamic>>()) {
+      final events = (res[1]['events'] as List).cast<Map<String, dynamic>>();
+      for (final e in events) {
         eng.apply(e);
       }
+      // Questions and GO requests stay in the conversation after they are answered, like any message.
+      chat.items.addAll(historyCards(events, identityId));
+      // Answers typed on this device are merged back below: seen here, the server's copy of one is not shown twice.
+      final typed = [for (final m in (old?.items ?? const <ChatItem>[]).whereType<UserMsg>()) if (m.replyTo?.askId != null) m];
       for (final m in (res[0]['messages'] as List).cast<Map<String, dynamic>>().reversed) {
-        final item = _messageItem(m, d, chat.items);
+        final item = _messageItem(m, d, chat.items, typed: typed);
         if (item != null) chat.items.add(item);
         // He read it: mark it handled so the worker's mailbox closes the loop (B.4).
         if (m['to_identity'] == 'owner' && m['kind'] != 'system' && m['state'] != 'handled') {
@@ -638,7 +645,7 @@ class HqBackend extends Backend {
     if (i >= 0) _shown.removeAt(i);
   }
 
-  /// Question cards follow the inbox: one appears when a worker asks while the chat is open, and
+  /// Question and GO cards follow the inbox: one appears in the conversation of whoever asked, and
   /// one answered elsewhere (home, another device, a manager) stops asking here.
   void _syncAsks(Conversation chat, String identityId, CompanyData d) {
     final open = {for (final w in d.waiting.where((w) => w.from == identityId && w.askId != null)) w.askId!: w};
@@ -651,7 +658,10 @@ class HqBackend extends Backend {
       if (have.contains(a.askId)) continue;
       // At the time it was asked, not "now": a card stamped now sorted below everything and buried
       // every new message under it.
-      chat.items.add(AskCard(id: 'ask:${a.askId}', ts: a.createdAt ?? DateTime.now(), askId: a.askId, from: identityId, question: a.body, options: a.options, blocking: a.blocking));
+      final ts = a.createdAt ?? DateTime.now();
+      chat.items.add(a.kind == WaitKind.go
+          ? GoCard(id: 'go:${a.inboxId}', ts: ts, askId: a.askId, ref: a.ref, from: identityId, headline: a.headline, details: a.body)
+          : AskCard(id: 'ask:${a.askId}', ts: ts, askId: a.askId, from: identityId, headline: a.headline, question: a.body, options: a.options, blocking: a.blocking));
       added = true;
     }
     if (added) chat.items.sort((a, b) => a.ts.compareTo(b.ts));
@@ -689,7 +699,11 @@ class HqBackend extends Backend {
     if (stale != null) return stale;
     final up = await _uploadAll(attachments);
     if (up == null) return const CommandResult.fail(_uploadFailed);
-    return _send('POST', '/api/asks/${Uri.encodeComponent(askId)}/answer', {
+    // A GO is an inbox item: his words close it, and the worker gets them as they are.
+    final path = askId.startsWith('inbox:')
+        ? '/api/inbox/${askId.substring(6)}/answer'
+        : '/api/asks/${Uri.encodeComponent(askId)}/answer';
+    return _send('POST', path, {
       'answer': text,
       'by': 'owner',
       if (up.isNotEmpty) 'attachments': [for (final a in up) a.id],
@@ -992,10 +1006,14 @@ CompanyData mapSnapshot({
       if (kind == WaitKind.go || kind == WaitKind.urgentProd) const AskOption(id: 'go', label: 'GO', primary: true),
       if (ask != null) for (final o in (ask['options'] as List).cast<String>()) AskOption(id: o, label: o),
     ];
+    final headline = ((i['headline'] as String?) ?? (ask?['headline'] as String?))?.trim();
     waiting.add(WaitItem(
       id: 'inbox:${i['id']}',
       inboxId: i['id'] as int,
-      askId: ask != null ? ask['id'] as String : null,
+      // A GO has no ask behind it: it is answered through its inbox item, in the conversation too.
+      askId: ask != null ? ask['id'] as String : (kind == WaitKind.go ? 'inbox:${i['id']}' : null),
+      headline: headline == null || headline.isEmpty ? null : headline,
+      ref: i['ref'] as String?,
       kind: kind,
       from: (i['from_identity'] as String?) ?? 'yoav',
       time: _hm(i['created_at'] as int),
@@ -1180,4 +1198,85 @@ String withoutIds(String s) => s
 Delivery furtherDelivery(Delivery a, Delivery b) {
   if (a == Delivery.failed || b == Delivery.failed) return a == Delivery.failed ? b : a;
   return a.index >= b.index ? a : b;
+}
+
+
+/// The question and GO cards of a conversation, from its events (`inbox.new`, `ask.new`): what was asked,
+/// in the order it was asked. Whether each is still open comes from the inbox (`_syncAsks`).
+List<AskCard> historyCards(List<Map<String, dynamic>> events, String identityId) {
+  final options = <String, List<String>>{};
+  for (final e in events) {
+    if (e['type'] != 'ask.new') continue;
+    final a = (e['data'] as Map).cast<String, dynamic>();
+    options[a['id'] as String] = ((a['options'] as List?) ?? const []).cast<String>();
+  }
+  final out = <AskCard>[];
+  for (final e in events) {
+    if (e['type'] != 'inbox.new') continue;
+    final i = (e['data'] as Map).cast<String, dynamic>();
+    if (i['from_identity'] != identityId) continue;
+    final ts = DateTime.fromMillisecondsSinceEpoch(i['created_at'] as int);
+    final headline = (i['headline'] as String?)?.trim();
+    final h = headline == null || headline.isEmpty ? null : headline;
+    final body = (i['body'] as String?)?.isNotEmpty == true ? i['body'] as String : i['title'] as String;
+    if (i['kind'] == 'go') {
+      out.add(GoCard(id: 'go:${i['id']}', ts: ts, askId: 'inbox:${i['id']}', ref: i['ref'] as String?, from: identityId, headline: h, details: body));
+    } else if (i['kind'] == 'ask' && i['ref'] != null) {
+      final ref = i['ref'] as String;
+      out.add(AskCard(
+        id: 'ask:$ref',
+        ts: ts,
+        askId: ref,
+        from: identityId,
+        headline: h,
+        question: body,
+        blocking: i['blocking'] == true,
+        options: [for (final o in options[ref] ?? const <String>[]) AskOption(id: o, label: o)],
+      ));
+    }
+  }
+  return out;
+}
+
+/// The card his answer message points at (its ref), if it is in this conversation.
+AskCard? cardFor(List<ChatItem> items, String? ref) =>
+    ref == null ? null : items.whereType<AskCard>().where((c) => c.ref == ref).lastOrNull;
+
+/// What he answered, without what hq wraps around it for the worker (mailbox.ts answer/reply/complete).
+/// `tapped`: a button or a closing action, not words he typed (no bubble of his own).
+(String, bool) answerText(String body) {
+  for (final re in _answerEnvelopes) {
+    final m = re.firstMatch(body);
+    if (m != null) return (m.group(1)!.trim(), false);
+  }
+  // Declined ("לא עכשיו" → dismiss) or done without a note: the card's line says so.
+  if (body.startsWith('רן דחה: ')) return ('לא עכשיו', true);
+  if (body.startsWith('רן סיים: ')) return ('סיימתי', true);
+  return (body, false);
+}
+
+final _answerEnvelopes = [
+  RegExp(r'^תשובה לשאלה \S+: ([\s\S]*)$'),
+  RegExp(r'^תשובה של רן (?:לבקשת ה-GO|על) "[\s\S]*?": ([\s\S]*)$'),
+  RegExp(r'^רן סיים: [^\n]*\n([\s\S]*)$'),
+];
+
+/// His answer to a card: the card closes with it ("ענית: X"). Words he typed are also his message, a reply
+/// to the card (as when he sent them); a button's answer is the card's line only, as when he tapped it.
+ChatItem? answerItem(Map<String, dynamic> m, AskCard card, String author, List<ChatItem> existing) {
+  final (text, closed) = answerText(m['body'] as String);
+  card.state = AskState.answered;
+  card.answer = text;
+  final tapped = closed || text == 'GO' || text == 'סיימתי' || card.options.any((o) => o.label == text);
+  // Sent from this device: its own bubble is already here.
+  final mine = existing.whereType<UserMsg>().any((u) => u.replyTo?.askId != null && u.replyTo!.askId == card.askId);
+  if (tapped || mine) return null;
+  return UserMsg(
+    id: m['id'] as String,
+    ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int),
+    text: text,
+    delivery: mapDelivery(m['state'] as String?),
+    replyTo: Quote(author: author, text: (card.headline ?? card.question).split('\n').first, itemId: card.id, askId: card.askId, go: card is GoCard),
+    attachments: attachmentsOf(m),
+  );
 }

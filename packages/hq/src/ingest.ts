@@ -95,13 +95,14 @@ export class Ingest {
         return { ok: true, id: e.id, ref: m.id };
       }
       case 'ask': {
-        const ask = mailbox.ask({ msg_id: e.id, from: e.identity, question: need('question'), options: strList(a.options), blocking: a.blocking === true });
+        const ask = mailbox.ask({ msg_id: e.id, from: e.identity, question: need('question'), headline: s(a.headline),
+          options: strList(a.options), blocking: a.blocking === true });
         return { ok: true, id: e.id, ref: ask.id };
       }
       case 'request_go': {
         const what = need('what');
         const item = inbox.add({ kind: 'go', from_identity: e.identity, title: `GO: ${what}`.slice(0, 200), blocking: true,
-          urgency: a.risk === 'high' ? 'urgent' : 'normal', ref: e.id, dedupe_key: `op:${e.id}`,
+          urgency: a.risk === 'high' ? 'urgent' : 'normal', ref: e.id, dedupe_key: `op:${e.id}`, headline: s(a.headline)?.trim() || null,
           body: [what, s(a.pr) ? `PR: ${String(a.pr)}` : '', s(a.risk) ? `סיכון: ${String(a.risk)}` : ''].filter(Boolean).join('\n') });
         return { ok: true, id: e.id, ref: `inbox-${item.id}` };
       }

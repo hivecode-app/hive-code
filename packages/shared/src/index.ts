@@ -44,6 +44,8 @@ export interface InboxItemDTO {
   ref: string | null;          // ask id / message id / probe id
   /** Where "פתיחה" goes when it is not the app itself: the one-time tab handoff link (B.9). */
   link: string | null;
+  /** First line of an ask or GO, in his words: what changes for him. The body is the details. */
+  headline: string | null;
   state: 'open' | 'resolved' | 'dismissed';
   created_at: number;          // epoch ms
   pushed_at: number | null;
@@ -54,6 +56,8 @@ export interface AskDTO {
   id: string;                  // ask-<n> or caller-supplied msg_id
   from_identity: IdentityId;
   question: string;
+  /** First line in his words; the question is the details under it. Null on asks from before it existed. */
+  headline: string | null;
   options: string[];
   blocking: boolean;
   urgency: Urgency;
@@ -79,6 +83,7 @@ export interface AskRequest {
   msg_id?: string;
   from: IdentityId;
   question: string;
+  headline?: string;
   options?: string[];
   blocking?: boolean;
   urgency?: Urgency;

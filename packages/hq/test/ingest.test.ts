@@ -48,12 +48,14 @@ test('ingest socket: 0600, ops are idempotent on id, tell/ask/request_go land wh
     assert.deepEqual(again.json, t.json, 'replay → same ack');
     assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM messages WHERE id = 'eli-1:01'`).get() as { n: number }).n, 1);
 
-    const a = await post(sock, '/v1/ops', entry('ask', { question: 'לשלם?', blocking: true, options: ['כן', 'לא'] }, 'eli-1:02'));
+    const a = await post(sock, '/v1/ops', entry('ask', { headline: 'חשבון החשמל', question: 'לשלם?', blocking: true, options: ['כן', 'לא'] }, 'eli-1:02'));
     assert.equal(hq.mailbox.getAsk(a.json.ref)!.blocking, true);
-    assert.ok(hq.inbox.open().some((i) => i.kind === 'ask' && i.ref === 'eli-1:02'));
+    assert.equal(hq.mailbox.getAsk(a.json.ref)!.headline, 'חשבון החשמל');
+    assert.equal(hq.inbox.open().find((i) => i.kind === 'ask' && i.ref === 'eli-1:02')?.headline, 'חשבון החשמל');
 
-    await post(sock, '/v1/ops', entry('request_go', { what: 'פריסה לפרודקשן', pr: '#12', risk: 'high' }, 'ac-ceo-1:01', 'ac-ceo'));
+    await post(sock, '/v1/ops', entry('request_go', { headline: 'עדכון לאפליקציה', what: 'פריסה לפרודקשן', pr: '#12', risk: 'high' }, 'ac-ceo-1:01', 'ac-ceo'));
     const go = hq.inbox.open().find((i) => i.kind === 'go')!;
+    assert.equal(go.headline, 'עדכון לאפליקציה');
     assert.equal(go.urgency, 'urgent');
     assert.match(go.body, /PR: #12/);
     await until(() => env.telegrams.some((x) => /GO: פריסה לפרודקשן/.test(x)), 2000, 'GO pushed (telegram fallback)');

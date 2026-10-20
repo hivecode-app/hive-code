@@ -21,6 +21,9 @@ class ChatScreen extends StatefulWidget {
   /// A quote (or just "focus the composer") handed over by home/notifications before opening.
   static final Map<String, Quote?> pendingQuote = {};
 
+  /// The question or GO to show when the conversation opens ("מחכה לך" leads to its message): an askId.
+  static final Map<String, String> pendingTarget = {};
+
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
@@ -74,6 +77,36 @@ class _ChatScreenState extends State<ChatScreen> {
       quote = ChatScreen.pendingQuote.remove(widget.identityId);
       WidgetsBinding.instance.addPostFrameCallback((_) => focus.requestFocus());
     }
+    final target = ChatScreen.pendingTarget.remove(widget.identityId);
+    if (target != null) {
+      _target = target;
+      _targetTries = 0;
+    }
+  }
+
+  /// The card to bring into view (an askId), until it is on screen.
+  String? _target;
+  int _targetTries = 0;
+  final targetKey = GlobalKey();
+
+  /// The list is lazy: a card far up is not built yet. Scroll up a screen at a time until it is, then
+  /// bring it into view (a few tries; the history may still be loading).
+  void _seekTarget() {
+    if (!mounted || _target == null) return;
+    final c = targetKey.currentContext;
+    if (c != null) {
+      _target = null;
+      Scrollable.ensureVisible(c, duration: const Duration(milliseconds: 250), alignment: 0.2);
+      return;
+    }
+    if (++_targetTries > 40) {
+      _target = null;
+      return;
+    }
+    if (scroll.hasClients && scroll.position.maxScrollExtent > scroll.offset) {
+      scroll.jumpTo((scroll.offset + scroll.position.viewportDimension * 0.8).clamp(0, scroll.position.maxScrollExtent));
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _seekTarget());
   }
 
   @override
@@ -146,7 +179,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // Quoting an open question answers it (#55).
     final askId = it is AskCard && it.state == AskState.open ? it.askId : null;
     setState(() {
-      quote = Quote(author: author, text: text.split('\n').first, itemId: it.id, askId: askId);
+      quote = Quote(author: author, text: (it is AskCard ? it.headline ?? text : text).split('\n').first, itemId: it.id, askId: askId, go: it is GoCard);
       selected = null;
     });
     focus.requestFocus();
@@ -169,6 +202,15 @@ class _ChatScreenState extends State<ChatScreen> {
     final who = d.who(widget.identityId);
     final presence = d.presence[widget.identityId] ?? const Presence(status: WorkerStatus.free);
     final openAsk = chat.items.whereType<AskCard>().where((a) => a.state == AskState.open && (a.blocking || a is GoCard)).lastOrNull;
+    // While a question or GO is open here, what he writes is the answer to it (the latest one), shown
+    // as a reply to it above the composer.
+    final answering = chat.items.whereType<AskCard>().where((a) => a.state == AskState.open && a.askId != null).lastOrNull;
+    final autoQuote = answering == null
+        ? null
+        : Quote(author: d.who(answering.from).name, text: (answering.headline ?? answering.question).split('\n').first, itemId: answering.id, askId: answering.askId, go: answering is GoCard);
+    if (_target != null && chat.items.any((i) => i is AskCard && i.askId == _target)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _seekTarget());
+    }
 
     // Search: local over loaded items (hq FTS replaces this when it ships, chat.md §6).
     final hits = query.isEmpty ? <String>[] : [for (final it in chat.items) if (_textOf(it).contains(query)) it.id];
@@ -179,7 +221,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // Rows are built lazily: only what is on screen. With thousands of items, building every row
     // on each store change (every streaming token) was the main cost of a frame.
     final rows = _entries(chat);
-    _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, openAsk, openAllTools]);
+    _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, openAsk, openAllTools, _target]);
     final selectedItem = selected == null ? null : chat.items.where((i) => i.id == selected).firstOrNull;
 
     final header = selectedItem != null
@@ -277,8 +319,9 @@ class _ChatScreenState extends State<ChatScreen> {
         identityId: widget.identityId,
         controller: controller,
         focus: focus,
-        quote: quote,
-        onClearQuote: () => setState(() => quote = null),
+        quote: quote ?? autoQuote,
+        // The answer strip of an open question stays: it is what his text is about to do.
+        onClearQuote: quote == null ? null : () => setState(() => quote = null),
         onSent: () {
           seenCount = chat.items.length;
           if (scroll.hasClients) _toBottom();
@@ -418,11 +461,11 @@ class _ChatScreenState extends State<ChatScreen> {
       TerminalCard() => TerminalCardView(card: it),
       PrCard() => PrCardView(card: it),
       AskCard() => KeyedSubtree(
-          key: identical(it, openAsk) ? askKey : null,
+          key: _target != null && it.askId == _target ? targetKey : (identical(it, openAsk) ? askKey : null),
           child: AskCardView(
             card: it,
             onOther: () {
-              setState(() => quote = Quote(author: d.who(it.from).name, text: it.question, itemId: it.id, askId: it.askId));
+              setState(() => quote = Quote(author: d.who(it.from).name, text: (it.headline ?? it.question).split('\n').first, itemId: it.id, askId: it.askId, go: it is GoCard));
               focus.requestFocus();
             },
           ),

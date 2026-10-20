@@ -296,7 +296,7 @@ class QuoteStrip extends StatelessWidget {
       child: Row(children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(quote.askId != null ? 'תשובה לשאלה של ${quote.author}' : quote.author, style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, fontWeight: FontWeight.w700, color: p.text)),
+            Text(quote.askId == null ? quote.author : (quote.go ? 'תשובה לבקשת GO של ${quote.author}' : 'תשובה לשאלה של ${quote.author}'), style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, fontWeight: FontWeight.w700, color: p.text)),
             Rich(quote.text, maxLines: 2, auto: true, style: TextStyle(fontFamily: kFont, fontSize: 13, height: 1.4, color: p.text2)),
           ]),
         ),
@@ -862,104 +862,184 @@ class PrCardView extends StatelessWidget {
   }
 }
 
-/// Ask and GO cards (chat.md §2.8): the same object as on home and in the notification.
-class AskCardView extends StatelessWidget {
+/// Ask and GO (chat.md §2.8): a message from whoever asked, in their conversation, with the answers as
+/// buttons right under it (Telegram's inline keyboard). The first line is the headline in his words;
+/// the technical details fold under it. The same object as on home and in the notification.
+class AskCardView extends StatefulWidget {
   const AskCardView({super.key, required this.card, required this.onOther});
   final AskCard card;
   final VoidCallback onOther;
 
   @override
+  State<AskCardView> createState() => _AskCardViewState();
+}
+
+class _AskCardViewState extends State<AskCardView> {
+  bool details = false;
+
+  @override
   Widget build(BuildContext context) {
+    final card = widget.card;
     final store = StoreScope.of(context);
     final p = context.p;
     final from = store.nameOf(card.from);
-    final go = card is GoCard ? card as GoCard : null;
+    final go = card is GoCard;
     final pending = store.pending('card:${card.id}');
     final answered = card.state == AskState.answered || card.state == AskState.decidedByManager;
+    final desktop = MediaQuery.sizeOf(context).width >= 800;
 
-    final kicker = Padding(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 2),
-      child: Text.rich(
-          TextSpan(children: [
-            WidgetSpan(
-              alignment: PlaceholderAlignment.middle,
-              child: Padding(padding: const EdgeInsetsDirectional.only(end: 4), child: Ic('front_hand', size: 16, fill: true, color: p.text)),
-            ),
-            TextSpan(text: go != null ? 'בקשת GO לפרודקשן' : 'שאלה מ$from', style: TextStyle(fontWeight: FontWeight.w700, color: p.text)),
-            TextSpan(
-                text: go != null
-                    ? ' · ${go.target}'
-                    : ' · ${card.blocking ? 'חוסמת את העבודה' : 'יכולה לחכות · $from ממשיך במשהו אחר'}${card.escalation != null ? ' · ${card.escalation!.replaceAll(' ', '\u00A0')}' : ''}'),
-          ]),
-          style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.5, color: p.text2),
+    final kicker = Text.rich(
+      TextSpan(children: [
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(padding: const EdgeInsetsDirectional.only(end: 4), child: Ic('front_hand', size: 16, fill: true, color: p.text2)),
         ),
+        TextSpan(text: go ? 'בקשת ${ltr('GO')}' : (card.blocking ? 'שאלה · חוסמת את העבודה' : 'שאלה · יכולה לחכות')),
+        if (!go && card.escalation != null) TextSpan(text: ' · ${card.escalation!.replaceAll(' ', '\u00A0')}'),
+      ]),
+      style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.5, color: p.text2),
     );
 
-    Widget body;
-    if (go != null) {
-      Widget kv(String k, String v) => Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 1),
-            child: Text.rich(
-              TextSpan(children: [TextSpan(text: '$k ', style: const TextStyle(fontWeight: FontWeight.w700)), ...Rich.spans(context, v, T.body)]),
-              style: TextStyle(fontFamily: kFont, fontSize: 14, height: 1.55, color: p.text),
+    final headline = card.headline;
+    final bubble = Bubble(
+      out: false,
+      wide: true,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        kicker,
+        const SizedBox(height: 2),
+        if (headline != null) ...[
+          Rich(headline, style: TextStyle(fontFamily: kFont, fontSize: 15.5, height: 1.45, fontWeight: FontWeight.w700, color: p.text)),
+          // The technical part folds under the headline, like a long message (chat.md §2.3).
+          Semantics(
+            button: true,
+            child: InkWell(
+              onTap: () => setState(() => details = !details),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(details ? 'הסתרת הפרטים' : 'פרטים', style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+                  AnimatedRotation(turns: details ? 0.5 : 0, duration: _fold, child: Ic('expand_more', size: 18, color: p.accent)),
+                ]),
+              ),
             ),
-          );
-      body = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [kv('מה נכנס:', go.includes), kv('סיכון:', go.risk), kv('חזרה:', go.rollback)]);
-    } else {
-      body = Padding(padding: const EdgeInsets.fromLTRB(14, 2, 14, 4), child: Rich(card.question, style: T.body.copyWith(color: p.text)));
-    }
+          ),
+          AnimatedSize(
+            duration: _fold,
+            alignment: Alignment.topCenter,
+            child: details ? Padding(padding: const EdgeInsets.only(bottom: 4), child: Markdown(card.question)) : const SizedBox(width: double.infinity),
+          ),
+        ] else
+          Markdown(card.question),
+        if (answered) ...[
+          const SizedBox(height: 4),
+          DoneLine(_doneLine(card, from, go), top: 2),
+        ],
+        Align(alignment: AlignmentDirectional.centerEnd, child: Meta(time: hm(card.ts))),
+      ]),
+    );
 
-    Widget tail;
+    Widget? keyboard;
     if (answered) {
-      final line = card.state == AskState.decidedByManager ? 'יואב החליט במקומך: ${card.answer}' : (go != null ? 'GO נשלח · $from מתחילה פריסה' : (card.answer == null ? 'השאלה נסגרה' : 'ענית: ${card.answer} · $from ממשיך'));
-      tail = Padding(padding: const EdgeInsets.fromLTRB(14, 0, 14, 12), child: DoneLine(line));
+      keyboard = null;
     } else if (pending != null) {
-      tail = Padding(padding: const EdgeInsets.fromLTRB(14, 0, 14, 12), child: UndoLine(label: pending.label, onCancel: () => store.cancelUndo('card:${card.id}'), top: 4));
-    } else if (go != null) {
-      tail = Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-        child: Row(children: [
-          Expanded(child: Btn('GO', kind: BtnKind.primary, onTap: () => store.answerCard(card, card.options.first))),
-          const SizedBox(width: 6),
-          Expanded(child: Btn('לא עכשיו', onTap: () {
+      keyboard = Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+        child: UndoLine(label: pending.label, onCancel: () => store.cancelUndo('card:${card.id}'), top: 2),
+      );
+    } else {
+      final opts = card.options.where((o) => o.id != 'q' && o.id != 'not_now').toList();
+      final rows = <List<Widget>>[];
+      if (go) {
+        rows.add([
+          _KeyButton('GO', primary: true, onTap: () => store.answerCard(card, card.options.first)),
+          _KeyButton('לא עכשיו', onTap: () {
             final w = store.data?.waiting.where((w) => w.askId == card.askId).firstOrNull;
             if (w != null) store.notNow(w);
-          })),
-          const SizedBox(width: 6),
-          Expanded(child: Btn('שאלה', onTap: onOther)),
-        ]),
-      );
-    } else {
-      final opts = card.options.where((o) => o.id != 'q').toList();
-      // Desktop: one row with 1-3 key hints (APP-SPEC §8.2); phone: full-width buttons with full text.
-      if (MediaQuery.sizeOf(context).width >= 800) {
-        tail = Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-          child: Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final (i, o) in opts.indexed)
-              Btn(o.label, kind: BtnKind.tonal, leading: Kbd('${i + 1}'), onTap: () => store.answerCard(card, o)),
-            Btn('תשובה אחרת', leading: Kbd('${opts.length + 1}'), onTap: onOther),
-          ]),
-        );
+          }),
+        ]);
       } else {
-      tail = Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          for (final (i, o) in opts.indexed) ...[
-            if (i > 0) const SizedBox(height: 6),
-            Btn(o.label, wide: !o.primary, kind: o.primary ? BtnKind.primary : BtnKind.tonal, onTap: () => store.answerCard(card, o)),
-          ],
-          const SizedBox(height: 6),
-          Btn('תשובה אחרת', wide: true, onTap: onOther),
-        ]),
-      );
+        for (final (i, o) in opts.indexed) {
+          rows.add([_KeyButton(o.label, primary: o.primary, hint: desktop ? '${i + 1}' : null, onTap: () => store.answerCard(card, o))]);
+        }
       }
+      rows.add([_KeyButton('תשובה אחרת', hint: desktop && !go ? '${opts.length + 1}' : null, onTap: widget.onOther)]);
+      keyboard = LayoutBuilder(builder: (context, c) {
+        return Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Container(
+            width: c.maxWidth * 0.92,
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              for (final r in rows)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(children: [
+                    for (final (i, b) in r.indexed) ...[if (i > 0) const SizedBox(width: 4), Expanded(child: b)],
+                  ]),
+                ),
+            ]),
+          ),
+        );
+      });
     }
 
     return Semantics(
       container: true,
-      label: go != null ? 'בקשת GO מ$from' : 'שאלה מ$from',
-      child: ChatCard(edge: !answered, children: [kicker, body, AnimatedSize(duration: _fold, alignment: Alignment.topCenter, child: tail)]),
+      label: go ? 'בקשת GO מ$from' : 'שאלה מ$from',
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        bubble,
+        AnimatedSize(duration: _fold, alignment: Alignment.topCenter, child: keyboard ?? const SizedBox(width: double.infinity)),
+      ]),
+    );
+  }
+
+  static String _doneLine(AskCard card, String from, bool go) {
+    if (card.state == AskState.decidedByManager) return 'יואב החליט במקומך: ${card.answer}';
+    final a = card.answer;
+    if (a == null) return go ? 'הבקשה נסגרה' : 'השאלה נסגרה';
+    if (go && a == 'GO') return '${ltr('GO')} נשלח ל$from';
+    return 'ענית: $a';
+  }
+}
+
+/// One button of the inline keyboard under a question (Telegram): a quiet chip in the bubble's colour,
+/// the full answer in it. GO is the one primary action, in the brand colour (design-taste §1.2).
+class _KeyButton extends StatelessWidget {
+  const _KeyButton(this.label, {required this.onTap, this.primary = false, this.hint});
+  final String label;
+  final VoidCallback onTap;
+  final bool primary;
+  final String? hint;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Semantics(
+      button: true,
+      child: DecoratedBox(
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), boxShadow: primary ? null : p.hairShadow),
+        child: Material(
+          color: primary ? p.accent : p.bubbleIn,
+          borderRadius: BorderRadius.circular(8),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 40),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              alignment: Alignment.center,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (hint != null) ...[Kbd(hint!), const SizedBox(width: 6)],
+                Flexible(
+                  child: Rich(label,
+                      align: TextAlign.center,
+                      style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.35, fontWeight: FontWeight.w700, color: primary ? p.onAccent : p.accent)),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

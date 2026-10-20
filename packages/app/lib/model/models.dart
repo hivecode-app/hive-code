@@ -115,8 +115,17 @@ class WaitItem {
     this.state = WaitState.open,
     this.answerLine,
     this.createdAt,
+    this.headline,
+    this.ref,
     String? short,
   }) : short = short ?? kicker;
+
+  /// The first line in his words ("עדכון לאפליקציה: תמונות בצ'אט"); [body] is the details under it.
+  /// Null on items from before workers gave one: the body is all there is.
+  final String? headline;
+
+  /// hq's ref of the inbox item (the ask id, or the request_go op id): his answer message carries it.
+  final String? ref;
 
   /// When it was raised (hq's created_at): where its card sits in the conversation.
   final DateTime? createdAt;
@@ -137,6 +146,7 @@ class WaitItem {
   final String body;
 
   /// One-tap answers (asks, GO). GO uses a primary option with id `go`.
+  /// A GO's [askId] is `inbox:<id>`: it has no ask behind it, and is answered through the inbox item.
   final List<AskOption> options;
   final String? askId;
   final int? inboxId;
@@ -235,7 +245,10 @@ class UserMsg extends ChatItem {
 }
 
 class Quote {
-  const Quote({required this.author, required this.text, this.itemId, this.askId});
+  const Quote({required this.author, required this.text, this.itemId, this.askId, this.go = false});
+
+  /// Answering a GO request (its askId is `inbox:<id>`).
+  final bool go;
   final String author;
   final String text;
   final String? itemId;
@@ -402,14 +415,22 @@ class AskCard extends ChatItem {
     required this.from,
     required this.question,
     required this.options,
+    this.headline,
     this.blocking = true,
     this.escalation,
     this.state = AskState.open,
     this.answer,
     this.askId,
+    String? ref,
     super.seq,
-  });
+  }) : ref = ref ?? askId;
   final String from;
+
+  /// What his answer message points at (ref): the ask id, or the request_go op id of a GO.
+  final String? ref;
+
+  /// The first line, in his words. The [question] folds under it as the details. Null: the question is all.
+  final String? headline;
   final String question;
   final List<AskOption> options;
   final bool blocking;
@@ -426,24 +447,17 @@ class GoCard extends AskCard {
     required super.id,
     required super.ts,
     required super.from,
-    required this.target,
-    required this.includes,
-    required this.risk,
-    required this.rollback,
+    super.headline,
+    required String details,
     super.state,
+    super.answer,
     super.askId,
+    super.ref,
     super.seq,
-  }) : super(question: target, options: const [
+  }) : super(question: details, options: const [
           AskOption(id: 'go', label: 'GO', primary: true),
           AskOption(id: 'not_now', label: 'לא עכשיו'),
-          AskOption(id: 'question', label: 'שאלה'),
         ]);
-
-  /// "לומו 1.1.20".
-  final String target;
-  final String includes;
-  final String risk;
-  final String rollback;
 }
 
 enum PermissionState { open, allowed, denied, allowedForTask }

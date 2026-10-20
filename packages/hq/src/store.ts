@@ -342,6 +342,11 @@ const MIGRATIONS: string[] = [
   );
   ALTER TABLE messages ADD COLUMN attachments TEXT;                   -- JSON [{id,name,mime,bytes}], NULL = none
   `,
+  // v9: the first line of a question or GO in his words ("עדכון לאפליקציה: תמונות בצ'אט"); the details fold under it.
+  `
+  ALTER TABLE asks ADD COLUMN headline TEXT;
+  ALTER TABLE inbox ADD COLUMN headline TEXT;
+  `,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [

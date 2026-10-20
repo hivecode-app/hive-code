@@ -12,11 +12,12 @@ export interface NewInboxItem {
   blocking?: boolean;
   ref?: string | null;
   link?: string | null;
+  headline?: string | null;
   dedupe_key?: string | null;
 }
 
 interface InboxRow { id: number; kind: InboxKind; title: string; body: string; from_identity: string | null; urgency: Urgency;
-  blocking: number; ref: string | null; link: string | null; state: InboxItemDTO['state']; created_at: number; pushed_at: number | null; acked_at: number | null;
+  blocking: number; ref: string | null; link: string | null; headline: string | null; state: InboxItemDTO['state']; created_at: number; pushed_at: number | null; acked_at: number | null;
   telegram_at: number | null; push_error: string | null }
 
 export const URGENCY_RANK: Record<Urgency, number> = { urgent: 0, normal: 1, low: 2 };
@@ -47,9 +48,9 @@ export class Inbox {
       const ex = this.store.db.prepare('SELECT * FROM inbox WHERE dedupe_key = ?').get(n.dedupe_key) as InboxRow | undefined;
       if (ex) return toDTO(ex);
     }
-    const r = this.store.db.prepare(`INSERT INTO inbox (kind, title, body, from_identity, urgency, blocking, ref, link, dedupe_key, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(n.kind, n.title, n.body ?? '', n.from_identity ?? null, n.urgency ?? 'normal',
-      n.blocking ? 1 : 0, n.ref ?? null, n.link ?? null, n.dedupe_key ?? null, now);
+    const r = this.store.db.prepare(`INSERT INTO inbox (kind, title, body, from_identity, urgency, blocking, ref, link, headline, dedupe_key, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(n.kind, n.title, n.body ?? '', n.from_identity ?? null, n.urgency ?? 'normal',
+      n.blocking ? 1 : 0, n.ref ?? null, n.link ?? null, n.headline ?? null, n.dedupe_key ?? null, now);
     const item = this.get(Number(r.lastInsertRowid))!;
     this.store.emit('inbox.new', item.from_identity, item);
     this.notify(item);
@@ -109,6 +110,6 @@ export class Inbox {
 function toDTO(r: InboxRow): InboxItemDTO {
   return {
     id: r.id, kind: r.kind, title: r.title, body: r.body, from_identity: r.from_identity, urgency: r.urgency,
-    blocking: r.blocking === 1, ref: r.ref, link: r.link ?? null, state: r.state, created_at: r.created_at, pushed_at: r.pushed_at, acked_at: r.acked_at,
+    blocking: r.blocking === 1, ref: r.ref, link: r.link ?? null, headline: r.headline ?? null, state: r.state, created_at: r.created_at, pushed_at: r.pushed_at, acked_at: r.acked_at,
   };
 }

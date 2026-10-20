@@ -100,6 +100,12 @@ test('handshake, tools/list, write tools queue to WAL while hq is down', async (
 
     const missing = await c.call('tools/call', { name: 'ask', arguments: {} });
     assert.equal(missing.result.isError, true);
+    // The first line in his words is required on everything he answers (ask, request_go).
+    const noHeadline = await c.call('tools/call', { name: 'request_go', arguments: { what: 'פריסה של hq' } });
+    assert.equal(noHeadline.result.isError, true);
+    assert.match(noHeadline.result.content[0].text, /headline/);
+    const enHeadline = await c.call('tools/call', { name: 'ask', arguments: { headline: 'Deploy the bots', question: 'להעביר?' } });
+    assert.equal(enHeadline.result.isError, true);
 
     const unknownTool = await c.call('tools/call', { name: 'nope', arguments: {} });
     assert.equal(unknownTool.error?.code, -32602);

@@ -156,3 +156,31 @@ test('a failed Telegram fallback is retried (up to 5), and stays visible', async
     assert.equal(sent.length, 1);
   } finally { await env.cleanup(); }
 });
+
+test('a written answer on an open item: a question is answered with it, a GO closes with his words', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    hq.mailbox.ask({ msg_id: 'ask-w', from: 'eli', headline: 'הבוטים', question: 'להעביר גם את הבוטים?', options: ['כן', 'לא'], blocking: true });
+    const askItem = hq.inbox.open().find((i) => i.ref === 'ask-w')!;
+    assert.equal(askItem.headline, 'הבוטים');
+    const r1 = hq.mailbox.reply(askItem.id, 'לא, בלי הבוטים');
+    assert.equal(hq.mailbox.getAsk('ask-w')!.answer, 'לא, בלי הבוטים');
+    assert.equal(r1.item!.state, 'resolved');
+    assert.match(r1.message!.body, /לא, בלי הבוטים/);
+
+    const go = hq.inbox.add({ kind: 'go', from_identity: 'eli', title: 'GO: פריסה', headline: 'עדכון לאפליקציה: תמונות בצ\'אט', body: 'פריסה', blocking: true, ref: 'op-1' });
+    const r2 = hq.mailbox.reply(go.id, 'רק אחרי 18:00');
+    assert.equal(hq.inbox.get(go.id)!.state, 'resolved');
+    const m = r2.message!;
+    assert.equal(m.to_identity, 'eli');
+    assert.equal(m.priority, 'now');
+    assert.equal(m.ref, 'op-1');
+    assert.match(m.body, /עדכון לאפליקציה: תמונות בצ'אט/);
+    assert.match(m.body, /רק אחרי 18:00/);
+    assert.doesNotMatch(m.body, /סיים/);
+    assert.throws(() => hq.mailbox.reply(go.id, 'שוב'), /already handled/, 'closed elsewhere: his words reach no one, so it fails');
+    assert.throws(() => hq.mailbox.reply(askItem.id, 'שוב'), /already handled/);
+    assert.throws(() => hq.mailbox.reply(9999, 'x'), /no inbox item/);
+  } finally { await env.cleanup(); }
+});

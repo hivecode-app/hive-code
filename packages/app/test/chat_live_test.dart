@@ -14,6 +14,8 @@ class _Hq {
   Duration messagesDelay = Duration.zero;
   List<Map<String, dynamic>> inbox = [];
   List<Map<String, dynamic>> asks = [];
+  List<Map<String, dynamic>> events = [];
+  List<Map<String, dynamic>> messages = [];
   final requests = <String>[];
 
   Future<void> start() async {
@@ -40,9 +42,12 @@ class _Hq {
           await Future<void>.delayed(messagesDelay);
           body = {
             'messages': [
+              ...messages,
               {'id': 'old', 'from_identity': 'yoav', 'to_identity': 'owner', 'kind': 'text', 'body': 'ישנה', 'created_at': 1000, 'state': 'handled'},
             ],
           };
+        case '/api/events':
+          body = {'events': events};
         default:
           body = {'events': [], 'ok': true};
       }
@@ -157,4 +162,79 @@ void main() {
     expect(furtherDelivery(Delivery.handled, Delivery.queued), Delivery.handled);
     expect(furtherDelivery(Delivery.failed, Delivery.delivered), Delivery.delivered);
   });
+
+  test('a GO is a card in the conversation, headline first, and words typed on it go to its inbox item', () async {
+    final (b, hq) = await up();
+    b.showConversation('yoav');
+    await b.openConversation('yoav');
+    hq.inbox = [
+      {'id': 2, 'kind': 'go', 'state': 'open', 'blocking': true, 'from_identity': 'yoav', 'title': 'GO: פריסת hq', 'headline': "עדכון לאפליקציה: תמונות בצ'אט",
+        'body': 'פריסת hq עם #65\nסיכון: low', 'ref': 'yoav-1:07', 'created_at': 3000},
+    ];
+    hq.send({'seq': 101, 'type': 'inbox.new', 'data': {}});
+    await until(() => b.data!.chats['yoav']!.items.whereType<GoCard>().isNotEmpty);
+    final go = b.data!.chats['yoav']!.items.whereType<GoCard>().single;
+    expect(go.headline, "עדכון לאפליקציה: תמונות בצ'אט");
+    expect(go.question, contains('#65'));
+    expect(go.askId, 'inbox:2');
+    expect(b.data!.waiting.single.headline, "עדכון לאפליקציה: תמונות בצ'אט");
+    final r = await b.freeAnswer('inbox:2', 'לא, בלי הבוטים');
+    expect(r.ok, isTrue);
+    expect(hq.requests, contains('/api/inbox/2/answer'));
+  }, timeout: const Timeout(Duration(seconds: 20)));
+
+  test('answered questions stay in the history, closed with his words; a typed answer is his reply to it', () async {
+    final (b, hq) = await up();
+    hq.events = [
+      {'seq': 5, 'ts': 2000, 'type': 'inbox.new', 'identity': 'yoav',
+        'data': {'id': 3, 'kind': 'ask', 'from_identity': 'yoav', 'title': 'יואב שואל/ת', 'headline': 'הבוטים של לומו', 'body': 'להעביר גם את הבוטים?', 'blocking': true, 'ref': 'a9', 'created_at': 2000}},
+      {'seq': 6, 'ts': 2000, 'type': 'ask.new', 'identity': 'yoav', 'data': {'id': 'a9', 'options': ['כן', 'לא']}},
+      {'seq': 7, 'ts': 2100, 'type': 'inbox.new', 'identity': 'yoav',
+        'data': {'id': 4, 'kind': 'go', 'from_identity': 'yoav', 'title': 'GO: x', 'headline': 'עדכון', 'body': 'x', 'blocking': true, 'ref': 'op-4', 'created_at': 2100}},
+    ];
+    hq.messages = [
+      {'id': 'inbox-4-done', 'from_identity': 'owner', 'to_identity': 'yoav', 'kind': 'answer', 'ref': 'op-4', 'body': 'רן סיים: GO: x\nGO', 'created_at': 2300, 'state': 'handled'},
+      {'id': 'a9-answer', 'from_identity': 'owner', 'to_identity': 'yoav', 'kind': 'answer', 'ref': 'a9', 'body': 'תשובה לשאלה a9: לא, בלי הבוטים', 'created_at': 2200, 'state': 'handled'},
+    ];
+    b.showConversation('yoav');
+    await b.openConversation('yoav');
+    final items = b.data!.chats['yoav']!.items;
+    final ask = items.whereType<AskCard>().firstWhere((c) => c is! GoCard);
+    expect(ask.headline, 'הבוטים של לומו');
+    expect([for (final o in ask.options) o.label], ['כן', 'לא']);
+    expect(ask.state, AskState.answered);
+    expect(ask.answer, 'לא, בלי הבוטים');
+    final reply = items.whereType<UserMsg>().single;
+    expect(reply.text, 'לא, בלי הבוטים', reason: 'without the envelope hq adds for the worker');
+    expect(reply.replyTo?.askId, 'a9');
+    final go = items.whereType<GoCard>().single;
+    expect(go.state, AskState.answered);
+    expect(go.answer, 'GO', reason: 'a tapped GO is the card line only, no bubble');
+  }, timeout: const Timeout(Duration(seconds: 20)));
+
+  test('reopening keeps one bubble for an answer typed here; a declined GO is the card line only', () async {
+    final (b, hq) = await up();
+    hq.events = [
+      {'seq': 5, 'ts': 2000, 'type': 'inbox.new', 'identity': 'yoav',
+        'data': {'id': 3, 'kind': 'ask', 'from_identity': 'yoav', 'title': 'q', 'headline': 'הבוטים', 'body': 'להעביר?', 'blocking': true, 'ref': 'a9', 'created_at': 2000}},
+      {'seq': 7, 'ts': 2100, 'type': 'inbox.new', 'identity': 'yoav',
+        'data': {'id': 4, 'kind': 'go', 'from_identity': 'yoav', 'title': 'GO: x', 'headline': 'עדכון', 'body': 'x', 'blocking': true, 'ref': 'op-4', 'created_at': 2100}},
+    ];
+    hq.messages = [
+      {'id': 'inbox-4-declined', 'from_identity': 'owner', 'to_identity': 'yoav', 'kind': 'answer', 'ref': 'op-4', 'body': 'רן דחה: GO: x', 'created_at': 2300, 'state': 'handled'},
+      {'id': 'a9-answer', 'from_identity': 'owner', 'to_identity': 'yoav', 'kind': 'answer', 'ref': 'a9', 'body': 'תשובה לשאלה a9: לא, בלי הבוטים', 'created_at': 2200, 'state': 'handled'},
+    ];
+    b.showConversation('yoav');
+    await b.openConversation('yoav');
+    // As if typed on this device: the local bubble, a reply to the question.
+    final chat = b.data!.chats['yoav']!;
+    chat.items.removeWhere((i) => i is UserMsg);
+    chat.items.add(UserMsg(id: 'm-local', ts: DateTime.fromMillisecondsSinceEpoch(2200), text: 'לא, בלי הבוטים', delivery: Delivery.delivered,
+        replyTo: const Quote(author: 'יואב', text: 'הבוטים', askId: 'a9')));
+    await b.openConversation('yoav');
+    final items = b.data!.chats['yoav']!.items;
+    expect(items.whereType<UserMsg>().map((m) => m.id), ['m-local'], reason: 'not shown twice after reopening');
+    final go = items.whereType<GoCard>().single;
+    expect(go.answer, 'לא עכשיו');
+  }, timeout: const Timeout(Duration(seconds: 20)));
 }
