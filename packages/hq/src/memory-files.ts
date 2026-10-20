@@ -80,7 +80,12 @@ export class MemoryFiles {
     return r ? r.key.slice(0, -(AUTOMATION.length + 1)) : null;
   }
 
-  enabled(): boolean { const o = this.owner(); return !!o && this.hq.store.toggle(`${o}/${AUTOMATION}`); }
+  /** On, and the company has a memory/ to write to: without COMPANY_HOME repoDir is the engine, which carries none since
+   *  the split, and nothing goes there. Updates wait in the queue, as with the switch off. */
+  enabled(): boolean {
+    const o = this.owner();
+    return !!o && this.hq.store.toggle(`${o}/${AUTOMATION}`) && existsSync(join(this.repoDir, 'memory'));
+  }
 
   pending(): Pending[] {
     const rows = this.db.prepare(`SELECT o.id, o.identity, o.args, o.received_at FROM ops o

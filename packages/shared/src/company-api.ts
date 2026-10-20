@@ -102,7 +102,7 @@ export const ENV = {
   identity: 'COMPANY_IDENTITY',
   shift: 'COMPANY_SHIFT',
   stateDir: 'COMPANY_STATE_DIR',   // root, default ~/.local/state/agent-company
-  repo: 'COMPANY_REPO',            // the engine's main checkout (the hooks guard protects it; memory/ fallback before COMPANY_HOME)
+  repo: 'COMPANY_REPO',            // the engine's main checkout (the hooks guard protects it; the memory/ fallback without COMPANY_HOME, empty since the split)
   home: 'COMPANY_HOME',            // the company: <home>/company and <home>/memory (company-home.ts)
   hqUrl: 'COMPANY_HQ_URL',
   sessionId: 'COMPANY_SESSION_ID',

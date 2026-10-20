@@ -116,7 +116,7 @@ export function orgDefaults(companyDir: string): OrgDefaults {
 
 /** Where the company is, from one source (COMPANY_HOME, shared company-home.ts), first match wins: overrides
  *  (companyHome, then the legacy companyDir), env COMPANY_HOME, the file's companyHome, the file's companyDir, env
- *  AGENT_COMPANY_DIR, else the engine repo itself (company/ and memory/ still in it). A legacy companyDir means
+ *  AGENT_COMPANY_DIR, else the engine repo itself (no company in it since the split: the generic defaults). A legacy companyDir means
  *  home = its parent, as hq read memory/ before COMPANY_HOME. */
 export function companyLocation(overrides: Partial<HqConfig>, fromFile: Partial<HqConfig>,
   env: NodeJS.ProcessEnv = process.env, engineRoot = ENGINE_ROOT): { companyHome: string; companyDir: string } {

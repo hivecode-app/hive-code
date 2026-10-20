@@ -149,6 +149,23 @@ test('sweep does nothing while the automation is off, and a failed push keeps th
   } finally { await env.cleanup(); }
 });
 
+test('a company home without memory/ (no COMPANY_HOME: the engine, since the split) gets nothing, the updates wait', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, clock } = env;
+    const calls: string[] = [];
+    hq.memoryFiles.run = async (cmd, args) => { calls.push(`${cmd} ${args[0]}`); return ''; };
+    hq.store.setToggle('adi/memory-files', true, false);
+    hq.memoryFiles.repoDir = join(hq.memoryFiles.repoDir, 'no-company-here');
+    hq.ingest.op(entry({ scope: 'project', kind: 'fact', text: 'x', file: 'memory/a.md' }, 'eli-1:g1'));
+    clock.advance(FLUSH_AGE_MS);
+    await hq.memoryFiles.sweep();
+    assert.deepEqual(calls, []);
+    assert.equal(hq.memoryFiles.enabled(), false);
+    assert.equal(hq.memoryFiles.pending().length, 1);
+  } finally { await env.cleanup(); }
+});
+
 test('flush: a conflict with main keeps the updates pending and tells the owner; nothing is applied twice', async () => {
   const r = repo();
   const env = await makeEnv();

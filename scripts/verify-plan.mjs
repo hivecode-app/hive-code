@@ -21,7 +21,7 @@ export function verifyPlan({ fromFile, cfg, companyHome, engine, appUrl, site = 
   const apk = Boolean(rel) && exists(join(rel, 'app-release.json'));
   return {
     configInGit: exists(join(companyHome, 'company/hq.config.json')) ? yes
-      : no('ההגדרות של hq נכתבו בהתקנה, ואין company/hq.config.json בחברה'),
+      : no(companyHome === engine ? 'COMPANY_HOME לא מוגדר, ואין חברה לקרוא ממנה את ההגדרות של hq' : 'ההגדרות של hq נכתבו בהתקנה, ואין company/hq.config.json בחברה'),
     dictation: cfg.dictate?.url ? yes : no('הכתבה לא מוגדרת (dictate.url)'),
     webApp: (rel && exists(join(rel, 'main.dart.js'))) || exists(join(engine, 'web/main.dart.js'))
       || exists(join(engine, 'packages/app/build/web/main.dart.js')) ? yes

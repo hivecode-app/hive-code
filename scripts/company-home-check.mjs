@@ -1,6 +1,6 @@
 // verify-prod's check that hq and every live worker read the company (contract, memory) from COMPANY_HOME, and not
-// from the engine repo. Forgetting one place is silent otherwise: the engine repo still has an old memory/ until the
-// split's last step (docs/generic/PLAN.md §1 step 3). Pure: verify-prod passes in what it read from /proc.
+// from the engine repo, which carries no company since the split's last step (docs/generic/PLAN.md §1 step 3): a
+// reader left on the engine reads nothing, silently. Pure: verify-prod passes in what it read from /proc.
 import { existsSync, readFileSync, readdirSync, readlinkSync } from 'node:fs';
 import { join, sep } from 'node:path';
 
@@ -17,7 +17,7 @@ export function companyHomeFindings({ home, engineRoot, hqHome, readers, exists 
   const out = [];
   const add = (ok, good, bad = good) => out.push({ ok, line: ok ? good : bad });
   const split = home !== engineRoot;
-  if (!split) add(true, `COMPANY_HOME לא מוגדר: החברה והזיכרון עוד בתוך repo המנוע (${engineRoot})`);
+  if (!split) add(false, '', `COMPANY_HOME לא מוגדר: hq ומי שקורא את החברה מחפשים אותה ב-repo המנוע (${engineRoot}), ואין בו חברה`);
   else {
     add(!inside(home, engineRoot), `COMPANY_HOME הוא ${home}, מחוץ ל-repo המנוע`, `COMPANY_HOME (${home}) בתוך repo המנוע (${engineRoot})`);
     const missing = ['company/org.yaml', 'memory'].filter((f) => !exists(join(home, f)));

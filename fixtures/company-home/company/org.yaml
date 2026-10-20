@@ -1,0 +1,234 @@
+# fixture: חברה לדוגמה, אחרי שיחת ההקמה. הבדיקות של המנוע רצות עליה (fixtures/README.md).
+# לא חברה אמיתית: השמות, הפרויקטים והכתובות מומצאים.
+
+version: 1
+owner: shira
+owner_name: שירה
+owner_gender: female
+manager: gal
+monitoring_lead: hadar
+timezone: Asia/Bangkok
+machines: [srv1, srv2, laptop]
+
+projects:
+  - id: engine
+    name: המנוע
+    status: active
+    team: engine
+  - id: shop
+    name: החנות
+    status: active
+    team: shop
+  - id: support-bot
+    name: בוט התמיכה
+    status: active
+    team: support-bot
+  - id: old-site
+    name: האתר הישן
+    status: dormant
+
+teams:
+  - id: management
+    name: הנהלה
+    kind: permanent
+    symbol: account_tree
+    lead: gal
+    members: []
+    helpers: ephemeral   # עובדי משימה זמניים
+
+  - id: monitoring
+    name: צוות הניטור
+    kind: permanent
+    symbol: monitor_heart
+    lead: hadar
+    members: [ofir]
+    helpers: ephemeral
+
+  - id: engine
+    name: המנוע
+    kind: project
+    project: engine
+    symbol: build
+    lead: ron
+    members: []
+    helpers: ephemeral
+
+  - id: shop
+    name: החנות
+    kind: project
+    project: shop
+    symbol: storefront
+    lead: aviv
+    members: [maya, noam, lior]
+    helpers: ephemeral
+
+  - id: support-bot
+    name: בוט התמיכה
+    kind: project
+    project: support-bot
+    symbol: tune
+    lead: michal
+    members: []
+    helpers: ephemeral
+
+identities:
+  - id: gal
+    name: גל
+    gender: male
+    title: מנהל החברה
+    symbol: explore
+    monogram: גל
+    team: management
+    reports_to: shira
+    kind: permanent
+    lifecycle: always-on
+    resident: true
+    home: srv1
+    may_open: [permanent, project, task]
+    memory_domain: company
+    grants: []
+    automations:
+      - id: night-scheduler
+        what: במצב לילה ממלא כל משבצת שמתפנה מהתור
+        when: בכל משבצת שמתפנה, כל עוד מצב לילה פעיל
+        enabled: false
+      - id: memory-consolidation
+        what: מאחד את עדכוני הזיכרון של היום ל-PR אחד
+        when: כל לילה
+        enabled: true
+      - id: said-twice
+        what: מסמן הוראה שבעלת החברה אמרה פעמיים
+        when: אחרי כל הוראה חדשה
+        enabled: false
+
+  - id: hadar
+    name: הדר
+    gender: female
+    title: ראשת צוות הניטור
+    symbol: shield
+    monogram: הד
+    team: monitoring
+    reports_to: gal
+    kind: permanent
+    lifecycle: always-on
+    home: srv1
+    may_open: [task]
+    memory_domain: company
+    grants: []
+    automations:
+      - id: prod-probes
+        what: probe-runner מריץ את בדיקות הפרודקשן מהאמנות (GET בלבד, בלי טוקנים). חריגה מעירה את הדר
+        when: לפי every של כל probe באמנת הפרויקט
+        enabled: true
+
+  - id: ofir
+    name: אופיר
+    gender: male
+    title: איש ניטור
+    symbol: monitor_heart
+    monogram: אפ
+    team: monitoring
+    reports_to: hadar
+    kind: permanent
+    lifecycle: dormant
+    home: srv2
+    may_open: []
+    memory_domain: company
+    grants: []
+    automations: []
+
+  - id: ron
+    name: רון
+    gender: male
+    title: ראש צוות המנוע
+    symbol: build
+    monogram: רו
+    team: engine
+    reports_to: gal
+    kind: project
+    lifecycle: always-on
+    home: srv1
+    may_open: [task]
+    memory_domain: projects/engine
+    grants: []
+    automations: []
+
+  - id: aviv
+    name: אביב
+    gender: male
+    title: ראש צוות החנות
+    symbol: storefront
+    monogram: אב
+    team: shop
+    reports_to: gal
+    kind: project
+    lifecycle: always-on
+    home: srv1
+    may_open: [task]
+    memory_domain: projects/shop
+    grants: []
+    automations: []
+
+  - id: maya
+    name: מאיה
+    gender: female
+    title: מפתחת בחנות
+    symbol: code
+    monogram: מא
+    team: shop
+    reports_to: aviv
+    kind: project
+    lifecycle: dormant
+    home: srv2
+    may_open: []
+    memory_domain: projects/shop
+    grants: []
+    automations: []
+
+  - id: noam
+    name: נועם
+    gender: male
+    title: בודק בחנות
+    symbol: verified
+    monogram: נע
+    team: shop
+    reports_to: aviv
+    kind: project
+    lifecycle: dormant
+    home: srv2
+    may_open: []
+    memory_domain: projects/shop
+    grants: []
+    automations: []
+
+  - id: lior
+    name: ליאור
+    gender: female
+    title: מעצבת בחנות
+    symbol: palette
+    monogram: לי
+    team: shop
+    reports_to: aviv
+    kind: project
+    lifecycle: dormant
+    home: laptop
+    may_open: []
+    memory_domain: projects/shop
+    grants: []
+    automations: []
+
+  - id: michal
+    name: מיכל
+    gender: female
+    title: ראשת צוות בוט התמיכה
+    symbol: tune
+    monogram: מי
+    team: support-bot
+    reports_to: gal
+    kind: project
+    lifecycle: always-on
+    home: srv1
+    may_open: [task]
+    memory_domain: projects/support-bot
+    grants: []
+    automations: []

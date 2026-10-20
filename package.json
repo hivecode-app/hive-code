@@ -13,7 +13,7 @@
     "pretest": "node scripts/check-shared-resolution.mjs",
     "test": "node --test --experimental-strip-types 'packages/*/test/**/*.test.ts'",
     "typecheck": "tsc -b packages/*/tsconfig.json",
-    "check:contract": "node scripts/check-contract.mjs && node scripts/check-contract.mjs starter && node scripts/check-contract.mjs --home",
+    "check:contract": "node scripts/check-contract.mjs starter && node scripts/check-contract.mjs fixtures/company-home && node scripts/check-contract.mjs --home",
     "check:starter": "node scripts/check-contract.mjs starter",
     "test:contract": "node --test scripts/check-contract.test.mjs",
     "canary": "node scripts/canary.mjs",

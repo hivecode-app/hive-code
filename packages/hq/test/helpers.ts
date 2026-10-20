@@ -291,6 +291,7 @@ export async function makeEnv(opts: { cfg?: Partial<HqConfig>; deps?: HqDeps; pr
   const dir = mkdtempSync(join(tmpdir(), 'hq-'));
   const company = join(dir, 'company');
   mkdirSync(join(company, 'projects'), { recursive: true });
+  mkdirSync(join(dir, 'memory')); // the company's memory/: memory-files writes only where there is one
   writeFileSync(join(company, 'org.yaml'), opts.org ?? ORG_YAML);
   for (const [p, md] of Object.entries(opts.projects ?? {})) writeFileSync(join(company, 'projects', `${p}.md`), md);
   // claudeHome: never the real ~/.claude (its token would go to /api/oauth/profile from a test).

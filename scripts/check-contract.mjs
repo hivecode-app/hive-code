@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Schema check for the company contract (company/, memory/). Node 22; needs `npm ci` (for `yaml`).
-// Usage: node scripts/check-contract.mjs [repoRoot | --home [path]]
-//   --home: the company at COMPANY_HOME (env, else hq.config.json's companyHome); nothing to do while it is this repo.
+// Usage: node scripts/check-contract.mjs [companyHome | --home [path]]
+//   companyHome: a checkout with company/ and memory/ at its root (starter, fixtures/company-home, a worktree).
+//   --home (and no argument at all): the company at COMPANY_HOME (env, else hq.config.json's companyHome); nothing to
+//   do when none is set. The engine carries no company of its own.
 //   --home <path>: that checkout (e.g. a worktree of a PR in the company's repo). `npm run check:contract -- --home <path>`
 //   reaches here as `--home --home <path>`: the last argument that is not --home wins.
 // Exit 0 = valid (warnings allowed), 1 = errors found.
@@ -16,9 +18,9 @@ import { resolveCompanyHome } from '../packages/shared/src/company-home.ts';
 
 const engineRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
-const homeMode = args.includes('--home');
 const given = args.filter((a) => a !== '--home').at(-1);
-const root = given ? resolve(given) : homeMode ? resolveCompanyHome({ fallback: engineRoot }) : engineRoot;
+const homeMode = args.includes('--home') || !given;
+const root = given ? resolve(given) : resolveCompanyHome({ fallback: engineRoot });
 const errors = [];
 const warnings = [];
 const err = (m) => errors.push(m);
@@ -231,7 +233,7 @@ function listMarkdown(dir) {
 
 export function main() {
   if (homeMode && !given && root === engineRoot) {
-    console.log('check:contract --home: COMPANY_HOME is not set, the company is in this repo (checked above)');
+    console.log('check:contract --home: COMPANY_HOME is not set, no company to check here');
     return;
   }
   if (homeMode) console.log(`check:contract --home: ${root}`);

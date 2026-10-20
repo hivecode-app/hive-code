@@ -7,9 +7,6 @@ on:
   pull_request:
   push:
     branches: [main]
-    # Memory registries land on main one commit at a time (packages/hq/src/memory-registry.ts): no code, nothing to
-    # check, and each run would cancel the run of the merge before it (same concurrency group).
-    paths-ignore: ['memory/**']
 
 permissions:
   contents: read

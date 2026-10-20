@@ -9,10 +9,10 @@ const ENGINE = '/home/u/projects/agent-company';
 const HOME = '/home/u/company';
 const fails = (fs) => fs.filter((f) => !f.ok).map((f) => f.line);
 
-test('before the split: the engine repo is the company, and every reader agrees', () => {
+test('no COMPANY_HOME: the engine repo carries no company, so verify-prod fails', () => {
   const f = companyHomeFindings({ home: ENGINE, engineRoot: ENGINE, hqHome: ENGINE, readers: [{ shift: 'yoav-3', home: ENGINE }] });
-  assert.deepEqual(fails(f), []);
-  assert.match(f[0].line, /לא מוגדר/);
+  assert.equal(fails(f).length, 1);
+  assert.match(fails(f)[0], /COMPANY_HOME לא מוגדר.*ואין בו חברה/);
 });
 
 test('after the split: hq and every live worker read from COMPANY_HOME, or verify-prod fails and names who does not', () => {

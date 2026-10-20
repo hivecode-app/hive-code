@@ -39,7 +39,7 @@ changed_since() { ! git diff --quiet "$1" "$main" -- "${@:2}" 2>/dev/null; }
 hq_sha="$(cat "$DSTATE/hq.sha" 2>/dev/null || true)"
 if [[ -z "$hq_sha" ]]; then
   d "אין רישום של פריסת hq ($DSTATE/hq.sha): hq לא נפרס דרך scripts/deploy.sh"
-elif changed_since "$hq_sha" packages company deploy package.json package-lock.json ':!packages/app'; then
+elif changed_since "$hq_sha" packages deploy package.json package-lock.json ':!packages/app'; then
   d "hq רץ על ${hq_sha:0:7}, וב-main יש שינויים בקוד שלו מאז"
 fi
 systemctl --user is-active -q agent-company-hq || d "agent-company-hq לא פעיל"

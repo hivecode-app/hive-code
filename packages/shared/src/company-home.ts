@@ -1,7 +1,7 @@
 // COMPANY_HOME: where the company lives, the one source every part reads it from (docs/generic/PLAN.md §1, step 3).
 // It is a git checkout with company/ (the contract) and memory/ at its root: hive-owner/my-company in ~/company on
 // hq-host. Order: the env var COMPANY_HOME, then `companyHome` in <state>/hq.config.json, then the engine repo
-// itself, which still carries company/ and memory/ (the behavior from before the split).
+// itself, which carries no company since the split: hq then runs with the generic defaults, and verify-prod fails.
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -43,8 +43,8 @@ export function resolveCompanyHome(o: CompanyHomeOptions = {}): string {
 }
 
 /** What shift-host hands a worker as COMPANY_HOME, at every start (so a restart follows the split or a rollback):
- *  --company-home, env COMPANY_HOME, hq.config.json's companyHome; null = not configured (the worker reads the
- *  engine repo through COMPANY_REPO, as before). */
+ *  --company-home, env COMPANY_HOME, hq.config.json's companyHome; null = not configured (the worker falls back to
+ *  the engine repo through COMPANY_REPO, which carries no company since the split: verify-prod fails on that). */
 export function shiftCompanyHome(arg: string | undefined, env: NodeJS.ProcessEnv, stateRoot: string): string | null {
   const given = arg?.trim() || env[COMPANY_HOME_ENV]?.trim();
   return given ? resolve(expandHome(given)) : configuredCompanyHome(stateRoot);

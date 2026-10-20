@@ -7,7 +7,8 @@ import { parse } from 'yaml';
 import { makeEnv, until } from './helpers.ts';
 import { loadProbes, parseCharterProbes, parseDuration, runHttpProbe } from '../src/probes.ts';
 
-const REAL_COMPANY = join(import.meta.dirname, '..', '..', '..', 'company');
+// The example company (fixtures/README.md): its charters declare probes the way a real company's do.
+const COMPANY = join(import.meta.dirname, '..', '..', '..', 'fixtures', 'company-home', 'company');
 
 const CHARTER = (url: string) => `# lumo
 
@@ -99,9 +100,9 @@ test('fail_after consecutive failures → one urgent message to רותם with ev
   } finally { await env.cleanup(); }
 });
 
-test('#26: the real charters of lumo and tiki-bot-go declare read-only http probes with a latency budget, and the switch is on', () => {
-  const probes = loadProbes(REAL_COMPANY).filter((p) => p.project === 'lumo' || p.project === 'tiki-bot-go');
-  for (const project of ['lumo', 'tiki-bot-go']) assert.ok(probes.some((p) => p.project === project), `${project} has probes`);
+test('#26: charters declare read-only http probes with a latency budget, and the switch is on (the example company)', () => {
+  const probes = loadProbes(COMPANY).filter((p) => p.project === 'shop' || p.project === 'support-bot');
+  for (const project of ['shop', 'support-bot']) assert.ok(probes.some((p) => p.project === project), `${project} has probes`);
   for (const p of probes) {
     assert.equal(p.kind, 'http', p.key);
     assert.equal(p.method, 'GET', `${p.key}: observe-only`);
@@ -109,30 +110,31 @@ test('#26: the real charters of lumo and tiki-bot-go declare read-only http prob
     assert.ok(p.maxLatencyMs && p.maxLatencyMs > 0, `${p.key}: response-time budget`);
     assert.ok(p.failAfter >= 2, `${p.key}: one failed probe is not proof`);
   }
-  const org = parse(readFileSync(join(REAL_COMPANY, 'org.yaml'), 'utf8')) as { identities: { id: string; grants: unknown[]; automations: { id: string; enabled: boolean }[] }[] };
-  const rotem = org.identities.find((i) => i.id === 'rotem')!;
-  assert.equal(rotem.automations.find((a) => a.id === 'prod-probes')!.enabled, true);
-  assert.deepEqual(rotem.grants, [], 'observe-only: no grants');
-  for (const project of ['lumo', 'tiki-bot-go']) {
-    const fm = parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(REAL_COMPANY, 'projects', `${project}.md`), 'utf8'))![1]!) as { grants: unknown[] };
+  const org = parse(readFileSync(join(COMPANY, 'org.yaml'), 'utf8')) as { identities: { id: string; grants: unknown[]; automations: { id: string; enabled: boolean }[] }[] };
+  const hadar = org.identities.find((i) => i.id === 'hadar')!;
+  assert.equal(hadar.automations.find((a) => a.id === 'prod-probes')!.enabled, true);
+  assert.deepEqual(hadar.grants, [], 'observe-only: no grants');
+  for (const project of ['shop', 'support-bot']) {
+    const fm = parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(join(COMPANY, 'projects', `${project}.md`), 'utf8'))![1]!) as { grants: unknown[] };
     assert.deepEqual(fm.grants, [], `${project}: no grants`);
   }
 });
 
-test('#26: a simulated outage on the real lumo charter wakes רותם with evidence', async () => {
-  const projects = Object.fromEntries(['lumo', 'tiki-bot-go'].map((p) => [p, readFileSync(join(REAL_COMPANY, 'projects', `${p}.md`), 'utf8')]));
+test('#26: a simulated outage on a charter\'s probe wakes the monitoring lead with evidence', async () => {
+  const projects = Object.fromEntries(['shop', 'support-bot'].map((p) => [p, readFileSync(join(COMPANY, 'projects', `${p}.md`), 'utf8')]));
+  // The charters are the example company's, the org is the test env's (helpers.ts): its monitoring lead is rotem.
   const env = await makeEnv({ projects });
   try {
     const { hq, clock, launcher } = env;
     assert.ok(hq.probes.probes.length >= 6);
-    hq.probes.run = async (p) => p.key === 'lumo/api'
+    hq.probes.run = async (p) => p.key === 'shop/api'
       ? { ok: false, status: 502, latencyMs: 41, error: 'status 502, expected 403' }
       : { ok: true, status: p.expect[0]!, latencyMs: 30, error: null };
     for (let i = 0; i < 3; i++) { await hq.probes.tick(); clock.advance(61_000); }
     const anomaly = hq.store.db.prepare(`SELECT id, body, priority FROM messages WHERE to_identity = 'rotem' AND kind = 'probe_anomaly'`).all() as { id: string; body: string; priority: string }[];
     assert.equal(anomaly.length, 1, 'only the failing probe, once');
     assert.equal(anomaly[0]!.priority, 'now');
-    assert.match(anomaly[0]!.body, /lumo\/api \(GET https:\/\/api\.example\.app\/v0\/channels\)/);
+    assert.match(anomaly[0]!.body, /shop\/api \(GET https:\/\/api\.shop\.example\/v1\/products\)/);
     assert.equal(anomaly[0]!.body.match(/status=502 latency=41ms/g)!.length, 3, 'three lines of evidence');
     await until(() => hq.mailbox.get(anomaly[0]!.id)!.state === 'delivered', 3000, 'רותם woken and the anomaly delivered');
     assert.ok(launcher.launches.some((l) => l.shiftId.startsWith('rotem-')));

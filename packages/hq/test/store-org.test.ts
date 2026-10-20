@@ -9,6 +9,9 @@ import { sessionIdFor, uuidv5 } from '../src/proc.ts';
 import { ORG_YAML } from './helpers.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 
+// The example company (fixtures/README.md): a whole contract, as a company's own repo carries it.
+const FIXTURE = join(import.meta.dirname, '..', '..', '..', 'fixtures', 'company-home', 'company');
+
 test('store: WAL, migrations idempotent across reopen, toggles seeded once', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hq-store-'));
   try {
@@ -81,13 +84,13 @@ test('syncOrg: missing file is not fatal; removed identities are deactivated; ma
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('the real contract parses: company/org.yaml in this repo', () => {
-  const file = join(import.meta.dirname, '..', '..', '..', 'company', 'org.yaml');
-  const { identities, automations } = parseOrg(readFileSync(file, 'utf8'), [], 'yoav');
+test('a whole contract parses: org.yaml of the example company (fixtures/)', () => {
+  const file = join(FIXTURE, 'org.yaml');
+  const { identities, automations } = parseOrg(readFileSync(file, 'utf8'), [], 'gal');
   const by = Object.fromEntries(identities.map((r) => [r.id, r]));
-  assert.equal(by.yoav?.lifecycle, 'resident');
-  assert.equal(by.rotem?.reports_to, 'yoav');
-  assert.ok(automations.some((a) => a.key === 'rotem/prod-probes'));
+  assert.equal(by.gal?.lifecycle, 'resident');
+  assert.equal(by.hadar?.reports_to, 'gal');
+  assert.ok(automations.some((a) => a.key === 'hadar/prod-probes'));
 });
 
 test('projects for the board: org.yaml order and names, the charter\'s status wins, no charter falls back to org.yaml', () => {
@@ -114,13 +117,13 @@ test('projects for the board: org.yaml order and names, the charter\'s status wi
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('the real contract lists its projects with their charter status', () => {
-  const projects = listProjects(join(import.meta.dirname, '..', '..', '..', 'company'));
-  assert.ok(projects.some((p) => p.id === 'agent-company' && p.status === 'active'));
-  // The owner's names (20/10/2026), not the repo ids.
+test('a whole contract lists its projects with their charter status (the example company)', () => {
+  const projects = listProjects(FIXTURE);
+  assert.ok(projects.some((p) => p.id === 'engine' && p.status === 'active'));
+  assert.ok(projects.some((p) => p.id === 'old-site' && p.status === 'dormant'));
+  // The owner's names, not the repo ids.
   const name = (id: string) => projects.find((p) => p.id === id)?.name;
-  assert.deepEqual([name('lumo'), name('lumo-bot'), name('tiki-bot-go')], ['האפליקציה לומו', 'לומו בוט', 'טיקי בוט']);
-  assert.ok(projects.length >= 2);
+  assert.deepEqual([name('engine'), name('shop'), name('support-bot')], ['המנוע', 'החנות', 'בוט התמיכה']);
 });
 
 test('deterministic session ids: uuidv5 (RFC 4122 vector) per identity:shift', () => {
@@ -142,37 +145,37 @@ test('host-args.json for the template unit: shift and shift-no come from the sto
 test('system prompt (L0+L1): dossier, how to reply, Authority, charter; task workers get the task-team rules', async () => {
   const { buildSystemPrompt } = await import('../src/system-prompt.ts');
   const { join } = await import('node:path');
-  const companyDir = join(import.meta.dirname, '..', '..', '..', 'company');
+  const companyDir = FIXTURE;
   const base = { symbol: '', team: null, team_kind: 'permanent', project: null, reports_to: null, lifecycle: 'resident', source: 'org', active: 1, data: '{}', updated_at: 0 };
-  const yoav = buildSystemPrompt(companyDir, { ...base, id: 'yoav', name: 'יואב', title: 'מנהל החברה' }, 'yoav');
-  assert.match(yoav, /אתה יואב, מנהל החברה/);
-  assert.match(yoav, /# יואב · מנהל החברה/);                    // the dossier itself
-  assert.match(yoav, /The complete list of things you may not do/); // Authority, verbatim (directives.md)
+  const yoav = buildSystemPrompt(companyDir, { ...base, id: 'gal', name: 'גל', title: 'מנהל החברה' }, 'gal');
+  assert.match(yoav, /אתה גל, מנהל החברה/);
+  assert.match(yoav, /# גל · מנהל החברה/);                      // the dossier itself
+  assert.match(yoav, /## הרשימה המלאה של מה שאסור/);            // Authority, verbatim (directives.md)
   assert.match(yoav, /`tell`/);
-  assert.match(yoav, /ה-identity של רן הוא `owner`/);
+  assert.match(yoav, /ה-identity של שירה הוא `owner`/);
   // chat.md §2.3א: with the owner the text is the reply; no tell back, no self-narration or delivery internals.
   assert.match(yoav, /\*\*הטקסט שאתה כותב הוא התשובה\.\*\*/);
-  assert.match(yoav, /\*\*לא עונים לו ב-`tell`\.\*\*/);
+  assert.match(yoav, /\*\*לא עונים לה ב-`tell`\.\*\*/);   // the owner of the example company is a woman
   assert.match(yoav, /לא מסכמים לעצמך מה עשית/);
   assert.match(yoav, /ההודעה נכנסה לתור המסירה/);
   assert.doesNotMatch(yoav, /טקסט רגיל בתשובה שלך לא מגיע לאף אחד/, 'the old rule that made every reply a tell');
-  const worker = buildSystemPrompt(companyDir, { ...base, id: 'agent-company-t7', name: 'דנה', title: 'מפתחת', team_kind: 'task',
-    project: 'agent-company', reports_to: 'adi', lifecycle: 'ephemeral', source: 'runtime' }, 'yoav');
-  assert.match(worker, /# אתה דנה, מפתחת, בצוות משימה \(`agent-company-t7`\)/);
+  const worker = buildSystemPrompt(companyDir, { ...base, id: 'engine-t7', name: 'דנה', title: 'מפתחת', team_kind: 'task',
+    project: 'engine', reports_to: 'ron', lifecycle: 'ephemeral', source: 'runtime' }, 'gal');
+  assert.match(worker, /# אתה דנה, מפתחת, בצוות משימה \(`engine-t7`\)/);
   // #51: Hebrew to everyone, titles included, even when the message came in English.
-  assert.match(worker, /\*\*עברית בכל הודעה\*\*: לרן, ליואב ולכל עובד, גם כשכתבו לך באנגלית/);
+  assert.match(worker, /\*\*עברית בכל הודעה\*\*: לשירה, לגל ולכל עובד, גם כשכתבו לך באנגלית/);
   assert.match(worker, /`open_team`\) וטיקטים \(`open_ticket`\) בעברית/);
   assert.match(worker, /gh pr merge --squash/);
   // The worker runs in another project's checkout: the company skills by absolute path.
   assert.ok(worker.includes(`\`${join(companyDir, 'skills', 'reviewer', 'SKILL.md')}\``), 'absolute reviewer skill path');
   assert.ok(worker.includes(`\`${join(companyDir, 'skills', 'ship', 'SKILL.md')}\``), 'absolute ship skill path');
-  assert.match(worker, /`company-ci`/);
-  assert.match(worker, /# אמנת agent-company/);                  // project charter
-  assert.match(worker, /מדווח ל-`adi`/);
+  assert.match(worker, /`engine-ci`/);
+  assert.match(worker, /# אמנת המנוע/);                          // project charter
+  assert.match(worker, /מדווח ל-`ron`/);
   // A helper eli opens has no project: the errand itself, no worktree/PR, outward acts need the owner (#24).
   const task = { ...base, team_kind: 'task', lifecycle: 'ephemeral', source: 'runtime' };
   const eli = { ...base, id: 'eli', name: 'אלי', title: 'ראש הצוות האישי', team: 'personal', lifecycle: 'lead' };
-  const helper = buildSystemPrompt(companyDir, { ...task, id: 'company-t9', name: 'איתי', title: 'עוזר אישי', reports_to: 'eli' }, 'yoav', eli);
+  const helper = buildSystemPrompt(companyDir, { ...task, id: 'company-t9', name: 'איתי', title: 'עוזר אישי', reports_to: 'eli' }, 'gal', eli);
   assert.match(helper, /# אתה איתי, עוזר אישי: עוזר חד-פעמי/);
   assert.match(helper, /`eli` פתח אותך/);
   assert.match(helper, /כלפי אנשים בחוץ/);
@@ -180,7 +183,7 @@ test('system prompt (L0+L1): dossier, how to reply, Authority, charter; task wor
   // Any other task without a project (noga's contract PRs, an owner task with no project) keeps the code-task rules.
   const noga = { ...base, id: 'noga', name: 'נגה', title: 'ראש מחלקת השיפור', team: 'improvement', lifecycle: 'lead' };
   for (const opener of [noga, undefined]) {
-    const t = buildSystemPrompt(companyDir, { ...task, id: 'company-t10', name: 't10', title: 'x', reports_to: opener?.id ?? 'yoav' }, 'yoav', opener);
+    const t = buildSystemPrompt(companyDir, { ...task, id: 'company-t10', name: 't10', title: 'x', reports_to: opener?.id ?? 'gal' }, 'gal', opener);
     assert.match(t, /צוות משימה/);
     assert.doesNotMatch(t, /עוזר חד-פעמי/);
   }
@@ -227,12 +230,11 @@ test('a task worker never gets a standing identity\'s name, one added to org.yam
   const standing = (id: string, name: string) => store.db.prepare(`INSERT INTO identities (id, name, title, symbol, team, team_kind, project,
       reports_to, lifecycle, source, active, data, updated_at) VALUES (?, ?, 'ראש צוות', '', 'x', 'project', NULL, 'yoav', 'lead', 'org', 1, '{}', 0)`).run(id, name);
   try {
-    // The real contract: no pool name is a standing identity's, for every task id.
-    syncOrg(store, join(import.meta.dirname, '../../../company'), [], 'yoav');
+    // A whole contract (the example company): no pool name is a standing identity's, for every task id.
+    syncOrg(store, FIXTURE, [], 'gal');
     const names = new Set((store.db.prepare(`SELECT name FROM identities WHERE source = 'org'`).all() as { name: string }[]).map((r) => r.name));
-    assert.ok(names.has('דנה') && names.has('עדי') && names.has('יואב'));
-    assert.ok(names.has('מיכל'), 'מיכל is a standing identity in lumo-bot');
-    assert.ok(names.has('נועה') && names.has('תום'), 'the design team is standing');
+    assert.ok(names.has('גל') && names.has('הדר') && names.has('אביב'));
+    assert.ok(names.has('מיכל'), 'מיכל is a standing identity in support-bot');
     for (let i = 0; i < 60; i++) assert.ok(!names.has(taskWorkerName(store, i).name), `task ${i}: ${taskWorkerName(store, i).name}`);
     // A task worker named מיכל from before she joined org.yaml: renamed at load, so the name is hers alone.
     ensureRuntimeIdentity(store, { id: 'lumo-bot-t7', name: 'מיכל', title: 'מפתחת', project: 'lumo-bot', reports_to: 'boaz' });

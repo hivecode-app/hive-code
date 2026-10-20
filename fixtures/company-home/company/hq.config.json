@@ -1,0 +1,23 @@
+{
+  "defaultCwd": "/home/shira/projects/engine",
+  "telegramChat": "100200300",
+  "auth": {
+    "rpId": "app.hq.example.com",
+    "origins": ["https://app.hq.example.com"],
+    "appUrl": "https://app.hq.example.com/",
+    "userName": "shira",
+    "userDisplayName": "שירה"
+  },
+  "apiUrl": "https://api.hq.example.com",
+  "dictate": { "url": "http://127.0.0.1:8790" },
+  "accounts": [
+    { "name": "personal", "label": "האישי", "expect": "shira@example.com", "managed": false },
+    { "name": "work", "label": "העבודה", "expect": "shira-work", "managed": true }
+  ],
+  "tab": { "baseUrl": "https://tab.hq.example.com" },
+  "pushContact": "mailto:shira@example.com",
+  "memoryImport": [
+    { "domain": "personal", "dir": "/home/shira/.claude/memory-shared" },
+    { "domain": "shop", "dir": "/home/shira/.claude/projects/-home-shira-shop-app/memory" }
+  ]
+}

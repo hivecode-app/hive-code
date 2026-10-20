@@ -1,5 +1,5 @@
 // The generic product, step 1 (docs/generic/PLAN.md): one company's values live in its hq.config.json and
-// org.yaml, not in code. With hq-host's file hq gets exactly what it had before; with none, nothing of anyone.
+// org.yaml, not in code. With a company's file hq gets exactly its values; with none, nothing of anyone.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { APK_ORIGIN, companyLocation, loadConfig, type HqConfig } from '../src/config.ts';
 import { makeEnv, ORG_YAML } from './helpers.ts';
 
-const REPO = join(import.meta.dirname, '..', '..', '..');
+const FIXTURE = join(import.meta.dirname, '..', '..', '..', 'fixtures', 'company-home');
 
 function withHome<T>(home: string, f: () => T): T {
   const prev = process.env.HOME;
@@ -16,34 +16,33 @@ function withHome<T>(home: string, f: () => T): T {
   try { return f(); } finally { process.env.HOME = prev; }
 }
 
-test("hq-host: company/hq.config.json + company/org.yaml give exactly the values hq had in code before", () => {
+test('a company\'s hq.config.json + org.yaml (the example company in fixtures/) give exactly its values', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hq-config-'));
   try {
-    copyFileSync(join(REPO, 'company', 'hq.config.json'), join(dir, 'hq.config.json'));
-    const cfg = withHome('/home/owner', () => loadConfig({ stateDir: dir, companyDir: join(REPO, 'company') }));
-    // The values that used to be the defaults in config.ts, auth.ts and push.ts (before the generic product).
+    copyFileSync(join(FIXTURE, 'company', 'hq.config.json'), join(dir, 'hq.config.json'));
+    const cfg = withHome('/home/shira', () => loadConfig({ stateDir: dir, companyDir: join(FIXTURE, 'company') }));
     assert.deepEqual({
       managerId: cfg.managerId, monitoringLeadId: cfg.monitoringLeadId, telegramChat: cfg.telegramChat, telegramCmd: cfg.telegramCmd,
       defaultCwd: cfg.defaultCwd, residents: cfg.capacity.residents, auth: cfg.auth, dictateUrl: cfg.dictate.url,
       accounts: cfg.accounts, tab: cfg.tab, appReleaseDir: cfg.appReleaseDir, pushContact: cfg.pushContact,
     }, {
-      managerId: 'yoav', monitoringLeadId: 'rotem', telegramChat: '100000001', telegramCmd: '/home/owner/bin/telegram-send',
-      defaultCwd: '/home/owner/projects/agent-company', residents: ['yoav'],
+      managerId: 'gal', monitoringLeadId: 'hadar', telegramChat: '100200300', telegramCmd: '/home/shira/bin/telegram-send',
+      defaultCwd: '/home/shira/projects/engine', residents: ['gal'],
       auth: {
         rpId: 'app.hq.example.com', rpName: 'החברה',
-        origins: ['https://app.hq.example.com', 'android:apk-key-hash:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'],
-        appUrl: 'https://app.hq.example.com/', pairCodeMs: 10 * 60_000, userName: 'ran', userDisplayName: 'רן',
+        origins: ['https://app.hq.example.com', APK_ORIGIN],
+        appUrl: 'https://app.hq.example.com/', pairCodeMs: 10 * 60_000, userName: 'shira', userDisplayName: 'שירה',
       },
       dictateUrl: 'http://127.0.0.1:8790',
       accounts: [
-        { name: 'owner-account', label: 'החשבון הראשי', expect: 'owner-account@example.com', managed: false },
-        { name: 'hive-owner', label: 'hive-owner', expect: 'hive-owner', managed: true },
+        { name: 'personal', label: 'האישי', expect: 'shira@example.com', managed: false },
+        { name: 'work', label: 'העבודה', expect: 'shira-work', managed: true },
       ],
       tab: { listen: '127.0.0.1:7422', baseUrl: 'https://tab.hq.example.com', cdpUrl: 'http://127.0.0.1:9222', ttlMin: 10 },
-      appReleaseDir: '/var/www/hq-app/current', pushContact: 'mailto:owner-account@example.com',
+      appReleaseDir: '/var/www/hq-app/current', pushContact: 'mailto:shira@example.com',
     });
     assert.equal(cfg.apiUrl, 'https://api.hq.example.com');
-    assert.equal(cfg.memoryImport.length, 5);
+    assert.equal(cfg.memoryImport.length, 2);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
