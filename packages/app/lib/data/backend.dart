@@ -30,6 +30,7 @@ class CompanyData {
     this.focus = false,
     this.night,
     this.awaiting = const [],
+    this.asked = const [],
     this.home,
   });
 
@@ -62,6 +63,9 @@ class CompanyData {
 
   /// "מה לבדוק" (#108): finished tasks that wait for a deploy or for him to check, newest first.
   List<AwaitingTask> awaiting;
+
+  /// "ביקשת" (#118): his requests to workers whose answer he hasn't read, newest first.
+  List<AskedRequest> asked;
 
   /// The head of the conversations screen (GET /api/home); null from an hq without it (the screen draws hq's default shape itself).
   HomeRecipe? home;

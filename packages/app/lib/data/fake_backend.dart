@@ -556,5 +556,17 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
       AwaitingTask(id: 3720, kind: AwaitingKind.check, title: 'אפליקציה: תמונות בצ\'אט', summary: 'התמונות בצ\'אט עולות גם מהטלפון', note: 'לשלוח תמונה מהטלפון ולראות שהיא עולה', identity: 'noa', project: 'lumo', at: at(13, 20)),
       AwaitingTask(id: 3711, kind: AwaitingKind.deploy, title: 'לומו: שעת איסוף', summary: 'שעת איסוף "לא ידוע" לא נאמרת ללקוח', note: 'מחכה ל-GO שלך', identity: 'ido', project: 'lumo', at: at(11, 5)),
     ],
+    asked: [
+      // Open: his last line to Dana, no answer yet. Answered: Ido's answer (t1) to his question (u1), not read yet.
+      AskedRequest(id: 'du3', identity: 'dana', body: 'ותוסיפי לרשימה גם את #3711 כשהוא ימוזג', at: at(14, 6)),
+      AskedRequest(
+        id: 'u1',
+        identity: 'ido',
+        body: 'עידו, מה עם התשלומים שנכשלים? משה אמר שיש משתמשים שחויבו פעמיים',
+        at: at(12, 41),
+        state: AskedState.answered,
+        reply: AskedReply(id: 't1', body: 'בדקתי. אין חיוב כפול. הבעיה היא ניסיון חוזר מיידי אחרי `card_declined`.', at: at(12, 43)),
+      ),
+    ],
   );
 }

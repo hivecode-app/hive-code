@@ -204,7 +204,7 @@ class HqBackend extends Backend {
     // org.yaml `timezone` (#121): before the mapping, so "today" and every hour in it are his.
     company_time.CompanyTime.apply(results[0]['timezone']);
     final prev = _data;
-    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), awaiting: _list(results[0], 'awaiting'), previous: prev);
+    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), awaiting: _list(results[0], 'awaiting'), asked: _list(results[0], 'asked'), previous: prev);
     // Order and last lines from the last messages fetch, right away: without them the list showed
     // board order, then jumped into recency order when the messages came back (on every event).
     final lines = _lastLines;
@@ -390,7 +390,7 @@ class HqBackend extends Backend {
       List<Map<String, dynamic>> list(String k, String f) => ((c[k] as Map)[f] as List).cast<Map<String, dynamic>>();
       company_time.CompanyTime.apply((c['board'] as Map)['timezone']);
       _data = mapSnapshot(board: list('board', 'identities'), inbox: list('inbox', 'items'), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'),
-          tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'), awaiting: _list(c['board'], 'awaiting'));
+          tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'), awaiting: _list(c['board'], 'awaiting'), asked: _list(c['board'], 'asked'));
       if (c['home'] is Map) {
         try {
           _data!.home = HomeRecipe.fromJson((c['home'] as Map).cast<String, dynamic>());
@@ -555,10 +555,17 @@ class HqBackend extends Backend {
     if (d == null) return;
 
     if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'task.new' || type == 'task.state' || type == 'toggle.changed' || type.startsWith('watchdog.')
-        || type == 'home.composed' || type == 'task.awaiting' || type == 'deploy.recorded') {
+        || type == 'home.composed' || type == 'task.awaiting' || type == 'deploy.recorded' || type == 'asked.changed') {
       _refreshSoon();
     }
     if (type == 'conv.read' || type == 'conv.muted') _refreshConvs();
+    // "ביקשת": hq says asked.changed itself; an answer coming in or a read of an answered one also reloads,
+    // so the row never waits on that event (an hq from before it, or one lost in a reconnect).
+    if (type == 'conv.read' && d.asked.any((a) => a.state == AskedState.answered && a.identity == identity)) _refreshSoon();
+    if (type == 'message.new' && e['data'] is Map) {
+      final m = e['data'] as Map;
+      if (m['to_identity'] == 'owner' && m['kind'] != 'system' && d.asked.any((a) => a.state == AskedState.open && a.identity == m['from_identity'])) _refreshSoon();
+    }
     if (type == 'seen.changed' && e['data'] is Map) {
       final data = e['data'] as Map;
       if (data['screen'] is String && data['at'] is int && _seenAt(data['screen'] as String, data['at'] as int)) notifyListeners();
@@ -1199,6 +1206,7 @@ CompanyData mapSnapshot({
   List<Map<String, dynamic>> tasks = const [],
   List<Map<String, dynamic>> projects = const [],
   List<Map<String, dynamic>> awaiting = const [],
+  List<Map<String, dynamic>> asked = const [],
   CompanyData? previous,
   DateTime? now,
 }) {
@@ -1491,6 +1499,7 @@ CompanyData mapSnapshot({
     focus: focus,
     night: night ? 'לילה פעיל' : null,
     awaiting: [for (final a in awaiting) ?AwaitingTask.fromHq(a)],
+    asked: [for (final a in asked) ?AskedRequest.fromHq(a)],
   );
 }
 

@@ -35,6 +35,7 @@ export interface HqConfig {
     unresponsiveActMs: number;   // unresponsive this long → interrupt, then a fresh process (resume)
     taskRetryMs: number;         // a task whose shift just started is not restarted again within this window
     handoffGraceMs: number;      // close_team on a standing worker's task: this long to write a handoff before the stop
+    turnEndWaitMs: number;       // status done mid-turn: the turn ends first (its text may be his reply, #118), at most this long
     accountsMs: number;          // B.7: quota read per account (get_usage), 10 min
   };
   capacity: {
@@ -109,6 +110,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       unresponsiveActMs: 2 * 60_000,
       taskRetryMs: 60_000,
       handoffGraceMs: 5 * 60_000,
+      turnEndWaitMs: 3 * 60_000,
       accountsMs: 10 * 60_000,
     },
     capacity: { reserveMb: 4096, rssIdleMb: 450, rssWorkMb: 2500, residents: ['yoav'], maxSlots: 8 },

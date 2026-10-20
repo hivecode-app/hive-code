@@ -85,6 +85,8 @@ export const TOOLS: readonly ToolDef[] = [
   tool('status', 'עדכון מצב העובד. עם state: "done" המשימה נסגרת, ותמיד כותבים summary: זו השורה שרן רואה ב"מאז שהיית פה" וב"מה הסתיים". '
     + 'בלי summary הוא רואה רק את שם המשימה. '
     + 'אם משהו עוד מחכה לו (פריסה אחרי GO, או משהו שהוא צריך לבדוק בעצמו), מוסיפים awaiting ו-awaiting_note, וזה מופיע אצלו ב"מה לבדוק". '
+    + 'המשימה נסגרת כשהסבב נגמר, ורק אם ענית על כל מה שרן שלח לך. אחרת hq כותב לך "רן מחכה לתשובה על…" והיא נשארת פתוחה. '
+    + 'The task closes when the turn ends, and only if every message he sent you was answered; else hq tells you so and it stays open. '
     + 'Update your working status. With state "done" the task closes; always give summary: it is the line he sees under "since you were here" '
     + 'and "what finished"; without it he sees only the task title. '
     + 'If it still waits on something (a deploy, or something he must check), add awaiting and awaiting_note: it shows under "what to check".', {
@@ -115,6 +117,8 @@ export const TOOLS: readonly ToolDef[] = [
       + 'גוברת על מה שהעובד כתב. כתבו אותה כשהעובד לא כתב, אחרת הוא רואה רק את שם המשימה '
       + '/ one line in his words on what changed for him, no PR numbers or jargon; overrides the worker\'s. Give it when the worker gave none, '
       + 'or he sees only the task title'),
+    force: { type: 'boolean', description: 'לסגור גם כשרן מחכה לתשובה מהעובד (hq מזהיר ולא סוגר בלי זה) '
+      + '/ close even though the owner is still waiting for an answer from the worker (without it hq warns and does not close)' },
     ...awaitingArgs,
   }, ['team']),
   tool('request_go', 'בקשת אישור לפעולה. מופיעה אצלו כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. '
@@ -130,7 +134,7 @@ export const TOOLS: readonly ToolDef[] = [
   tool('compose_home', 'הרכבת ראש מסך השיחות של רן: אילו בלוקים, באיזה סדר ובאיזה ניסוח. רק לעדי וליואב. '
     + 'האפליקציה מציירת כל בלוק מקומפוננטה קבועה וממלאת אותו מנתונים חיים, ולכן מפנים לנתונים לפי מזהה, והטקסט בעברית. '
     + 'אוצר הבלוקים: '
-    + 'headline {text} משפט אחד · alert {inbox: מספר} או {shift: מזהה משמרת} · waiting {inbox: [מספרים]} · awaiting {tasks: [מזהי משימות]} מה לבדוק, משימות שמחכות לפריסה או לבדיקה שלו · lanes {projects: [ids]} פסי היום · '
+    + 'headline {text} משפט אחד · alert {inbox: מספר} או {shift: מזהה משמרת} · waiting {inbox: [מספרים]} · asked {messages: [מזהי הודעות]} ביקשת, בקשות שלו מעובדים שמחכות לתשובה או שהתשובה עליהן עוד לא נקראה, בדרך כלל אחרי waiting · awaiting {tasks: [מזהי משימות]} מה לבדוק, משימות שמחכות לפריסה או לבדיקה שלו · lanes {projects: [ids]} פסי היום · '
     + 'project {project, note?} שתי שורות · people {identities: [ids], caption?} · since {items: [עד 3 משפטים]} · '
     + 'note {text, icon} הערה שלך, icon הוא שם של Material Symbol. לכל בלוק אפשר emphasis: normal|quiet|strong (טיפוגרפיה בלבד). '
     + 'בלוק לא מוכר, שדה חסר או הפניה שלא קיימת נדחים עם הסיבה. מה שנסגר נעלם לבד, ומה שחוסם עליו ולא שובץ מתווסף לבד. '

@@ -307,6 +307,17 @@ export class Mailbox {
     if (answered) for (const t of triggers) if (this.get(t.id)!.state === 'seen') this.setState(t.id, 'handled');
   }
 
+  /**
+   * His messages to this worker since [since] that nothing answered (#118), oldest first: not handled (a reply, a tell
+   * with ref, an ask or a GO all mark it), and no message of the worker to him after it.
+   */
+  unanswered(identity: string, since = 0): MessageRow[] {
+    return (this.store.db.prepare(`SELECT * FROM messages m WHERE m.from_identity = @owner AND m.to_identity = @identity AND m.kind = 'tell'
+      AND m.created_at >= @since AND m.state != 'handled' AND NOT EXISTS (SELECT 1 FROM messages r WHERE r.from_identity = m.to_identity
+        AND r.to_identity = @owner AND r.kind != 'system' AND r.created_at >= m.created_at)
+      ORDER BY m.created_at, m.rowid`).all({ owner: OWNER, identity, since }) as StoredRow[]).map(hydrate);
+  }
+
   /** A shift ended before echoing: its messages go back to waiting for the next shift. */
   private requeueUndelivered(row: ShiftRow): void {
     this.store.db.prepare(`UPDATE messages SET shift_id = NULL WHERE shift_id = ? AND state = 'queued'`).run(row.id);
@@ -555,4 +566,11 @@ function shiftOf(data: string): string | undefined {
 
 function askDTO(r: AskRow): AskDTO {
   return { ...r, options: JSON.parse(r.options) as string[], blocking: r.blocking === 1 };
+}
+
+/** "רן מחכה לתשובה על «…»" for his unanswered messages (#118): the latest one quoted, one line. */
+export function waitingLine(msgs: Pick<MessageRow, 'body'>[]): string {
+  const last = msgs.at(-1)?.body.replace(/\s+/g, ' ').trim() ?? '';
+  const quote = last.length > 80 ? `${last.slice(0, 79)}…` : last;
+  return `רן מחכה לתשובה על «${quote}»${msgs.length > 1 ? ` (ועוד ${msgs.length - 1})` : ''}`;
 }

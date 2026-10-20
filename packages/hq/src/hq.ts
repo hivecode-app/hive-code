@@ -195,6 +195,7 @@ export class Hq {
     await this.shifts.reattachAll();
     await this.shifts.restoreLost(this.watchdog.procCheck);
     this.store.bg(this.ingest.drainPendingTickets(), 'open_ticket.drain');
+    this.ingest.resumePendingDone();
     this.store.emit('hq.started', null, { pid: process.pid });
     if (opts.timers !== false) {
       const T = this.cfg.timers;
@@ -202,7 +203,7 @@ export class Hq {
       this.every(5_000, 'spool', () => this.shifts.collectSpools());
       this.every(T.watchdogMs, 'watchdog', async () => { await this.watchdog.sweep(); await this.shifts.releaseEnded(); });
       this.every(T.livenessMs, 'liveness', () => this.shifts.pingAll());
-      this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); await this.night.sweep(); this.home.sweep(); });
+      this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); await this.night.sweep(); this.home.sweep(); this.home.watchAsked(); });
       this.every(5_000, 'probes', () => this.probes.tick());
       this.every(30_000, 'push', () => this.pusher.sweepUnacked());
       // A handoff link never outlives its 10 minutes, and never leaves a phone viewport on a tab.

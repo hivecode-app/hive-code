@@ -520,6 +520,32 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     });
   }
 
+  /**
+   * Resolves when this shift's turn ends (`result`, `idle`, exit) or after [maxMs]; at once when it is not in a turn.
+   * Resolves on the next tick, so what the other `frame` listeners fold from the result (the owner reply) is stored.
+   */
+  waitTurnEnd(id: string, maxMs: number): Promise<void> {
+    const row = this.get(id);
+    if (!row || (row.state !== 'starting' && row.state !== 'live') || !row.in_turn) return Promise.resolve();
+    return new Promise((resolve) => {
+      const finish = () => {
+        this.off('frame', onFrame);
+        this.off('ended', onEnded);
+        clearTimeout(timer);
+        setImmediate(resolve);
+      };
+      const onFrame = (r: ShiftRow, f: LoggedFrame) => {
+        if (r.id !== id) return;
+        if ((f.t === 'event' && f.ev.kind === 'result') || (f.t === 'lifecycle' && (f.state === 'idle' || f.state === 'exited'))) finish();
+      };
+      const onEnded = (r: ShiftRow) => { if (r.id === id) finish(); };
+      const timer = setTimeout(finish, maxMs);
+      timer.unref?.();
+      this.on('frame', onFrame);
+      this.on('ended', onEnded);
+    });
+  }
+
   stop(id: string, reason: string, startedAt?: number): Promise<void> {
     const row = this.get(id);
     if (!row) return Promise.resolve();

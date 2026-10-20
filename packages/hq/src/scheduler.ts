@@ -4,7 +4,7 @@
 //  - lets night.ts (B.16) scope the queue, add the night note and measure empty slots after every fill.
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
-import type { Mailbox } from './mailbox.ts';
+import { waitingLine, type Mailbox } from './mailbox.ts';
 import { ShiftBusyError, type ShiftManager } from './shifts.ts';
 import { ensureRuntimeIdentity, getIdentity, isStandingWorker, projectLead, taskWorkerName } from './org.ts';
 import { HELPER_TEAM, taskSteps } from './system-prompt.ts';
@@ -429,6 +429,37 @@ export class Scheduler {
     this.store.db.prepare('UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?').run(next, this.store.now(), taskId);
     this.store.emit('task.state', t.identity, { id: taskId, state: next, reason });
     if (next === 'done') this.closeWorktree(taskId);
+  }
+
+  /** Tasks whose worker's status done waits for its turn: the latest call's op and onClose win. */
+  private finishing = new Map<number, { opId: string; onClose?: () => void }>();
+
+  /**
+   * status done from the worker (#118). Its turn ends first: the text it is still writing may be his reply, and a stop
+   * mid-turn loses it. Then, if he is still waiting for an answer from it, the task stays open and the worker hears
+   * so; otherwise [onClose] runs and the task completes. Returns what happened.
+   */
+  async finishByWorker(id: number, identity: string, opId: string, onClose?: () => void): Promise<'done' | 'waiting' | 'skipped'> {
+    const again = this.finishing.has(id);
+    this.finishing.set(id, { opId, onClose });
+    if (again) return 'skipped';
+    try {
+      const cur = this.shifts.current(identity);
+      if (cur && cur.kind !== 'foreign') await this.shifts.waitTurnEnd(cur.id, this.cfg.timers.turnEndWaitMs);
+      const t = this.task(id);
+      if (!t || t.state === 'done') return 'skipped';
+      const waiting = this.mailbox.unanswered(identity, t.started_at ?? t.created_at);
+      const last = this.finishing.get(id)!;
+      if (waiting.length) {
+        this.mailbox.tell({ msg_id: `${last.opId}-waiting`, from: 'hq', to: identity, kind: 'system', priority: 'now', ref: waiting.at(-1)!.id,
+          body: `המשימה לא נסגרה: ${waitingLine(waiting)}. ענה לו ב-\`tell\` ל-\`owner\`, ואז \`status\` עם \`state: "done"\` שוב.` });
+        this.store.emit('task.close_waiting', identity, { id, messages: waiting.map((m) => m.id) });
+        return 'waiting';
+      }
+      last.onClose?.();
+      await this.completeTask(id);
+      return 'done';
+    } finally { this.finishing.delete(id); }
   }
 
   /** The worker (status op state=done) or the owner closed the task: end its shift with task_done. */

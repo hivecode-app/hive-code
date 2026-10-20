@@ -39,6 +39,11 @@ List<HomeBlock> liveBlocks(HomeRecipe recipe, CompanyData d) {
         if (ids.isNotEmpty) out.add(b.copyWith(projects: ids));
       case 'project':
         if (projects.isEmpty || projects.contains(b.projects.firstOrNull)) out.add(b);
+      case 'asked':
+        // A request he read the answer to is gone; one the recipe names that this device doesn't know, too.
+        final asked = {for (final a in d.asked) a.id};
+        final ids = [for (final m in b.messages) if (asked.contains(m)) m];
+        if (ids.isNotEmpty) out.add(b.copyWith(messages: ids));
       case 'people':
         final ids = [for (final i in b.identities) if (d.identities.containsKey(i)) i];
         if (ids.isNotEmpty) out.add(b.copyWith(identities: ids));
@@ -205,6 +210,10 @@ class _GroupView {
         final data = AwaitingData.of(d, b.tasks);
         if (data.items.isEmpty) return null;
         return BlockCard(label: 'מה לבדוק', child: AwaitingBlock(data: data, now: now));
+      case 'asked':
+        final data = AskedData.of(d, b.messages);
+        if (data.items.isEmpty) return null;
+        return BlockCard(label: 'ביקשת', child: AskedBlock(data: data, now: now));
     }
     return null;
   }

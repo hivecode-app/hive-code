@@ -678,6 +678,55 @@ class AwaitingTask {
   }
 }
 
+/// "ביקשת" (hq `asked`, #118): a request of his to a worker that still has no answer he read. `open` = no
+/// answer yet; `answered` = the worker answered and he hasn't read it (hq drops it once he does).
+enum AskedState { open, answered }
+
+/// The worker's answer to a request: its message id, its start (hq cuts it at 300), when.
+class AskedReply {
+  const AskedReply({required this.id, required this.body, required this.at});
+  final String id;
+  final String body;
+  final DateTime at;
+}
+
+class AskedRequest {
+  const AskedRequest({required this.id, required this.identity, required this.body, required this.at, this.count = 1, this.state = AskedState.open, this.reply});
+
+  /// His message id (the first of the ones this row stands for).
+  final String id;
+
+  /// The worker he asked.
+  final String identity;
+
+  /// His message, cut at 300.
+  final String body;
+  final DateTime at;
+
+  /// How many of his messages to the worker this row stands for.
+  final int count;
+  final AskedState state;
+  final AskedReply? reply;
+
+  /// From `/api/board`'s `asked`; null for a state this app does not know or a row without its ids.
+  static AskedRequest? fromHq(Map<String, dynamic> j) {
+    final state = AskedState.values.asNameMap()[j['state']];
+    if (state == null || j['id'] is! String || j['identity'] is! String) return null;
+    final r = j['reply'];
+    return AskedRequest(
+      id: j['id'] as String,
+      identity: j['identity'] as String,
+      body: j['body'] as String? ?? '',
+      at: DateTime.fromMillisecondsSinceEpoch(((j['created_at'] as num?) ?? 0).toInt()),
+      count: ((j['count'] as num?) ?? 1).toInt().clamp(1, 1 << 20),
+      state: state,
+      reply: r is Map && r['id'] is String
+          ? AskedReply(id: r['id'] as String, body: r['body'] as String? ?? '', at: DateTime.fromMillisecondsSinceEpoch(((r['created_at'] as num?) ?? 0).toInt()))
+          : null,
+    );
+  }
+}
+
 /// A project from org.yaml (`projects:`) with its charter's status; the board's filter chips.
 class ProjectInfo {
   const ProjectInfo({required this.id, required this.active, String? name, this.teamId}) : name = name ?? id;

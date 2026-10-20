@@ -103,7 +103,8 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   // timezone: org.yaml's (#121), so the app shows his hours wherever the phone thinks it is.
   route('GET', '/api/org', () => ({ identities: hq.board(), teams: hq.teams(), timezone: hq.clock() }));
   // awaiting: "מה לבדוק" (#108), finished tasks that wait for a deploy or for him to check (awaiting.ts).
-  route('GET', '/api/board', () => ({ identities: hq.board(), tasks: hq.scheduler.tasks(), awaiting: hq.awaiting.list(), projects: hq.projects(),
+  // asked: "ביקשת" (#118), his requests to workers still waiting for an answer, and answers he hasn't read (asked.ts).
+  route('GET', '/api/board', () => ({ identities: hq.board(), tasks: hq.scheduler.tasks(), awaiting: hq.awaiting.list(), asked: hq.home.asked(), projects: hq.projects(),
     slots: hq.scheduler.slots(), probes: hq.probes.summary(), timezone: hq.clock() }));
 
   // The head of the conversations screen (home.ts): the recipe in force, and a new one. The app says

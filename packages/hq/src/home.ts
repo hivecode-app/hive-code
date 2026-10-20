@@ -7,11 +7,12 @@
 // The composer (the identity that owns the `compose-home` automation in org.yaml, today עדי) is woken to
 // compose again on what matters, at most once per 3 minutes; during night mode only for an incident or a new
 // "waiting for you", the rest is kept for one composition in the morning (07:00, or when he opens the app).
-import type { HqEvent } from '@company/shared';
+import { OWNER, type HqEvent } from '@company/shared';
 import type { Hq } from './hq.ts';
 import { hhmm, nextLocal } from './timezone.ts';
+import { askedList, type AskedItem } from './asked.ts';
 
-export const BLOCK_TYPES = ['headline', 'alert', 'waiting', 'awaiting', 'lanes', 'project', 'people', 'since', 'note'] as const;
+export const BLOCK_TYPES = ['headline', 'alert', 'waiting', 'asked', 'awaiting', 'lanes', 'project', 'people', 'since', 'note'] as const;
 export type BlockType = (typeof BLOCK_TYPES)[number];
 export const EMPHASES = ['normal', 'quiet', 'strong'] as const;
 export type Emphasis = (typeof EMPHASES)[number];
@@ -20,6 +21,7 @@ export type Block = { type: BlockType; emphasis?: Emphasis } & (
   | { type: 'headline'; text: string }
   | { type: 'alert'; inbox?: number; shift?: string }
   | { type: 'waiting'; inbox: number[] }
+  | { type: 'asked'; messages: string[] }
   | { type: 'awaiting'; tasks: number[] }
   | { type: 'lanes'; projects: string[] }
   | { type: 'project'; project: string; note?: string }
@@ -51,12 +53,17 @@ export class HomeError extends Error {
 }
 
 /** What validation checks references against (the live board). */
-export interface HomeRefs { projects: Set<string>; identities: Set<string>; inbox: Set<number>; awaiting: Set<number>; shifts?: Set<string> }
+export interface HomeRefs {
+  projects: Set<string>; identities: Set<string>; inbox: Set<number>; awaiting: Set<number>; shifts?: Set<string>;
+  /** "ביקשת" (asked.ts): his requests on the list now, by message id. */
+  asked?: Set<string>;
+}
 
 const FIELDS: Record<BlockType, { required: string[]; optional: string[] }> = {
   headline: { required: ['text'], optional: [] },
   alert: { required: [], optional: ['inbox', 'shift'] },
   waiting: { required: ['inbox'], optional: [] },
+  asked: { required: ['messages'], optional: [] },
   awaiting: { required: ['tasks'], optional: [] },
   lanes: { required: ['projects'], optional: [] },
   project: { required: ['project'], optional: ['note'] },
@@ -133,6 +140,15 @@ export function validateBlocks(raw: unknown, refs: HomeRefs): Block[] {
       case 'waiting': {
         if (!Array.isArray(o.inbox) || !o.inbox.length) throw new HomeError(`${at} (waiting): inbox חייב להיות רשימת מזהי inbox לא ריקה`);
         out.push({ type: t, inbox: [...new Set(o.inbox.map((x) => inboxId(x, 'inbox')))], ...base });
+        break;
+      }
+      case 'asked': {
+        const v = o.messages;
+        if (!Array.isArray(v) || !v.length || v.some((x) => typeof x !== 'string' || !x)) {
+          throw new HomeError(`${at} (asked): messages חייב להיות רשימת מזהי הודעות לא ריקה`);
+        }
+        for (const x of v as string[]) if (!refs.asked?.has(x)) throw new HomeError(`${at} (asked): ההודעה ${x} לא ב"ביקשת"`);
+        out.push({ type: t, messages: [...new Set(v as string[])], ...base });
         break;
       }
       case 'awaiting': {
@@ -212,8 +228,40 @@ export class Home {
       identities: new Set((this.db.prepare('SELECT id FROM identities WHERE active = 1').all() as { id: string }[]).map((r) => r.id)),
       inbox: new Set(this.hq.inbox.open().map((i) => i.id)),
       awaiting: new Set(this.awaitingIds()),
+      asked: new Set(this.asked().map((a) => a.id)),
       shifts: new Set((this.db.prepare('SELECT id FROM shifts').all() as { id: string }[]).map((r) => r.id)),
     };
+  }
+
+  /** "ביקשת" (asked.ts, #118): his open requests to workers, and answers he hasn't read. */
+  asked(): AskedItem[] { return askedList(this.hq.store); }
+
+  /**
+   * From the scheduler loop: a request turns into one after two minutes without any event, so the app hears of a
+   * change in the list (`asked.changed`) from here. Returns whether it changed.
+   */
+  watchAsked(): boolean {
+    const list = this.asked();
+    const sig = list.map((a) => `${a.id}:${a.state}:${a.count}`).join(',');
+    if (sig === (this.hq.store.getMeta('home.asked') ?? '')) return false;
+    this.hq.store.setMeta('home.asked', sig);
+    this.hq.store.emit('asked.changed', null, { ids: list.map((a) => a.id) });
+    return true;
+  }
+
+  private askedTimer: NodeJS.Timeout | null = null;
+  /**
+   * Out of the emit that triggered it, and once for a burst: emitting from inside another event's listeners would
+   * reach the WS first and move its cursor past that event, which then never reaches the app.
+   */
+  private askedSoon(): void {
+    if (this.askedTimer) return;
+    this.askedTimer = setTimeout(() => {
+      this.askedTimer = null;
+      try { this.watchAsked(); }
+      catch (e) { try { this.hq.store.emit('loop.error', null, { loop: 'home.asked', error: (e as Error).message }); } catch { /* store closed (hq stopping) */ } }
+    }, 200);
+    this.askedTimer.unref?.();
   }
 
   /** "מה לבדוק" (awaiting.ts, #108): finished tasks that wait for a deploy or for him to check. */
@@ -251,7 +299,8 @@ export class Home {
       try {
         // Inbox references are not re-checked here: a closed one is pruned below, not a reason to drop the recipe.
         const raw = JSON.parse(row.blocks) as unknown;
-        const blocks = validateBlocks(raw, { ...refs, inbox: new Set(this.ever(raw, 'inbox')), awaiting: new Set(this.ever(raw, 'tasks')) });
+        const blocks = validateBlocks(raw, { ...refs, inbox: new Set(this.ever(raw, 'inbox')), awaiting: new Set(this.ever(raw, 'tasks')),
+          asked: new Set(this.everMessages(raw)) });
         recipe = { version: row.version, composed_by: row.composed_by, composed_at: row.composed_at, reason: row.reason, source: 'agent', blocks };
       } catch { fallback = 'invalid'; }
     }
@@ -264,6 +313,13 @@ export class Home {
     if (!Array.isArray(raw)) return [];
     return raw.flatMap((b: Record<string, unknown>) => (Array.isArray(b?.[k]) ? b[k] as unknown[] : b?.[k] !== undefined ? [b[k]] : []))
       .filter((x): x is number => Number.isInteger(x));
+  }
+
+  /** Every message id a stored recipe's `asked` blocks mention. */
+  private everMessages(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.flatMap((b: Record<string, unknown>) => (b?.type === 'asked' && Array.isArray(b.messages) ? b.messages : []))
+      .filter((x): x is string => typeof x === 'string');
   }
 
   /** Live data wins: what closed disappears, and a blocking item nobody placed yet is shown anyway. */
@@ -285,6 +341,11 @@ export class Home {
         case 'waiting': {
           const inbox = b.inbox.filter((i) => refs.inbox.has(i));
           if (inbox.length) out.push({ ...b, inbox });
+          break;
+        }
+        case 'asked': {
+          const messages = b.messages.filter((m) => refs.asked?.has(m));
+          if (messages.length) out.push({ ...b, messages });
           break;
         }
         case 'awaiting': {
@@ -318,6 +379,19 @@ export class Home {
         out.splice(at, 0, { type: 'waiting', inbox: missing });
       }
     }
+    // What he asked for is never only in a conversation he has to search (#118): one nobody placed is shown anyway.
+    const askedPlaced = new Set(out.flatMap((b) => (b.type === 'asked' ? b.messages : [])));
+    const askedMissing = [...(refs.asked ?? [])].filter((m) => !askedPlaced.has(m));
+    if (askedMissing.length) {
+      const a = out.findIndex((b) => b.type === 'asked');
+      if (a >= 0) out[a] = { ...(out[a] as Extract<Block, { type: 'asked' }>), messages: [...(out[a] as Extract<Block, { type: 'asked' }>).messages, ...askedMissing] };
+      else {
+        // Right after "מחכה לך", where the default puts it.
+        let at = out.findIndex((b) => b.type === 'waiting') + 1;
+        if (at === 0) while (at < out.length && (out[at]!.type === 'headline' || out[at]!.type === 'alert')) at++;
+        out.splice(at, 0, { type: 'asked', messages: askedMissing });
+      }
+    }
     return out;
   }
 
@@ -334,6 +408,8 @@ export class Home {
     }
     const waiting = open.filter((i) => i.id !== incident?.id).map((i) => i.id);
     if (waiting.length) blocks.push({ type: 'waiting', inbox: waiting });
+    const asked = this.asked().map((a) => a.id);
+    if (asked.length) blocks.push({ type: 'asked', messages: asked });
     const awaiting = this.awaitingIds();
     if (awaiting.length) blocks.push({ type: 'awaiting', tasks: awaiting });
     const active = this.hq.projects().filter((p) => p.status === 'active').map((p) => p.id);
@@ -366,6 +442,9 @@ export class Home {
   observe(e: HqEvent): void {
     const d = (e.data ?? {}) as Record<string, unknown>;
     switch (e.type) {
+      // An answer came, or he read it: the list changes now, not at the next sweep.
+      case 'message.new': case 'message.state': if (d.from === OWNER || d.to === OWNER || d.from_identity === OWNER || d.to_identity === OWNER) this.askedSoon(); return;
+      case 'conv.read': this.askedSoon(); return;
       case 'task.state': {
         const t = typeof d.id === 'number' ? this.taskLine(d.id) : undefined;
         if (!t) return;
@@ -435,6 +514,7 @@ export class Home {
     const board = this.hq.board();
     const working = board.filter((b) => b.status === 'working').map((b) => `${b.id} (${b.name})`);
     const projects = this.hq.projects().map((p) => `${p.id}${p.name ? ` (${p.name})` : ''}${p.status !== 'active' ? ` · ${p.status}` : ''}`);
+    const asked = this.asked().map((a) => `${a.id}: ${this.hq.mailbox.label(a.identity)} · ${a.state === 'answered' ? 'ענו' : 'מחכה'} · ${a.body.replace(/\s+/g, ' ').slice(0, 60)}`);
     const inbox = this.hq.inbox.open().map((i) => `${i.id}: ${i.kind}${i.blocking ? ' · חוסם' : ''}${i.snoozed_at ? ' · נדחה' : ''} · ${i.headline ?? i.title}`);
     return [
       `להרכיב מחדש את ראש מסך השיחות של רן (\`compose_home\`). מאז ההרכבה הקודמת${row ? ` (${this.hhmm(row.composed_at)})` : ''}:`,
@@ -443,6 +523,7 @@ export class Home {
       `מה מוצג עכשיו (${cur.source === 'agent' ? `מתכון ${cur.version}` : `ברירת המחדל${cur.fallback && cur.fallback !== 'none' ? `, ${cur.fallback}` : ''}`}):`,
       '```json', JSON.stringify(cur.blocks), '```',
       `inbox פתוח: ${inbox.length ? '' : 'אין'}`, ...inbox.map((l) => `- ${l}`),
+      `ביקשת (asked): ${asked.length ? '' : 'אין'}`, ...asked.map((l) => `- ${l}`),
       `פרויקטים: ${projects.join(', ') || 'אין'}`,
       `עובדים עכשיו: ${working.join(', ') || 'אף אחד'}`,
       'אם אין מה לשנות, לא צריך לקרוא לכלי. מתכון ישן מ-30 דקות מתחלף בברירת המחדל.',

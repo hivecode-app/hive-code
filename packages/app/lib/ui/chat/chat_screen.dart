@@ -22,8 +22,12 @@ class ChatScreen extends StatefulWidget {
   /// A quote (or just "focus the composer") handed over by home/notifications before opening.
   static final Map<String, Quote?> pendingQuote = {};
 
-  /// The question or GO to show when the conversation opens ("מחכה לך" leads to its message): an askId.
+  /// What to show when the conversation opens: a question or GO by its askId ("מחכה לך" leads to its message),
+  /// or a message by its id ("ביקשת" leads to the answer).
   static final Map<String, String> pendingTarget = {};
+
+  /// The start of that message, for when it is on screen under another id (an answer that streamed in).
+  static final Map<String, String> pendingTargetText = {};
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -79,14 +83,40 @@ class _ChatScreenState extends State<ChatScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) => focus.requestFocus());
     }
     final target = ChatScreen.pendingTarget.remove(widget.identityId);
+    final targetText = ChatScreen.pendingTargetText.remove(widget.identityId);
     if (target != null) {
       _target = target;
+      _targetText = targetText;
       _targetTries = 0;
     }
   }
 
-  /// The card to bring into view (an askId), until it is on screen.
+  /// The card or message to bring into view (an askId or a message id), until it is on screen.
   String? _target;
+  String? _targetText;
+
+  /// The id of the item [_target] found, as of the last build: the row that carries [targetKey].
+  String? _targetId;
+
+  /// The item [_target] names in the conversation now; the last one, when the text matches more than one.
+  String? _targetItem(Conversation chat) {
+    final t = _target;
+    if (t == null) return null;
+    final start = _targetText == null ? null : _snippet(_targetText!);
+    bool hit(ChatItem i) => switch (i) {
+          AskCard() => i.askId == t,
+          UserMsg() || TextMsg() => i.id == t || i.id == 'msg:$t',
+          _ => false,
+        };
+    bool byText(ChatItem i) => start != null && start.isNotEmpty && (i is TextMsg || i is UserMsg) && _snippet(_textOf(i)).startsWith(start);
+    return (chat.items.where(hit).lastOrNull ?? chat.items.where(byText).lastOrNull)?.id;
+  }
+
+  /// A message's start, spaces folded and an ellipsis dropped: what a cut copy (hq's 300) and the whole share.
+  static String _snippet(String s) {
+    final t = s.replaceAll(RegExp(r'\s+'), ' ').replaceAll(RegExp(r'…$'), '').trim();
+    return t.length > 60 ? t.substring(0, 60) : t;
+  }
   int _targetTries = 0;
   final targetKey = GlobalKey();
 
@@ -96,12 +126,12 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!mounted || _target == null) return;
     final c = targetKey.currentContext;
     if (c != null) {
-      _target = null;
+      setState(() => _target = null);
       Scrollable.ensureVisible(c, duration: const Duration(milliseconds: 250), alignment: 0.2);
       return;
     }
     if (++_targetTries > 40) {
-      _target = null;
+      setState(() => _target = null);
       return;
     }
     if (scroll.hasClients && scroll.position.maxScrollExtent > scroll.offset) {
@@ -209,7 +239,8 @@ class _ChatScreenState extends State<ChatScreen> {
     final autoQuote = answering == null
         ? null
         : Quote(author: d.who(answering.from).name, text: (answering.headline ?? answering.question).split('\n').first, itemId: answering.id, askId: answering.askId, go: answering is GoCard);
-    if (_target != null && chat.items.any((i) => i is AskCard && i.askId == _target)) {
+    _targetId = _targetItem(chat);
+    if (_targetId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _seekTarget());
     }
 
@@ -222,7 +253,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // Rows are built lazily: only what is on screen. With thousands of items, building every row
     // on each store change (every streaming token) was the main cost of a frame.
     final rows = _entries(chat);
-    _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, openAsk, openAllTools, _target]);
+    _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, openAsk, openAllTools, _targetId]);
     final selectedItem = selected == null ? null : chat.items.where((i) => i.id == selected).firstOrNull;
 
     final header = selectedItem != null
@@ -424,6 +455,7 @@ class _ChatScreenState extends State<ChatScreen> {
         child: w,
       );
     }
+    if (it.id == _targetId) w = KeyedSubtree(key: targetKey, child: w);
     if (it.id == hitId) {
       final k = GlobalKey();
       w = Container(key: k, color: p.accentSoft, child: w);
@@ -465,7 +497,7 @@ class _ChatScreenState extends State<ChatScreen> {
       TerminalCard() => TerminalCardView(card: it),
       PrCard() => PrCardView(card: it),
       AskCard() => KeyedSubtree(
-          key: _target != null && it.askId == _target ? targetKey : (identical(it, openAsk) ? askKey : null),
+          key: identical(it, openAsk) ? askKey : null,
           child: AskCardView(
             card: it,
             onOther: () {

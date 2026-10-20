@@ -19,6 +19,7 @@ import { noWorkers, readCharter } from './workspace.ts';
 import { getIdentity, isStandingWorker } from './org.ts';
 import { HandoffError } from './tab/handoffs.ts';
 import { HomeError } from './home.ts';
+import { waitingLine } from './mailbox.ts';
 import { FILE_MODES, memoryFilePath } from './memory-files.ts';
 
 const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home']);
@@ -126,8 +127,8 @@ export class Ingest {
           const t = this.hq.store.db.prepare(`SELECT id FROM tasks WHERE identity = ? AND state IN ('running','resting') ORDER BY updated_at DESC LIMIT 1`)
             .get(e.identity) as { id: number } | undefined;
           if (t && taskSummary(a.summary)) this.hq.store.db.prepare('UPDATE tasks SET summary = ? WHERE id = ?').run(taskSummary(a.summary), t.id);
-          if (t) this.hq.awaiting.mark(t.id, a, e.identity);
-          if (t) this.hq.store.bg(this.hq.scheduler.completeTask(t.id), 'task.complete');
+          // After its turn ends, and only if he isn't waiting for an answer from it (#118): else it stays open and hears why.
+          if (t) this.hq.store.bg(this.hq.scheduler.finishByWorker(t.id, e.identity, e.id, () => this.hq.awaiting.mark(t.id, a, e.identity)), 'task.complete');
           return { ok: true, id: e.id, result: { stored: true, task_done: t?.id ?? null } };
         }
         return { ok: true, id: e.id, result: { stored: true } };
@@ -178,15 +179,8 @@ export class Ingest {
         // nothing wakes it again. A team that isn't found or isn't the caller's to close is a 4xx with the reason.
         const team = need('team');
         const reason = s(a.reason);
-        const reject = (status: number, why: string, he: string): never => {
-          // MCP writes are acked locally ({queued:true}): the worker hears the rejection through its mailbox.
-          queueMicrotask(() => {
-            try {
-              mailbox.tell({ msg_id: `${e.id}-rejected`, from: 'hq', to: e.identity, kind: 'system', priority: 'now', ref: e.id, body: he });
-            } catch { /* best effort */ }
-          });
-          throw new IngestError(status, why);
-        };
+        // MCP writes are acked locally ({queued:true}): the caller hears the reason, in Hebrew, in its mailbox (rejected()).
+        const reject = (status: number, why: string, he: string): never => { throw new IngestError(status, why, he); };
         const { task: t, ambiguous } = this.hq.scheduler.findTeam(team);
         if (ambiguous) {
           const ids = ambiguous.map((x) => `t${x.id}`).join(', ');
@@ -195,6 +189,13 @@ export class Ingest {
         if (!t) reject(404, `close_team: no team ${team}`, `הצוות "${team}" לא נסגר: אין משימה כזו. אפשר לסגור לפי מזהה (t22), לפי ה-identity של העובד (lumo-t22) או לפי השם שלו.`);
         if (!this.hq.scheduler.canCloseTeam(t!, e.identity)) {
           reject(403, `close_team: ${e.identity} may not close task ${t!.id}`, `הצוות "${team}" (t${t!.id}) לא נסגר: רק מי שפתח אותו, המנהל שלו, המנהל של העובד (או ראש הפרויקט, כשאין מי שפתח) או ${this.hq.cfg.managerId} יכולים לסגור.`);
+        }
+        // He is still waiting for an answer from the worker (#118): a warning the closer may override with force.
+        const left = t!.state !== 'done' && t!.identity && a.force !== true ? mailbox.unanswered(t!.identity, t!.started_at ?? t!.created_at) : [];
+        if (left.length) {
+          reject(409, `close_team: the owner is waiting for an answer from ${t!.identity} (${left.map((m) => m.id).join(', ')})`,
+            `הצוות "${team}" (t${t!.id}) לא נסגר: ${waitingLine(left)} מ-${mailbox.label(t!.identity!)}. `
+            + 'כדאי שהעובד יענה לו קודם. אם בכל זאת לסגור, `close_team` שוב עם `force: true`.');
         }
         // The closer's line wins over the worker's: it is the last word, written for him.
         if (taskSummary(a.summary)) this.hq.store.db.prepare('UPDATE tasks SET summary = ? WHERE id = ?').run(taskSummary(a.summary), t!.id);
@@ -271,6 +272,26 @@ export class Ingest {
     } catch (x) {
       this.hq.store.emit('loop.error', null, { loop: 'op.rejected', error: x instanceof Error ? x.message : String(x) });
     }
+  }
+
+  /**
+   * status done waits for the worker's turn in memory (#118): one that an hq restart cut off is finished now. A task
+   * still running whose worker's latest status since it started is done, and that was not already sent back.
+   */
+  resumePendingDone(): number {
+    const rows = this.hq.store.db.prepare(`SELECT t.id AS task, t.identity, o.id, o.args FROM tasks t JOIN ops o ON o.identity = t.identity
+      AND o.op = 'status' AND o.received_at >= COALESCE(t.started_at, t.created_at)
+      WHERE t.state IN ('running','resting') AND t.identity IS NOT NULL
+        AND o.received_at = (SELECT MAX(received_at) FROM ops x WHERE x.identity = t.identity AND x.op = 'status')`).all() as
+      { task: number; identity: string; id: string; args: string }[];
+    let n = 0;
+    for (const r of rows) {
+      const a = JSON.parse(r.args) as Record<string, unknown>;
+      if ((a.state !== 'done' && a.state !== 'task_done') || this.hq.mailbox.get(`${r.id}-waiting`)) continue;
+      this.hq.store.bg(this.hq.scheduler.finishByWorker(r.task, r.identity, r.id, () => this.hq.awaiting.mark(r.task, a, r.identity)), 'task.complete');
+      n++;
+    }
+    return n;
   }
 
   /** open_ticket runs after its ack is stored; tickets acked before a crash but never opened are opened now. */
