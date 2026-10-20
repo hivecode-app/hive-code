@@ -51,7 +51,8 @@ class _LanesBlockState extends State<LanesBlock> {
   @override
   Widget build(BuildContext context) {
     final data = widget.data;
-    final span = data.now.difference(data.from).inMilliseconds.clamp(1, 1 << 52);
+    // Not `.clamp(1, 1 << 52)`: on the web `<<` is 32-bit, `1 << 52` is 0, and clamp throws (#148).
+    final span = math.max(1, data.now.difference(data.from).inMilliseconds);
     final scaler = MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.15);
     final nameStyle = T.meta.copyWith(fontWeight: FontWeight.w500);
     return Semantics(
