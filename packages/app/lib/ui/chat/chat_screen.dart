@@ -428,40 +428,12 @@ class _ChatScreenState extends State<ChatScreen> {
       ShiftMarker() => ServiceLine(
           icon: 'autorenew',
           text: 'משמרת ${it.shift} · קיבלה העברה ממשמרת ${it.from} · ${hm(it.ts)}',
-          onTap: () => _showHandoff(context, it),
         ),
       EventLine() => ServiceLine(text: it.text, icon: it.icon, strong: it.strong),
       HandoffCard() => HandoffCardView(card: it, from: widget.identityId),
       ErrorLine() => ServiceLine(text: it.text, icon: 'error', iconColor: context.p.urgent),
       UnknownItem() => ServiceLine(text: 'אירוע: ${it.kind}'),
     };
-  }
-
-  void _showHandoff(BuildContext context, ShiftMarker m) {
-    final p = context.p;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: p.surface,
-      showDragHandle: true,
-      builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('העברה ממשמרת ${m.from} למשמרת ${m.shift}', style: T.name.copyWith(color: p.text)),
-          const SizedBox(height: 10),
-          for (final (k, v) in [
-            ('מה נעשה', 'נמצא שהניסיון החוזר מיידי. אין חיוב כפול.'),
-            ('מה הוחלט', 'ניסיון שני אחרי 24 שעות.'),
-            ('הצעד הבא', 'לשנות את renew.go ולעדכן בדיקות.'),
-            ('מה פתוח', 'מה עושים עם מנויים שנדחו פעמיים.'),
-          ])
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text.rich(TextSpan(children: [TextSpan(text: '$k: ', style: const TextStyle(fontWeight: FontWeight.w700)), TextSpan(text: v)]),
-                  style: T.row2.copyWith(color: p.text)),
-            ),
-        ]),
-      ),
-    );
   }
 
   static String _dayLabel(DateTime d) {
@@ -563,11 +535,7 @@ class _ChatBar extends StatelessWidget {
           itemBuilder: (_) => [
             for (final (v, t) in [
               ('search', 'חיפוש בשיחה'),
-              ('shift', 'משמרת חדשה'),
               ('stop', 'עצירה'),
-              ('mute', 'השתקה'),
-              ('page', 'תצוגת דף'),
-              ('yoav', 'העברה ליואב'),
               ('tools', 'פתיחת כל הכלים'),
             ])
               PopupMenuItem(value: v, child: Text(t, style: T.body.copyWith(color: p.text))),
@@ -585,7 +553,6 @@ class _ChatBar extends StatelessWidget {
       ('ממונה', team?.leadId != null && team!.leadId != who.id ? d.who(team!.leadId!).name : 'יואב'),
       if (who.taskRef != null) ('משימה', '`${who.taskRef}`'),
       if (pr.shift != null) ('משמרת', '${pr.shift}${pr.shiftSince != null ? ' · מ-${pr.shiftSince}' : ''}'),
-      ('מודל', '`claude-opus-5-5`'),
       if (pr.contextPct != null) ('הקשר', '${pr.contextPct}%'),
       ('מחשב', '`hq-host`'),
     ];

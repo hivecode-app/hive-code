@@ -127,7 +127,7 @@ void main() {
   testWidgets('sign-in golden, and fingerprint login hands the session up', (tester) async {
     final hq = FakeHq();
     Session? got;
-    await pumpScreen(tester, SignInScreen(client: AuthClient(base, client: hq.client, passkeys: FakePasskeys()), onSignedIn: (s) => got = s, onDemo: () {}));
+    await pumpScreen(tester, SignInScreen(client: AuthClient(base, client: hq.client, passkeys: FakePasskeys()), onSignedIn: (s) => got = s));
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/sign_in_light.png'));
     await tester.tap(find.text('כניסה עם טביעת אצבע'));
     await tester.pumpAndSettle();

@@ -1,8 +1,7 @@
-// "עוד" → settings (APP-SPEC §4.8): data source, devices, focus, appearance, version. Stripe-style pairs.
+// "עוד" → settings (APP-SPEC §4.8): server and sign-out, devices, focus, appearance, version. Stripe-style pairs.
 // Signing in is a passkey or a pairing code (#23); hq's own token is never entered on a device.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/backend.dart';
 import '../../data/backend_select.dart';
@@ -27,9 +26,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? note;
   bool busy = false;
 
-  /// Leaving the real company on this device (demo, or back to sign-in) revokes its token in hq
-  /// first, so no live token is left behind in the devices list (#23).
-  Future<void> _leave({required bool demo}) async {
+  /// Signing this device out revokes its token in hq first, so no live token is left behind in the
+  /// devices list (#23).
+  Future<void> _leave() async {
     setState(() => busy = true);
     try {
       final s = await savedSession();
@@ -46,14 +45,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
       await clearSession();
-      final p = await SharedPreferences.getInstance();
-      if (demo) {
-        await p.setBool(kDemo, true);
-      } else {
-        await p.remove(kDemo);
-      }
       await kGlue?.syncConfig();
-      if (mounted) setState(() => note = demo ? 'בפתיחה הבאה האפליקציה תציג את ההדגמה.' : 'בפתיחה הבאה האפליקציה תבקש כניסה.');
+      // Back to sign-in now: the running link would otherwise go on with a token that is gone.
+      final out = kSignOut;
+      if (out != null) {
+        out('המכשיר יצא מהחברה. אפשר להיכנס שוב.');
+      } else if (mounted) {
+        setState(() => note = 'המכשיר יצא מהחברה. בפתיחה הבאה האפליקציה תבקש כניסה.');
+      }
+    } catch (_) {
+      if (mounted) setState(() => note = 'היציאה לא הושלמה. אפשר לנסות שוב.');
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -77,14 +78,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListView(padding: EdgeInsets.zero, children: [
               const Section('שרת', top: 8),
               ListBlock(inset: 16, children: [
-                pair('מקור הנתונים', Text(store.backend.label, style: T.row2.copyWith(color: p.text))),
+                pair('כתובת', Text(store.backend.label, textDirection: TextDirection.ltr, style: T.row2.copyWith(color: p.text))),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                      Btn('הדגמה', onTap: busy ? null : () => _leave(demo: true)),
-                      Btn('חברה אמיתית', onTap: busy ? null : () => _leave(demo: false)),
-                    ]),
+                    Align(alignment: AlignmentDirectional.centerStart, child: Btn('יציאה מהמכשיר הזה', onTap: busy || note != null ? null : _leave)),
                     if (note != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(note!, style: T.secondary.copyWith(color: p.text))),
                   ]),
                 ),
@@ -105,10 +103,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                     child: Wrap(spacing: 8, runSpacing: 8, children: [
                       Btn('הרשאת התראות', onTap: () => NativeBridge.instance.requestNotificationPermission()),
-                      Btn('התראות לדוגמה', onTap: () async {
-                        final ok = await NativeBridge.instance.showDemoNotifications();
-                        if (!ok) await NativeBridge.instance.requestNotificationPermission();
-                      }),
                       Btn('פטור מחיסכון בסוללה', onTap: () => NativeBridge.instance.requestBatteryExemption()),
                     ]),
                   ),

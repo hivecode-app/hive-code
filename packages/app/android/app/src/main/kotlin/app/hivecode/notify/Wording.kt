@@ -31,7 +31,7 @@ object Wording {
 
     fun countdown(name: String, seconds: Int): String = "יישלח ${to(name)} בעוד $seconds שנ'"
 
-    fun sent(name: String, demo: Boolean): String = "נשלח ${to(name)}" + if (demo) " (הדגמה)" else ""
+    fun sent(name: String): String = "נשלח ${to(name)}"
 
     const val SENDING = "שולח"
 

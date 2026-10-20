@@ -48,16 +48,6 @@ class Prefs(context: Context) {
     var boardJson: String? by string(K_BOARD)
     var togglesJson: String? by string(K_TOGGLES)
 
-    /** Demo item ids still waiting (negative). Empty = no demo running. */
-    var demoRemaining: Set<Long>
-        get() = longs(K_DEMO)
-        set(v) = putLongs(K_DEMO, v)
-
-    /** When the demo was started, so demo message times stay put across re-posts. */
-    var demoStartedAt: Long
-        get() = p.getLong(K_DEMO_AT, 0L)
-        set(v) = p.edit { putLong(K_DEMO_AT, v) }
-
     /** Items the owner swiped away. Dismissing is not an answer, but we do not re-post them either. */
     var dismissed: Set<Long>
         get() = longs(K_DISMISSED)
@@ -108,8 +98,6 @@ class Prefs(context: Context) {
         const val K_ASKS = "asks_json"
         const val K_BOARD = "board_json"
         const val K_TOGGLES = "toggles_json"
-        const val K_DEMO = "demo_remaining"
-        const val K_DEMO_AT = "demo_started_at"
         const val K_DISMISSED = "dismissed"
         const val K_ALERTED = "alerted"
         const val K_SNOOZE = "snoozed"

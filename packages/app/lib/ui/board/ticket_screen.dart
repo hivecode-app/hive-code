@@ -17,8 +17,6 @@ class TicketScreen extends StatefulWidget {
 }
 
 class _TicketScreenState extends State<TicketScreen> {
-  bool nightReady = false;
-
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
@@ -51,7 +49,6 @@ class _TicketScreenState extends State<TicketScreen> {
           const SizedBox(height: 14),
           Wrap(spacing: 8, runSpacing: 8, children: [
             if (who != null) Btn('לשיחה עם ${who.name}', kind: BtnKind.primary, onTap: () => Nav.chat(context, who.id)),
-            Btn(nightReady ? 'מוכן ללילה · כן' : 'מוכן ללילה', icon: nightReady ? 'check' : null, onTap: () => setState(() => nightReady = !nightReady)),
           ]),
         ]),
       ),

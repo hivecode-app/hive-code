@@ -6,8 +6,9 @@
 # (its own port), never a phone that happens to be plugged in.
 #
 # Steps (one per line; blank lines and # comments are skipped):
-#   tap X Y | swipe X1 Y1 X2 Y2 MS | text WORDS (letters, digits, spaces) | key BACK|ENTER|...
+#   tap X Y | swipe X1 Y1 X2 Y2 MS | text WORDS (letters, digits, spaces, -) | key BACK|ENTER|...
 #   sleep MS | shot NAME | rotate 0|1 | dark on|off | start | stop | record NAME SECONDS | pull NAME
+#   logcat NAME (the device log so far, saved as NAME.txt)
 # Coordinates are device pixels (1080x2400).
 # Usage: tool/qa/emu_session.sh <name> <steps file> [--no-build]
 set -euo pipefail
@@ -65,7 +66,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     swipe) adb shell input swipe "${a[1]}" "${a[2]}" "${a[3]}" "${a[4]}" "${a[5]:-300}" </dev/null ;;
     text)
       words="${line#*text }"
-      [[ "$words" =~ ^[A-Za-z0-9\ ]+$ ]] || { echo "text: letters, digits and spaces only"; continue; }
+      [[ "$words" =~ ^[A-Za-z0-9\ -]+$ ]] || { echo "text: letters, digits, spaces and - only"; continue; }
       adb shell input text "${words// /%s}" </dev/null ;;
     key) if [[ "${a[1]:-}" =~ ^[A-Z_0-9]+$ ]]; then adb shell input keyevent "KEYCODE_${a[1]}" </dev/null; else echo "bad step: $line"; fi ;;
     sleep) if [[ "${a[1]:-}" =~ ^[0-9]+$ ]]; then sleep "$(awk -v ms="${a[1]}" 'BEGIN{print ms/1000}')"; else echo "bad step: $line"; fi ;;
@@ -74,6 +75,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     dark) if [[ "${a[1]:-}" =~ ^(on|off)$ ]]; then adb shell cmd uimode night "$([[ "${a[1]}" == on ]] && echo yes || echo no)" </dev/null; else echo "bad step: $line"; fi ;;
     record) if [[ "${a[1]:-}" =~ ^[A-Za-z0-9._-]+$ && "${a[2]:-}" =~ ^[0-9]+$ ]]; then adb shell screenrecord --time-limit "${a[2]}" "/sdcard/${a[1]}.mp4" </dev/null & sleep 0.5; else echo "bad step: $line"; fi ;;
     pull) if [[ "${a[1]:-}" =~ ^[A-Za-z0-9._-]+$ ]]; then sleep 1; adb pull "/sdcard/${a[1]}.mp4" "$out/${a[1]}.mp4" </dev/null >/dev/null; else echo "bad step: $line"; fi ;;
+    logcat) if [[ "${a[1]:-}" =~ ^[A-Za-z0-9._-]+$ ]]; then adb logcat -d </dev/null > "$out/${a[1]}.txt" 2>&1 || true; else echo "bad step: $line"; fi ;;
     *) echo "unknown step: $cmd" ;;
   esac
 done < "$run/steps"

@@ -47,7 +47,7 @@ class NativeGlue {
   }
 
   /// Hands the hq address and this device's token to the native side, so notifications, the
-  /// widget and the tiles work without Flutter running. Not signed in (or demo): native is
+  /// widget and the tiles work without Flutter running. Not signed in: native is
   /// cleared. Only calls configure when native is unconfigured or holds something else. Call it
   /// again after settings change.
   Future<void> syncConfig() async {
@@ -57,8 +57,8 @@ class NativeGlue {
       final p = await SharedPreferences.getInstance();
       final url = (p.getString(kHqUrl) ?? '').trim();
       final token = (p.getString(kHqToken) ?? '').trim();
-      // Demo or signed out: native stays unconfigured, so nothing real is posted.
-      if (url.isEmpty || token.isEmpty || p.getBool(kDemo) == true) {
+      // Signed out: native stays unconfigured, so nothing is posted.
+      if (url.isEmpty || token.isEmpty) {
         if (await b.getConfig() != null) await b.clearConfig();
         return;
       }

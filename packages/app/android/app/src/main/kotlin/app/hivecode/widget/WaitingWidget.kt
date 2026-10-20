@@ -51,7 +51,7 @@ class WaitingWidget : AppWidgetProvider() {
                 v.setViewVisibility(R.id.widget_top_name, View.GONE)
                 v.setTextViewText(
                     R.id.widget_top_line,
-                    if (!prefs.isConfigured && prefs.demoRemaining.isEmpty()) "לא מחובר לחברה. נגיעה לפתיחה." else Wording.summary(0),
+                    if (!prefs.isConfigured) "לא מחובר לחברה. נגיעה לפתיחה." else Wording.summary(0),
                 )
             }
             v.setOnClickPendingIntent(R.id.widget_root, NotificationPoster.openApp(context, "/", null))

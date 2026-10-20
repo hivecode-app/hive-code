@@ -139,8 +139,4 @@ class NativeBridge {
 
   /// The in-app waiting counter is the source of truth for the launcher badge (APP-SPEC §5.6).
   Future<void> setWaitingCount(int count) => _call<void>('setWaitingCount', {'count': count});
-
-  /// Posts the four notifications of mockup screen 9 with local data. Their buttons run the full
-  /// undo flow without the network. Returns whether notifications are allowed.
-  Future<bool> showDemoNotifications() async => await _call<bool>('showDemoNotifications') ?? false;
 }

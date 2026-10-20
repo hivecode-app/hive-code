@@ -39,6 +39,7 @@ const Map<String, IconData> kIcons = {
   'call_merge': Symbols.call_merge_rounded,
   'checklist': Symbols.checklist_rounded,
   'content_copy': Symbols.content_copy_rounded,
+  'content_paste': Symbols.content_paste_rounded,
   'forward': Symbols.forward_rounded,
   'attach_file': Symbols.attach_file_rounded,
   'photo_camera': Symbols.photo_camera_rounded,

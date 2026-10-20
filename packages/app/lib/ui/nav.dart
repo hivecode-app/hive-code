@@ -72,7 +72,7 @@ class Nav {
   }
 
   /// A real handoff (hq gave a link) opens the phone page in the browser, as the bet6 spike had it;
-  /// "סיימתי" there wakes the worker. The in-app screen stays for demo mode.
+  /// "סיימתי" there wakes the worker. Without a link the in-app screen shows the request and a code field.
   static void handoff(BuildContext context, WaitItem item) {
     final link = item.link;
     if (link != null) {

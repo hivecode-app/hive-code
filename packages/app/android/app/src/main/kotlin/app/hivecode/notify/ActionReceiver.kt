@@ -91,7 +91,7 @@ class ActionReceiver : BroadcastReceiver() {
         // Inexact is fine for "in an hour" and needs no exact-alarm permission.
         am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, until, snoozeEndIntent(app, call.itemId))
         thread(name = "company-snooze") {
-            if (!call.demo) try { HqClient.from(app)?.inboxAck(call.itemId) } catch (_: Exception) {}
+            try { HqClient.from(app)?.inboxAck(call.itemId) } catch (_: Exception) {}
             HqSync.refresh(app, fetch = false) { async.finish() }
         }
     }

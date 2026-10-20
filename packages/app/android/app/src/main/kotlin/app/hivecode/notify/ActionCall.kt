@@ -27,8 +27,6 @@ data class ActionCall(
     /** Idempotency key for a tell, created once when the send starts and reused by "ניסיון נוסף". */
     val msgId: String? = null,
 ) {
-    val demo: Boolean get() = itemId < 0
-
     /** What the countdown and result lines show: "GO לפרודקשן: לומו 1.1.20", the option, the typed text. */
     val subject: String get() = Bidi.display(ActionPlanner.subject(op, label, answer, title, body))
 

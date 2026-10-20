@@ -1,22 +1,22 @@
 // The one place that picks the backend.
 //   1. hq address + token saved on this device (its own device token, #23) -> HqBackend.
-//   2. "הדגמה" chosen in settings or on the sign-in screen, or ?demo in the web URL -> FakeBackend.
-//   3. Otherwise, when there is a real hq next to the app (on the web <app path>/hq on the same
-//      origin; on Android the HQ_URL baked in at build time): null, and the app shows the sign-in
-//      screen (passkey or pairing code). No token ships inside the app; hq's own token stays on the server.
-// Tests construct FakeBackend directly.
+//   2. Otherwise null, and the app shows the sign-in screen (passkey or pairing code) against the
+//      hq next to it (on the web <app path>/hq on the same origin; on Android the HQ_URL baked in
+//      at build time). No token ships inside the app; hq's own token stays on the server.
+// There is no demo mode (#53): FakeBackend lives for tests only and never reaches a release build.
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'auth_client.dart';
 import 'backend.dart';
-import 'fake_backend.dart';
 import 'hq_backend.dart';
 
 const kHqUrl = 'hq.url';
 const kHqToken = 'hq.token';
-const kDemo = 'demo';
 const kBuiltInHqUrl = String.fromEnvironment('HQ_URL');
+
+/// Set by the running app: back to the sign-in screen now, with [note] on it (settings → "יציאה").
+void Function(String note)? kSignOut;
 
 /// The backend to open with, or null when this device still has to sign in.
 Future<Backend?> selectBackend() async {
@@ -25,9 +25,8 @@ Future<Backend?> selectBackend() async {
     await followGateway(p);
     final url = p.getString(kHqUrl), token = p.getString(kHqToken);
     if (url != null && url.isNotEmpty && token != null && token.isNotEmpty) return HqBackend(baseUrl: url, token: token);
-    if (p.getBool(kDemo) == true || Uri.base.queryParameters.containsKey('demo')) return FakeBackend();
   } catch (_) {}
-  return gatewayUrl().isNotEmpty ? null : FakeBackend();
+  return null;
 }
 
 /// The saved session, if this device is signed in.
@@ -57,7 +56,7 @@ Future<void> saveSession(Session s) async {
   final p = await SharedPreferences.getInstance();
   await p.setString(kHqUrl, s.baseUrl);
   await p.setString(kHqToken, s.token);
-  await p.remove(kDemo);
+  await p.remove('demo'); // left by builds that still had a demo mode
 }
 
 Future<void> clearSession() async {

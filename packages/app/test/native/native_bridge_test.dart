@@ -46,13 +46,11 @@ void main() {
           'notificationsEnabled' => false,
           'requestNotificationPermission' => true,
           'requestBatteryExemption' => false,
-          'showDemoNotifications' => true,
           _ => null,
         });
     expect(await bridge.notificationsEnabled(), isFalse);
     expect(await bridge.requestNotificationPermission(), isTrue);
     expect(await bridge.requestBatteryExemption(), isFalse);
-    expect(await bridge.showDemoNotifications(), isTrue);
     await bridge.setWaitingCount(4);
     expect(calls.last.method, 'setWaitingCount');
     expect(calls.last.arguments, {'count': 4});
@@ -110,7 +108,6 @@ void main() {
     await bridge.configure(baseUrl: 'https://x', token: 'y');
     expect(await bridge.notificationsEnabled(), isTrue);
     expect(await bridge.requestBatteryExemption(), isTrue);
-    expect(await bridge.showDemoNotifications(), isFalse);
     expect(calls, isEmpty);
   });
 }

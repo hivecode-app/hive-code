@@ -302,7 +302,7 @@ object NotificationPoster {
                 .setContentText(Wording.SENDING)
                 .setProgress(0, 0, true)
                 .setOngoing(true)
-            UndoState.Sent -> b.setContentTitle(Wording.sent(call.name, call.demo))
+            UndoState.Sent -> b.setContentTitle(Wording.sent(call.name))
                 .setContentText(call.subject)
                 // Safety net if the process dies before PendingSends removes it.
                 .setTimeoutAfter(UndoMachine.SENT_VISIBLE_MS + 1000)

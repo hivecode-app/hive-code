@@ -100,22 +100,12 @@ object PendingSends {
         pending.remove(p.call.notifId)
         setBusy(p.call.notifId, false)
         p.async?.finish(); p.async = null
-        if (sent) {
-            NotificationManagerCompat.from(app).cancel(p.call.notifId)
-            if (p.call.demo && resolvesItem(p.call.op)) {
-                val prefs = Prefs(app)
-                prefs.demoRemaining = prefs.demoRemaining - p.call.itemId
-            }
-        }
-        // Sent on hq: fetch again (the item is resolved there now). Cancelled or demo: redraw from the cache.
-        HqSync.refresh(app, fetch = sent && !p.call.demo)
+        if (sent) NotificationManagerCompat.from(app).cancel(p.call.notifId)
+        // Sent on hq: fetch again (the item is resolved there now). Cancelled: redraw from the cache.
+        HqSync.refresh(app, fetch = sent)
     }
 
     private fun perform(app: Context, call: ActionCall, isRetry: Boolean) {
-        if (call.demo) {
-            Thread.sleep(600) // let the "שולח" state be seen, like a real round trip
-            return
-        }
         val hq = HqClient.from(app) ?: throw HqError(Wording.ERR_NOT_CONFIGURED)
         when (call.op) {
             Op.ANSWER, Op.REPLY_ASK -> try {

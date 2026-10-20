@@ -8,11 +8,9 @@ import '../../theme/tokens.dart';
 import '../common.dart';
 
 class SignInScreen extends StatefulWidget {
-  const SignInScreen({super.key, required this.client, required this.onSignedIn, this.onDemo, this.note, this.pairCode});
+  const SignInScreen({super.key, required this.client, required this.onSignedIn, this.note, this.pairCode});
   final AuthClient client;
   final ValueChanged<Session> onSignedIn;
-  final VoidCallback? onDemo;
-
   /// Why we are here, e.g. "המכשיר הזה נותק".
   final String? note;
 
@@ -141,11 +139,6 @@ class _SignInScreenState extends State<SignInScreen> {
                       const SizedBox(width: 6),
                       Expanded(child: Text(error!, style: T.secondary.copyWith(color: p.text))),
                     ]),
-                  ),
-                if (widget.onDemo != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
-                    child: Align(alignment: AlignmentDirectional.centerStart, child: LinkText('הצגת הדגמה, בלי חיבור', onTap: widget.onDemo)),
                   ),
               ]),
             ),

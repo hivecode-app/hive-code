@@ -1,6 +1,7 @@
-// Tab handoff (APP-SPEC §9, mockup screen 8): only the site's page at phone size, the domain from
-// the server's browser (not editable), the SMS code offered by the keyboard, and three exits.
-// The page itself is the worker's tab drawn from the screencast; in demo mode it is the mockup's page.
+// Tab handoff (APP-SPEC §9, mockup screen 8): what the worker needs on a site, the domain from the
+// server's browser (not editable), a code field the SMS autofill can fill, and three exits.
+// The live page from the worker's tab comes with #50; until then the screen shows the request
+// itself, and the code goes to the worker (or answers the ask, when the item is one).
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -23,6 +24,8 @@ class _HandoffScreenState extends State<HandoffScreen> {
   final code = TextEditingController();
   final focus = FocusNode();
   bool thanks = false;
+  bool busy = false;
+  String? error;
   Timer? _close;
 
   @override
@@ -30,7 +33,7 @@ class _HandoffScreenState extends State<HandoffScreen> {
     super.initState();
     code.addListener(() {
       setState(() {});
-      if (code.text.length == 6) _done();
+      if (code.text.length == 6 && RegExp(r'^\d{6}$').hasMatch(code.text)) _send();
     });
   }
 
@@ -40,6 +43,30 @@ class _HandoffScreenState extends State<HandoffScreen> {
     code.dispose();
     focus.dispose();
     super.dispose();
+  }
+
+  /// The code goes where the request came from: the ask's answer, or a message to the worker.
+  Future<void> _send() async {
+    final c = code.text.trim();
+    if (busy || thanks || c.isEmpty) return;
+    final store = StoreScope.read(context);
+    final item = widget.item;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    final r = item.askId != null
+        ? await store.backend.freeAnswer(item.askId!, c)
+        : await store.backend.send(item.from, UserMsg(id: 'm-${DateTime.now().millisecondsSinceEpoch}', ts: DateTime.now(), text: c));
+    if (!mounted) return;
+    if (!r.ok) {
+      setState(() {
+        busy = false;
+        error = r.error;
+      });
+      return;
+    }
+    _done();
   }
 
   void _done() {
@@ -58,6 +85,7 @@ class _HandoffScreenState extends State<HandoffScreen> {
     final p = context.p;
     final store = StoreScope.of(context);
     final who = store.data!.who(widget.item.from);
+    final domain = widget.item.domain;
     return Scaffold(
       backgroundColor: p.surface,
       resizeToAvoidBottomInset: true,
@@ -71,13 +99,13 @@ class _HandoffScreenState extends State<HandoffScreen> {
                 Row(children: [
                   IBtn('close', tip: 'סגירה', onTap: () => Navigator.of(context).maybePop()),
                   const SizedBox(width: 4),
-                  Expanded(child: Text('${who.name} · קוד אימות', style: TextStyle(fontFamily: kFont, fontSize: 16, fontWeight: FontWeight.w700, color: p.text))),
+                  Expanded(child: Text('${who.name} · כניסה לאתר', style: TextStyle(fontFamily: kFont, fontSize: 16, fontWeight: FontWeight.w700, color: p.text))),
                 ]),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Row(children: [
-                    Semantics(
-                      label: 'הדומיין מהדפדפן של השרת: ${widget.item.domain}',
+                if (domain != null && domain.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Semantics(
+                      label: 'הדומיין מהדפדפן של השרת: $domain',
                       child: Container(
                         height: 26,
                         padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -85,22 +113,73 @@ class _HandoffScreenState extends State<HandoffScreen> {
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
                           Ic('lock', size: 15, fill: true, color: p.text),
                           const SizedBox(width: 4),
-                          Text(widget.item.domain ?? '', textDirection: TextDirection.ltr, style: T.mono(12).copyWith(color: p.text)),
+                          Flexible(child: Text(domain, textDirection: TextDirection.ltr, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.mono(12).copyWith(color: p.text))),
                         ]),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Text("בתוקף עוד 8 דק'", style: T.meta.copyWith(color: p.text2)),
-                  ]),
-                ),
+                  ),
               ]),
             ),
-            Expanded(child: _DemoSite(code: code, focus: focus)),
+            Expanded(
+              child: SelectionArea(
+                child: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 16), children: [
+                  Rich(widget.item.body, auto: true, style: T.body.copyWith(color: p.text)),
+                  const SizedBox(height: 20),
+                  Text('קוד', style: T.small.copyWith(color: p.text2, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    key: const Key('handoff-code'),
+                    controller: code,
+                    focusNode: focus,
+                    autofocus: true,
+                    textDirection: TextDirection.ltr,
+                    keyboardType: TextInputType.visiblePassword,
+                    autofillHints: const [AutofillHints.oneTimeCode],
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    onSubmitted: (_) => _send(),
+                    style: T.mono(16, w: FontWeight.w500).copyWith(color: p.text),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'קוד אימות או קוד מהאתר',
+                      hintTextDirection: TextDirection.rtl,
+                      hintStyle: T.body.copyWith(color: p.text3),
+                      filled: true,
+                      fillColor: p.surface2,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      suffixIcon: IconButton(
+                        tooltip: 'הדבקה',
+                        icon: Ic('content_paste', size: 20, color: p.text2),
+                        onPressed: () async {
+                          final t = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+                          if (t != null) code.text = t.trim();
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Btn(busy ? 'שולח…' : 'שליחת הקוד ל${who.name}', kind: BtnKind.primary, onTap: busy || code.text.trim().isEmpty ? null : _send),
+                  ),
+                  if (error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Ic('error', size: 18, color: p.urgent),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(error!, style: T.secondary.copyWith(color: p.text))),
+                      ]),
+                    ),
+                ]),
+              ),
+            ),
             Container(
               decoration: BoxDecoration(color: p.surface, border: Border(top: BorderSide(color: p.line))),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(children: [
-                Expanded(child: Btn('סיימתי', kind: BtnKind.primary, hpad: 8, onTap: _done)),
+                // A code typed and not sent yet goes first; "סיימתי" never drops it.
+                Expanded(child: Btn('סיימתי', hpad: 8, onTap: busy ? null : (code.text.trim().isEmpty ? _done : _send))),
                 const SizedBox(width: 8),
                 Expanded(child: Btn('לא עכשיו', hpad: 8, onTap: () {
                   store.notNow(widget.item);
@@ -131,81 +210,6 @@ class _HandoffScreenState extends State<HandoffScreen> {
               ),
             ),
         ]),
-      ),
-    );
-  }
-}
-
-/// The demo stand-in for the worker's tab (Mercury's 2FA page from the mockup), LTR like the site.
-class _DemoSite extends StatelessWidget {
-  const _DemoSite({required this.code, required this.focus});
-  final TextEditingController code;
-  final FocusNode focus;
-
-  @override
-  Widget build(BuildContext context) {
-    const ink = Color(0xFF1D1D1F), grey = Color(0xFF5B5B60);
-    final digits = code.text.padRight(6).characters.toList();
-    return Container(
-      color: Colors.white,
-      width: double.infinity,
-      child: Directionality(
-        textDirection: TextDirection.ltr,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(22, 24, 22, 24),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('mercury', style: TextStyle(fontFamily: kFont, fontWeight: FontWeight.w700, fontSize: 15, letterSpacing: 0.4, color: ink)),
-            const SizedBox(height: 30),
-            const Text('Check your phone', style: TextStyle(fontFamily: kFont, fontWeight: FontWeight.w700, fontSize: 21, color: ink)),
-            const SizedBox(height: 6),
-            const Text('Enter the 6-digit code we sent to (•••) •••-4417.', style: TextStyle(fontFamily: kFont, fontSize: 14, color: grey)),
-            const SizedBox(height: 22),
-            GestureDetector(
-              onTap: () => focus.requestFocus(),
-              child: Stack(children: [
-                Row(children: [
-                  for (var i = 0; i < 6; i++)
-                    Container(
-                      width: 38,
-                      height: 46,
-                      margin: const EdgeInsets.only(right: 7),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: i == code.text.length.clamp(0, 5) || digits[i].trim().isNotEmpty ? ink : const Color(0xFFC9C9CE), width: 1.5),
-                      ),
-                      child: Text(digits[i], style: T.mono(20, w: FontWeight.w700).copyWith(color: ink)),
-                    ),
-                ]),
-                // The real input: one-time-code autofill lets Android offer the SMS code above the keyboard.
-                Positioned.fill(
-                  child: Opacity(
-                    opacity: 0,
-                    child: TextField(
-                      controller: code,
-                      focusNode: focus,
-                      autofocus: true,
-                      maxLength: 6,
-                      keyboardType: TextInputType.number,
-                      autofillHints: const [AutofillHints.oneTimeCode],
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(counterText: '', border: InputBorder.none),
-                    ),
-                  ),
-                ),
-              ]),
-            ),
-            const SizedBox(height: 14),
-            Container(
-              height: 44,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(color: ink, borderRadius: BorderRadius.circular(8)),
-              child: const Text('Verify', style: TextStyle(fontFamily: kFont, color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14.5)),
-            ),
-            const SizedBox(height: 14),
-            const Text("Didn't get a code? Resend", style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: grey)),
-          ]),
-        ),
       ),
     );
   }

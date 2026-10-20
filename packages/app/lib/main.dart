@@ -4,7 +4,6 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'data/auth_client.dart';
 import 'data/backend.dart';
 import 'data/backend_select.dart';
-import 'data/fake_backend.dart';
 import 'data/hq_backend.dart';
 import 'data/store.dart';
 import 'native/native_bridge.dart';
@@ -44,6 +43,9 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void initState() {
     super.initState();
+    kSignOut = (note) {
+      if (mounted && store != null) _signOut(note);
+    };
     if (widget.initial != null) _open(widget.initial!);
   }
 
@@ -59,12 +61,12 @@ class _AuthGateState extends State<AuthGate> {
     if (b is HqBackend && b.unauthorized) _signOut();
   }
 
-  Future<void> _signOut() async {
+  Future<void> _signOut([String note = 'המכשיר הזה נותק מהחברה. אפשר להיכנס שוב.']) async {
     final s = store!;
     s.backend.removeListener(_watch);
     setState(() {
       store = null;
-      note = 'המכשיר הזה נותק מהחברה. אפשר להיכנס שוב.';
+      this.note = note;
     });
     await clearSession();
     await NativeBridge.instance.clearConfig();
@@ -75,12 +77,20 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Future<void> _signedIn(Session session) async {
-    await saveSession(session);
+    try {
+      await saveSession(session);
+    } catch (e) {
+      // Still open with the token in hand (#52: a broken prefs plugin used to drop the owner
+      // back on sign-in with no word); only the next cold start will ask again.
+      debugPrint('saveSession failed: $e');
+    }
+    if (!mounted) return;
     setState(() => _open(HqBackend(baseUrl: session.baseUrl, token: session.token)));
   }
 
   @override
   void dispose() {
+    kSignOut = null;
     final s = store;
     if (s != null) {
       s.backend.removeListener(_watch);
@@ -101,7 +111,6 @@ class _AuthGateState extends State<AuthGate> {
         note: note,
         pairCode: note == null ? pairCodeFromUrl() : null, // after a sign-out the link's code is spent
         onSignedIn: _signedIn,
-        onDemo: () => setState(() => _open(FakeBackend())),
       ),
     );
   }

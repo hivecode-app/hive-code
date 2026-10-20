@@ -33,8 +33,7 @@ class WordingAndMonogramTest {
 
     @Test fun undoTexts() {
         assertEquals("יישלח לדנה בעוד 3 שנ'", Wording.countdown("דנה", 3))
-        assertEquals("נשלח לדנה", Wording.sent("דנה", demo = false))
-        assertEquals("נשלח לעידו (הדגמה)", Wording.sent("עידו", demo = true))
+        assertEquals("נשלח לדנה", Wording.sent("דנה"))
         assertEquals("לא נשלח · אין חיבור לרשת. אפשר לנסות שוב.", Wording.failed(Wording.ERR_OFFLINE))
     }
 
@@ -62,10 +61,8 @@ class WordingAndMonogramTest {
         val c = ActionCall(Op.ANSWER, "ביטול המנוי מיד", 1234, -2, "ido", "עידו", "עידו · מפתח", "blocking", "local_shipping",
             ephemeral = true, askId = "ask-1", answer = "ביטול המנוי מיד")
         assertEquals(c, ActionCall.fromJson(c.toJson()))
-        assertTrue(c.demo)
         val noAsk = c.copy(op = Op.GO, itemId = 7, askId = null, answer = null)
         assertEquals(noAsk, ActionCall.fromJson(noAsk.toJson()))
-        assertFalse(noAsk.demo)
     }
 
     @Test fun parsesHqPayloads() {

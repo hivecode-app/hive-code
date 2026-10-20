@@ -1,5 +1,5 @@
 // QA driver for the web build in a private headless Chromium (never the owner's Chrome on :9222).
-// Usage: node pw.mjs <scenario> <outdir> [--demo] [--desktop] [--dark]
+// Usage: node pw.mjs <scenario> <outdir> [--desktop] [--dark] [--url=<base>]
 // Playwright lives outside the repo: PW_DIR (default ~/.local/state/agent-company/qa/pw).
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -12,14 +12,13 @@ const { chromium } = createRequire(path.join(pwDir, 'package.json'))('playwright
 const args = process.argv.slice(2);
 const scenario = args[0] || 'load';
 const out = args[1] || '/tmp/qa';
-const demo = args.includes('--demo');
 const desktop = args.includes('--desktop');
 const dark = args.includes('--dark');
 const local = args.find((a) => a.startsWith('--url='))?.slice(6);
 fs.mkdirSync(out, { recursive: true });
 
-const base = local || 'https://app.hq.example.com/';
-const url = base + (demo ? '?demo' : '');
+// The app is at the root since 20/10/2026 (hq at /hq). There is no demo mode (#53).
+const url = local || 'https://app.hq.example.com/';
 const vp = desktop ? { width: 1440, height: 900 } : { width: 412, height: 915 };
 
 // PROFILE=<dir>: a persistent profile of our own (keeps a paired QA device between runs). Never the

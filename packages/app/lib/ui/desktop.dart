@@ -332,7 +332,6 @@ class _ContextColumn extends StatelessWidget {
       h('משימה'),
       block([
         if (ticket != null) kv('טיקט', '${ticket.number} ${ticket.title.split(' ').take(2).join(' ')}'),
-        if (who.taskRef != null) kv('ענף', '`${who.taskRef}-renew-retry`'),
         if (presence?.shift != null) kv('משמרת', '${presence!.shift}${presence.shiftSince != null ? ' · מ-${presence.shiftSince}' : ''}'),
         if (presence?.contextPct != null) kv('הקשר', '${presence!.contextPct}%'),
         kv('מחשב', '`hq-host`'),
@@ -340,7 +339,7 @@ class _ContextColumn extends StatelessWidget {
       if (pr != null) ...[
         h('PR #${pr.number}'),
         block([
-          kv('CI', pr.ci == Check.ok ? "עבר · 4 דק'" : (pr.ci == Check.running ? 'רץ' : '—')),
+          kv('CI', pr.ci == Check.ok ? 'עבר' : (pr.ci == Check.running ? 'רץ' : '—')),
           kv('סקירה', pr.review == Check.ok ? 'עברה' : (pr.review == Check.running ? 'רצה' : '—')),
           kv('מיזוג', '${who.name} ממזג כשהכול עובר'),
         ]),

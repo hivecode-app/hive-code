@@ -116,10 +116,6 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
                 HqSync.setWaitingCount(ctx, call.argument<Int>("count") ?: 0)
                 result.success(null)
             }
-            "showDemoNotifications" -> {
-                HqSync.startDemo(ctx)
-                result.success(NotificationManagerCompat.from(ctx).areNotificationsEnabled())
-            }
             // A tab handoff link (B.9): the phone page opens in the browser, as the bet6 spike had it.
             "openUrl" -> {
                 val url = call.argument<String>("url").orEmpty()

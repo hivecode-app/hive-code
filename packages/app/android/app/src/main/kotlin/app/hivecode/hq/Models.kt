@@ -19,12 +19,9 @@ data class InboxItem(
     /** For kind=ask: the ask id. */
     val ref: String?,
     val createdAt: Long,
-    /** Local only (demo data): button label for GO, e.g. "GO לחזרה". hq items use plain "GO". */
+    /** Button label for GO, e.g. "GO לחזרה". hq items use plain "GO". */
     val goLabel: String? = null,
-) {
-    /** Demo items use negative ids so they can never collide with hq rows and never hit the network. */
-    val isDemo: Boolean get() = id < 0
-}
+)
 
 data class Ask(
     val id: String,
@@ -49,7 +46,7 @@ data class Identity(
     val shiftLive: Boolean,
 )
 
-/** Everything the notification surface needs at one moment, real hq data plus remaining demo items. */
+/** Everything the notification surface needs at one moment, from hq. */
 data class Snapshot(
     val items: List<InboxItem>,
     val asks: Map<String, Ask>,

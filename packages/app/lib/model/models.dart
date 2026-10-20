@@ -133,7 +133,7 @@ class WaitItem {
   final int? inboxId;
   final String? domain;
 
-  /// The one-time tab handoff link from hq (B.9); "פתיחה" goes there. Null in demo mode.
+  /// The one-time tab handoff link from hq (B.9); "פתיחה" goes there. Null when hq gave none.
   final String? link;
 
   /// What the collapsed row says after delivery ("GO נשלח · דנה מתחילה פריסה").
