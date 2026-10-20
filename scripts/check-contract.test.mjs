@@ -177,3 +177,19 @@ test('the starter kit carries nothing of the owner of this repo', () => {
   const r = spawnSync('grep', ['-rniE', 'רן|יואב|ran|hivecode', join(repo, 'starter')], { encoding: 'utf8' });
   assert.equal(r.stdout, '', r.stdout);
 });
+
+// A PR in the company's own repo is checked from its worktree: `npm run check:contract -- --home <path>`, which
+// reaches the script as `--home --home <path>`. The path wins over COMPANY_HOME and hq.config.json.
+test('--home <path> checks that path, also as npm passes it', () => {
+  const dir = copyStarter();
+  try {
+    edit(dir, 'company/org.yaml', 'name: מנהל החברה', 'name:');
+    const env = { ...process.env, HOME: join(dir, 'nohome'), COMPANY_HOME: join(repo, 'starter') };
+    for (const args of [['--home', dir], ['--home', '--home', dir]]) {
+      const r = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env });
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.match(r.stdout + r.stderr, new RegExp(`check:contract --home: ${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+      assert.match(r.stdout + r.stderr, /identity "manager" has no name/);
+    }
+  } finally { rmSync(dir, { recursive: true }); }
+});
