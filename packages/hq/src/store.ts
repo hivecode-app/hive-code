@@ -401,6 +401,11 @@ const MIGRATIONS: string[] = [
     flushed_at INTEGER NOT NULL
   );
   `,
+  // v16: registries (memory-registry.ts) land on main one commit each: the commit, and how the write ended.
+  `
+  ALTER TABLE memory_file_ops ADD COLUMN sha TEXT;        -- the commit on main; NULL when nothing was committed
+  ALTER TABLE memory_file_ops ADD COLUMN outcome TEXT;    -- committed | unchanged | conflict | invalid; NULL = the rolling PR
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

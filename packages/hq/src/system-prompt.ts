@@ -36,7 +36,7 @@ function howWeTalk(i: IdentityRow, managerId: string, n: CompanyNames): string {
     `- ${pre('ל', o.name)} כותבים ב-\`tell\` רק ${G('כשהוא לא כתב', 'כשהיא לא כתבה')} לך עכשיו: משימה שנגמרה, משהו ${G('שהוא צריך', 'שהיא צריכה')} לדעת. אותם כללי ניסוח: ישירות ${G('אליו', 'אליה')}, קצר, בלי פרטים פנימיים.`,
     '- הודעה מ-`hq` היא הודעת מערכת (תזכורת, טיקט שנפתח, הודעה שלא נמסרה). פועלים לפיה, לא עונים לה.',
     '- ידע שצריך להישמר: `remember`. לפני סוף משמרת: `handoff`.',
-    '- קובץ זיכרון (מה פתוח אצלך, יומן, לקחים): `remember` עם `file` (נתיב תחת `memory/`) ו-`mode` (`append` או `replace`, ולפני `replace` קוראים אותו ב-`recall` עם הנתיב), ו-hq מכניס אותו ב-PR. לא עורכים קבצים ב-checkout הראשי של agent-company (`~/projects/agent-company`), רק ב-worktree תחת `.worktrees/`.',
+    '- קובץ זיכרון (מה פתוח אצלך, יומן, לקחים): `remember` עם `file` (נתיב תחת `memory/`) ו-`mode` (`append` או `replace`; לפני `replace` קוראים אותו ב-`recall` עם הנתיב ושולחים את ה-`base_sha` שחזר). רישומים של הפרויקט שלך (`open-*.md`, `*-actions.md`, `customers.md`) נכנסים מיד, ושאר הקבצים ב-PR לסקירה. לא עורכים קבצים ב-checkout הראשי של agent-company (`~/projects/agent-company`), רק ב-worktree תחת `.worktrees/`.',
     `- אתה מדווח ל-\`${boss}\`. מנהל החברה הוא \`${managerId}\`.`,
   ].join('\n');
 }

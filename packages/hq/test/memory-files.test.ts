@@ -1,4 +1,5 @@
 // #115: `remember` with `file` → stored at once, then folded into one rolling PR from a temp worktree, never the checkout.
+// (Registries skip the PR: memory-registry.test.ts. The files here are the ones that still go through review.)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -51,7 +52,7 @@ test('flush: one rolling PR from a temp worktree, more commits while it is open,
   try {
     const { hq, clock } = env;
     mkdirSync(join(r.checkout, 'memory', 'projects', 'lumo-bot'), { recursive: true });
-    writeFileSync(join(r.checkout, 'memory', 'projects', 'lumo-bot', 'michal-actions.md'), '# יומן\n');
+    writeFileSync(join(r.checkout, 'memory', 'projects', 'lumo-bot', 'lessons.md'), '# יומן\n');
     git(r.checkout, 'add', '.'); git(r.checkout, 'commit', '--quiet', '-m', 'mem'); git(r.checkout, 'push', '--quiet', 'origin', 'HEAD:main');
 
     let prOpen: string | null = null;
@@ -71,9 +72,9 @@ test('flush: one rolling PR from a temp worktree, more commits while it is open,
 
     const add = (id: string, file: string, text: string, mode?: string) =>
       hq.ingest.op(entry({ scope: 'project', kind: 'fact', project: 'lumo-bot', file, text, ...(mode ? { mode } : {}) }, id, 'eli'));
-    add('e:1', 'memory/projects/lumo-bot/michal-actions.md', '- 20/10 הארכת מנוי לתחנה 12');
-    add('e:2', 'memory/projects/lumo-bot/open-michal.md', '# מה פתוח אצל מיכל\n\nכלום', 'replace');
-    add('e:3', 'memory/projects/lumo-bot/michal-actions.md', '- 20/10 זיכוי ללקוח');
+    add('e:1', 'memory/projects/lumo-bot/lessons.md', '- 20/10 הארכת מנוי לתחנה 12');
+    add('e:2', 'memory/projects/lumo-bot/decisions.md', '# מה פתוח אצל מיכל\n\nכלום', 'replace');
+    add('e:3', 'memory/projects/lumo-bot/lessons.md', '- 20/10 זיכוי ללקוח');
 
     assert.equal(hq.memoryFiles.due(), false, 'three updates, a minute old: not yet');
     clock.advance(FLUSH_AGE_MS);
@@ -82,8 +83,8 @@ test('flush: one rolling PR from a temp worktree, more commits while it is open,
 
     const show = (path: string) => git(r.checkout, 'show', `origin/${BRANCH}:${path}`);
     git(r.checkout, 'fetch', '--quiet', 'origin');
-    assert.equal(show('memory/projects/lumo-bot/michal-actions.md'), '# יומן\n- 20/10 הארכת מנוי לתחנה 12\n- 20/10 זיכוי ללקוח');
-    assert.equal(show('memory/projects/lumo-bot/open-michal.md'), '# מה פתוח אצל מיכל\n\nכלום');
+    assert.equal(show('memory/projects/lumo-bot/lessons.md'), '# יומן\n- 20/10 הארכת מנוי לתחנה 12\n- 20/10 זיכוי ללקוח');
+    assert.equal(show('memory/projects/lumo-bot/decisions.md'), '# מה פתוח אצל מיכל\n\nכלום');
     assert.equal(gh.filter((a) => a[1] === 'create').length, 1);
     assert.equal(hq.memoryFiles.pending().length, 0);
     assert.match(hq.mailbox.get('memory-files-e:1')!.body, /pull\/200/);
@@ -91,29 +92,29 @@ test('flush: one rolling PR from a temp worktree, more commits while it is open,
     // The checkout hq runs from is untouched: no file, no branch switch, no dirty tree.
     assert.equal(git(r.checkout, 'status', '--porcelain'), '');
     assert.equal(git(r.checkout, 'rev-parse', '--abbrev-ref', 'HEAD'), 'main');
-    assert.equal(readFileSync(join(r.checkout, 'memory', 'projects', 'lumo-bot', 'michal-actions.md'), 'utf8'), '# יומן\n');
+    assert.equal(readFileSync(join(r.checkout, 'memory', 'projects', 'lumo-bot', 'lessons.md'), 'utf8'), '# יומן\n');
     assert.equal(git(r.checkout, 'worktree', 'list').split('\n').length, 1);
 
     // Reading before a replace: the open PR's branch plus what still waits, through recall with the path.
-    add('e:3b', 'memory/projects/lumo-bot/michal-actions.md', '- 20/10 עוד אחת', 'append');
-    const seen = await hq.ingest.recallWithFiles({ identity: 'eli', shift: 'eli-1', query: 'memory/projects/lumo-bot/michal-actions.md' });
-    assert.equal(seen.items[0]!.ref, 'memory/projects/lumo-bot/michal-actions.md');
+    add('e:3b', 'memory/projects/lumo-bot/lessons.md', '- 20/10 עוד אחת', 'append');
+    const seen = await hq.ingest.recallWithFiles({ identity: 'eli', shift: 'eli-1', query: 'memory/projects/lumo-bot/lessons.md' });
+    assert.equal(seen.items[0]!.ref, 'memory/projects/lumo-bot/lessons.md');
     assert.equal(seen.items[0]!.text, '# יומן\n- 20/10 הארכת מנוי לתחנה 12\n- 20/10 זיכוי ללקוח\n- 20/10 עוד אחת\n');
     assert.equal(await hq.memoryFiles.current('memory/projects/none.md'), null);
     await hq.memoryFiles.flush();
 
     // PR still open: the next update is another commit on the same branch, no second PR.
-    add('e:4', 'memory/projects/lumo-bot/michal-actions.md', '- 21/10 עוד פעולה');
+    add('e:4', 'memory/projects/lumo-bot/lessons.md', '- 21/10 עוד פעולה');
     await hq.memoryFiles.flush();
     git(r.checkout, 'fetch', '--quiet', 'origin');
-    assert.match(show('memory/projects/lumo-bot/michal-actions.md'), /עוד אחת\n- 21\/10 עוד פעולה$/);
+    assert.match(show('memory/projects/lumo-bot/lessons.md'), /עוד אחת\n- 21\/10 עוד פעולה$/);
     assert.equal(gh.filter((a) => a[1] === 'create').length, 1);
     assert.match(hq.mailbox.get('memory-files-e:4')!.body, /^נוספו 1/);
 
     // main moves under the open PR (another file): the branch takes main in, and stays mergeable.
     writeFileSync(join(r.checkout, 'memory', 'other.md'), 'מ-main\n');
     git(r.checkout, 'add', '.'); git(r.checkout, 'commit', '--quiet', '-m', 'other'); git(r.checkout, 'push', '--quiet', 'origin', 'HEAD:main');
-    add('e:4b', 'memory/projects/lumo-bot/michal-actions.md', '- 21/10 אחרי main');
+    add('e:4b', 'memory/projects/lumo-bot/lessons.md', '- 21/10 אחרי main');
     await hq.memoryFiles.flush();
     git(r.checkout, 'fetch', '--quiet', 'origin');
     assert.equal(show('memory/other.md'), 'מ-main');
@@ -123,12 +124,12 @@ test('flush: one rolling PR from a temp worktree, more commits while it is open,
     git(r.checkout, 'merge', '--quiet', '--squash', `origin/${BRANCH}`);
     git(r.checkout, 'commit', '--quiet', '-m', 'squash'); git(r.checkout, 'push', '--quiet', 'origin', 'HEAD:main');
     prOpen = null;
-    add('e:5', 'memory/projects/lumo-bot/open-michal.md', '# מה פתוח אצל מיכל\n\nזיכוי לתחנה 3', 'replace');
+    add('e:5', 'memory/projects/lumo-bot/decisions.md', '# מה פתוח אצל מיכל\n\nזיכוי לתחנה 3', 'replace');
     await hq.memoryFiles.flush();
     git(r.checkout, 'fetch', '--quiet', 'origin');
     assert.equal(gh.filter((a) => a[1] === 'create').length, 2);
     assert.equal(git(r.checkout, 'rev-list', '--count', `origin/main..origin/${BRANCH}`), '1');
-    assert.equal(show('memory/projects/lumo-bot/open-michal.md'), '# מה פתוח אצל מיכל\n\nזיכוי לתחנה 3');
+    assert.equal(show('memory/projects/lumo-bot/decisions.md'), '# מה פתוח אצל מיכל\n\nזיכוי לתחנה 3');
   } finally { await env.cleanup(); r.cleanup(); }
 });
 

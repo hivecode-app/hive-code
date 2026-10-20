@@ -21,6 +21,7 @@ import { HandoffError } from './tab/handoffs.ts';
 import { HomeError } from './home.ts';
 import { waitingLine } from './mailbox.ts';
 import { FILE_MODES, memoryFilePath } from './memory-files.ts';
+import { blobSha, MAX_TEXT_BYTES, secretIn } from './memory-registry.ts';
 
 const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home']);
 
@@ -239,6 +240,8 @@ export class Ingest {
       }
       case 'remember': {
         // #115: `file` updates a memory file through hq (memory-files.ts), never by editing the main checkout.
+        // Routed here and only here: a `registry` the client sent is never trusted.
+        delete a.registry;
         if (a.file === undefined) return { ok: true, id: e.id, result: { stored: true } };
         const file = memoryFilePath(a.file);
         if (!file) throw new IngestError(400, `remember: file must be memory/<path>.md, got ${String(a.file)}`,
@@ -247,7 +250,28 @@ export class Ingest {
           throw new IngestError(400, `remember: mode must be append or replace`, '`mode` הוא `append` או `replace`');
         }
         need('text');
+        if (a.base_sha !== undefined && !(typeof a.base_sha === 'string' && /^[0-9a-f]{7,40}$/i.test(a.base_sha))) {
+          throw new IngestError(400, 'remember: base_sha must be a hex sha', '`base_sha` הוא ה-sha שחזר ב-`recall` עם הנתיב (40 תווים הקסדצימליים)');
+        }
+        const text = String(a.text);
+        if (Buffer.byteLength(text) > MAX_TEXT_BYTES) {
+          throw new IngestError(400, `remember: text is over ${MAX_TEXT_BYTES} bytes`, `הטקסט גדול מ-${MAX_TEXT_BYTES / 1024}KB`);
+        }
+        const secret = secretIn(text);
+        if (secret) {
+          throw new IngestError(400, `remember: text looks like a secret (${secret})`,
+            `בטקסט יש משהו שנראה כמו סוד (${secret}). סודות לא נכנסים לקבצי זיכרון: כותבים איפה הסוד שמור, לא את הסוד עצמו`);
+        }
         a.file = file;
+        const registry = this.hq.memoryFiles.registry;
+        if (registry.isRegistry(file)) {
+          const why = registry.refuse(e.identity, file);
+          if (why) throw new IngestError(403, `remember: ${file} is not a registry ${e.identity} may write`, why);
+          // Straight to main, through the one queue, right after this op is stored (same transaction, then a microtask).
+          a.registry = true;
+          queueMicrotask(() => this.hq.store.bg(registry.kick(), 'memory.registry'));
+          return { ok: true, id: e.id, result: { stored: true, file, commit: 'queued' } };
+        }
         return { ok: true, id: e.id, result: { stored: true, file, pr: 'pending' } };
       }
       default:
@@ -366,8 +390,10 @@ export class Ingest {
     const file = [r.query, ...strList(r.queries)].map(memoryFilePath).find((f): f is string => !!f);
     if (!file) return res;
     const text = await this.hq.memoryFiles.current(file);
+    // A registry also returns its base_sha, for a replace (memory-registry.ts); a file that does not exist yet has none.
+    const sha = text != null && this.hq.memoryFiles.registry.isRegistry(file) ? { base_sha: blobSha(text) } : {};
     if (text == null) return res;
-    return { ...res, items: [{ ref: file, scope: 'file', title: file, text, score: 100 }, ...res.items.filter((i) => i.ref !== file)] };
+    return { ...res, items: [{ ref: file, scope: 'file', title: file, text, score: 100, ...sha }, ...res.items.filter((i) => i.ref !== file)] };
   }
 
   /** For prime.json: the top record's full body (bet 9) plus the next refs as an index. */

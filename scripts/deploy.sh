@@ -148,7 +148,10 @@ cfg_get() { node -e 'const c = JSON.parse(require("fs").readFileSync(process.arg
 APP_URL="$(cfg_get auth.appUrl)" || fail "$HQ_CONFIG_SRC לא JSON תקין"
 API_URL="$(cfg_get apiUrl)"
 [[ -n "$APP_URL" && -n "$API_URL" ]] || fail "חסרים auth.appUrl או apiUrl ב-$HQ_CONFIG_SRC"
-if ((moved_checkout)); then say "ה-checkout עודכן מ-${prev_sha:0:7} ל-${sha:0:7} ($(git log -1 --format=%s | cut -c1-60))"; else say "ה-checkout כבר ב-origin/main (${sha:0:7})"; fi
+# Memory registries (packages/hq/src/memory-registry.ts) land on main by themselves, also while a GO waits: they are
+# pulled with the rest, but they are memory, not what this deploy brings, so the summary leaves them out.
+code_subject="$(git log -n1 --format=%s --invert-grep -E --grep='^Company-Memory-Registry: ' "$prev_sha..$sha")"
+if [[ -n "$code_subject" ]]; then say "ה-checkout עודכן מ-${prev_sha:0:7} ל-${sha:0:7} ($(cut -c1-60 <<<"$code_subject"))"; else say "ה-checkout כבר ב-origin/main (${sha:0:7})"; fi
 
 # ── checks ───────────────────────────────────────────────────────────────────
 # Before the first `all`, Caddy still has the hand-written blocks (open /dictate, old paths) and the

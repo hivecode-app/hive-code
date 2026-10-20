@@ -56,6 +56,8 @@ export interface RecallItem {
   title?: string;
   text: string;            // snippet
   score?: number;
+  /** A memory registry read by its path: what `remember` with `mode: replace` sends back as `base_sha`. */
+  base_sha?: string;
 }
 
 export interface RecallResponse {

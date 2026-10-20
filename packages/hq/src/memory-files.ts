@@ -3,11 +3,13 @@
 // file update into one rolling PR on `company/memory-updates`: a fresh branch from origin/main, or more commits on the
 // PR that is still open. It flushes when enough updates wait or the oldest has waited long enough, so at least daily.
 // The automation is `memory-files` in org.yaml; its owner gets the PR to review and merge.
+// Registries (open-*.md, *-actions.md, customers.md) skip the PR and land on main at once: memory-registry.ts.
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, normalize, resolve } from 'node:path';
 import type { Hq } from './hq.ts';
+import { MemoryRegistry } from './memory-registry.ts';
 
 export const AUTOMATION = 'memory-files';
 export const BRANCH = 'company/memory-updates';
@@ -56,10 +58,18 @@ export class MemoryFiles {
   run: Run;
   /** The company repository (company/ and memory/ live in it). */
   repoDir: string;
+  /** Registries: straight to main through one queue. */
+  readonly registry: MemoryRegistry;
   constructor(hq: Hq, run: Run = execRun, repoDir = resolve(hq.cfg.companyDir, '..')) {
     this.hq = hq;
     this.run = run;
     this.repoDir = repoDir;
+    const self = this;
+    this.registry = new MemoryRegistry(hq, {
+      get run() { return self.run; }, get repoDir() { return self.repoDir; },
+      fetch: () => this.fetch(), owner: () => this.owner(), enabled: () => this.enabled(),
+      notifyOwner: (key, body, priority) => this.notifyOwner(key, body, priority),
+    });
   }
 
   private get db() { return this.hq.store.db; }
@@ -75,6 +85,7 @@ export class MemoryFiles {
   pending(): Pending[] {
     const rows = this.db.prepare(`SELECT o.id, o.identity, o.args, o.received_at FROM ops o
       WHERE o.op = 'remember' AND json_extract(o.args, '$.file') IS NOT NULL
+        AND COALESCE(json_extract(o.args, '$.registry'), 0) != 1
         AND NOT EXISTS (SELECT 1 FROM memory_file_ops f WHERE f.op_id = o.id)
       ORDER BY o.received_at, o.rowid`).all() as PendingRow[];
     return rows.flatMap((r) => {
@@ -95,6 +106,8 @@ export class MemoryFiles {
 
   async sweep(): Promise<void> {
     if (!this.enabled()) return;
+    // Registries left waiting (an hq restart, a failed push): the queue goes again. It tells the owner itself.
+    await this.registry.kick().catch(() => {});
     // Every round, so a PR merged since the last flush stops being read as open (current) within minutes.
     if (this.hq.store.getMeta(PR_META)) await this.openPr().catch(() => {});
     if (!this.due()) return;
@@ -113,12 +126,14 @@ export class MemoryFiles {
    * The file as it will be once everything waiting lands: origin/main merged with the rolling branch while its PR is
    * open, plus the pending updates. What a worker reads before a `replace`, through `recall` with the path. A fetch and
    * a look at the PR first, bounded so recall stays in its budget (they finish in the background and the next read
-   * has them). A merged PR's branch is never read. null = no such file anywhere yet.
+   * has them). A merged PR's branch is never read. null = no such file anywhere yet. A registry: origin/main and the
+   * registry writes still queued, never the PR.
    */
   async current(file: string): Promise<string | null> {
     const git = (...a: string[]) => this.run('git', a, this.repoDir);
     const fresh = Promise.all([this.fetch(), this.openPr()]).catch(() => {});
     await Promise.race([fresh, new Promise((r) => setTimeout(r, FETCH_BUDGET_MS).unref())]);
+    if (this.registry.isRegistry(file)) return this.registry.current(file);
     let ref = 'origin/main';
     const branch = `origin/${BRANCH}`;
     if (this.hq.store.getMeta(PR_META) && await git('rev-parse', '--verify', '--quiet', branch).then(() => true, () => false)) {
@@ -136,13 +151,13 @@ export class MemoryFiles {
    * several reads) share the fetch in flight instead of racing on the same refs.
    */
   private fetching: Promise<string> | null = null;
-  private fetch(): Promise<string> {
+  fetch(): Promise<string> {
     this.fetching ??= this.run('git', ['fetch', '--quiet', '--prune', 'origin', '+refs/heads/main:refs/remotes/origin/main',
       `+refs/heads/${BRANCH}*:refs/remotes/origin/${BRANCH}*`], this.repoDir).finally(() => { this.fetching = null; });
     return this.fetching;
   }
 
-  private notifyOwner(key: string, body: string, priority: 'now' | 'next' = 'next'): void {
+  notifyOwner(key: string, body: string, priority: 'now' | 'next' = 'next'): void {
     const owner = this.owner();
     if (owner) this.hq.mailbox.tell({ msg_id: `memory-files-${key}`, from: 'hq', to: owner, kind: 'system', priority, body });
   }
