@@ -208,7 +208,7 @@ deploy_app() {
   ((size > 5 * 1024 * 1024)) || fail "ה-APK קטן מדי ($size bytes)"
   hex="$("$APKSIGNER" verify --print-certs "$apk" | sed -n 's/.*certificate SHA-256 digest: \([0-9a-f]\{64\}\).*/\1/p' | head -1)"
   got="$(echo -n "$hex" | xxd -r -p | base64 -w0 | tr '+/' '-_' | tr -d '=')"
-  want="$(grep -o 'android:apk-key-hash:[A-Za-z0-9_-]*' packages/hq/src/config.ts | head -1 | cut -d: -f3)"
+  want="$(grep -o 'android:apk-key-hash:[A-Za-z0-9_-]\+' packages/hq/src/config.ts | head -1 | cut -d: -f3)"
   [[ -n "$got" && "$got" == "$want" ]] || fail "ה-APK לא חתום במפתח השחרור ($got, ציפיתי ל-$want)"
 
   sudo -n install -d -o "$(id -un)" -m755 "$WWW/releases"
