@@ -1,5 +1,6 @@
 // The scheduler is code, not an LLM (A.2(8), B.5, B.16). It:
 //  - fills every free work slot from the queue immediately, in B.16 order, with no quota-percentage gate;
+//  - counts a lead idle with no task outside the work slots, and rests it when a task waits for a slot (#128);
 //  - escalates unanswered blocking asks to the manager (A.4: 10 min by day, immediately at night);
 //  - lets night.ts (B.16) scope the queue, add the night note and measure empty slots after every fill.
 import { g, pre } from '@company/shared';
@@ -61,6 +62,15 @@ const QUEUE_SQL = `
  */
 const STANDING_TASK = `(i.source = 'org' AND i.active = 1 AND i.team_kind != 'task' AND i.lifecycle NOT IN ('lead','resident') AND i.id != @mgr
   AND (t.state IN ('running','resting') OR (t.state IN ('open','interrupted') AND t.started_at IS NOT NULL)))`;
+
+/**
+ * SQL over shifts s LEFT JOIN identities i: a shift of an identity from org.yaml that is not a task worker and not a
+ * resident (a lead, a standing worker). Without a task and out of a turn it holds no work slot (#128).
+ */
+const STANDING_SHIFT = `(i.source = 'org' AND i.active = 1 AND COALESCE(i.team_kind, '') != 'task' AND i.lifecycle != 'resident' AND i.id != @mgr)`;
+
+/** SQL over shifts s: a message to its identity not yet handled. */
+const PENDING = `SELECT 1 FROM messages m WHERE m.to_identity = s.identity AND m.state IN ('queued','delivered')`;
 
 /** Label on a standing worker's task that close_team is closing: the time it was asked for its handoff. */
 const CLOSING = 'closing-at:';
@@ -134,12 +144,59 @@ export class Scheduler {
     return this.store.db.prepare(QUEUE_SQL).all({ scope: scope ? JSON.stringify(scope) : null }) as (TaskRow & { bucket: number })[];
   }
 
+  /**
+   * Slots (B.5, #128). `running` is what holds a work slot: task shifts, starts under way, and a standing shift (a lead,
+   * a standing worker between tasks) while it is in a turn. A standing shift that is up and idle with no task holds no
+   * slot: it is counted like a resident (RSS_idle off the total), and rests when a task waits (restOnPressure).
+   * `tasks` / `leads` say what is behind the numbers, for the board.
+   */
   slots() {
+    const db = this.store.db;
+    const live = db.prepare(`SELECT s.task_id, s.in_turn, s.state, ${STANDING_SHIFT} AS standing FROM shifts s
+      LEFT JOIN identities i ON i.id = s.identity WHERE s.state IN ('starting','live') AND s.kind = 'work'`)
+      .all({ mgr: this.cfg.managerId }) as { task_id: number | null; in_turn: number; state: string; standing: number }[];
+    const leadShifts = live.filter((s) => s.standing && s.task_id == null);
+    const idle = leadShifts.filter((s) => s.state === 'live' && !s.in_turn).length;
+    const active = leadShifts.length - idle;
     // A task still in its worktree setup has no shift row yet, but its slot is taken.
-    const running = (this.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND kind = 'work'`).get() as { n: number }).n
-      + this.starting.size;
-    const residents = (this.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND kind = 'resident'`).get() as { n: number }).n;
-    return capacity(this.cfg, this.memInfo(), running, Math.max(residents, this.cfg.capacity.residents.length));
+    const tasks = live.length - leadShifts.length + this.starting.size;
+    const residents = (db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND kind = 'resident'`).get() as { n: number }).n;
+    // Standing identities that ran before and are down now: rested (idle, pressure) or stopped by hand. A message wakes them.
+    const resting = (db.prepare(`SELECT COUNT(*) n FROM identities i WHERE i.source = 'org' AND i.active = 1
+      AND COALESCE(i.team_kind, '') != 'task' AND i.lifecycle != 'resident' AND i.id != @mgr
+      AND EXISTS (SELECT 1 FROM shifts s WHERE s.identity = i.id AND s.kind = 'work')
+      AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.identity = i.id AND s.state IN ('starting','live'))`)
+      .get({ mgr: this.cfg.managerId }) as { n: number }).n;
+    const c = capacity(this.cfg, this.memInfo(), tasks + active, Math.max(residents, this.cfg.capacity.residents.length) + idle);
+    return { ...c, tasks, leads: { active, idle, resting } };
+  }
+
+  /**
+   * #128: a task waits for a slot and none is free → standing shifts (not residents, not yoav) idle with no task for
+   * restOnPressureMs rest (session kept; a message wakes them as always). Returns the shifts it rested.
+   */
+  async restOnPressure(): Promise<string[]> {
+    if (!this.store.toggle('scheduler')) return [];
+    const { free, total } = this.slots();
+    // At the maxSlots cap a rested lead frees no slot: it would only wake slower.
+    if (free > 0 || total >= this.cfg.capacity.maxSlots || !this.queue().some((t) => this.waitReason(t, free) === 'מחכה למשבצת')) return [];
+    const cutoff = this.store.now() - this.cfg.timers.restOnPressureMs;
+    const rows = this.store.db.prepare(`SELECT s.id, s.identity, s.started_at FROM shifts s JOIN identities i ON i.id = s.identity
+      WHERE s.state = 'live' AND s.kind = 'work' AND s.task_id IS NULL AND s.in_turn = 0 AND ${STANDING_SHIFT}
+        AND COALESCE(s.last_event_at, s.started_at) <= @cutoff
+        AND NOT EXISTS (${PENDING})
+      ORDER BY COALESCE(s.last_event_at, s.started_at)`).all({ mgr: this.cfg.managerId, cutoff }) as { id: string; identity: string; started_at: number }[];
+    const rested: string[] = [];
+    for (const r of rows) {
+      // A message may have come in, or started a turn, since the read (the stops before this one await): never cut one.
+      const cur = this.shifts.get(r.id);
+      if (!cur || cur.started_at !== r.started_at || cur.state !== 'live' || cur.in_turn || cur.task_id != null) continue;
+      if (this.store.db.prepare(`SELECT 1 FROM shifts s WHERE s.id = ? AND EXISTS (${PENDING})`).get(r.id)) continue;
+      await this.shifts.stop(r.id, 'rest', r.started_at);
+      this.store.emit('scheduler.rest_on_pressure', r.identity, { shift: r.id });
+      rested.push(r.id);
+    }
+    return rested;
   }
 
   private filling: Promise<number[]> | null = null;
@@ -636,6 +693,7 @@ export class Scheduler {
     this.escalateAsks();
     await this.ensureResidents();
     await this.closeOverdue();
+    await this.restOnPressure();
     await this.fill();
     // Empty-slot measurement (metric.empty_slot) is night.ts: per interval, with its reason.
     await this.retryCloses();

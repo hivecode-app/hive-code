@@ -276,3 +276,75 @@ test('hq start (with its loops) wakes a never-run lead by itself (#68)', async (
     assert.ok(env.hq.mailbox.get('hq-lead-up-ac-ceo'));
   } finally { await env.cleanup(); }
 });
+
+test('#128: idle leads hold no work slot; with a task waiting they rest after 5 min, yoav stays, a message wakes them', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, clock, launcher } = env;
+    // 2 work slots with yoav and two idle leads on the RSS_idle line.
+    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 3 * 450 + 2 * 2500 + 100, availableMb: 4096 + 2 * 2500 + 100 });
+    hq.store.setToggle('scheduler', false);
+    await hq.scheduler.ensureResidents();
+    for (const [id, to] of [['l-1', 'eli'], ['l-2', 'ac-ceo']]) hq.mailbox.tell({ msg_id: id, to, body: 'שלום' });
+    await until(() => ['l-1', 'l-2'].every((m) => hq.mailbox.get(m)!.state === 'delivered'), 3000, 'leads up');
+    hq.mailbox.markHandled('l-1'); hq.mailbox.markHandled('l-2');
+    await until(() => !hq.shifts.get('eli-1')!.in_turn && !hq.shifts.get('ac-ceo-1')!.in_turn && hq.shifts.get('yoav-1')?.state === 'live', 3000, 'idle');
+    assert.deepEqual(hq.scheduler.slots(), { total: 2, running: 0, free: 2, tasks: 0, leads: { active: 0, idle: 2, resting: 0 } });
+
+    hq.store.setToggle('scheduler', true);
+    const t1 = hq.scheduler.addTask({ title: 'א', project: 'agent-company' });
+    const t2 = hq.scheduler.addTask({ title: 'ב', project: 'agent-company' });
+    const t3 = hq.scheduler.addTask({ title: 'ג', project: 'agent-company' });
+    await until(() => hq.scheduler.task(t1.id)!.state === 'running' && hq.scheduler.task(t2.id)!.state === 'running', 3000, 'queue fills past idle leads');
+    assert.equal(hq.scheduler.task(t3.id)!.state, 'queued');
+
+    // Idle under 5 min: nobody rests yet.
+    clock.advance(4 * 60_000);
+    assert.deepEqual(await hq.scheduler.restOnPressure(), []);
+    clock.advance(2 * 60_000);
+    // A lead with a message waiting, or one in a turn, is never rested.
+    hq.mailbox.tell({ msg_id: 'l-w', to: 'ac-ceo', body: 'רגע' });
+    await until(() => hq.mailbox.get('l-w')!.state === 'delivered', 3000, 'ac-ceo has mail');
+    hq.shifts.setFields('eli-1', { in_turn: 1 });
+    assert.deepEqual(await hq.scheduler.restOnPressure(), []);
+    hq.mailbox.markHandled('l-w');
+    hq.shifts.setFields('eli-1', { in_turn: 0 });
+    for (const id of ['eli-1', 'ac-ceo-1']) hq.shifts.setFields(id, { last_event_at: hq.store.now() - 6 * 60_000 });
+    assert.deepEqual((await hq.scheduler.restOnPressure()).sort(), ['ac-ceo-1', 'eli-1']);
+    assert.equal(hq.shifts.get('eli-1')!.end_reason, 'rest');
+    assert.equal(hq.shifts.get('yoav-1')!.state, 'live', 'the resident never rests');
+    assert.equal(hq.board().find((b) => b.id === 'eli')!.status, 'resting');
+    assert.deepEqual(hq.scheduler.slots().leads, { active: 0, idle: 0, resting: 2 });
+
+    // A message wakes a rested lead on its own session, as always.
+    const before = launcher.launches.filter((l) => l.identity === 'eli').length;
+    hq.mailbox.tell({ msg_id: 'l-3', to: 'eli', body: 'עוד משהו' });
+    await until(() => hq.mailbox.get('l-3')!.state === 'delivered', 3000, 'eli woken');
+    const wake = launcher.launches.filter((l) => l.identity === 'eli');
+    assert.equal(wake.length, before + 1);
+    assert.equal(wake.at(-1)!.resume, true, 'session kept');
+  } finally { await env.cleanup(); }
+});
+
+test('#128: no pressure (empty queue) → idle leads stay up; a lead in a turn holds a slot', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, clock } = env;
+    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 2 * 450 + 2 * 2500 + 100, availableMb: 4096 + 2 * 2500 + 100 });
+    hq.mailbox.tell({ msg_id: 'n-1', to: 'eli', body: 'שלום' });
+    await until(() => hq.mailbox.get('n-1')!.state === 'delivered', 3000, 'eli up');
+    hq.shifts.setFields('eli-1', { in_turn: 1 });
+    assert.deepEqual(hq.scheduler.slots().leads, { active: 1, idle: 0, resting: 0 });
+    assert.equal(hq.scheduler.slots().running, 1, 'in a turn it holds a slot');
+    hq.mailbox.markHandled('n-1');
+    hq.shifts.setFields('eli-1', { in_turn: 0 });
+    clock.advance(30 * 60_000);
+    assert.deepEqual(await hq.scheduler.restOnPressure(), [], 'empty queue');
+    assert.equal(hq.shifts.get('eli-1')!.state, 'live');
+
+    // Stopped by hand (systemctl stop): down, counted as resting, not as a slot.
+    hq.shifts.markEnded('eli-1', 'dead', 'crash: process gone');
+    assert.deepEqual(hq.scheduler.slots().leads, { active: 0, idle: 0, resting: 1 });
+    assert.equal(hq.scheduler.slots().running, 0);
+  } finally { await env.cleanup(); }
+});
