@@ -7,10 +7,10 @@ import type { Store } from './store.ts';
 import type { Mailbox } from './mailbox.ts';
 import type { ShiftManager } from './shifts.ts';
 import { ensureRuntimeIdentity, getIdentity, projectLead, taskWorkerName } from './org.ts';
-import { HELPER_TEAM, reviewSteps } from './system-prompt.ts';
+import { HELPER_TEAM } from './system-prompt.ts';
 import { memInfoMb } from './proc.ts';
 import { dirname, join } from 'node:path';
-import { forCheckout, noWorkers, readCharter, Workspaces, type Checkout, type CloseResult } from './workspace.ts';
+import { noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
 
 export interface TaskRow {
   id: number; ref: string | null; project: string | null; title: string; body: string; source: string; state: string;
@@ -281,7 +281,7 @@ export class Scheduler {
     if (t.worktree) {
       const { c } = this.checkoutOf(t);
       if (!(await this.workspaces.ensure(t.worktree, c?.path, ch ?? undefined))) throw new Error(`task ${t.id}: worktree ${t.worktree} is gone and its branch too`);
-      return { path: t.worktree, note: worktreeNote(this.cfg.companyDir, t.worktree, ch, c) };
+      return { path: t.worktree, note: worktreeNote(t.worktree, ch) };
     }
     // Started before hq made worktrees: its session and work live where it ran (hq's default cwd and
     // a worktree the worker made itself). Moving it would orphan both.
@@ -293,7 +293,7 @@ export class Scheduler {
     const w = await this.workspaces.create(ch, c, `company-t${t.id}`);
     this.store.db.prepare('UPDATE tasks SET worktree = ?, updated_at = ? WHERE id = ?').run(w.path, this.store.now(), t.id);
     this.store.emit('task.worktree', null, { id: t.id, path: w.path, branch: w.branch, base: w.base });
-    return { path: w.path, note: worktreeNote(this.cfg.companyDir, w.path, ch, c, w.branch, w.base) };
+    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) };
   }
 
   /**
@@ -427,18 +427,12 @@ export class Scheduler {
   }
 }
 
-/**
- * What the worker is told about where it works (first prompt of each run). A checkout with its own CI check
- * or merge steps (B.5) gets them here, since the system prompt carries the charter's top level.
- */
-function worktreeNote(companyDir: string, path: string, top: ReturnType<typeof readCharter>, c?: Checkout | null, branch?: string, base?: string): string {
-  const ch = top && forCheckout(top, c);
+/** What the worker is told about where it works (first prompt of each run). */
+function worktreeNote(path: string, ch: ReturnType<typeof readCharter>, branch?: string, base?: string): string {
   const cmds = Object.entries(ch?.commands ?? {}).map(([k, v]) => `${k}: \`${v}\``).join(' · ');
-  const own = c?.own && ('ciCheck' in c.own || 'mergeInstructions' in c.own);
   return [
     `**איפה עובדים:** hq פתח לך worktree ב-\`${path}\`${branch ? ` על הענף \`${branch}\` (מ-\`${base}\`)` : ''}. זה ה-cwd שלך. לא פותחים worktree נוסף ולא מסירים אותו: hq שומר ומסיר אותו כשהמשימה נסגרת.`,
     cmds ? `**פקודות מהאמנה:** ${cmds}` : '',
-    ch?.ciCheck ? `**CI:** ממזגים רק כשהבדיקה \`${ch.ciCheck}\` ירוקה ב-PR.` : own ? '**CI:** ל-repo הזה אין בדיקת CI באמנה. מריצים את הבדיקות שלו מקומית לפני המיזוג.' : '',
-    own ? [`**סקירה ומיזוג ב-repo הזה (\`${c!.name}\`):** הצעדים האלה מחליפים רק את צעדי הסקירה והמיזוג שבפרומפט. השאר (worktree, ‏PR, הדיווח ו-\`status\` בסוף) נשאר.`, ...reviewSteps(companyDir, ch, 3, !ch?.ciCheck)].join('\n') : '',
+    ch?.ciCheck ? `**CI:** ממזגים רק כשהבדיקה \`${ch.ciCheck}\` ירוקה ב-PR.` : '',
   ].filter(Boolean).join('\n');
 }

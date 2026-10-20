@@ -350,14 +350,6 @@ export function main() {
             if (names.has(c.name)) err(`${rel(charter)}: duplicate checkout "${c.name}"`);
             names.add(c.name);
             if (!/^(~\/|\/)/.test(c.path)) err(`${rel(charter)}: checkout "${c.name}" path must be absolute or start with ~/`);
-            // A checkout's own commands, ci_check and merge_instructions win over the top level (another repo of the project).
-            for (const k of ['commands', 'merge_instructions']) if (k in c && c[k] == null) err(`${rel(charter)}: checkout "${c.name}" "${k}" is empty (leave it out to inherit)`);
-            if (c.commands != null && (!isObj(c.commands) || Object.values(c.commands).some((v) => typeof v !== 'string' || !v))) err(`${rel(charter)}: checkout "${c.name}" "commands" must map names to command strings`);
-            if ('ci_check' in c && c.ci_check !== null && (typeof c.ci_check !== 'string' || !c.ci_check)) err(`${rel(charter)}: checkout "${c.name}" "ci_check" must be a check name, or null for none`);
-            if (c.merge_instructions != null && !(typeof c.merge_instructions === 'string' ? c.merge_instructions
-              : Array.isArray(c.merge_instructions) && c.merge_instructions.length && c.merge_instructions.every((v) => typeof v === 'string' && v))) {
-              err(`${rel(charter)}: checkout "${c.name}" "merge_instructions" must be a string ("default" = the company's steps) or a list of strings`);
-            }
           }
         }
       }

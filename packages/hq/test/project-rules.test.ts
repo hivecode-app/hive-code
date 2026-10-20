@@ -9,7 +9,7 @@ import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeEnv, until } from './helpers.ts';
 import { buildSystemPrompt } from '../src/system-prompt.ts';
-import { forCheckout, readCharter, Workspaces } from '../src/workspace.ts';
+import { readCharter, Workspaces } from '../src/workspace.ts';
 import type { IdentityRow } from '../src/org.ts';
 
 const ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
@@ -240,47 +240,4 @@ test('a task closed while its worktree is being set up gets no worker, and its w
     assert.equal(launcher.launches.some((l) => l.identity === `slow-t${a.id}`), false);
     await until(() => !existsSync(join(r.checkout, '.worktrees', `company-t${a.id}`)), 5000, 'worktree removed');
   } finally { await env.cleanup(); r.cleanup(); }
-});
-
-test('a second checkout with its own commands, ci_check and merge steps: its worktree and its note use them', async () => {
-  const r = repo();
-  const bot = repo();
-  const second = `  - name: bot
-    path: ${bot.checkout}
-    default_branch: main
-    repo: o/bot
-    commands:
-      test: go test ./...
-    ci_check: null
-    merge_instructions: default
-`;
-  const text = charter(r.checkout, SETUP_OK + 'merge_instructions:\n  - "מיזוג ב-`gh api -X PUT repos/o/proj/pulls/N/merge`"\n')
-    .replace('worktree_dir:', `${second}worktree_dir:`);
-  const env = await makeEnv({ projects: { proj: text } });
-  try {
-    const ch = readCharter(join(env.cfg.companyDir), 'proj')!;
-    const [main, b] = ch.checkouts;
-    assert.equal(main!.own, undefined, 'the first checkout inherits everything');
-    assert.deepEqual(b!.own, { commands: { test: 'go test ./...' }, ciCheck: null, mergeInstructions: null });
-    assert.equal(b!.repo, 'o/bot');
-    const inBot = forCheckout(ch, b);
-    assert.equal(inBot.commands.worktree_setup, undefined, "the top level's setup is not run in the bot repo");
-    assert.equal(inBot.ciCheck, null);
-    assert.equal(forCheckout(ch, main).ciCheck, 'app');
-
-    const w = await env.hq.scheduler.prepareWorktree({ id: 901, project: 'proj', worktree: null, labels: '["repo:bot"]', started_at: null });
-    assert.equal(w!.path, join(bot.checkout, '.worktrees', 'company-t901'));
-    assert.equal(existsSync(join(w!.path, '.setup')), false);
-    assert.match(w!.note, /go test/);
-    assert.doesNotMatch(w!.note, /npm test|gh api -X PUT|`app`/);
-    assert.match(w!.note, /אין בדיקת CI/);
-    assert.match(w!.note, /^3\. סקירה בלתי תלויה/m);
-    assert.match(w!.note, /^4\. .*gh pr merge --squash --delete-branch.*עברו מקומית/m);
-
-    const m = await env.hq.scheduler.prepareWorktree({ id: 902, project: 'proj', worktree: null, labels: '[]', started_at: null });
-    assert.equal(readFileSync(join(m!.path, '.setup'), 'utf8'), 'done\n');
-    assert.match(m!.note, /npm test/);
-    assert.match(m!.note, /`app` ירוקה/);
-    assert.doesNotMatch(m!.note, /סקירה ומיזוג ב-repo הזה/, 'the first checkout: the steps are in the system prompt');
-  } finally { await env.cleanup(); r.cleanup(); bot.cleanup(); }
 });

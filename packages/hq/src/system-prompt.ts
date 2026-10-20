@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import { OWNER } from '@company/shared';
 import type { IdentityRow } from './org.ts';
-import { readCharter, type Charter } from './workspace.ts';
+import { readCharter } from './workspace.ts';
 
 const read = (p: string): string | null => (existsSync(p) ? readFileSync(p, 'utf8').trim() : null);
 
@@ -44,7 +44,14 @@ function howWeTalk(i: IdentityRow, managerId: string): string {
  */
 function taskWorker(i: IdentityRow, companyDir: string): string {
   const ch = i.project ? readCharter(companyDir, i.project) : null;
-  const review = reviewSteps(companyDir, ch, 3);
+  const skill = (name: string) => `\`${join(companyDir, 'skills', name, 'SKILL.md')}\``;
+  const ci = ch?.ciCheck ? `בדיקת ה-CI שבאמנה (\`${ch.ciCheck}\`)` : 'בדיקת ה-CI שבאמנה (`ci_check`)';
+  const review = ch?.mergeInstructions
+    ? ch.mergeInstructions.map((m, n) => `${n + 3}. ${n === 0 ? 'סקירה ומיזוג לפי האמנה של הפרויקט, לא לפי ה-skills של החברה. ' : ''}${m}`)
+    : [
+      `3. סקירה בלתי תלויה בהקשר נקי, לפי ${skill('reviewer')} (סוכן משנה בלי כלי עריכה). מתקנים מה שעלה.`,
+      `4. ממזגים בעצמך: \`gh pr merge --squash --delete-branch\`, רק כשהסקירה אישרה ו${ci} ירוקה. לפי ${skill('ship')}.`,
+    ];
   return [
     `# אתה ${i.name}${i.title ? `, ${i.title}` : ''}, בצוות משימה (\`${i.id}\`)`,
     '',
@@ -54,21 +61,6 @@ function taskWorker(i: IdentityRow, companyDir: string): string {
     ...review,
     `${review.length + 3}. מדווחים במשפט-שניים ב-\`tell\` למי ששלח את המשימה (עם קישור ל-PR), ואז \`status\` עם \`state: "done"\`. זה סוגר את המשימה ואת המשמרת.`,
   ].join('\n');
-}
-
-/**
- * The review and merge steps, numbered from `from`: the charter's merge_instructions, else the company's
- * default (reviewer and ship skills, `gh pr merge`, the CI check). Also used for a checkout with its own steps.
- */
-export function reviewSteps(companyDir: string, ch: Pick<Charter, 'ciCheck' | 'mergeInstructions'> | null, from: number, noCi = false): string[] {
-  const skill = (name: string) => `\`${join(companyDir, 'skills', name, 'SKILL.md')}\``;
-  const ci = ch?.ciCheck ? `בדיקת ה-CI שבאמנה (\`${ch.ciCheck}\`) ירוקה` : noCi ? 'הבדיקות של ה-repo עברו מקומית' : 'בדיקת ה-CI שבאמנה (`ci_check`) ירוקה';
-  return ch?.mergeInstructions
-    ? ch.mergeInstructions.map((m, n) => `${n + from}. ${n === 0 ? 'סקירה ומיזוג לפי האמנה של הפרויקט, לא לפי ה-skills של החברה. ' : ''}${m}`)
-    : [
-      `${from}. סקירה בלתי תלויה בהקשר נקי, לפי ${skill('reviewer')} (סוכן משנה בלי כלי עריכה). מתקנים מה שעלה.`,
-      `${from + 1}. ממזגים בעצמך: \`gh pr merge --squash --delete-branch\`, רק כשהסקירה אישרה ו${ci}. לפי ${skill('ship')}.`,
-    ];
 }
 
 /** A one-off helper of the personal team (opened by eli for one errand): no worktree or PR, just the errand. */
