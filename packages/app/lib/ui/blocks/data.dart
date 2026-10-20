@@ -94,7 +94,7 @@ class LaneAlert {
 
 /// One project's lane of the day.
 class Lane {
-  const Lane({required this.id, required this.name, this.symbol = 'folder', this.done = const [], this.running = const [], this.waiting = 0, this.alerts = const []});
+  const Lane({required this.id, required this.name, this.symbol = 'folder', this.done = const [], this.running = const [], this.waiting = 0, this.queued = const [], this.alerts = const []});
   final String id;
   final String name;
   final String symbol;
@@ -103,6 +103,9 @@ class Lane {
 
   /// How many things in it wait for him: a hollow `pause` mark at now.
   final int waiting;
+
+  /// The tasks waiting their turn, in queue order (#128): a hollow `schedule` mark at now, on a track of its own.
+  final List<String> queued;
   final List<LaneAlert> alerts;
 
   factory Lane.fromJson(Map<String, dynamic> j) => Lane(
@@ -112,6 +115,7 @@ class Lane {
         done: [for (final x in _maps(j['done'])) LaneDone.fromJson(x)],
         running: [for (final x in _maps(j['running'])) LaneRun.fromJson(x)],
         waiting: (j['waiting'] as num?)?.toInt() ?? 0,
+        queued: (j['queued'] as List?)?.whereType<String>().toList() ?? const [],
         alerts: [for (final x in _maps(j['alerts'])) LaneAlert.fromJson(x)],
       );
   Map<String, dynamic> toJson() => {
@@ -121,6 +125,7 @@ class Lane {
         'done': [for (final x in done) x.toJson()],
         'running': [for (final x in running) x.toJson()],
         'waiting': waiting,
+        'queued': queued,
         'alerts': [for (final x in alerts) x.toJson()],
       };
 }
@@ -168,6 +173,7 @@ class LanesData {
               LaneRun(from: t.startedAt == null || t.startedAt!.isBefore(start) ? start : t.startedAt!, text: plainTitle(t.title), who: t.assigneeId),
         ],
         waiting: d.waiting.where((w) => _open(w) && w.kind != WaitKind.urgentProd && w.kind != WaitKind.failure && projectOf(d, w.from) == p.id).length,
+        queued: [for (final t in d.openTasks) if (t.project == p.id && t.state == OpenTaskState.queued) t.title],
         alerts: [
           for (final w in d.waiting)
             if (_open(w) && (w.kind == WaitKind.urgentProd || w.kind == WaitKind.failure) && projectOf(d, w.from) == p.id)

@@ -21,6 +21,7 @@ import { ProbeRunner } from './probes.ts';
 import { Pusher, loadOrCreateVapid, telegramVia, type TelegramSend, type WebPushSend } from './push.ts';
 import { backupOnce } from './backup.ts';
 import { board } from './board.ts';
+import { openTasks } from './open-tasks.ts';
 import { Home } from './home.ts';
 import { MemoryFiles, type Run } from './memory-files.ts';
 import { startApi, loadOrCreateToken, health, type ApiServer } from './api.ts';
@@ -132,6 +133,9 @@ export class Hq {
   clock() { return clockOf(this.timeZone(), this.store.now()); }
 
   board() { return board(this.store, this.cfg.timers.livenessMs * 3, this.timeZone()); }
+
+  /** "בעבודה ובתור" (#128): every task not done, with who opened it, who is on it and why it waits. */
+  openTasks(b = this.board()) { return openTasks(this.store, this.scheduler, b); }
 
   teams() {
     // A project's team shows the owner's name for the project (org.yaml `projects[].name`), or null.

@@ -35,7 +35,7 @@ const kLinkLine = 40.0;
 /// line with its padding, at least [minHeight] ([kLinkRow] or [kLinkLine]), the line centered in it.
 /// With no [identity] it is the bare [child], read as [label].
 class EntityLink extends StatelessWidget {
-  const EntityLink({super.key, required this.identity, required this.child, this.label, this.minHeight = 0, this.borderRadius});
+  const EntityLink({super.key, required this.identity, required this.child, this.label, this.minHeight = 0, this.borderRadius, this.open});
 
   /// The conversation it opens; null: nothing to open.
   final String? identity;
@@ -45,6 +45,9 @@ class EntityLink extends StatelessWidget {
   final String? label;
   final double minHeight;
   final BorderRadius? borderRadius;
+
+  /// How the conversation opens, when not from here (a sheet that closes first); [Nav.chat] when null.
+  final void Function(String identity)? open;
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +62,7 @@ class EntityLink extends StatelessWidget {
       excludeSemantics: label != null,
       child: InkWell(
         borderRadius: borderRadius,
-        onTap: () => Nav.chat(context, id),
+        onTap: () => open != null ? open!(id) : Nav.chat(context, id),
         child: ConstrainedBox(
           constraints: BoxConstraints(minHeight: minHeight),
           child: Align(alignment: AlignmentDirectional.centerStart, heightFactor: 1, child: child),

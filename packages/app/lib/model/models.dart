@@ -717,6 +717,75 @@ class AwaitingTask {
 /// answer yet; `answered` = the worker answered and he hasn't read it (hq drops it once he does).
 enum AskedState { open, answered }
 
+/// "בעבודה ובתור" (hq `open_tasks`, #128): a task that is not done. running: a worker is on it · queued: waits
+/// its turn · waitingForYou: its worker waits for him · blocked: waits for a decision.
+enum OpenTaskState { running, queued, waitingForYou, blocked }
+
+class OpenTask {
+  const OpenTask({required this.id, required this.title, required this.state, this.project = '', this.openedBy, this.worker, this.position, this.reason, this.since});
+  final int id;
+
+  /// In his words: hq sends it without the area prefix and numbers; [plainTitle] again for a fallback from tickets.
+  final String title;
+  final String project;
+
+  /// Who opened it (`opened-by:`, else the project's lead): the conversation it shows under.
+  final String? openedBy;
+
+  /// The worker on it; null while it waits for a slot.
+  final String? worker;
+  final OpenTaskState state;
+
+  /// Its place in the queue, from 1.
+  final int? position;
+
+  /// Why it waits ("מחכה למשבצת").
+  final String? reason;
+  final DateTime? since;
+
+  static const _states = {'running': OpenTaskState.running, 'queued': OpenTaskState.queued, 'waiting_for_you': OpenTaskState.waitingForYou, 'blocked': OpenTaskState.blocked};
+
+  /// From `/api/board`'s `open_tasks`; null for a state this app does not know.
+  static OpenTask? fromHq(Map<String, dynamic> j) {
+    final state = _states[j['state']];
+    if (state == null || j['id'] is! num) return null;
+    return OpenTask(
+      id: (j['id'] as num).toInt(),
+      title: plainTitle(j['title'] as String? ?? ''),
+      project: j['project'] as String? ?? '',
+      openedBy: j['opened_by'] as String?,
+      worker: j['worker'] as String?,
+      state: state,
+      position: (j['position'] as num?)?.toInt(),
+      reason: j['reason'] as String?,
+      since: j['since'] is num ? DateTime.fromMillisecondsSinceEpoch((j['since'] as num).toInt()) : null,
+    );
+  }
+
+  /// An hq from before `open_tasks` (and the mockup): the same list from the tickets, without a reason. No
+  /// opener: the project's lead ([leadOf]), as hq does.
+  static List<OpenTask> fromTickets(List<Ticket> tickets, {Map<String, String?> leadOf = const {}}) {
+    var place = 0;
+    final out = <OpenTask>[];
+    for (final t in tickets) {
+      if (t.doneAt != null) continue;
+      final queued = t.group == TicketGroup.queued;
+      out.add(OpenTask(
+        id: int.tryParse(t.number.replaceFirst(RegExp(r'^\D+'), '')) ?? 0,
+        title: plainTitle(t.title),
+        project: t.project,
+        openedBy: t.openedBy ?? leadOf[t.project],
+        worker: queued ? null : t.assigneeId,
+        state: queued ? OpenTaskState.queued : (t.group == TicketGroup.waiting ? OpenTaskState.waitingForYou : OpenTaskState.running),
+        position: queued ? ++place : null,
+        since: t.startedAt,
+      ));
+    }
+    const rank = {OpenTaskState.running: 0, OpenTaskState.waitingForYou: 1, OpenTaskState.queued: 2, OpenTaskState.blocked: 3};
+    return out..sort((a, b) => rank[a.state]! - rank[b.state]!);
+  }
+}
+
 /// The worker's answer to a request: its message id, its start (hq cuts it at 300), when.
 class AskedReply {
   const AskedReply({required this.id, required this.body, required this.at});

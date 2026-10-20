@@ -152,8 +152,10 @@ class _TaskRow extends StatelessWidget {
       icon = 'check_circle';
       state = 'הסתיים ${hm(t.doneAt!)}';
     } else if (t.group == TicketGroup.queued) {
+      // Its place in line and why it waits (#128), when hq says.
+      final o = d.openTasks.where((x) => 't${x.id}' == t.number).firstOrNull;
       icon = 'schedule';
-      state = 'בתור';
+      state = [o?.position == null ? 'בתור' : 'בתור, מקום ${o!.position}', if (o?.reason?.isNotEmpty == true) o!.reason!].join(' · ');
     } else {
       icon = statusLoud(t.status) ? statusIcon(t.status) : 'play_arrow';
       state = [statusWord(t.status, who?.gender ?? Gender.m), if (t.startedAt != null) 'מ-${hm(t.startedAt!)}'].join(' ');

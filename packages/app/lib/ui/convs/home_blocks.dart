@@ -48,6 +48,15 @@ List<HomeBlock> liveBlocks(HomeRecipe recipe, CompanyData d) {
       case 'people':
         final ids = [for (final i in b.identities) if (d.identities.containsKey(i)) i];
         if (ids.isNotEmpty) out.add(b.copyWith(identities: ids));
+      case 'tasks':
+        // "open" follows the list; a named task leaves when it is done.
+        if (b.allOpen) {
+          if (d.openTasks.isNotEmpty) out.add(b);
+        } else {
+          final openIds = {for (final t in d.openTasks) t.id};
+          final ids = [for (final i in b.tasks) if (openIds.contains(i)) i];
+          if (ids.isNotEmpty) out.add(b.copyWith(tasks: ids));
+        }
       default:
         out.add(b);
     }
@@ -213,6 +222,10 @@ class _GroupView {
         return BlockCard(label: 'מאז שהיית פה', child: SinceBlock(data: data, now: now, max: 3));
       case 'note':
         return BlockCard(child: NoteBlock(data: NoteData(text: b.text ?? '', icon: b.icon, from: recipe.byAgent ? recipe.composedBy : null)));
+      case 'tasks':
+        final tasks = openTasksOf(d, b.allOpen ? null : b.tasks);
+        if (tasks.isEmpty) return null;
+        return BlockCard(label: 'בעבודה ובתור', child: TasksBlock(tasks: tasks, now: now));
       case 'awaiting':
         final data = AwaitingData.of(d, b.tasks);
         if (data.items.isEmpty) return null;

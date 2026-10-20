@@ -227,6 +227,21 @@ export class Scheduler {
     return started;
   }
 
+  /**
+   * Why a task in the queue has not started, in his words (#128): what fill() would skip it for, else that every
+   * slot is taken. `free` is slots().free, read once by the caller for the whole list.
+   */
+  waitReason(t: TaskRow, free: number): string {
+    if (!this.store.toggle('scheduler')) return 'התור עצור';
+    if (this.starting.has(t.id)) return 'מתחילה עכשיו';
+    if (this.dormant(t.project)) return 'הפרויקט לא פעיל';
+    if (t.identity && this.standing(t.identity) && this.workerBusy(t.identity, t.id)) {
+      return `מחכה ${pre('ש', getIdentity(this.store, t.identity)?.name ?? t.identity)} יתפנה`;
+    }
+    if (this.inBackoff(t.id)) return 'ניסיון חוזר בעוד רגע';
+    return free > 0 ? 'מתחילה עכשיו' : 'מחכה למשבצת';
+  }
+
   private standing(identity: string): boolean {
     return isStandingWorker(getIdentity(this.store, identity), this.cfg.managerId);
   }

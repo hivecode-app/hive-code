@@ -4,6 +4,7 @@
 //   is on it inside its now end, breathing;
 // · a finished task: a small filled dot where it finished; dots on the same few pixels are one, with a count;
 // · something waiting for him: a hollow ring with `pause` just past now;
+// · tasks waiting their turn (#128): a hollow ring with `schedule` just past now, on a track of its own;
 // · a production failure: `warning` where it happened.
 // RTL: time flows right to left, now is at the left edge. A tap picks the nearest mark and tells its story under
 // the axis (where the legend is); a tap on the name opens the project.
@@ -228,8 +229,8 @@ class _LaneRow extends StatelessWidget {
     // A date when it is not today (an incident from yesterday sits at the axis' edge).
     String when(DateTime t) => daysAgo(t, data.now) == 0 ? hm(t) : '${dm(t)} ${hm(t)}';
     final runs = lane.running.length;
-    // The dots' track, then a track per running task under it: bars never hide what finished.
-    final height = _kRow + runs * (_kBar + _kBarGap);
+    // The dots' track, then a track per running task under it (bars never hide what finished), then the queue's.
+    final height = _kRow + (runs + (lane.queued.isEmpty ? 0 : 1)) * (_kBar + _kBarGap);
     final mid = _kRow / 2;
     final marks = <Widget>[];
     // Each mark's span on the lane and its story: a tap picks the one nearest the finger.
@@ -333,6 +334,29 @@ class _LaneRow extends StatelessWidget {
         ),
       ));
     }
+    if (lane.queued.isNotEmpty) {
+      final n = lane.queued.length;
+      final top = _kRow - _kBarGap + runs * (_kBar + _kBarGap) + (_kBar - 16) / 2;
+      final text = [for (final q in lane.queued.take(3)) q, if (n > 3) 'ועוד ${n - 3}'].join('\n');
+      final meta = n == 1 ? 'בתור' : '$n בתור';
+      final pick = target(2, 18, top, top + 16, 10, top + 8, text, meta);
+      marks.add(Positioned(
+        left: 2,
+        top: top,
+        width: 16,
+        height: 16,
+        child: _Mark(
+          spoken: n == 1 ? 'משימה אחת בתור' : '$n משימות בתור',
+          text: text,
+          onTap: pick,
+          child: Container(
+            decoration: BoxDecoration(shape: BoxShape.circle, color: p.surface, border: Border.all(color: p.text, width: 1.5)),
+            alignment: Alignment.center,
+            child: Ic('schedule', size: 11, color: p.text),
+          ),
+        ),
+      ));
+    }
     if (picked != null) {
       marks.add(Positioned(
         left: picked!.dx - 11,
@@ -347,6 +371,7 @@ class _LaneRow extends StatelessWidget {
       if (runs > 0) runs == 1 ? 'משימה אחת רצה' : '$runs רצות',
       '${lane.done.length} הסתיימו היום',
       if (lane.waiting > 0) lane.waiting == 1 ? 'דבר אחד מחכה לך' : '${lane.waiting} דברים מחכים לך',
+      if (lane.queued.isNotEmpty) lane.queued.length == 1 ? 'משימה אחת בתור' : '${lane.queued.length} משימות בתור',
       if (lane.alerts.isNotEmpty) 'תקלה',
     ].join(', ');
     return Semantics(
@@ -532,6 +557,16 @@ class _Legend extends StatelessWidget {
           'כמה יחד',
         ),
         item(Container(width: 12, height: 12, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: p.text, width: 1.5))), 'מחכה לך'),
+        item(
+          Container(
+            width: 13,
+            height: 13,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: p.text, width: 1.5)),
+            child: Ic('schedule', size: 9, color: p.text),
+          ),
+          'בתור',
+        ),
         item(Ic('warning', size: 13, fill: true, color: p.text), 'תקלה'),
       ]),
     );

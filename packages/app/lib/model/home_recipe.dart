@@ -6,10 +6,10 @@ enum Emphasis { normal, quiet, strong }
 
 /// One block. [type] is one of [HomeBlock.types]; anything else never reaches the screen.
 class HomeBlock {
-  const HomeBlock({required this.type, this.emphasis = Emphasis.normal, this.text, this.icon, this.inbox = const [], this.shift, this.tasks = const [], this.messages = const [],
+  const HomeBlock({required this.type, this.emphasis = Emphasis.normal, this.text, this.icon, this.inbox = const [], this.shift, this.tasks = const [], this.allOpen = false, this.messages = const [],
       this.projects = const [], this.identities = const [], this.items = const [], this.note, this.caption});
 
-  static const types = {'headline', 'alert', 'waiting', 'asked', 'awaiting', 'lanes', 'project', 'people', 'since', 'note'};
+  static const types = {'headline', 'alert', 'waiting', 'asked', 'awaiting', 'tasks', 'lanes', 'project', 'people', 'since', 'note'};
 
   final String type;
   final Emphasis emphasis;
@@ -26,8 +26,11 @@ class HomeBlock {
   /// alert: a shift id (`<identity>-<n>`).
   final String? shift;
 
-  /// awaiting: task ids.
+  /// awaiting and tasks: task ids.
   final List<int> tasks;
+
+  /// tasks: `"open"`, every open task as the list is now (#128).
+  final bool allOpen;
 
   /// asked: his message ids (hq `asked[].id`).
   final List<String> messages;
@@ -53,7 +56,7 @@ class HomeBlock {
       };
 
   HomeBlock copyWith({List<int>? inbox, List<int>? tasks, List<String>? messages, List<String>? projects, List<String>? identities}) => HomeBlock(
-      type: type, emphasis: emphasis, text: text, icon: icon, inbox: inbox ?? this.inbox, shift: shift, tasks: tasks ?? this.tasks, messages: messages ?? this.messages,
+      type: type, emphasis: emphasis, text: text, icon: icon, inbox: inbox ?? this.inbox, shift: shift, tasks: tasks ?? this.tasks, allOpen: allOpen, messages: messages ?? this.messages,
       projects: projects ?? this.projects, identities: identities ?? this.identities, items: items, note: note, caption: caption);
 
   static List<T> _list<T>(Object? v) => v is List ? v.whereType<T>().toList() : const [];
@@ -71,6 +74,7 @@ class HomeBlock {
       inbox: alertInbox,
       shift: j['shift'] as String?,
       tasks: _list<int>(j['tasks']),
+      allOpen: type == 'tasks' && j['tasks'] == 'open',
       messages: _list<String>(j['messages']),
       projects: type == 'project' && j['project'] is String ? [j['project'] as String] : _list<String>(j['projects']),
       identities: _list<String>(j['identities']),
@@ -90,7 +94,7 @@ class HomeBlock {
         if (icon != null) 'icon': icon,
         if (type == 'alert' && inbox.isNotEmpty) 'inbox': inbox.first else if (inbox.isNotEmpty) 'inbox': inbox,
         if (shift != null) 'shift': shift,
-        if (tasks.isNotEmpty) 'tasks': tasks,
+        if (allOpen) 'tasks': 'open' else if (tasks.isNotEmpty) 'tasks': tasks,
         if (messages.isNotEmpty) 'messages': messages,
         if (type == 'project') 'project': projects.firstOrNull else if (projects.isNotEmpty) 'projects': projects,
         if (identities.isNotEmpty) 'identities': identities,

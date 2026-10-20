@@ -12,7 +12,7 @@ import type { Hq } from './hq.ts';
 import { hhmm, nextLocal } from './timezone.ts';
 import { askedList, type AskedItem } from './asked.ts';
 
-export const BLOCK_TYPES = ['headline', 'alert', 'waiting', 'asked', 'awaiting', 'lanes', 'project', 'people', 'since', 'note'] as const;
+export const BLOCK_TYPES = ['headline', 'alert', 'waiting', 'asked', 'awaiting', 'tasks', 'lanes', 'project', 'people', 'since', 'note'] as const;
 export type BlockType = (typeof BLOCK_TYPES)[number];
 export const EMPHASES = ['normal', 'quiet', 'strong'] as const;
 export type Emphasis = (typeof EMPHASES)[number];
@@ -23,6 +23,7 @@ export type Block = { type: BlockType; emphasis?: Emphasis } & (
   | { type: 'waiting'; inbox: number[] }
   | { type: 'asked'; messages: string[] }
   | { type: 'awaiting'; tasks: number[] }
+  | { type: 'tasks'; tasks: number[] | 'open' }
   | { type: 'lanes'; projects: string[] }
   | { type: 'project'; project: string; note?: string }
   | { type: 'people'; identities: string[]; caption?: string }
@@ -62,6 +63,8 @@ export interface HomeRefs {
   asked?: Set<string>;
   /** Whether a task id exists (a since item's `task`); unchecked when absent. */
   task?: (id: number) => boolean;
+  /** "בעבודה ובתור" (open-tasks.ts): every task not done, by id. */
+  open?: Set<number>;
 }
 
 const FIELDS: Record<BlockType, { required: string[]; optional: string[] }> = {
@@ -70,6 +73,7 @@ const FIELDS: Record<BlockType, { required: string[]; optional: string[] }> = {
   waiting: { required: ['inbox'], optional: [] },
   asked: { required: ['messages'], optional: [] },
   awaiting: { required: ['tasks'], optional: [] },
+  tasks: { required: ['tasks'], optional: [] },
   lanes: { required: ['projects'], optional: [] },
   project: { required: ['project'], optional: ['note'] },
   people: { required: ['identities'], optional: ['caption'] },
@@ -164,6 +168,15 @@ export function validateBlocks(raw: unknown, refs: HomeRefs): Block[] {
         out.push({ type: t, tasks: [...new Set(o.tasks as number[])], ...base });
         break;
       }
+      case 'tasks': {
+        if (o.tasks === 'open') { out.push({ type: t, tasks: 'open', ...base }); break; }
+        if (!Array.isArray(o.tasks) || !o.tasks.length || o.tasks.some((x) => !Number.isInteger(x))) {
+          throw new HomeError(`${at} (tasks): tasks הוא "open" או רשימת מזהי משימות (מספרים) לא ריקה`);
+        }
+        for (const x of o.tasks as number[]) if (!refs.open?.has(x)) throw new HomeError(`${at} (tasks): משימה ${x} לא פתוחה`);
+        out.push({ type: t, tasks: [...new Set(o.tasks as number[])], ...base });
+        break;
+      }
       case 'lanes': out.push({ type: t, projects: ids('projects', refs.projects, 'פרויקט'), ...base }); break;
       case 'project': {
         const p = text('project', 64);
@@ -245,6 +258,7 @@ export class Home {
       inbox: new Set(this.hq.inbox.open().map((i) => i.id)),
       awaiting: new Set(this.awaitingIds()),
       asked: new Set(this.asked().map((a) => a.id)),
+      open: new Set(this.openIds()),
       shifts: new Set((this.db.prepare('SELECT id FROM shifts').all() as { id: string }[]).map((r) => r.id)),
       task: (id) => !!this.db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(id),
     };
@@ -280,6 +294,9 @@ export class Home {
     }, 200);
     this.askedTimer.unref?.();
   }
+
+  /** "בעבודה ובתור" (open-tasks.ts, #128): every task not done. */
+  private openIds(): number[] { return this.hq.openTasks().map((t) => t.id); }
 
   /** "מה לבדוק" (awaiting.ts, #108): finished tasks that wait for a deploy or for him to check. */
   private awaitingIds(): number[] { return this.hq.awaiting.list().map((t) => t.id); }
@@ -317,7 +334,7 @@ export class Home {
         // Inbox references are not re-checked here: a closed one is pruned below, not a reason to drop the recipe.
         const raw = JSON.parse(row.blocks) as unknown;
         const blocks = validateBlocks(raw, { ...refs, inbox: new Set(this.ever(raw, 'inbox')), awaiting: new Set(this.ever(raw, 'tasks')),
-          asked: new Set(this.everMessages(raw)) });
+          open: new Set(this.ever(raw, 'tasks')), asked: new Set(this.everMessages(raw)) });
         recipe = { version: row.version, composed_by: row.composed_by, composed_at: row.composed_at, reason: row.reason, source: 'agent', blocks };
       } catch { fallback = 'invalid'; }
     }
@@ -367,6 +384,13 @@ export class Home {
         }
         case 'awaiting': {
           const tasks = b.tasks.filter((i) => refs.awaiting.has(i));
+          if (tasks.length) out.push({ ...b, tasks });
+          break;
+        }
+        case 'tasks': {
+          // "open" follows the list as it is; named tasks leave as they finish.
+          if (b.tasks === 'open') { if (refs.open?.size) out.push(b); break; }
+          const tasks = b.tasks.filter((i) => refs.open?.has(i));
           if (tasks.length) out.push({ ...b, tasks });
           break;
         }
@@ -429,6 +453,7 @@ export class Home {
     if (asked.length) blocks.push({ type: 'asked', messages: asked });
     const awaiting = this.awaitingIds();
     if (awaiting.length) blocks.push({ type: 'awaiting', tasks: awaiting });
+    if (this.openIds().length) blocks.push({ type: 'tasks', tasks: 'open' });
     const active = this.hq.projects().filter((p) => p.status === 'active').map((p) => p.id);
     if (active.length) blocks.push({ type: 'lanes', projects: active });
     for (const p of active) blocks.push({ type: 'project', project: p });
@@ -536,6 +561,8 @@ export class Home {
     const projects = this.hq.projects().map((p) => `${p.id}${p.name ? ` (${p.name})` : ''}${p.status !== 'active' ? ` · ${p.status}` : ''}`);
     const asked = this.asked().map((a) => `${a.id}: ${this.hq.mailbox.label(a.identity)} · ${a.state === 'answered' ? 'ענו' : 'מחכה'} · ${a.body.replace(/\s+/g, ' ').slice(0, 60)}`);
     const inbox = this.hq.inbox.open().map((i) => `${i.id}: ${i.kind}${i.blocking ? ' · חוסם' : ''}${i.snoozed_at ? ' · נדחה' : ''} · ${i.headline ?? i.title}`);
+    const open = this.hq.openTasks(board).map((t) => `${t.id}: ${t.title} · ${t.state}${t.position ? ` ${t.position} בתור` : ''}`
+      + `${t.worker ? ` · ${this.hq.mailbox.label(t.worker)}` : ''}${t.opened_by ? ` · פתח ${this.hq.mailbox.label(t.opened_by)}` : ''}`);
     return [
       `להרכיב מחדש את ראש מסך השיחות של ${this.hq.mailbox.names.owner.name} (\`compose_home\`). מאז ההרכבה הקודמת${row ? ` (${this.hhmm(row.composed_at)})` : ''}:`,
       ...pending.map((p) => `- ${this.hhmm(p.at)} ${p.text}`),
@@ -544,6 +571,7 @@ export class Home {
       '```json', JSON.stringify(cur.blocks), '```',
       `inbox פתוח: ${inbox.length ? '' : 'אין'}`, ...inbox.map((l) => `- ${l}`),
       `ביקשת (asked): ${asked.length ? '' : 'אין'}`, ...asked.map((l) => `- ${l}`),
+      `בעבודה ובתור (tasks): ${open.length ? '' : 'אין'}`, ...open.map((l) => `- ${l}`),
       `פרויקטים: ${projects.join(', ') || 'אין'}`,
       `עובדים עכשיו: ${working.join(', ') || 'אף אחד'}`,
       'אם אין מה לשנות, לא צריך לקרוא לכלי. מתכון ישן מ-30 דקות מתחלף בברירת המחדל.',

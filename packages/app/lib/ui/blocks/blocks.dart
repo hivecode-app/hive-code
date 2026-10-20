@@ -9,3 +9,4 @@ export 'parts.dart';
 export 'people.dart';
 export 'project.dart';
 export 'since.dart';
+export 'tasks.dart';

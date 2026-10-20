@@ -183,15 +183,16 @@ Iterable<String> _rows(WidgetTester tester) => [
     ];
 
 void main() {
-  testWidgets('chats: Yoav pinned, who is at work (leads with their team\'s tasks), then the rest by latest', (tester) async {
+  testWidgets('chats: Yoav pinned, who is at work, what each one opened, then the rest by latest', (tester) async {
     await _pump(tester, size: _tall);
     final rows = _rows(tester).toList();
     expect(rows.first, 'yoav');
     expect(find.byType(Dismissible), findsNothing, reason: 'nothing waits and nothing since: no card');
-    // At work: Keren on her own task, Adi with the two tasks her team runs (Shani, Omer).
+    // At work: Keren on her own task. The two tasks Adi's team runs (Shani, Omer) are the line under her (#128).
     final working = [for (final w in tester.widgetList<WorkingRow>(find.byType(WorkingRow))) w.c.identityId];
-    expect(working, unorderedEquals(['keren', 'adi']), reason: 'in the list\'s order');
-    expect(findShown('שני: לא נקרא, התראות על הודעות'), findsOneWidget);
+    expect(working, ['keren']);
+    final lines = {for (final w in tester.widgetList<OpenTasksLine>(find.byType(OpenTasksLine))) w.identityId: openTasksLine(w.tasks)};
+    expect(lines, {'adi': '2 משימות · 2 רצות', 'shachar': 'רצה: שעת איסוף "לא ידוע" לא נאמרת ללקוח'});
     expect(find.byWidgetPredicate((w) => w is Ic && w.name == 'play_arrow'), findsNWidgets(3));
     // Then one list by latest, who works now in his own place in it, each once; task workers without an
     // unread message are not here.
@@ -251,10 +252,13 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    // On "עכשיו בעבודה": Shani's line under Adi opens Shani; Adi's name opens Adi.
+    // Under Adi, what her team runs (#128): the line opens the list, Shani's task in it opens Shani; Adi's name opens Adi.
     final shani = d.tickets.firstWhere((t) => t.doneAt == null && t.assignee == 'שני');
-    await tester.tap(findShown('שני: לא נקרא, התראות על הודעות'));
+    await tester.tap(find.byWidgetPredicate((w) => w is OpenTasksLine && w.identityId == 'adi'));
     await tester.pumpAndSettle();
+    await tester.tap(findShown('לא נקרא, התראות על הודעות').last);
+    await tester.pumpAndSettle();
+    expect(find.text('מה פתוח אצל עדי'), findsNothing, reason: 'the sheet closes as the chat opens');
     expect(open(), shani.assigneeId);
     await back();
     await tester.tap(find.text('עדי').first);
@@ -358,8 +362,9 @@ void main() {
         status: WorkerStatus.working, assigneeId: 'agent-company-t14', openedBy: 'eli'));
     store.touch();
     await tester.pump();
-    expect([for (final w in tester.widgetList<WorkingRow>(find.byType(WorkingRow))) w.c.identityId], contains('eli'));
-    expect(findShown('${d.who('agent-company-t14').name}: השוואת ביטוחים'), findsOneWidget);
+    final line = tester.widgetList<OpenTasksLine>(find.byType(OpenTasksLine)).where((w) => w.identityId == 'eli').single;
+    expect(openTasksLine(line.tasks), 'רצה: השוואת ביטוחים');
+    expect(line.tasks.single.worker, 'agent-company-t14');
   });
 
   // ── the head: one card of what needs him (t63) ──────────────────────────

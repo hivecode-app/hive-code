@@ -205,7 +205,7 @@ class HqBackend extends Backend {
     company_time.CompanyTime.apply(results[0]['timezone']);
     final prev = _data;
     if (results[0] is Map && (results[0] as Map).containsKey('names')) companyNames = CompanyNames.fromJson(results[0]['names']);
-    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), awaiting: _list(results[0], 'awaiting'), asked: _list(results[0], 'asked'), manager: (results[0]['manager'] as String?) ?? '', previous: prev);
+    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), awaiting: _list(results[0], 'awaiting'), asked: _list(results[0], 'asked'), openTasks: results[0]['open_tasks'] is List ? _list(results[0], 'open_tasks') : null, manager: (results[0]['manager'] as String?) ?? '', previous: prev);
     // Order and last lines from the last messages fetch, right away: without them the list showed
     // board order, then jumped into recency order when the messages came back (on every event).
     final lines = _lastLines;
@@ -393,6 +393,7 @@ class HqBackend extends Backend {
       if (c['board'] is Map && (c['board'] as Map).containsKey('names')) companyNames = CompanyNames.fromJson(c['board']['names']);
       _data = mapSnapshot(board: list('board', 'identities'), inbox: list('inbox', 'items'), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'),
           tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'), awaiting: _list(c['board'], 'awaiting'), asked: _list(c['board'], 'asked'),
+          openTasks: (c['board'] as Map)['open_tasks'] is List ? _list(c['board'], 'open_tasks') : null,
           manager: ((c['board'] as Map)['manager'] as String?) ?? '');
       if (c['home'] is Map) {
         try {
@@ -1211,6 +1212,9 @@ CompanyData mapSnapshot({
   List<Map<String, dynamic>> projects = const [],
   List<Map<String, dynamic>> awaiting = const [],
   List<Map<String, dynamic>> asked = const [],
+
+  /// `open_tasks` (#128); null from an hq before it: derived from [tasks].
+  List<Map<String, dynamic>>? openTasks,
   String manager = '',
   CompanyData? previous,
   DateTime? now,
@@ -1440,13 +1444,13 @@ CompanyData mapSnapshot({
           if (b['team_kind'] == 'task' && b['project'] == project && taskOf.containsKey(b['id'])) b['id'] as String,
       ];
       final people = (lead != null ? 1 : 0) + standing.length + workers.length;
-      final openTasks = tickets.where((k) => k.project == project && k.group != TicketGroup.doneToday).length;
+      final openCount = tickets.where((k) => k.project == project && k.group != TicketGroup.doneToday).length;
       orgTeams.add(OrgTeam(
         teamId: t.id,
         line: [
           if (lead != null) lead.name,
           people == 1 ? 'עובד אחד' : '$people עובדים',
-          openTasks == 0 ? 'אין משימות פתוחות' : (openTasks == 1 ? 'משימה פתוחה אחת' : '$openTasks משימות פתוחות'),
+          openCount == 0 ? 'אין משימות פתוחות' : (openCount == 1 ? 'משימה פתוחה אחת' : '$openCount משימות פתוחות'),
         ].join(' · '),
         statusIcon: '',
         statusWord: '',
@@ -1506,6 +1510,7 @@ CompanyData mapSnapshot({
     night: night ? 'לילה פעיל' : null,
     awaiting: [for (final a in awaiting) ?AwaitingTask.fromHq(a)],
     asked: [for (final a in asked) ?AskedRequest.fromHq(a)],
+    openTasks: openTasks == null ? null : [for (final t in openTasks) ?OpenTask.fromHq(t)],
   );
 }
 

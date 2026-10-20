@@ -9,6 +9,7 @@ import '../../theme/tokens.dart';
 import '../common.dart';
 import '../entity_link.dart';
 import '../nav.dart';
+import '../blocks/tasks.dart';
 import '../system_bar.dart';
 import 'head.dart';
 import 'home_blocks.dart';
@@ -92,6 +93,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     final done = fold ? all.where(closed).toList() : const <ConversationSummary>[];
 
     if (widget.compact) {
+      final opened = openedTasks(d);
       return Container(
         color: p.surface,
         child: Column(children: [
@@ -101,7 +103,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
             child: ListView(padding: EdgeInsets.zero, children: [
               for (final (i, c) in list.indexed) ...[
                 if (i > 0) Padding(padding: const EdgeInsetsDirectional.only(start: 62), child: Container(height: 1, color: p.line)),
-                ConversationRow(c: c, compact: true, selected: store.currentConversation == c.identityId),
+                ConversationRow(c: c, compact: true, selected: store.currentConversation == c.identityId, opened: opened[c.identityId] ?? const []),
               ],
             ]),
           ),
@@ -153,9 +155,10 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     final shown = [for (final c in d.conversations) if (!d.who(c.identityId).temp || c.unread > 0) c];
     final yoav = shown.where((c) => c.identityId == d.managerId).firstOrNull;
     final working = nowWorking(d);
+    final opened = openedTasks(d);
     final others = [
       for (final c in shown)
-        if (c.identityId != d.managerId && (working.containsKey(c.identityId) || c.lastLine.isNotEmpty || c.unread > 0)) c,
+        if (c.identityId != d.managerId && (working.containsKey(c.identityId) || opened.containsKey(c.identityId) || c.lastLine.isNotEmpty || c.unread > 0)) c,
     ];
     // A finished task worker with unread lines goes below every live conversation (#40).
     final rest = [...others.where((c) => !d.isDone(c.identityId)), ...others.where((c) => d.isDone(c.identityId))];
@@ -164,11 +167,14 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     final since = store.chatsSeenAt ?? dayStart(now);
     final head = HeadData.of(d, since: since);
     final listed = {for (final c in rest) c.identityId};
+    Widget row(ConversationSummary c) => working.containsKey(c.identityId)
+        ? WorkingRow(c: c, lines: working[c.identityId]!, opened: opened[c.identityId] ?? const [])
+        : ConversationRow(c: c, quiet: true, opened: opened[c.identityId] ?? const []);
     final rows = <Widget>[
-      if (yoav != null) ConversationRow(c: yoav, pinned: true, quiet: true),
-      for (final id in working.keys)
-        if (!listed.contains(id)) WorkingRow(c: conv(id), lines: working[id]!),
-      for (final c in rest) working.containsKey(c.identityId) ? WorkingRow(c: c, lines: working[c.identityId]!) : ConversationRow(c: c, quiet: true),
+      if (yoav != null) ConversationRow(c: yoav, pinned: true, quiet: true, opened: opened[yoav.identityId] ?? const []),
+      for (final id in {...working.keys, ...opened.keys})
+        if (!listed.contains(id) && id != yoav?.identityId) row(conv(id)),
+      for (final c in rest) row(c),
     ];
     return ListView(padding: EdgeInsets.zero, children: [
       // hq's recipe when it has one (home_blocks.dart); an older hq: the card alone, as before.
@@ -365,8 +371,11 @@ class Fab extends StatelessWidget {
 }
 
 class ConversationRow extends StatelessWidget {
-  const ConversationRow({super.key, required this.c, this.compact = false, this.selected = false, this.pinned = false, this.quiet = false});
+  const ConversationRow({super.key, required this.c, this.compact = false, this.selected = false, this.pinned = false, this.quiet = false, this.opened = const []});
   final ConversationSummary c;
+
+  /// The open tasks this one opened (#128): a line under the row ("3 משימות · 2 רצות · 1 בתור") that opens the list.
+  final List<OpenTask> opened;
   final bool compact;
   final bool selected;
 
@@ -471,6 +480,7 @@ class ConversationRow extends StatelessWidget {
                         if (pill != null) ...[const SizedBox(width: 8), pill],
                       ]),
                     ),
+                  if (opened.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2), child: OpenTasksLine(identityId: c.identityId, tasks: opened)),
                   if (!quiet || statusLoud(pr.status) || (pill != null && !lineShown)) Padding(padding: const EdgeInsets.only(top: 4), child: status),
                 ]),
               ),
@@ -504,10 +514,8 @@ class UnreadPill extends StatelessWidget {
   }
 }
 
-/// Who is in the middle of a task, and what (#53): a standing worker with a task in hand, and each project
-/// lead whose task workers are running, with their tasks (most work runs on task workers, who are not on
-/// this screen; without this the section was empty most of the day). A task worker's line carries its
-/// identity: a tap on it opens that worker.
+/// Who is in the middle of a task of their own, and what (#53): a standing worker with a task in hand. The tasks
+/// someone handed to task workers, running or queued, are the line under the one who opened them ([openedTasks]).
 typedef WorkingLine = ({String text, String? who});
 
 Map<String, List<WorkingLine>> nowWorking(CompanyData d) {
@@ -519,28 +527,42 @@ Map<String, List<WorkingLine>> nowWorking(CompanyData d) {
     final task = pr.currentTask ?? pr.activity;
     if (task != null && task.isNotEmpty) out[who.id] = [(text: plainTitle(task), who: null)];
   }
-  // A task worker's task goes under its project's lead; a task without a project (an errand for the
-  // personal team, monitoring, improvement) under whoever opened it.
-  final leadOf = {for (final proj in d.projects) proj.id: d.teams[proj.teamId]?.leadId};
-  for (final t in d.tickets) {
-    final id = t.assigneeId;
-    if (t.group == TicketGroup.queued || t.doneAt != null || id == null || !d.who(id).temp) continue;
-    var lead = leadOf[t.project];
-    if (lead == null) {
-      final opener = t.openedBy == null ? null : d.identities[t.openedBy];
-      if (opener != null && !opener.temp) lead = opener.id;
+  return out;
+}
+
+/// "מה פתוח אצלי" (#128): the open tasks under each one who opened them (a lead, Yoav, a standing worker), queued
+/// ones too. A task worker that opened one is not a conversation here: its tasks go under its own opener's row.
+Map<String, List<OpenTask>> openedTasks(CompanyData d) {
+  // A task worker's own opener: whoever opened the task it is on (open tasks first, then finished ones).
+  final openerOf = <String, String?>{
+    for (final t in d.tickets) if (t.assigneeId != null) t.assigneeId!: t.openedBy,
+    for (final t in d.openTasks) if (t.worker != null) t.worker!: t.openedBy,
+  };
+  String? owner(String? id) {
+    for (var hops = 0; id != null && hops < 5; hops++) {
+      if (!d.identities.containsKey(id)) return null;
+      if (!d.who(id).temp) return id;
+      id = openerOf[id];
     }
-    if (lead == null) continue;
-    out[lead] = [...?out[lead], (text: '${t.assignee}: ${plainTitle(t.title)}', who: chatTargetOfTicket(d, t))];
+    return null;
+  }
+
+  final out = <String, List<OpenTask>>{};
+  for (final t in d.openTasks) {
+    final id = owner(t.openedBy);
+    if (id != null) (out[id] ??= []).add(t);
   }
   return out;
 }
 
 /// A conversation under "עכשיו בעבודה": the name and team, then the task with `play_arrow`.
 class WorkingRow extends StatelessWidget {
-  const WorkingRow({super.key, required this.c, required this.lines});
+  const WorkingRow({super.key, required this.c, required this.lines, this.opened = const []});
   final ConversationSummary c;
   final List<WorkingLine> lines;
+
+  /// The open tasks this one opened (#128), as in [ConversationRow].
+  final List<OpenTask> opened;
   @override
   Widget build(BuildContext context) {
     final d = StoreScope.of(context).data!;
@@ -587,6 +609,7 @@ class WorkingRow extends StatelessWidget {
                     ),
                     if (i == 0 && unread) ...[const SizedBox(width: 8), Padding(padding: const EdgeInsets.only(top: 3), child: UnreadPill(c.unread, muted: c.muted))],
                   ]),
+                if (opened.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2), child: OpenTasksLine(identityId: c.identityId, tasks: opened)),
               ]),
             ),
           ]),

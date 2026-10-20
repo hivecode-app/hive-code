@@ -7,6 +7,7 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../blocks/awaiting.dart';
+import '../blocks/tasks.dart';
 import '../common.dart';
 import '../entity_link.dart';
 import '../nav.dart';
@@ -32,7 +33,13 @@ class StatusScreen extends StatelessWidget {
       const SystemBar(),
       Expanded(
         child: ListView(padding: EdgeInsets.zero, children: [
-          Section('מחכה לך', count: waiting.isEmpty ? null : '${waiting.length}', top: 8),
+          // "בעבודה ובתור" (#128): every open task, wherever it runs, queued ones too.
+          Section('בעבודה ובתור', count: d.openTasks.isEmpty ? null : '${d.openTasks.length}', top: 8),
+          ListBlock(children: [
+            if (d.openTasks.isEmpty) const _Quiet(icon: 'radio_button_unchecked', text: 'אין משימות פתוחות')
+            else TasksBlock(tasks: d.openTasks, now: now),
+          ]),
+          Section('מחכה לך', count: waiting.isEmpty ? null : '${waiting.length}'),
           ListBlock(children: [
             if (waiting.isEmpty) const _Quiet(icon: 'check_circle', text: 'אין מה שמחכה לך')
             else for (final w in waiting) _WaitLine(item: w),

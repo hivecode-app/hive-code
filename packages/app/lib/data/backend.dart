@@ -33,6 +33,7 @@ class CompanyData {
     this.asked = const [],
     this.home,
     this.managerId = '',
+    this._openTasks,
   });
 
   /// The company's manager (hq's `manager`, from org.yaml): pinned first in the conversations. '' = an hq that does not say.
@@ -70,6 +71,17 @@ class CompanyData {
 
   /// "ביקשת" (#118): his requests to workers whose answer he hasn't read, newest first.
   List<AskedRequest> asked;
+
+  /// "בעבודה ובתור" (#128): every task not done, running first, then what waits for him, the queue in its order, the blocked.
+  List<OpenTask> get openTasks => _openTasks ?? OpenTask.fromTickets(tickets, leadOf: {for (final p in projects) p.id: teams[p.teamId ?? p.id]?.leadId});
+
+  set openTasks(List<OpenTask> v) => _openTasks = v;
+
+  /// hq's list; null from an hq before it (and the mockup): derived from the tickets as they are now.
+  List<OpenTask>? _openTasks;
+
+  /// The open tasks [identityId] opened: what its row in the conversations shows ("מה פתוח אצלי").
+  List<OpenTask> openedBy(String identityId) => [for (final t in openTasks) if (t.openedBy == identityId) t];
 
   /// The head of the conversations screen (GET /api/home); null from an hq without it (the screen draws hq's default shape itself).
   HomeRecipe? home;
