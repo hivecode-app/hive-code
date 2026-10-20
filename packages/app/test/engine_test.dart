@@ -141,6 +141,20 @@ void main() {
     expect(streamedAlready(items, {'id': 'tell-1', 'text_ref': null}), isFalse);
   });
 
+  test('two text blocks of one message (same messageId) both stream', () {
+    // The CLI sends one `assistant` event per block, all with the message's id (spikes/bet7-chat/RESULT.md).
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.m);
+    Map<String, dynamic> delta(String t) => {'seq': 0, 'ts': 1000, 'type': 'engine.delta', 'identity': 'yoav', 'data': {'shift': 'yoav-4', 'kind': 'text_delta', 'text': t, 'messageId': 'msg_a'}};
+    m.apply(delta('בודק'));
+    m.apply(ev(1, 'text', {'text': 'בודק.', 'messageId': 'msg_a'}));
+    m.apply(delta('עוד'));
+    expect(items.whereType<TextMsg>().last.streaming, isTrue, reason: 'the second block streams too');
+    m.apply(ev(2, 'text', {'text': 'עוד משהו.', 'messageId': 'msg_a'}));
+    expect(items.whereType<TextMsg>().map((t) => t.text), ['בודק.', 'עוד משהו.']);
+    expect(items.whereType<TextMsg>().any((t) => t.streaming), isFalse);
+  });
+
   test('board status "free" is פנוי, not נח', () {
     expect(mapStatus('free'), WorkerStatus.free);
     expect(mapStatus('resting'), WorkerStatus.resting);

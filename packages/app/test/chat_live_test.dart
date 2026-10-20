@@ -95,6 +95,33 @@ void main() {
     expect(ids(b), containsAllInOrder(['msg:old', 'msg:reply']));
   }, timeout: const Timeout(Duration(seconds: 20)));
 
+  test('#68: a reply that streams while the open chat reloads (hq restarted mid-turn) shows once', () async {
+    final (b, hq) = await up();
+    b.showConversation('yoav'); // as ChatScreen does
+    const reply = 'כן. צריך להתקין את ה-APK החדש.';
+    Map<String, dynamic> delta(String t) => {'seq': 0, 'type': 'engine.delta', 'identity': 'yoav', 'data': {'shift': 'yoav-4', 'kind': 'text_delta', 'text': t, 'messageId': 'msg_apk'}};
+    final text = {'seq': 201, 'ts': 5000, 'type': 'engine.text', 'identity': 'yoav', 'data': {'shift': 'yoav-4', 'seq': 7, 'ev': {'kind': 'text', 'text': reply, 'messageId': 'msg_apk'}}};
+    final result = {'seq': 203, 'ts': 5001, 'type': 'engine.result', 'identity': 'yoav', 'data': {'shift': 'yoav-4', 'seq': 8, 'ev': {'kind': 'result', 'subtype': 'success', 'isError': false, 'text': reply}}};
+    final stored = {'id': 'm-17-reply', 'from_identity': 'yoav', 'to_identity': 'owner', 'kind': 'tell', 'body': reply, 'ref': 'm-17', 'text_ref': 'msg_apk', 'created_at': 5002, 'state': 'delivered'};
+    // By the time hq answers the reload, the turn is over: its history has the final text and the stored reply.
+    hq.events = [text, result];
+    hq.messages = [stored];
+    hq.messagesDelay = const Duration(milliseconds: 400);
+    final opening = b.openConversation('yoav');
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    // ...and what streamed live meanwhile reaches the app during the fetch.
+    hq.send(delta('כן. צריך '));
+    hq.send(delta('להתקין את ה-APK החדש.'));
+    hq.send(text);
+    hq.send({'seq': 202, 'type': 'message.new', 'identity': 'owner', 'data': stored});
+    hq.send(result);
+    await opening;
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    final texts = b.data!.chats['yoav']!.items.whereType<TextMsg>().where((t) => t.text.contains('APK')).toList();
+    expect(texts.map((t) => t.id), ['t:msg_apk'], reason: 'one bubble, not the history copy plus a stream copy');
+    expect(texts.single.streaming, isFalse);
+  }, timeout: const Timeout(Duration(seconds: 20)));
+
   test('a question asked while the chat is open appears; one answered elsewhere closes', () async {
     final (b, hq) = await up();
     b.showConversation('yoav'); // as ChatScreen does

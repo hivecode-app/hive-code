@@ -620,9 +620,12 @@ class HqBackend extends Backend {
       d.chats[identityId] = chat;
       _engines[identityId] = eng;
       _openFailed.remove(identityId);
-      // What arrived while this loaded, applied to the new copy (the engine skips seqs it has).
+      // What arrived while this loaded, applied to the new copy (the engine skips seqs it has). Deltas are
+      // live-only (no seq): those of a text the history already has in full would open it a second time (#68).
+      final done = {for (final t in chat.items.whereType<TextMsg>()) if (!t.streaming) t.id};
       final waiting = _midFetch.remove(identityId) ?? const [];
       for (final e in waiting) {
+        if (e['type'] == 'engine.delta' && done.contains('t:${(e['data'] as Map?)?['messageId']}')) continue;
         _onEvent(e);
       }
       notifyListeners();
