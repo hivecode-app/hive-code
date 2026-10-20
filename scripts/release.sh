@@ -12,7 +12,8 @@
 #   4. .engine-release: "<tag> <sha>".
 # All in agent-company-v<X.Y.Z>.tar.gz (one top dir, agent-company-v<X.Y.Z>/), next to SHA256SUMS.
 # Then the annotated tag v<X.Y.Z> on the commit, pushed, and a GitHub Release with both files: a draft prerelease
-# (the repo is private; the public engine repo comes after step 8). --no-publish only builds into --out.
+# (the repo is private). Publishes to the origin of the checkout: run it from the engine repo (hive-owner/company-engine,
+# the default of install.sh), not from agent-company. --no-publish only builds into --out.
 #
 # Built from a clean export of the commit, never from the working tree, so the release is exactly the tag.
 # Needs (hq-host): ~/flutter, the Android SDK, the release key (~/.local/state/agent-company/android/key.properties).
