@@ -10,7 +10,9 @@
 # its installer live in the engine):
 #   1. requirements: Ubuntu/Debian, systemd, Node 22.18+, git, gh, curl, 16GB memory
 #   2. explicit consent to the workers' full access (typed "כן"), remembered in ~/.config/agent-company/install.json
-#   3. the engine at a tag: ~/.local/share/agent-company/engine/<tag> (the tree, no .git), `current` -> <tag>, npm ci
+#   3. the engine at a tag: ~/.local/share/agent-company/engine/<tag>, `current` -> <tag>, npm ci. From the tag's release
+#      (scripts/release.sh: the tree, the web app and the APK, checked against SHA256SUMS), or --from-tarball; a tag
+#      with no release and a branch come as the tree of the commit (git archive, no .git), without the web app
 #   4. Claude Code at the version the engine pins (scripts/install-claude.sh), `claude auth login`, canary
 #   5. the company from starter/ in COMPANY_HOME, a local git repo
 #   6. the public address: Caddy (own domain), Cloudflare Tunnel, or Tailscale Funnel; all of them go
@@ -50,6 +52,7 @@ bash scripts/install.sh [options]   (later: curl -fsSL https://get.<domain>/inst
   --company-home DIR                     where the company lives (default: $COMPANY_HOME, else ~/company)
   --repo URL|PATH                        the engine repo (default: $AGENT_COMPANY_REPO, else GitHub)
   --version REF                          engine tag (default: the newest v* tag; main when there is none)
+  --from-tarball FILE                    the engine from a release file (SHA256SUMS next to it), not from the repo
   --accept-full-access                   the consent of step 2, for a non-interactive run
   --skip-claude-login                    test runs only: no `claude auth login` and no canary
 env: CLOUDFLARE_TUNNEL_TOKEN (tunnel; replaces a saved one), INSTALL_MIN_MEM_GB (default 16)
@@ -58,7 +61,7 @@ EOF
 
 # Everything runs from main, called on the last line: under `curl | bash`, a download cut short runs nothing.
 main() {
-address=""; domain=""; company_home=""; repo="${AGENT_COMPANY_REPO:-$REPO_DEFAULT}"; version=""
+address=""; domain=""; company_home=""; repo="${AGENT_COMPANY_REPO:-$REPO_DEFAULT}"; version=""; tarball=""
 accept=0; skip_login=0
 while (($#)); do
   case "$1" in
@@ -67,6 +70,7 @@ while (($#)); do
     --company-home) company_home="${2:?}"; shift 2 ;;
     --repo) repo="${2:?}"; shift 2 ;;
     --version) version="${2:?}"; shift 2 ;;
+    --from-tarball) tarball="${2:?}"; shift 2 ;;
     --accept-full-access) accept=1; shift ;;
     --skip-claude-login) skip_login=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -148,28 +152,76 @@ step 3 "המנוע"
 if [ -L "$ENGINE" ] && [ -f "$ENGINE/.install-ok" ]; then
   done_ "מותקן: $(readlink "$ENGINE"). עדכון גרסה: company update"
 else
-  if [ -z "$version" ]; then
-    version="$(git ls-remote --tags --refs --sort=-v:refname "$repo" 'v*' 2>/dev/null | head -1 | sed 's#.*refs/tags/##')" || true
-    [ -n "$version" ] || { version=main; say "אין עדיין גרסה מתויגת ב-$repo: מתקינה את main."; }
+  # The release of a tag: the tree, web/ and apk/, checked against the SHA256SUMS next to it (scripts/release.sh).
+  rel_dir=""; rel_file=""; from_code_sha=0
+  if [ -n "$tarball" ]; then
+    [ -f "$tarball" ] || die "אין קובץ $tarball."
+    rel_dir="$(cd "$(dirname "$tarball")" && pwd)"; rel_file="$(basename "$tarball")"; sha=""
+  else
+    if [ -z "$version" ]; then
+      version="$(git ls-remote --tags --refs --sort=-v:refname "$repo" 'v*' 2>/dev/null | head -1 | sed 's#.*refs/tags/##')" || true
+      [ -n "$version" ] || { version=main; say "אין עדיין גרסה מתויגת ב-$repo: מתקינה את main."; }
+    fi
+    # An annotated tag lists its tag object first; the commit is the ^{} line.
+    refs="$(git ls-remote "$repo" "refs/tags/$version^{}" "refs/tags/$version" "refs/heads/$version" 2>/dev/null)" || true
+    sha="$( { grep -F '^{}' <<<"$refs" || head -1 <<<"$refs"; } | head -1 | cut -f1)"
+    [ -n "$sha" ] || { [[ "$version" =~ ^[0-9a-f]{7,40}$ ]] && sha="$version"; } \
+      || die "לא מצאתי את $version ב-$repo." "repo פרטי? gh auth login ואז gh auth setup-git, ומריצים שוב."
+    slug=""
+    [[ "$repo" =~ ^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$ ]] && slug="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+    if [ -n "$slug" ] && git ls-remote --tags "$repo" "refs/tags/$version" | grep -q .; then
+      rel_dir="$(mktemp -d)"; rel_file="agent-company-$version.tar.gz"
+      say "מוריד את השחרור $version מ-$slug"
+      # The public download; for a private repo or a draft, gh with the user's login.
+      if ! { curl -fsSL "https://github.com/$slug/releases/download/$version/$rel_file" -o "$rel_dir/$rel_file" \
+               && curl -fsSL "https://github.com/$slug/releases/download/$version/SHA256SUMS" -o "$rel_dir/SHA256SUMS"; } 2>/dev/null \
+         && ! gh release download "$version" -R "$slug" -p "$rel_file" -p SHA256SUMS -D "$rel_dir" --clobber >/dev/null 2>&1; then
+        # Named by its sha, not the tag: v<X.Y.Z> stays for the release, so `company update` still brings the web app.
+        say "ל-$version אין שחרור להורדה: מתקינה מהקוד בשם ${sha:0:12}, בלי האפליקציה ל-web וה-APK."
+        rm -rf "$rel_dir"; rel_dir=""; from_code_sha=1
+      fi
+    fi
   fi
-  # An annotated tag lists its tag object first; the commit is the ^{} line.
-  refs="$(git ls-remote "$repo" "refs/tags/$version^{}" "refs/tags/$version" "refs/heads/$version" 2>/dev/null)" || true
-  sha="$( { grep -F '^{}' <<<"$refs" || head -1 <<<"$refs"; } | head -1 | cut -f1)"
-  [ -n "$sha" ] || { [[ "$version" =~ ^[0-9a-f]{7,40}$ ]] && sha="$version"; } \
-    || die "לא מצאתי את $version ב-$repo." "repo פרטי? gh auth login ואז gh auth setup-git, ומריצים שוב."
-  # A tag keeps its name; a branch or a commit is named by its commit, so `current` always means one tree.
-  if git ls-remote --tags "$repo" "refs/tags/$version" | grep -q .; then name="$version"; else name="${sha:0:12}"; fi
-  dest="$ENGINES/$name"
+  if [ -n "$rel_dir" ]; then
+    # Nothing of a failed run stays behind: the download (not a file the user gave) and the unpacked tree.
+    rel_fail() { [ -n "$tarball" ] || rm -rf "$rel_dir"; rm -rf "${tmp:-}"; die "$@"; }
+    tmp=""
+    want="$(awk -v f="$rel_file" '$2 == f || $2 == "*" f { print $1; exit }' "$rel_dir/SHA256SUMS" 2>/dev/null)"
+    [[ "$want" =~ ^[0-9a-f]{64}$ ]] || rel_fail "אין checksum ל-$rel_file ב-$rel_dir/SHA256SUMS."
+    [ "$(sha256sum "$rel_dir/$rel_file" | cut -c1-64)" = "$want" ] || rel_fail "ה-checksum של $rel_file לא תואם ל-SHA256SUMS. לא מתקינה."
+    mkdir -p "$ENGINES"
+    tmp="$(mktemp -d "$ENGINES/.release.XXXXXX")"
+    tar -xzf "$rel_dir/$rel_file" -C "$tmp" --strip-components=1 --no-same-owner || rel_fail "פריסת $rel_file נכשלה."
+    read -r name rsha _ <"$tmp/.engine-release" 2>/dev/null || true
+    [[ "${name:-}" =~ ^v[0-9][A-Za-z0-9._-]*$ && "${rsha:-}" =~ ^[0-9a-f]{40}$ ]] || rel_fail "ב-$rel_file אין .engine-release תקין: זה לא שחרור של המנוע."
+    [ -z "$sha" ] || [ "$rsha" = "$sha" ] || rel_fail "השחרור $name נבנה מ-${rsha:0:7}, והתג ב-$repo על ${sha:0:7}."
+    [ -n "$tarball" ] || [ "$name" = "$version" ] || rel_fail "השחרור שהורד הוא $name, לא $version."
+    [ -n "$tarball" ] || rm -rf "$rel_dir"
+    sha="$rsha"; dest="$ENGINES/$name"
+    if [ -f "$dest/.install-ok" ]; then rm -rf "$tmp"
+    else
+      rm -rf "$ENGINES/.$name.partial" "$dest"
+      mv -T "$tmp" "$ENGINES/.$name.partial"
+    fi
+    say "השחרור $name (המנוע, האפליקציה ל-web וה-APK), ה-checksum תקין"
+  else
+    # A tag keeps its name; a branch or a commit is named by its commit, so `current` always means one tree.
+    if ((from_code_sha == 0)) && git ls-remote --tags "$repo" "refs/tags/$version" | grep -q .; then name="$version"; else name="${sha:0:12}"; fi
+    dest="$ENGINES/$name"
+    if [ ! -f "$dest/.install-ok" ]; then
+      tmp="$ENGINES/.$name.partial"; src="$ENGINES/.$name.git"
+      rm -rf "$tmp" "$src" "$dest"
+      mkdir -p "$ENGINES" "$tmp"
+      say "מוריד את $version ($name) מ-$repo"
+      # A fixed tree, not a git checkout: nobody pulls new code into what the units run (the lesson of 21/10).
+      # A new version is a new directory and a new `current`, by company update.
+      git clone --quiet --bare "$repo" "$src"
+      git -C "$src" archive "$sha" | tar -x -C "$tmp"
+      rm -rf "$src"
+    fi
+  fi
   if [ ! -f "$dest/.install-ok" ]; then
-    tmp="$ENGINES/.$name.partial"; src="$ENGINES/.$name.git"
-    rm -rf "$tmp" "$src" "$dest"
-    mkdir -p "$ENGINES" "$tmp"
-    say "מוריד את $version ($name) מ-$repo"
-    # A fixed tree, not a git checkout: nobody pulls new code into what the units run (the lesson of 21/10).
-    # A new version is a new directory and a new `current`, by company update.
-    git clone --quiet --bare "$repo" "$src"
-    git -C "$src" archive "$sha" | tar -x -C "$tmp"
-    rm -rf "$src"
+    tmp="$ENGINES/.$name.partial"
     printf '%s %s %s\n' "$name" "$sha" "$repo" >"$tmp/.engine-version"
     say "מתקין תלויות (npm ci)"
     (cd "$tmp" && npm ci --omit=dev --no-audit --no-fund --loglevel=error >/dev/null)
@@ -306,18 +358,13 @@ case "$address" in
 esac
 record_set address "$address" domain "$domain"
 
-# The web app: an engine release that ships the web build serves it; otherwise a short page that points to the app.
-web="$ENGINE/packages/app/build/web"
+# The web app comes with an engine release (web/). An engine installed from the code has none: a short page that points
+# to the Android app takes its place, inside that engine, so a later release brings the real one with it.
+web="$ENGINE/web"
 if [ ! -f "$web/index.html" ]; then
-  web="$SHARE/web-placeholder"
   mkdir -p "$web"
-  cat >"$web/index.html" <<'EOF'
-<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>החברה</title><body style="font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;line-height:1.6">
-<h1 style="font-size:1.4rem">השרת של החברה עובד</h1>
-<p>הגרסה הזו של המנוע עוד לא כוללת את האפליקציה ל-web. נכנסים מהאפליקציה לאנדרואיד: סורקים את ה-QR מההתקנה, או מדביקים את הקישור במסך הכניסה.</p>
-</body></html>
-EOF
+  if [ -f "$ENGINE/scripts/lib/web-placeholder.html" ]; then cp "$ENGINE/scripts/lib/web-placeholder.html" "$web/index.html"
+  else printf '<!doctype html><meta charset="utf-8"><title>החברה</title><p>השרת של החברה עובד. נכנסים מהאפליקציה לאנדרואיד.</p>\n' >"$web/index.html"; fi
 fi
 
 # The routes live in one snippet. The loopback site answers any Host, because Funnel and Tunnel send their own
@@ -344,6 +391,12 @@ $MARK
 	@pairing path /pair /.well-known/assetlinks.json
 	handle @pairing {
 		reverse_proxy 127.0.0.1:7420
+	}
+	# The Android app, for a first install from the phone; updates go through hq (/hq/api/app).
+	handle /agent-company.apk {
+		root * $ENGINE/apk
+		header Cache-Control "no-cache"
+		file_server
 	}
 	handle {
 		root * $web
@@ -491,9 +544,9 @@ WantedBy=default.target"
 # ── 7. hq ────────────────────────────────────────────────────────────────────
 step 7 "hq"
 mkdir -p "$STATE"; chmod 700 "$STATE"
-cfg_changed="$(node - "$STATE/hq.config.json" "$company_home" "$origin" "$UNITS/company-shift@.service" "$(id -un)" "$HOME" <<'EOF'
+cfg_changed="$(node - "$STATE/hq.config.json" "$company_home" "$origin" "$UNITS/company-shift@.service" "$(id -un)" "$HOME" "$ENGINE/apk" <<'EOF'
 const fs = require('fs');
-const [file, companyHome, origin, shiftTemplate, user, home] = process.argv.slice(2);
+const [file, companyHome, origin, shiftTemplate, user, home, appReleaseDir] = process.argv.slice(2);
 let c = {};
 try { c = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
 const before = JSON.stringify(c);
@@ -501,7 +554,8 @@ const host = new URL(origin).hostname;
 c.companyHome = companyHome;
 delete c.companyDir;
 c.apiUrl = `${origin}/hq`;
-c.appReleaseDir = null;
+// The APK of the live engine (engine/current/apk), for the in-app update; hq follows the symlink on every read.
+c.appReleaseDir = appReleaseDir;
 c.shiftTemplate = shiftTemplate;
 c.defaultCwd ??= home;
 c.auth = { ...(c.auth ?? {}) };

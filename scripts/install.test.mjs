@@ -67,3 +67,16 @@ test('the pinned downloads carry full hashes', () => {
     assert.match(src, new RegExp(`CLOUDFLARED_SHA256_${a}='[0-9a-f]{64}'`));
   }
 });
+
+test('--from-tarball is an option', () => {
+  const r = spawnSync('bash', [script, '--help'], { encoding: 'utf8' });
+  assert.match(r.stdout, /--from-tarball FILE/);
+});
+
+test('release.sh parses and refuses a version that is not X.Y.Z', () => {
+  const release = join(dirname(script), 'release.sh');
+  execFileSync('bash', ['-n', release]);
+  const r = spawnSync('bash', [release, 'v0.1'], { encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /scripts\/release\.sh <X\.Y\.Z>/);
+});

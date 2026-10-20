@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # `company update [<tag>]`: moves an installed engine to a new tagged version (docs/generic/PLAN.md §5).
+# `company update --from-tarball <file>`: the same, from a release file (scripts/release.sh) with SHA256SUMS next to it.
 #
 # The engine lives in ~/.local/share/agent-company/engine/<name>, and engine/current is a relative symlink to the live
 # one; the units (hq, company-shift@) run from engine/current (scripts/install.sh). An update:
 #   1. installs the tag (default: the highest vX.Y.Z of the engine's repo) into engine/<tag>, the way the installer
-#      does (scripts/lib/engine-install.sh: a tree without .git, `npm ci --omit=dev`);
+#      does (scripts/lib/engine-install.sh: the tag's release, checksum checked, with web/ and apk/; or a tree without
+#      .git when the tag has no release; then `npm ci --omit=dev`);
 #   2. asks the NEW engine about the company: org.yaml's format (a change is opened as a PR in the company's repo and
 #      the update stops until it is merged: nothing is rewritten in place), then `company check`;
 #   3. backs hq.db up and runs the new engine's migrations on a copy of it;
@@ -110,13 +112,19 @@ trap 'fail "פקודה נכשלה בשורה $LINENO: $BASH_COMMAND"' ERR
 step "גרסה"
 url="$(engine_origin "$self")"
 [[ -n "$url" ]] || fail "לא ידוע מאיזה repo המנוע ב-$self הגיע (אין .engine-version ואין origin)"
-tag="${1:-}"
-if [[ -z "$tag" ]]; then
+tag=""; from_tarball=""
+case "${1:-}" in
+  --from-tarball) from_tarball="${2:-}"; [[ -n "$from_tarball" ]] || fail "‏--from-tarball צריך קובץ" ;;
+  *) tag="${1:-}" ;;
+esac
+if [[ -n "$from_tarball" ]]; then
+  from_tarball="$(readlink -f -- "$from_tarball")"
+elif [[ -z "$tag" ]]; then
   tag="$(node "$self/scripts/engine.mjs" latest-tag "$url")" || fail "לא הצלחתי לקרוא את התגים של $url"
   [[ -n "$tag" ]] || fail "אין גרסה מתויגת (vX.Y.Z) ב-$url"
 fi
-[[ "$tag" =~ ^[A-Za-z0-9._/-]+$ ]] || fail "שם גרסה לא תקין: $tag"
-if [[ "$tag" == "$cur" ]]; then
+[[ -n "$from_tarball" || "$tag" =~ ^[A-Za-z0-9._/-]+$ ]] || fail "שם גרסה לא תקין: $tag"
+if [[ -z "$from_tarball" && "$tag" == "$cur" ]]; then
   say "המנוע כבר בגרסה $tag"
   trap - ERR
   finish 0
@@ -125,7 +133,8 @@ fi
 
 # ── fetch: a new directory, the live engine is not touched ───────────────────
 step "הורדה"
-engine_install "$url" "$tag" "$ENGINES" || fail "$ENGINE_ERR"
+if [[ -n "$from_tarball" ]]; then engine_install_tarball "$from_tarball" "$ENGINES" "$url" || fail "$ENGINE_ERR"
+else engine_install "$url" "$tag" "$ENGINES" || fail "$ENGINE_ERR"; fi
 if [[ "$ENGINE_NAME" == "$cur" ]]; then
   say "המנוע כבר בגרסה $cur ($tag)"
   trap - ERR

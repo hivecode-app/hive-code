@@ -48,7 +48,7 @@ if [[ "$*" == *http_code* ]]; then echo 200; else echo '{"live_shifts":1}'; fi`)
   // The engine's origin: two tags, each with its own Claude pin.
   const origin = join(t, 'origin');
   mkdirSync(join(origin, 'scripts/lib'), { recursive: true });
-  for (const f of ['company-update.sh', 'lib/hq-restart.sh', 'lib/engine-install.sh']) copyFileSync(join(REPO, 'scripts', f), join(origin, 'scripts', f));
+  for (const f of ['company-update.sh', 'lib/hq-restart.sh', 'lib/engine-install.sh', 'lib/web-placeholder.html']) copyFileSync(join(REPO, 'scripts', f), join(origin, 'scripts', f));
   writeFileSync(join(origin, 'scripts/engine.mjs'), ENGINE_STUB);
   writeFileSync(join(origin, 'scripts/company-home.mjs'), 'console.log(process.env.COMPANY_HOME)\n');
   writeFileSync(join(origin, 'scripts/check-contract.mjs'), 'process.exit(process.env.FAKE_CHECK_FAIL ? 1 : 0)\n');
@@ -213,4 +213,69 @@ test('update: a failed org.yaml migration leaves no branch and no worktree behin
 test('update: from a development checkout (no engine/current) it is scripts/deploy.sh hq', () => {
   const src = readFileSync(join(REPO, 'scripts/company-update.sh'), 'utf8');
   assert.match(src, /exec "\$self\/scripts\/deploy\.sh" hq/);
+});
+
+// A release of v1.1.0 the way scripts/release.sh lays it out: one top dir with the tree, web/, apk/ and .engine-release,
+// SHA256SUMS next to it.
+function release(f, { corrupt = false } = {}) {
+  const dir = mkdtempSync(join(f.t, 'rel-')); const top = join(dir, 'stage', 'agent-company-v1.1.0');
+  mkdirSync(top, { recursive: true });
+  sh(f.t, `git -C origin archive v1.1.0 | tar -x -C ${top}`);
+  mkdirSync(join(top, 'web')); writeFileSync(join(top, 'web/index.html'), '<!doctype html>app\n');
+  mkdirSync(join(top, 'apk')); writeFileSync(join(top, 'apk/app-release.json'), '{}\n');
+  writeFileSync(join(top, '.engine-release'), `v1.1.0 ${sh(join(f.t, 'origin'), 'git rev-parse v1.1.0').trim()}\n`);
+  sh(dir, 'tar -czf agent-company-v1.1.0.tar.gz -C stage agent-company-v1.1.0 && sha256sum agent-company-v1.1.0.tar.gz >SHA256SUMS');
+  if (corrupt) sh(dir, 'echo x >>agent-company-v1.1.0.tar.gz');
+  return join(dir, 'agent-company-v1.1.0.tar.gz');
+}
+
+test('engine install from a release: checksum checked, named by .engine-release, with web/ and apk/', () => {
+  const f = fixture();
+  try {
+    const file = release(f);
+    const lib = `source ${join(REPO, 'scripts/lib/engine-install.sh')} && PATH=${join(f.t, 'bin')}:$PATH`;
+    assert.equal(sh(f.t, `${lib} engine_install_tarball ${file} ${f.engines} https://github.com/o/r.git && echo $ENGINE_NAME`).trim(), 'v1.1.0');
+    const v = join(f.engines, 'v1.1.0');
+    assert.ok(existsSync(join(v, '.install-ok')) && existsSync(join(v, 'apk/app-release.json')));
+    assert.equal(readFileSync(join(v, 'web/index.html'), 'utf8'), '<!doctype html>app\n');
+    assert.equal(readFileSync(join(v, '.engine-version'), 'utf8').trim().split(' ')[2], 'https://github.com/o/r.git');
+    // An engine from the code gets the placeholder page instead.
+    assert.match(readFileSync(join(f.engines, 'v1.0.0/web/index.html'), 'utf8'), /בלי האפליקציה ל-web/);
+  } finally { f.done(); }
+});
+
+test('engine install from a release: a checksum that does not match installs nothing', () => {
+  const f = fixture();
+  try {
+    const file = release(f, { corrupt: true });
+    const r = spawnSync('bash', ['-c', `source ${join(REPO, 'scripts/lib/engine-install.sh')} && engine_install_tarball ${file} ${f.engines} x || { echo "$ENGINE_ERR"; exit 1; }`], { encoding: 'utf8' });
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /checksum של agent-company-v1\.1\.0\.tar\.gz לא תואם/);
+    assert.ok(!existsSync(join(f.engines, 'v1.1.0')));
+    // A release that is not the tag that was asked for is refused too.
+    const other = spawnSync('bash', ['-c', `source ${join(REPO, 'scripts/lib/engine-install.sh')} && engine_install_tarball ${release(f)} ${f.engines} x v9.9.9 || { echo "$ENGINE_ERR"; exit 1; }`], { encoding: 'utf8' });
+    assert.equal(other.status, 1);
+    assert.match(other.stdout, /השחרור שהורד הוא v1\.1\.0, לא v9\.9\.9/);
+    assert.ok(!existsSync(join(f.engines, 'v1.1.0')));
+  } finally { f.done(); }
+});
+
+test('update --from-tarball: the release file becomes the new engine', () => {
+  const f = fixture();
+  try {
+    const r = f.run(['--from-tarball', release(f)]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(readlinkSync(join(f.engines, 'current')), 'v1.1.0');
+    assert.ok(existsSync(join(f.engines, 'v1.1.0/web/index.html')));
+    assert.equal(readlinkSync(join(f.data, 'claude/current')), '2.1.400');
+  } finally { f.done(); }
+});
+
+test('engine_github_slug: GitHub URLs only', () => {
+  const slug = (u) => spawnSync('bash', ['-c', `source ${join(REPO, 'scripts/lib/engine-install.sh')} && engine_github_slug "$1"`, '_', u], { encoding: 'utf8' });
+  assert.equal(slug('https://github.com/hivecode-app/hive-code.git').stdout.trim(), 'hivecode-app/hive-code');
+  assert.equal(slug('git@github.com:o/r').stdout.trim(), 'o/r');
+  assert.equal(slug('o/r').stdout.trim(), 'o/r');
+  assert.equal(slug('/tmp/some/origin').status, 1);
+  assert.equal(slug('https://gitlab.com/o/r.git').status, 1);
 });

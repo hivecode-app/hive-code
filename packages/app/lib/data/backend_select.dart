@@ -139,10 +139,11 @@ ServerTarget? parseServer(String input) {
 }
 
 /// On the web build the hq API sits next to the app: `<app path>/hq` (Caddy, deploy/caddy/agent-company.caddy).
+/// Also on localhost (an install with `--address local`), unless a development run set [kDevHqUrl].
 String defaultHqUrl() {
   final b = Uri.base;
   if (b.scheme != 'https' && b.scheme != 'http') return '';
-  if (b.host == 'localhost' || b.host == '127.0.0.1') return kDevHqUrl;
+  if ((b.host == 'localhost' || b.host == '127.0.0.1') && kDevHqUrl.isNotEmpty) return kDevHqUrl;
   final path = b.path.endsWith('/') ? b.path : b.path.substring(0, b.path.lastIndexOf('/') + 1);
   return '${b.origin}${path}hq';
 }
