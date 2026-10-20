@@ -104,8 +104,12 @@ class WaitItem {
     this.doneLine,
     this.state = WaitState.open,
     this.answerLine,
+    this.createdAt,
     String? short,
   }) : short = short ?? kicker;
+
+  /// When it was raised (hq's created_at): where its card sits in the conversation.
+  final DateTime? createdAt;
 
   /// One-line peek for the desktop context column.
   final String short;

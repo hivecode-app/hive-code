@@ -38,6 +38,9 @@ class HqBackend extends Backend {
   /// Between connecting and hq's {type:'live'}: replayed events change data but don't redraw the
   /// screen one by one; one redraw comes with 'live'.
   bool _replaying = false;
+  /// Redraws held back during a replay. The 4s guard releases these, while [_replaying] (which
+  /// keeps the first replay out of chats and unread counts) lasts until hq says live.
+  bool _holdRedraws = false;
   bool _skipEngineReplay = false;
   bool _connectedOnce = false;
   Timer? _replayGuard;
@@ -45,7 +48,7 @@ class HqBackend extends Backend {
 
   @override
   void notifyListeners() {
-    if (_replaying || _disposed) return;
+    if (_holdRedraws || _disposed) return;
     super.notifyListeners();
   }
   final _boardShift = <String, String>{}; // identity -> live shift id
@@ -60,6 +63,7 @@ class HqBackend extends Backend {
     if (_unauthorized || _disposed) return;
     _unauthorized = true;
     _replaying = false;
+    _holdRedraws = false;
     _retry?.cancel();
     notifyListeners();
   }
@@ -126,6 +130,7 @@ class HqBackend extends Backend {
 
   void _setDown() {
     _replaying = false; // a failed connection must still say so on screen
+    _holdRedraws = false;
     _downSince ??= DateTime.now();
     final t = _downSince!;
     _status = SystemStatus(LinkState.offline, since: '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}');
@@ -163,6 +168,8 @@ class HqBackend extends Backend {
     final toggles = (results[3]['toggles'] as List).cast<Map<String, dynamic>>();
     final prev = _data;
     _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, previous: prev);
+    final open = openIdentity, openChat = open == null ? null : _data!.chats[open];
+    if (open != null && openChat != null && !_midFetch.containsKey(open)) _syncAsks(openChat, open, _data!);
     for (final b in board) {
       final sh = b['shift'] as Map?;
       if (sh != null && sh['state'] == 'live') _boardShift[b['id'] as String] = sh['id'] as String;
@@ -232,11 +239,12 @@ class HqBackend extends Backend {
     _status = const SystemStatus(LinkState.connecting);
     _replayed = 0;
     _replaying = true;
+    _holdRedraws = true;
     _skipEngineReplay = first;
     _replayGuard?.cancel();
     _replayGuard = Timer(const Duration(seconds: 4), () {
-      if (_disposed || !_replaying) return;
-      _replaying = false;
+      if (_disposed || !_holdRedraws) return;
+      _holdRedraws = false;
       notifyListeners();
     });
     try {
@@ -269,6 +277,7 @@ class HqBackend extends Backend {
     final type = e['type'] as String? ?? '';
     if (type == 'live') {
       _replaying = false;
+      _holdRedraws = false;
       _connectedOnce = true;
       _replayGuard?.cancel();
       final liveSeq = (e['seq'] as num?)?.toInt() ?? 0;
@@ -286,6 +295,8 @@ class HqBackend extends Backend {
         });
         _refreshSoon();
       }
+      final open = openIdentity;
+      if (open != null && (wasDown || _openFailed.contains(open))) unawaited(openConversation(open));
       notifyListeners();
       return;
     }
@@ -304,6 +315,7 @@ class HqBackend extends Backend {
     // The first replay is history the snapshot and openConversation already cover: building chats
     // from it only cost time at start.
     if (_skipEngineReplay && _replaying && type.startsWith('engine.')) return;
+    if (identity != null && (type.startsWith('engine.') || type == 'shift.state') && _buffer(identity, e)) return;
     if (identity != null && (type.startsWith('engine.') || type == 'shift.state')) {
       final chat = d.chats.putIfAbsent(identity, () => Conversation(identityId: identity, items: []));
       _engineFor(identity, chat).apply(e);
@@ -311,6 +323,7 @@ class HqBackend extends Backend {
     }
     if (type == 'message.state') {
       final data = (e['data'] as Map).cast<String, dynamic>();
+      if (_buffer(data['to'] as String?, e)) return;
       final chat = d.chats[data['to']];
       final m = chat?.items.whereType<UserMsg>().where((m) => m.id == data['id']).firstOrNull;
       if (m != null) {
@@ -320,8 +333,9 @@ class HqBackend extends Backend {
     }
     if (type == 'message.new') {
       final m = (e['data'] as Map).cast<String, dynamic>();
-      if (m['to_identity'] == 'owner' && m['kind'] != 'system') {
-        final from = m['from_identity'] as String;
+      final from = m['from_identity'] as String, to = m['to_identity'] as String;
+      if (to == 'owner' && m['kind'] != 'system') {
+        if (_buffer(from, e)) return;
         final chat = d.chats.putIfAbsent(from, () => Conversation(identityId: from, items: []));
         if (!chat.items.any((i) => i.id == 'msg:${m['id']}')) {
           if (!streamedAlready(chat.items, m)) {
@@ -331,8 +345,56 @@ class HqBackend extends Backend {
           _bumpConversation(from, m['body'] as String, m['created_at'] as int);
           notifyListeners();
         }
+      } else {
+        // The owner's own messages from another device, system lines, and messages between
+        // workers: they belong to an open conversation (the one they involve), or wait for it.
+        final chatId = from == 'owner' ? to : (to == 'owner' ? from : (openIdentity == from || openIdentity == to ? openIdentity : null));
+        if (chatId == null || _buffer(chatId, e)) return;
+        final chat = d.chats[chatId];
+        if (chat == null) return;
+        final item = _messageItem(m, d, chat.items);
+        if (item != null && !chat.items.any((i) => i.id == item.id)) {
+          chat.items.add(item);
+          notifyListeners();
+        }
       }
     }
+  }
+
+  /// One stored message as a chat item, the same way whether it came in the history or live.
+  /// Null when the worker's streamed text already shows it.
+  ChatItem? _messageItem(Map<String, dynamic> m, CompanyData d, List<ChatItem> existing) {
+    final ts = DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int);
+    if (m['from_identity'] == 'owner') {
+      return UserMsg(
+        id: m['id'] as String,
+        ts: ts,
+        text: m['body'] as String,
+        delivery: mapDelivery(m['state'] as String?),
+        priority: Priority.values.byName((m['priority'] as String?) ?? 'next'),
+      );
+    }
+    if (m['to_identity'] == 'owner') {
+      if (m['kind'] == 'system') return EventLine(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String);
+      return streamedAlready(existing, m) ? null : TextMsg(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String);
+    }
+    final body = withoutIds((m['body'] as String).replaceAll('\n', ' '));
+    return EventLine(
+      id: 'msg:${m['id']}',
+      ts: ts,
+      icon: 'forward',
+      text: '${d.who(m['from_identity'] as String).name} ← ${d.who(m['to_identity'] as String).name}: ${body.length > 90 ? '${body.substring(0, 90)}…' : body}',
+    );
+  }
+
+  // While a conversation's history is loading, its live events wait here and are applied to the
+  // new copy when it lands (applying them to the old copy lost them when it was replaced).
+  final _midFetch = <String, List<Map<String, dynamic>>>{};
+  bool _buffer(String? identity, Map<String, dynamic> e) {
+    final q = identity == null ? null : _midFetch[identity];
+    if (q == null) return false;
+    q.add(e);
+    return true;
   }
 
   EngineModel _engineFor(String identity, Conversation chat) => _engines.putIfAbsent(
@@ -366,56 +428,92 @@ class HqBackend extends Backend {
   @override
   Future<void> openConversation(String identityId) async {
     openIdentity = identityId;
+    if (!_opening.add(identityId)) return; // already fetching it
+    try {
+      await _openConversation(identityId);
+    } finally {
+      _opening.remove(identityId);
+    }
+  }
+
+  final _opening = <String>{};
+
+  Future<void> _openConversation(String identityId) async {
     final d = _data;
     if (d == null) return;
+    _midFetch[identityId] = [];
     try {
       final res = await Future.wait([
         _get('/api/messages?identity=${Uri.encodeQueryComponent(identityId)}&limit=200'),
         _get('/api/events?identity=${Uri.encodeQueryComponent(identityId)}&after=${_seq > 20000 ? _seq - 20000 : 0}&limit=2000'),
       ]);
-      final chat = Conversation(identityId: identityId, items: [], draft: d.chats[identityId]?.draft ?? '');
+      final old = d.chats[identityId];
+      final chat = Conversation(identityId: identityId, items: [], draft: old?.draft ?? '');
       final eng = EngineModel(items: chat.items, gender: d.who(identityId).gender, onLive: (l) => chat.live = l);
       for (final e in (res[1]['events'] as List).cast<Map<String, dynamic>>()) {
         eng.apply(e);
       }
       for (final m in (res[0]['messages'] as List).cast<Map<String, dynamic>>().reversed) {
-        final ts = DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int);
-        if (m['from_identity'] == 'owner') {
-          chat.items.add(UserMsg(
-            id: m['id'] as String,
-            ts: ts,
-            text: m['body'] as String,
-            delivery: mapDelivery(m['state'] as String?),
-            priority: Priority.values.byName((m['priority'] as String?) ?? 'next'),
-          ));
-        } else if (m['to_identity'] == 'owner') {
-          if (m['kind'] == 'system') {
-            chat.items.add(EventLine(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String));
-          } else if (!streamedAlready(chat.items, m)) {
-            chat.items.add(TextMsg(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String));
-          }
-          // He read it: mark it handled so the worker's mailbox closes the loop (B.4).
-          if (m['state'] != 'handled') unawaited(_send('POST', '/api/messages/${Uri.encodeComponent(m['id'] as String)}/handled'));
-        } else {
-          final body = (m['body'] as String).replaceAll('\n', ' ');
-          chat.items.add(EventLine(
-            id: 'msg:${m['id']}',
-            ts: ts,
-            icon: 'forward',
-            text: '${d.who(m['from_identity'] as String).name} ← ${d.who(m['to_identity'] as String).name}: ${body.length > 90 ? '${body.substring(0, 90)}…' : body}',
-          ));
+        final item = _messageItem(m, d, chat.items);
+        if (item != null) chat.items.add(item);
+        // He read it: mark it handled so the worker's mailbox closes the loop (B.4).
+        if (m['to_identity'] == 'owner' && m['kind'] != 'system' && m['state'] != 'handled') {
+          unawaited(_send('POST', '/api/messages/${Uri.encodeComponent(m['id'] as String)}/handled'));
         }
       }
-      for (final a in d.waiting.where((w) => w.from == identityId && w.askId != null)) {
-        chat.items.add(AskCard(id: 'ask:${a.askId}', ts: DateTime.now(), askId: a.askId, from: identityId, question: a.body, options: a.options, blocking: a.blocking));
+      _syncAsks(chat, identityId, d);
+      // Messages sent from here: keep the furthest delivery state either copy has seen, and keep
+      // the ones hq doesn't have yet (in the queue, waiting for the link, or failed).
+      final mine = {for (final m in chat.items.whereType<UserMsg>()) m.id: m};
+      for (final m in (old?.items ?? const <ChatItem>[]).whereType<UserMsg>()) {
+        final there = mine[m.id];
+        if (there != null) {
+          there.delivery = furtherDelivery(there.delivery, m.delivery);
+        } else if (const {Delivery.queued, Delivery.pendingConnection, Delivery.failed}.contains(m.delivery)) {
+          mine[m.id] = m;
+          chat.items.add(m);
+        }
       }
       chat.items.sort((a, b) => a.ts.compareTo(b.ts));
       d.chats[identityId] = chat;
       _engines[identityId] = eng;
+      _openFailed.remove(identityId);
+      // What arrived while this loaded, applied to the new copy (the engine skips seqs it has).
+      final waiting = _midFetch.remove(identityId) ?? const [];
+      for (final e in waiting) {
+        _onEvent(e);
+      }
       notifyListeners();
     } catch (_) {
-      // Keep what we have; the system strip already says the link is down.
+      // Keep what we have; the system strip already says the link is down. The next 'live'
+      // (link back) opens it again.
+      _openFailed.add(identityId);
+      final waiting = _midFetch.remove(identityId) ?? const [];
+      for (final e in waiting) {
+        _onEvent(e);
+      }
     }
+  }
+
+  final _openFailed = <String>{};
+
+  /// Question cards follow the inbox: one appears when a worker asks while the chat is open, and
+  /// one answered elsewhere (home, another device, a manager) stops asking here.
+  void _syncAsks(Conversation chat, String identityId, CompanyData d) {
+    final open = {for (final w in d.waiting.where((w) => w.from == identityId && w.askId != null)) w.askId!: w};
+    var added = false;
+    for (final card in chat.items.whereType<AskCard>()) {
+      if (card.state == AskState.open && card.askId != null && !open.containsKey(card.askId)) card.state = AskState.answered;
+    }
+    final have = {for (final c in chat.items.whereType<AskCard>()) c.askId};
+    for (final a in open.values) {
+      if (have.contains(a.askId)) continue;
+      // At the time it was asked, not "now": a card stamped now sorted below everything and buried
+      // every new message under it.
+      chat.items.add(AskCard(id: 'ask:${a.askId}', ts: a.createdAt ?? DateTime.now(), askId: a.askId, from: identityId, question: a.body, options: a.options, blocking: a.blocking));
+      added = true;
+    }
+    if (added) chat.items.sort((a, b) => a.ts.compareTo(b.ts));
   }
 
   // ── commands ─────────────────────────────────────────────────────────────
@@ -646,6 +744,7 @@ CompanyData mapSnapshot({
       kind: kind,
       from: (i['from_identity'] as String?) ?? 'yoav',
       time: _hm(i['created_at'] as int),
+      createdAt: DateTime.fromMillisecondsSinceEpoch(i['created_at'] as int),
       kicker: kickerFor(i),
       body: (ask?['question'] as String?) ?? ((i['body'] as String?)?.isNotEmpty == true ? i['body'] as String : i['title'] as String),
       options: options,
@@ -708,4 +807,18 @@ CompanyData mapSnapshot({
     focus: focus,
     night: night ? 'לילה פעיל' : null,
   );
+}
+
+/// Internal message ids mean nothing to the owner: "(מזהה agent-company-t5-2:mvfww7y1-010ec676ca)"
+/// and bare ids of that shape are dropped from the one-line view of messages between workers.
+String withoutIds(String s) => s
+    .replaceAll(RegExp(r'\s*\((?:מזהה|id|ref)[: ]+[^)]*\)'), '')
+    .replaceAll(RegExp(r'\b[\w.-]+-\d+:[a-z0-9]{6,}-[a-z0-9]{6,}\b'), '')
+    .replaceAll(RegExp(r' {2,}'), ' ')
+    .trim();
+
+/// The further of two delivery states of the same message (a late copy never moves a tick back).
+Delivery furtherDelivery(Delivery a, Delivery b) {
+  if (a == Delivery.failed || b == Delivery.failed) return a == Delivery.failed ? b : a;
+  return a.index >= b.index ? a : b;
 }

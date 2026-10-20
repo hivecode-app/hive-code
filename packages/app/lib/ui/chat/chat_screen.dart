@@ -48,25 +48,37 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  bool _opened = false;
+  Conversation? _seenChat;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final store = StoreScope.read(context);
-    final chat = store.data?.chats[widget.identityId];
-    if (chat != null && controller.text.isEmpty && chat.draft.isNotEmpty) controller.text = chat.draft;
+    // This runs on every store change. Opening the conversation (a fetch that replaces it) belongs
+    // to the first time only: doing it here every time refetched in a loop, dropped messages just
+    // sent and kept the CPU busy.
+    if (!_opened) {
+      _opened = true;
+      final chat = store.data?.chats[widget.identityId];
+      if (chat != null && controller.text.isEmpty && chat.draft.isNotEmpty) controller.text = chat.draft;
+      seenCount = chat?.items.length ?? 0;
+      store.backend.openConversation(widget.identityId);
+    }
     if (ChatScreen.pendingQuote.containsKey(widget.identityId)) {
       quote = ChatScreen.pendingQuote.remove(widget.identityId);
       WidgetsBinding.instance.addPostFrameCallback((_) => focus.requestFocus());
     }
-    seenCount = chat?.items.length ?? 0;
-    store.backend.openConversation(widget.identityId);
   }
 
   @override
   void didUpdateWidget(covariant ChatScreen old) {
     super.didUpdateWidget(old);
     if (old.identityId != widget.identityId) {
-      final chat = StoreScope.read(context).data?.chats[widget.identityId];
+      final store = StoreScope.read(context);
+      final chat = store.data?.chats[widget.identityId];
+      seenCount = chat?.items.length ?? 0;
+      store.backend.openConversation(widget.identityId);
       controller.text = chat?.draft ?? '';
       quote = ChatScreen.pendingQuote.remove(widget.identityId);
       selected = null;
@@ -136,6 +148,11 @@ class _ChatScreenState extends State<ChatScreen> {
     final p = context.p;
     if (d == null) return const SizedBox.shrink();
     final chat = d.chats[widget.identityId] ?? Conversation(identityId: widget.identityId, items: []);
+    // A freshly loaded history is not "new": count from the copy on screen now.
+    if (!identical(chat, _seenChat)) {
+      _seenChat = chat;
+      seenCount = chat.items.length;
+    }
     final who = d.who(widget.identityId);
     final presence = d.presence[widget.identityId] ?? const Presence(status: WorkerStatus.free);
     final openAsk = chat.items.whereType<AskCard>().where((a) => a.state == AskState.open && (a.blocking || a is GoCard)).lastOrNull;

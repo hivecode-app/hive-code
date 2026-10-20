@@ -98,5 +98,6 @@ void main() {
     fake.sockets.first.add(jsonEncode({'seq': 1, 'type': 'message.new', 'identity': 'yoav', 'data': {'id': 'x', 'from_identity': 'yoav', 'to_identity': 'owner', 'kind': 'text', 'body': 'שלום', 'created_at': 0}}));
     await until(() => redraws > 0, ms: 6000);
     expect(redraws, greaterThan(0));
+    expect(hq.data!.chats['yoav']?.items.any((i) => i.id == 'msg:x'), isTrue, reason: 'the message itself arrived');
   }, timeout: const Timeout(Duration(seconds: 30)));
 }

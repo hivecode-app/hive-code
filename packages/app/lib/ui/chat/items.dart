@@ -786,7 +786,7 @@ class AskCardView extends StatelessWidget {
 
     Widget tail;
     if (answered) {
-      final line = card.state == AskState.decidedByManager ? 'יואב החליט במקומך: ${card.answer}' : (go != null ? 'GO נשלח · $from מתחילה פריסה' : 'ענית: ${card.answer} · $from ממשיך');
+      final line = card.state == AskState.decidedByManager ? 'יואב החליט במקומך: ${card.answer}' : (go != null ? 'GO נשלח · $from מתחילה פריסה' : (card.answer == null ? 'השאלה נסגרה' : 'ענית: ${card.answer} · $from ממשיך'));
       tail = Padding(padding: const EdgeInsets.fromLTRB(14, 0, 14, 12), child: DoneLine(line));
     } else if (pending != null) {
       tail = Padding(padding: const EdgeInsets.fromLTRB(14, 0, 14, 12), child: UndoLine(label: pending.label, onCancel: () => store.cancelUndo('card:${card.id}'), top: 4));
