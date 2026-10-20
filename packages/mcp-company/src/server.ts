@@ -29,6 +29,7 @@ wal.start();
 const server = createServer({
   ctx: { identity, shift, sessionId: env[ENV.sessionId] || null },
   append: (e) => wal.append(e),
+  waitSettled: (id, ms) => wal.waitSettled(id, ms),
   recall: (req) => recall(req, {
     transport: (r, timeoutMs) => postJson(target, '/v1/recall', r, timeoutMs),
     repo: env[ENV.repo] || process.cwd(),

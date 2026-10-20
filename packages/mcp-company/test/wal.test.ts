@@ -139,6 +139,37 @@ test('restart: pending and unacked entries are re-sent, settled ones are not', a
   assert.equal(third.pending().length, 0);
 });
 
+test('waitSettled: the caller sees hq\'s verdict and body; timeout or stop() resolves null', async () => {
+  const dir = tmp();
+  const bad = entry('open_team'); const good = entry('open_team'); const slow = entry('open_team');
+  let release = () => {};
+  const gate = new Promise<void>((r) => { release = r; });
+  const wal = new Wal({
+    dir, sleep: noSleep,
+    transport: async (e) => {
+      if (e.id === bad.id) return { status: 400, body: { ok: false, error: 'dormant', reason: 'הפרויקט רדום' } };
+      if (e.id === slow.id) { await gate; return { status: 200 }; }
+      return { status: 200, body: { ok: true, id: e.id, result: { task: 7 } } };
+    },
+  });
+  wal.start();
+  wal.append(bad);
+  const r1 = await wal.waitSettled(bad.id, 2000);
+  assert.deepEqual(r1, { outcome: 'fail', status: 400, body: { ok: false, error: 'dormant', reason: 'הפרויקט רדום' } });
+  wal.append(good);
+  const r2 = await wal.waitSettled(good.id, 2000);
+  assert.equal(r2?.outcome, 'ack');
+  assert.deepEqual((r2?.body as { result: unknown }).result, { task: 7 });
+  assert.equal(await wal.waitSettled('not-pending', 2000), null);
+  wal.append(slow);
+  assert.equal(await wal.waitSettled(slow.id, 30), null, 'timeout: the entry stays in the WAL');
+  assert.deepEqual(wal.pending().map((e) => e.id), [slow.id]);
+  const waiting = wal.waitSettled(slow.id, 60_000);
+  release();
+  assert.equal((await waiting)?.outcome, 'ack');
+  await wal.stop();
+});
+
 test('stop() interrupts a long backoff sleep', async () => {
   const dir = tmp();
   const wal = new Wal({ dir, transport: async () => { throw new Error('down'); }, baseDelayMs: 60_000 });

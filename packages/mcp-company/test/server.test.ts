@@ -181,3 +181,33 @@ test('restarted server re-sends pending WAL entries to hq over the unix socket',
     assert.deepEqual(walLines(root, shift, 'wal.ndjson'), []);
   } finally { hq.close(); }
 });
+
+test('open_team answers with hq\'s verdict: a rejection comes back as a tool error with the reason (#69)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mcp-srv-'));
+  const hq = createHttpServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => { body += d; });
+    req.on('end', () => {
+      const e = JSON.parse(body) as WalEntry;
+      if (e.args.project === 'sleepy') {
+        res.writeHead(400).end(JSON.stringify({ ok: false, error: 'open_team: project sleepy is dormant', reason: 'הפרויקט `sleepy` רדום' }));
+      } else {
+        res.writeHead(200).end(JSON.stringify({ ok: true, id: e.id, ref: 'task-9', result: { task: 9, state: 'queued' } }));
+      }
+    });
+  });
+  await new Promise<void>((r) => hq.listen(join(root, 'hq.sock'), r));
+  const c = new Client({ COMPANY_STATE_DIR: root, COMPANY_SHIFT: 'yoav-4', COMPANY_IDENTITY: 'yoav', COMPANY_REPO: root });
+  try {
+    const no = await c.call('tools/call', { name: 'open_team', arguments: { name: 'משימה', purpose: 'לבדוק', project: 'sleepy' } });
+    assert.equal(no.result.isError, true);
+    assert.match(no.result.content[0].text, /^`open_team` נדחה ב-hq: הפרויקט `sleepy` רדום$/);
+    const yes = await c.call('tools/call', { name: 'open_team', arguments: { name: 'משימה', purpose: 'לבדוק', project: 'agent-company' } });
+    assert.equal(yes.result.isError, undefined);
+    const ack = JSON.parse(yes.result.content[0].text) as { ok: boolean; ref: string; result: { task: number } };
+    assert.equal(ack.ok, true);
+    assert.equal(ack.ref, 'task-9');
+    assert.equal(ack.result.task, 9);
+    await c.close();
+  } finally { hq.close(); }
+});

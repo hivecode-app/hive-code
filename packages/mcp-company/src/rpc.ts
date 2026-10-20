@@ -5,6 +5,10 @@ import { COMPANY_API_VERSION } from '@company/shared';
 import type { OpName, WalEntry } from '@company/shared';
 import type { RecallQuery, RecallResult } from './recall.ts';
 import { hebrewProblem, TOOL_BY_NAME, TOOLS, validateArgs } from './tools.ts';
+import type { Settled } from './wal.ts';
+
+/** Ops answered with hq's verdict instead of {queued:true}: their rejection must reach the caller in the same turn (#69). */
+const SYNC_OPS: ReadonlySet<OpName> = new Set(['open_team']);
 
 export const SERVER_NAME = 'company';
 export const SERVER_VERSION = '0.1.0';
@@ -17,6 +21,10 @@ export interface ServerDeps {
   ctx: Ctx;
   /** Durable append; must not return before the entry is on disk. */
   append: (entry: WalEntry) => void;
+  /** Waits for hq to settle an appended entry (null on timeout). Used by ops whose rejection the caller must see now. */
+  waitSettled?: (id: string, timeoutMs: number) => Promise<Settled | null>;
+  /** How long a synchronous op waits for hq before answering {queued:true}. */
+  syncTimeoutMs?: number;
   recall: (req: RecallQuery) => Promise<RecallResult>;
   now?: () => Date;
   log?: (msg: string) => void;
@@ -76,6 +84,18 @@ export function createServer(deps: ServerDeps) {
     } catch (e) {
       log(`wal append failed: ${e instanceof Error ? e.message : String(e)}`);
       return text(`לא נשמר: כתיבה ל-WAL נכשלה (WAL write failed): ${e instanceof Error ? e.message : String(e)}`, true);
+    }
+    if (SYNC_OPS.has(entry.op) && deps.waitSettled) {
+      const r = await deps.waitSettled(entry.id, deps.syncTimeoutMs ?? 5000);
+      if (r?.outcome === 'fail') {
+        const b = (r.body ?? {}) as { reason?: unknown; error?: unknown };
+        const why = typeof b.reason === 'string' ? b.reason : typeof b.error === 'string' ? b.error : `HTTP ${r.status}`;
+        return text(`\`${entry.op}\` נדחה ב-hq: ${why}`, true);
+      }
+      if (r?.outcome === 'ack') {
+        const b = (r.body ?? {}) as { ref?: unknown; result?: unknown };
+        return text({ ok: true, id: entry.id, ...(b.ref !== undefined ? { ref: b.ref } : {}), ...(b.result !== undefined ? { result: b.result } : {}) });
+      }
     }
     return text({ queued: true, id: entry.id });
   }

@@ -67,6 +67,13 @@ test('ingest socket: 0600, ops are idempotent on id, tell/ask/request_go land wh
     assert.equal((await post(sock, '/v1/ops', entry('tell', { to: 'owner', body: 'לרן' }, 'eli-1:06'))).status, 200);
     await until(() => !!hq.mailbox.get('eli-1:05-rejected'), 2000, 'the sender hears its tell was rejected');
     assert.equal(hq.mailbox.get('eli-1:05-rejected')!.to_identity, 'eli');
+    assert.match(hq.mailbox.get('eli-1:05-rejected')!.body, /^`tell` נדחה ב-hq: ההודעה ל-"יואב" לא נשלחה/);
+    assert.match(hq.mailbox.get('eli-1:03-rejected')!.body, /^`tell` נדחה ב-hq: חסר השדה `body`/);
+    assert.match(hq.mailbox.get('eli-1:04-rejected')!.body, /אין פעולה כזו/);
+    assert.equal(hq.mailbox.get('x-rejected')!.to_identity, 'eli', 'a version mismatch from a known identity is reported too');
+    assert.equal((await post(sock, '/v1/ops', entry('tell', { to: 'eli', body: 'שלום' }, 'dana-1:01', 'dana'))).status, 400);
+    assert.ok(hq.store.db.prepare(`SELECT 1 FROM events WHERE type = 'op.rejected' AND json_extract(data, '$.from') = 'dana'`).get(),
+      'an unknown sender has no mailbox, but the board sees the rejection');
     await post(sock, '/v1/ops', entry('tell', { to: 'hq', body: 'תודה' }, 'eli-1:07'));
     assert.equal(hq.mailbox.get('eli-1:07')!.state, 'handled', 'a reply to hq is closed, not delivered');
     assert.ok(!hq.shifts.current('hq'), 'no shift for hq');
@@ -125,6 +132,18 @@ test('open_team opens a task: queued under the project, the worker hears the tas
     const dormant = await post(sock, '/v1/ops', entry('open_team', { name: 'x', purpose: 'y', project: 'sleepy' }, 'yoav-1:04b', 'yoav'));
     assert.equal(dormant.status, 400, 'a dormant project gets no team');
     assert.match(JSON.stringify(dormant.json), /dormant/);
+    assert.match(dormant.json.reason, /רדום/, 'the Hebrew reason rides along for a synchronous caller');
+    // #69: the WAL drops a 4xx silently, so the sender hears it in its mailbox and the board gets an event.
+    const told = hq.mailbox.get('yoav-1:04b-rejected')!;
+    assert.equal(told.to_identity, 'yoav');
+    assert.equal(told.from_identity, 'hq');
+    assert.equal(told.ref, 'yoav-1:04b');
+    assert.match(told.body, /^`open_team` נדחה ב-hq: הפרויקט `sleepy` רדום/);
+    assert.ok(hq.mailbox.get('yoav-1:04-rejected'), 'unknown project is reported too');
+    await post(sock, '/v1/ops', entry('open_team', { name: 'x', purpose: 'y', project: 'sleepy' }, 'yoav-1:04b', 'yoav'));
+    const rejectedEvents = (id: string) => (hq.store.db.prepare(`SELECT COUNT(*) n FROM events WHERE type = 'op.rejected' AND json_extract(data, '$.id') = ?`)
+      .get(id) as { n: number }).n;
+    assert.equal(rejectedEvents('yoav-1:04b'), 1, 'a resend of the same rejected op is not reported twice');
     await hq.scheduler.fill();
     await until(() => launcher.launches.some((l) => l.identity === `agent-company-t${id}`), 2000, 'task worker launched');
     const first = hq.mailbox.list(`agent-company-t${id}`).find((m) => m.to_identity === `agent-company-t${id}`)!;

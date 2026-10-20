@@ -71,8 +71,8 @@ export const TOOLS: readonly ToolDef[] = [
     state: s('מצב, e.g. working | blocked | idle / state'),
     note: s('הערה קצרה / short note'),
   }, ['state']),
-  tool('open_team', 'פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. '
-    + 'Open a task team: queued; a fresh worker starts in a free slot and reports back to you when done.', {
+  tool('open_team', 'פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. אם hq דוחה (למשל פרויקט רדום), הדחייה והסיבה חוזרות כשגיאה. '
+    + 'Open a task team: queued; a fresh worker starts in a free slot and reports back to you when done. A rejection by hq comes back as an error with the reason.', {
     name: s('כותרת המשימה / task title'),
     purpose: s('מה בדיוק לעשות ואיך יודעים שזה גמור / what to do and the definition of done'),
     project: s('הפרויקט, e.g. agent-company (ברירת מחדל: הפרויקט שלך) / project (default: yours)'),

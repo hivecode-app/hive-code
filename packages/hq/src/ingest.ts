@@ -22,7 +22,9 @@ const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 
 
 export class IngestError extends Error {
   status: number;
-  constructor(status: number, message: string) { super(message); this.status = status; }
+  /** The reason in Hebrew, for the sender's mailbox when an op is rejected. */
+  he?: string;
+  constructor(status: number, message: string, he?: string) { super(message); this.status = status; this.he = he; }
 }
 
 const s = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
@@ -49,21 +51,35 @@ export class Ingest {
   op(raw: unknown): OpAck {
     const e = raw as Partial<WalEntry>;
     if (!e || typeof e !== 'object') throw new IngestError(400, 'body must be a WalEntry');
-    if (e.v !== COMPANY_API_VERSION) throw new IngestError(400, `unsupported version ${String(e.v)}`);
     if (!s(e.id) || !s(e.identity) || !s(e.op)) throw new IngestError(400, 'id, identity and op are required');
-    if (!OPS.has(e.op as OpName)) throw new IngestError(400, `unknown op ${String(e.op)}`);
-    if (!this.hq.identityExists(e.identity!)) throw new IngestError(400, `unknown identity ${String(e.identity)}`);
+    if (!this.hq.identityExists(e.identity!)) {
+      // No mailbox to tell (e.g. org.yaml not reloaded yet), so at least the board sees it.
+      const err = new IngestError(400, `unknown identity ${String(e.identity)}`);
+      // Best effort: a failed event write must not turn this 400 into a 500 that the WAL retries at its head forever.
+      try { this.hq.store.emit('op.rejected', null, { id: e.id, shift: e.shift ?? null, op: e.op, from: e.identity, status: err.status, error: err.message }); }
+      catch { /* the 400 still reaches the sender's stderr log */ }
+      throw err;
+    }
+    const reject = (err: IngestError): never => { this.rejected(e as WalEntry, err); throw err; };
+    if (e.v !== COMPANY_API_VERSION) reject(new IngestError(400, `unsupported version ${String(e.v)}`, `גרסת API לא נתמכת (${String(e.v)})`));
+    if (!OPS.has(e.op as OpName)) reject(new IngestError(400, `unknown op ${String(e.op)}`, 'אין פעולה כזו'));
     const args = (e.args && typeof e.args === 'object' ? e.args : {}) as Record<string, unknown>;
     const db = this.hq.store.db;
     const prev = db.prepare('SELECT ack FROM ops WHERE id = ?').get(e.id) as { ack: string } | undefined;
     if (prev) return JSON.parse(prev.ack) as OpAck;
 
-    const ack = db.transaction((): OpAck => {
-      const a = this.apply(e as WalEntry, args);
-      db.prepare(`INSERT INTO ops (id, identity, shift, session_id, op, args, ts, received_at, ack) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(e.id, e.identity, e.shift ?? null, e.sessionId ?? null, e.op, JSON.stringify(args), e.ts ?? null, this.hq.store.now(), JSON.stringify(a));
-      return a;
-    })();
+    let ack: OpAck;
+    try {
+      ack = db.transaction((): OpAck => {
+        const a = this.apply(e as WalEntry, args);
+        db.prepare(`INSERT INTO ops (id, identity, shift, session_id, op, args, ts, received_at, ack) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(e.id, e.identity, e.shift ?? null, e.sessionId ?? null, e.op, JSON.stringify(args), e.ts ?? null, this.hq.store.now(), JSON.stringify(a));
+        return a;
+      })();
+    } catch (err) {
+      if (err instanceof IngestError && err.status >= 400 && err.status < 500) reject(err);
+      throw err;
+    }
     this.hq.store.emit(`op.${e.op}`, e.identity!, { id: e.id, shift: e.shift ?? null, args });
     if (e.op === 'open_ticket') this.hq.store.bg(this.openTicket(e as WalEntry, args), 'open_ticket');
     return ack;
@@ -71,7 +87,7 @@ export class Ingest {
 
   private apply(e: WalEntry, a: Record<string, unknown>): OpAck {
     const { mailbox, inbox } = this.hq;
-    const need = (k: string) => { const v = s(a[k]); if (!v) throw new IngestError(400, `${e.op}: ${k} is required`); return v; };
+    const need = (k: string) => { const v = s(a[k]); if (!v) throw new IngestError(400, `${e.op}: ${k} is required`, `חסר השדה \`${k}\``); return v; };
     switch (e.op) {
       case 'tell': {
         // mcp-company's `urgency` is the delivery priority (now|next|later); map it onto both axes.
@@ -80,16 +96,8 @@ export class Ingest {
         const to = need('to');
         // A display name ("יואב") instead of an id would wake a shift for an identity that doesn't exist.
         if (to !== OWNER && to !== 'hq' && !this.hq.identityExists(to)) {
-          const why = `tell: unknown identity ${to} (use the id, e.g. yoav, or ${OWNER} for רן)`;
-          // MCP writes are acked locally ({queued:true}), so a 400 alone never reaches the worker. Tell it,
-          // after this transaction rolls back.
-          queueMicrotask(() => {
-            try {
-              mailbox.tell({ msg_id: `${e.id}-rejected`, from: 'hq', to: e.identity, kind: 'system', priority: 'now', ref: e.id,
-                body: `ההודעה שלך ל-"${to}" לא נשלחה: אין identity כזה. שלח שוב עם ה-id (מה שבסוגריים בכותרת ההודעה), למשל yoav, או ${OWNER} לרן.` });
-            } catch { /* best effort */ }
-          });
-          throw new IngestError(400, why);
+          throw new IngestError(400, `tell: unknown identity ${to} (use the id, e.g. yoav, or ${OWNER} for רן)`,
+            `ההודעה ל-"${to}" לא נשלחה: אין identity כזה. שלח שוב עם ה-id (מה שבסוגריים בכותרת ההודעה), למשל yoav, או ${OWNER} לרן.`);
         }
         const m = mailbox.tell({ msg_id: e.id, from: e.identity, to, body: need('body'), priority: pr, urgency, ref: s(a.ref) });
         return { ok: true, id: e.id, ref: m.id };
@@ -128,10 +136,11 @@ export class Ingest {
         // 4xx, not a thrown 500: the WAL retries 5xx at its head forever and would hold back every later op.
         if (project != null && (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(project)
           || (!existsSync(join(this.hq.cfg.companyDir, 'projects', `${project}.md`)) && !db.prepare('SELECT 1 FROM identities WHERE project = ?').get(project)))) {
-          throw new IngestError(400, `open_team: unknown project ${project}`);
+          throw new IngestError(400, `open_team: unknown project ${project}`, `אין פרויקט בשם \`${project}\` (אין לו אמנה ב-company/projects/)`);
         }
         if (project != null && noWorkers(readCharter(this.hq.cfg.companyDir, project))) {
-          throw new IngestError(400, `open_team: project ${project} is dormant or its charter is invalid; it gets workers only after it moves to the company`);
+          throw new IngestError(400, `open_team: project ${project} is dormant or its charter is invalid; it gets workers only after it moves to the company`,
+            `הפרויקט \`${project}\` רדום או שהאמנה שלו לא תקינה. הוא מקבל עובדים רק אחרי שהוא עובר לחברה (\`status: active\` באמנה)`);
         }
         // Same ticket while its task is still open → that task. A finished one is not reopened silently.
         const base = s(a.ref) ?? `team:${e.id}`;
@@ -148,6 +157,24 @@ export class Ingest {
         // remember / handoff / status / close_team: stored durably now (ops table),
         // consumed by memory consolidation, prime.json (handoff) and the board.
         return { ok: true, id: e.id, result: { stored: true } };
+    }
+  }
+
+  /**
+   * MCP writes are acked locally ({queued:true}) and the WAL drops a 4xx without retrying, so a rejection
+   * would otherwise vanish (#69). The sender gets it in its mailbox, with the reason, and the board an event.
+   * Idempotent on the op id: a resend of the same rejected op does not repeat the message.
+   */
+  private rejected(e: WalEntry, err: IngestError): void {
+    const msgId = `${e.id}-rejected`;
+    try {
+      if (this.hq.mailbox.get(msgId)) return;
+      const body = `\`${e.op}\` נדחה ב-hq: ${err.he ?? err.message}`;
+      // open_team already returned the rejection as its tool result, unless hq answered too late: no need to interrupt.
+      this.hq.mailbox.tell({ msg_id: msgId, from: 'hq', to: e.identity, kind: 'system', priority: e.op === 'open_team' ? 'next' : 'now', ref: e.id, body });
+      this.hq.store.emit('op.rejected', e.identity, { id: e.id, shift: e.shift ?? null, op: e.op, status: err.status, error: err.message, reason: body });
+    } catch (x) {
+      this.hq.store.emit('loop.error', null, { loop: 'op.rejected', error: x instanceof Error ? x.message : String(x) });
     }
   }
 
@@ -271,7 +298,8 @@ export class Ingest {
       }
     } catch (e) {
       status = e instanceof IngestError || e instanceof HandoffError ? e.status : (e as { status?: number }).status ?? 500;
-      out = { ok: false, error: (e as Error).message, ...(e instanceof HandoffError && e.busy ? { busy: e.busy } : {}) };
+      out = { ok: false, error: (e as Error).message, ...(e instanceof IngestError && e.he ? { reason: e.he } : {}),
+        ...(e instanceof HandoffError && e.busy ? { busy: e.busy } : {}) };
     }
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(out));

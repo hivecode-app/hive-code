@@ -26,6 +26,9 @@ export interface WalOptions {
 
 type Outcome = 'ack' | 'fail' | 'retry';
 
+/** How hq settled an entry: accepted (2xx) or permanently rejected (4xx), with its reply body. */
+export interface Settled { outcome: 'ack' | 'fail'; status: number; body?: unknown }
+
 function classify(status: number): Outcome {
   if (status >= 200 && status < 300) return 'ack';
   // 408/429 are "try again later" by HTTP semantics; every other 4xx is a
@@ -85,6 +88,7 @@ export class Wal {
   private stopSignal: Promise<void> = Promise.resolve();
   private fireStop: () => void = () => {};
   private idleWaiters: Array<() => void> = [];
+  private settleWaiters = new Map<string, Array<(s: Settled | null) => void>>();
   private dirty = false;
   /** WAL size as this instance last left it; a mismatch means another instance wrote. */
   private walSize = 0;
@@ -158,6 +162,29 @@ export class Wal {
     this.loop = null;
   }
 
+  /**
+   * Waits for hq to settle one pending entry. Resolves null on timeout, on stop(), or if the id is not
+   * pending; the entry then stays in the WAL and is retried as usual.
+   */
+  waitSettled(id: string, timeoutMs: number): Promise<Settled | null> {
+    if (!this.queue.some((e) => e.id === id)) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (v: Settled | null) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        const list = this.settleWaiters.get(id)?.filter((w) => w !== finish);
+        if (list?.length) this.settleWaiters.set(id, list); else this.settleWaiters.delete(id);
+        resolve(v);
+      };
+      const timer = setTimeout(() => finish(null), timeoutMs);
+      timer.unref();
+      this.settleWaiters.set(id, [...(this.settleWaiters.get(id) ?? []), finish]);
+      void this.stopSignal.then(() => { if (!this.running) finish(null); });
+    });
+  }
+
   /** Resolves once nothing is pending (or immediately if nothing is). */
   whenIdle(): Promise<void> {
     if (this.queue.length === 0) return Promise.resolve();
@@ -177,10 +204,12 @@ export class Wal {
       }
       let outcome: Outcome = 'retry';
       let status = 0;
+      let body: unknown;
       this.attempts++;
       try {
         const reply = await this.transport(head);
         status = reply.status;
+        body = reply.body;
         outcome = classify(status);
       } catch (e) {
         this.log(`wal: send ${head.id} failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -208,6 +237,7 @@ export class Wal {
       }
       failures = 0;
       this.queue.shift();
+      for (const w of this.settleWaiters.get(head.id) ?? []) w({ outcome, status, body });
     }
   }
 

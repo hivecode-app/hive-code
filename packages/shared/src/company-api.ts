@@ -8,6 +8,9 @@
 //     Idempotent on WalEntry.id: hq must accept a replay of an id it already
 //     stored and answer with the same ack. 4xx = permanent reject (the client
 //     marks the entry failed and stops retrying); 5xx / network = retry.
+//     A 4xx body is {ok:false, error, reason?}: `reason` is the Hebrew cause. hq
+//     also tells the sender (from `hq`, ref = entry id) and emits `op.rejected`,
+//     since the client answered {queued:true} long before (#69).
 //   POST /v1/recall   body: RecallRequest   -> 200 RecallResponse
 //     Read-only. The client gives up after 3s and falls back to grepping the
 //     memory/ files of the company repo, marking the answer partial.
