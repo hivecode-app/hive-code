@@ -117,14 +117,9 @@ fail() {
 }
 trap 'fail "פקודה נכשלה בשורה $LINENO: $BASH_COMMAND"' ERR
 
-wait_health() {
-  for _ in $(seq 1 60); do
-    [[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7420/health)" == 200 ]] && return 0
-    sleep 1
-  done
-  return 1
-}
-active_shifts() { systemctl --user list-units 'company-shift@*' --state=active --plain --no-legend | awk '{print $1}' | sort; }
+# wait_health, active_shifts, hq_safe_restart: the same safe restart `company update` uses.
+# shellcheck source=lib/hq-restart.sh
+source "$repo/scripts/lib/hq-restart.sh"
 
 # ── preflight: only the production checkout, clean main, at origin/main ──────
 step "בדיקה מקדימה"
@@ -238,18 +233,10 @@ deploy_hq() {
   systemctl --user enable -q agent-company-hq actions-runner-company
   systemctl --user enable -q --now agent-company-drift.timer vscode-workspace.timer
 
-  # Safe restart: shifts are their own units (company-shift@), outside hq's cgroup.
-  local before after gone live_before live_after
-  before="$(active_shifts)"
-  live_before="$({ curl -s http://127.0.0.1:7420/health || true; } | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).live_shifts)}catch{console.log("?")}})')"
-  systemctl --user restart agent-company-hq
+  # Safe restart: shifts are their own units (company-shift@), outside hq's cgroup (scripts/lib/hq-restart.sh).
   hq_restarted=1
-  wait_health || fail "hq לא עונה ב-/health דקה אחרי restart"
-  after="$(active_shifts)"
-  gone="$(comm -23 <(echo "$before") <(echo "$after") | grep . || true)"
-  [[ -z "$gone" ]] || fail "משמרות נפלו ב-restart: $(echo "$gone" | tr '\n' ' ')"
-  live_after="$({ curl -s http://127.0.0.1:7420/health || true; } | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).live_shifts)}catch{console.log("?")}})')"
-  say "hq הופעל מחדש על ${sha:0:7}; $(echo "$after" | grep -c . || true) יחידות משמרת נשארו פעילות (live לפני/אחרי: $live_before/$live_after)"
+  hq_safe_restart || fail "$HQ_RESTART_MSG"
+  say "hq הופעל מחדש על ${sha:0:7}; $HQ_RESTART_MSG"
 }
 
 # ── app ──────────────────────────────────────────────────────────────────────

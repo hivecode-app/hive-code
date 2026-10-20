@@ -177,7 +177,7 @@ ls -d ~/.claude/projects/*/memory 2>/dev/null
 5. **`memory/`:** `memory/projects/<p>/INDEX.md` לכל פרויקט פעיל (עם מה שיובא), שורה לכל פרויקט ב-`memory/projects/INDEX.md`, ו-`memory/company/machines.md` מלא לפי התבנית שבו (`hostname`, `nproc`, `free -g`, `df -h ~`, ומערכת ההפעלה).
 6. **בדיקה:**
    ```bash
-   company check        # עד שיש CLI: node <engine>/scripts/check-contract.mjs "$COMPANY_HOME"
+   company check        # ~/.local/bin/company, מהמנוע (scripts/company)
    ```
    **לא ממשיכים עד שהיא עוברת.** שגיאה מתקנים בקבצים, לא בבדיקה. אזהרות (קובץ שלא רשום באינדקס) מתקנים גם הן.
 7. **קומיט:** ב-`$COMPANY_HOME`, `git add -A && git commit -m "הקמת החברה"`. זה הקומיט היחיד שנעשה בלי PR. מעכשיו כל שינוי בחוזה עובר ב-PR עם סקירה, כמו קוד.
