@@ -32,19 +32,24 @@ export function companyHomeFindings({ home, engineRoot, hqHome, readers, exists 
   return out;
 }
 
-/** Live company-mcp processes of this user: their shift and where they read memory from. Linux /proc. */
-export function liveReaders() {
+/** Live company-mcp processes of this user: their shift and where they read memory from. Linux /proc.
+ *  Only processes in this one's mount namespace: an install test's container on the same host (its own
+ *  manager-1, its own COMPANY_HOME) shows up in /proc too, and is not a shift of this company. */
+export function liveReaders(proc = '/proc') {
   const out = [];
   let pids = [];
-  try { pids = readdirSync('/proc').filter((p) => /^\d+$/.test(p)); } catch { return out; }
+  try { pids = readdirSync(proc).filter((p) => /^\d+$/.test(p)); } catch { return out; }
+  let mine = null;
+  try { mine = readlinkSync(`${proc}/self/ns/mnt`); } catch { /* no namespaces here: every process counts */ }
   for (const pid of pids) {
     try {
-      const cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+      const cmd = readFileSync(`${proc}/${pid}/cmdline`, 'utf8');
       if (!cmd.includes(`mcp-company${sep}src${sep}server.ts`)) continue;
-      const env = procEnv(pid);
+      if (mine && readlinkSync(`${proc}/${pid}/ns/mnt`) !== mine) continue;
+      const env = procEnv(pid, proc);
       if (!env.COMPANY_SHIFT) continue;
       let cwd = null;
-      try { cwd = readlinkSync(`/proc/${pid}/cwd`); } catch { /* gone */ }
+      try { cwd = readlinkSync(`${proc}/${pid}/cwd`); } catch { /* gone */ }
       out.push({ shift: env.COMPANY_SHIFT, home: readerHome(env, cwd) });
     } catch { /* not ours, or gone */ }
   }
@@ -52,9 +57,9 @@ export function liveReaders() {
 }
 
 /** A process's environment from /proc, or {} (gone, not ours). */
-export function procEnv(pid) {
+export function procEnv(pid, proc = '/proc') {
   try {
-    return Object.fromEntries(readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').filter(Boolean)
+    return Object.fromEntries(readFileSync(`${proc}/${pid}/environ`, 'utf8').split('\0').filter(Boolean)
       .map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]));
   } catch { return {}; }
 }

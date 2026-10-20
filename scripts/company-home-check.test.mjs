@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { companyHomeFindings, readerHome } from './company-home-check.mjs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, sep } from 'node:path';
+import { companyHomeFindings, liveReaders, readerHome } from './company-home-check.mjs';
 
 const ENGINE = '/home/u/projects/agent-company';
 const HOME = '/home/u/company';
@@ -34,4 +37,29 @@ test('a worker reads memory from COMPANY_HOME, else COMPANY_REPO, else its cwd (
   assert.equal(readerHome({ COMPANY_REPO: '/r' }, '/c'), '/r');
   assert.equal(readerHome({}, '/c'), '/c');
   assert.equal(readerHome({}, null), null);
+});
+
+test('liveReaders: a shift in an install test container on the same host (another mount namespace) is not counted', () => {
+  const proc = mkdtempSync(join(tmpdir(), 'proc-'));
+  const server = `node packages${sep}mcp-company${sep}src${sep}server.ts`;
+  const pid = (n, ns, env, cmd = server) => {
+    mkdirSync(join(proc, n, 'ns'), { recursive: true });
+    writeFileSync(join(proc, n, 'cmdline'), cmd.replaceAll(' ', '\0'));
+    writeFileSync(join(proc, n, 'environ'), Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\0'));
+    symlinkSync(ns, join(proc, n, 'ns', 'mnt'));
+    symlinkSync('/somewhere', join(proc, n, 'cwd'));
+  };
+  try {
+    mkdirSync(join(proc, 'self', 'ns'), { recursive: true });
+    symlinkSync('mnt:[1]', join(proc, 'self', 'ns', 'mnt'));
+    pid('10', 'mnt:[1]', { COMPANY_SHIFT: 'adi-1', COMPANY_HOME: '/home/owner/company' });
+    pid('11', 'mnt:[2]', { COMPANY_SHIFT: 'manager-1', COMPANY_HOME: '/home/tester/company' });
+    pid('12', 'mnt:[1]', { COMPANY_SHIFT: 'x-1' }, 'node something-else.js');
+    pid('13', 'mnt:[1]', { PATH: '/bin' });
+    assert.deepEqual(liveReaders(proc), [{ shift: 'adi-1', home: '/home/owner/company' }]);
+  } finally { rmSync(proc, { recursive: true, force: true }); }
+});
+
+test('liveReaders on the real /proc: no throw, and every reader has a shift', () => {
+  for (const r of liveReaders()) assert.ok(r.shift);
 });
