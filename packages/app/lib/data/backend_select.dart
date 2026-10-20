@@ -47,6 +47,7 @@ Future<void> clearSession() async {
   final p = await SharedPreferences.getInstance();
   await p.remove(kHqUrl);
   await p.remove(kHqToken);
+  await p.remove(HqBackend.kCacheKey); // the last snapshot was this device's view of that hq
 }
 
 /// The hq next to the app: same origin `<app path>/hq` on the web, HQ_URL on Android.

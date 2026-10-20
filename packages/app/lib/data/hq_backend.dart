@@ -8,7 +8,10 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../model/models.dart';
@@ -105,6 +108,9 @@ class HqBackend extends Backend {
 
   @override
   Future<void> start() async {
+    // The last snapshot on this device shows at once (quality.md: "מחכה לך" from cache in <=1s);
+    // the fresh one replaces it a moment later.
+    await _restoreCache();
     try {
       await _load();
       notifyListeners(); // the snapshot shows at once; the WebSocket only adds what is new
@@ -121,6 +127,7 @@ class HqBackend extends Backend {
     _disposed = true;
     _replayGuard?.cancel();
     _onlineAgain?.cancel();
+    _saveTimer?.cancel();
     _retry?.cancel();
     _refresh?.cancel();
     _wsSub?.cancel();
@@ -132,7 +139,8 @@ class HqBackend extends Backend {
   void _setDown() {
     _replaying = false; // a failed connection must still say so on screen
     _holdRedraws = false;
-    _downSince ??= DateTime.now();
+    // On data from the device cache, "since" is when that data was current, not when the link failed.
+    _downSince ??= _fromCache ?? DateTime.now();
     final t = _downSince!;
     _status = SystemStatus(LinkState.offline, since: '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}');
   }
@@ -169,6 +177,19 @@ class HqBackend extends Backend {
     final toggles = (results[3]['toggles'] as List).cast<Map<String, dynamic>>();
     final prev = _data;
     _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, previous: prev);
+    // Order and last lines from the last messages fetch, right away: without them the list showed
+    // board order, then jumped into recency order when the messages came back (on every event).
+    final lines = _lastLines;
+    if (lines != null) {
+      try {
+        _applyLastLines(_data!, lines);
+      } catch (_) {
+        _lastLines = null; // never let a bad copy block every reload
+      }
+    }
+    _snapshotRaw = {'board': results[0], 'inbox': results[1], 'asks': results[2], 'toggles': results[3]};
+    _fromCache = null;
+    if (!_fresh.isCompleted) _fresh.complete();
     final open = openIdentity, openChat = open == null ? null : _data!.chats[open];
     if (open != null && openChat != null && !_midFetch.containsKey(open)) _syncAsks(openChat, open, _data!);
     if (open != null && _openFailed.contains(open)) unawaited(openConversation(open));
@@ -187,35 +208,124 @@ class HqBackend extends Backend {
     final d = _data;
     if (d == null) return;
     try {
-      final res = await _get('/api/messages?identity=owner&limit=200');
-      final seen = <String>{};
-      for (final m in (res['messages'] as List).cast<Map<String, dynamic>>()) {
-        final other = m['from_identity'] == 'owner' ? m['to_identity'] as String : m['from_identity'] as String;
-        if (!seen.add(other)) continue;
-        final i = d.conversations.indexWhere((c) => c.identityId == other);
-        final c = ConversationSummary(
-          identityId: other,
-          lastLine: (m['from_identity'] == 'owner' ? 'את/ה: ' : '') + (m['body'] as String).split('\n').first,
-          time: _hm(m['created_at'] as int),
-          lastIsMine: m['from_identity'] != 'owner',
-          unread: m['to_identity'] == 'owner' && m['state'] != 'handled' ? 1 : 0,
-          pinned: other == 'yoav',
-        );
-        if (i >= 0) {
-          d.conversations[i] = c;
-        } else {
-          d.conversations.add(c);
-        }
-      }
-      // Recent first, then the rest; Yoav stays pinned in the list widget.
-      final order = [for (final m in (res['messages'] as List)) (m['from_identity'] == 'owner' ? m['to_identity'] : m['from_identity']) as String];
-      int rank(ConversationSummary c) {
-        final r = order.indexOf(c.identityId);
-        return r < 0 ? 1 << 20 : r;
-      }
-      d.conversations.sort((a, b) => rank(a).compareTo(rank(b)));
+      final res = (await _get('/api/messages?identity=owner&limit=200')) as Map<String, dynamic>;
+      final now = _data;
+      if (now == null) return;
+      _applyLastLines(now, res);
+      _lastLines = _latestPerConversation(res);
       notifyListeners();
+      _saveSoon();
     } catch (_) {}
+  }
+
+  /// The owner's latest messages (raw /api/messages), kept for ordering the conversation list.
+  Map<String, dynamic>? _lastLines;
+  Map<String, dynamic>? _snapshotRaw;
+
+  /// Last line and time per conversation, newest first, Yoav pinned (APP-SPEC §4.3).
+  void _applyLastLines(CompanyData d, Map<String, dynamic> res) {
+    final seen = <String>{};
+    for (final m in (res['messages'] as List).cast<Map<String, dynamic>>()) {
+      final other = m['from_identity'] == 'owner' ? m['to_identity'] as String : m['from_identity'] as String;
+      if (!seen.add(other)) continue;
+      final i = d.conversations.indexWhere((c) => c.identityId == other);
+      final c = ConversationSummary(
+        identityId: other,
+        lastLine: (m['from_identity'] == 'owner' ? 'את/ה: ' : '') + (m['body'] as String).split('\n').first,
+        time: _hm(m['created_at'] as int),
+        lastIsMine: m['from_identity'] != 'owner',
+        unread: m['to_identity'] == 'owner' && m['state'] != 'handled' && openIdentity != other ? 1 : 0,
+        pinned: other == 'yoav',
+      );
+      if (i >= 0) {
+        d.conversations[i] = c;
+      } else {
+        d.conversations.add(c);
+      }
+    }
+    // Recent first, then the rest; Yoav stays pinned in the list widget.
+    final order = [for (final m in (res['messages'] as List)) (m['from_identity'] == 'owner' ? m['to_identity'] : m['from_identity']) as String];
+    int rank(ConversationSummary c) {
+      final r = order.indexOf(c.identityId);
+      return r < 0 ? 1 << 20 : r;
+    }
+    d.conversations.sort((a, b) => rank(a).compareTo(rank(b)));
+  }
+
+  // ── the last snapshot on this device ─────────────────────────────────────
+
+  static const kCacheKey = 'hq.snapshot.v1';
+
+  Future<void> _restoreCache() async {
+    try {
+      final raw = (await SharedPreferences.getInstance()).getString(kCacheKey);
+      if (raw == null) return;
+      final c = jsonDecode(raw) as Map<String, dynamic>;
+      if (c['url'] != baseUrl) return;
+      List<Map<String, dynamic>> list(String k, String f) => ((c[k] as Map)[f] as List).cast<Map<String, dynamic>>();
+      _data = mapSnapshot(board: list('board', 'identities'), inbox: list('inbox', 'items'), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'));
+      final lines = c['messages'] as Map<String, dynamic>?;
+      if (lines != null) {
+        try {
+          _applyLastLines(_data!, lines);
+          _lastLines = lines;
+        } catch (_) {}
+      }
+      _fromCache = c['saved'] is int ? DateTime.fromMillisecondsSinceEpoch(c['saved'] as int) : DateTime.now();
+      notifyListeners();
+    } catch (_) {
+      // A cache that doesn't parse is just not used.
+    }
+  }
+
+  /// When the data on screen came from the device cache: when that snapshot was saved.
+  DateTime? _fromCache;
+  Timer? _saveTimer;
+
+  /// Inbox events come in bursts; the cache is written at most every 3 seconds.
+  void _saveSoon() {
+    if (_saveTimer?.isActive ?? false) return;
+    _saveTimer = Timer(const Duration(seconds: 3), _saveCache);
+  }
+
+  Future<void> _saveCache() async {
+    final snap = _snapshotRaw;
+    if (snap == null || _disposed) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      try {
+        await prefs.setString(kCacheKey, jsonEncode({'url': baseUrl, 'saved': DateTime.now().millisecondsSinceEpoch, ...snap, if (_lastLines != null) 'messages': _lastLines}));
+      } catch (_) {
+        await prefs.remove(kCacheKey); // a cache that can't be written must not go on aging
+      }
+    } catch (_) {
+      // No preferences store here (a bare test): nothing to cache into.
+    }
+  }
+
+  /// Only what the conversation list needs: each conversation's latest message, first line only.
+  static Map<String, dynamic> _latestPerConversation(Map<String, dynamic> res) {
+    final seen = <String>{};
+    final out = <Map<String, dynamic>>[];
+    for (final m in (res['messages'] as List).cast<Map<String, dynamic>>()) {
+      final other = m['from_identity'] == 'owner' ? m['to_identity'] : m['from_identity'];
+      if (!seen.add(other as String)) continue;
+      out.add({
+        'from_identity': m['from_identity'],
+        'to_identity': m['to_identity'],
+        'body': (m['body'] as String).split('\n').first,
+        'created_at': m['created_at'],
+        'state': m['state'],
+      });
+    }
+    return {'messages': out};
+  }
+
+  /// What an inbox event does (a snapshot reload), for tests.
+  @visibleForTesting
+  Future<void> debugReload() async {
+    await _load();
+    notifyListeners();
   }
 
   void _refreshSoon() {
@@ -414,6 +524,14 @@ class HqBackend extends Backend {
   void _bumpConversation(String id, String line, int ts) {
     final d = _data;
     if (d == null) return;
+    final kept = _lastLines;
+    if (kept != null) {
+      // So the next reload doesn't put back the older line.
+      final list = [...(kept['messages'] as List).cast<Map<String, dynamic>>()]
+        ..removeWhere((m) => (m['from_identity'] == 'owner' ? m['to_identity'] : m['from_identity']) == id)
+        ..insert(0, {'from_identity': id, 'to_identity': 'owner', 'body': line.split('\n').first, 'created_at': ts, 'state': openIdentity == id ? 'handled' : 'delivered'});
+      _lastLines = {'messages': list};
+    }
     final i = d.conversations.indexWhere((c) => c.identityId == id);
     final c = ConversationSummary(
       identityId: id,
@@ -529,16 +647,38 @@ class HqBackend extends Backend {
 
   // ── commands ─────────────────────────────────────────────────────────────
 
-  @override
-  Future<CommandResult> answerAsk(String askId, AskOption option, {String? from}) =>
-      _send('POST', '/api/asks/${Uri.encodeComponent(askId)}/answer', {'answer': option.label, 'by': 'owner'}).then(_after);
+  /// Completes when a snapshot from the server (not the device cache) is in.
+  final _fresh = Completer<void>();
+
+  /// An answer, a GO or a retry taken on what the cache showed waits for the fresh snapshot, and
+  /// goes out only if the item is still open there: otherwise "already handled", never a silent
+  /// no-op that looks like success.
+  Future<CommandResult?> _stale(String? askId, int? inboxId) async {
+    if (_fresh.isCompleted) return null; // taken on fresh data: as usual
+    try {
+      await _fresh.future.timeout(const Duration(seconds: 10));
+    } catch (_) {
+      return const CommandResult.fail('אין חיבור לשרת, ולכן הפעולה לא נשלחה. אפשר לנסות שוב.');
+    }
+    final d = _data;
+    final open = d != null && d.waiting.any((w) => (askId != null && w.askId == askId) || (inboxId != null && w.inboxId == inboxId));
+    return open ? null : const CommandResult.fail('הפריט כבר טופל, ולכן התשובה לא נשלחה.');
+  }
 
   @override
-  Future<CommandResult> freeAnswer(String askId, String text) =>
-      _send('POST', '/api/asks/${Uri.encodeComponent(askId)}/answer', {'answer': text, 'by': 'owner'}).then(_after);
+  Future<CommandResult> answerAsk(String askId, AskOption option, {String? from}) async =>
+      await _stale(askId, null) ??
+      await _send('POST', '/api/asks/${Uri.encodeComponent(askId)}/answer', {'answer': option.label, 'by': 'owner'}).then(_after);
+
+  @override
+  Future<CommandResult> freeAnswer(String askId, String text) async =>
+      await _stale(askId, null) ??
+      await _send('POST', '/api/asks/${Uri.encodeComponent(askId)}/answer', {'answer': text, 'by': 'owner'}).then(_after);
 
   @override
   Future<CommandResult> go(WaitItem item) async {
+    final stale = await _stale(item.askId, item.inboxId);
+    if (stale != null) return stale;
     final r = item.askId != null && !item.askId!.startsWith('inbox:')
         ? await _send('POST', '/api/asks/${Uri.encodeComponent(item.askId!)}/answer', {'answer': 'GO', 'by': 'owner'})
         : await _send('POST', '/api/inbox/${item.inboxId}/done', {'note': 'GO'});
@@ -555,10 +695,12 @@ class HqBackend extends Backend {
   }
 
   @override
-  Future<CommandResult> retry(WaitItem item) => _send('POST', '/api/inbox/${item.inboxId}/done', {'note': 'retry'}).then(_after);
+  Future<CommandResult> retry(WaitItem item) async =>
+      await _stale(null, item.inboxId) ?? await _send('POST', '/api/inbox/${item.inboxId}/done', {'note': 'retry'}).then(_after);
 
   @override
-  Future<CommandResult> handoffDone(WaitItem item) => _send('POST', '/api/inbox/${item.inboxId}/done', {'note': 'done'}).then(_after);
+  Future<CommandResult> handoffDone(WaitItem item) async =>
+      await _stale(null, item.inboxId) ?? await _send('POST', '/api/inbox/${item.inboxId}/done', {'note': 'done'}).then(_after);
 
   @override
   Future<AccountsView?> accounts() async {

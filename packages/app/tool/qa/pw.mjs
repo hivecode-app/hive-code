@@ -219,5 +219,7 @@ try {
 }
 fs.writeFileSync(path.join(out, 'console.log'), logs.join('\n'));
 console.log(`console lines: ${logs.length}; errors: ${logs.filter((l) => /error/i.test(l)).length}`);
-await ctx.close();
+// A persistent profile with video can hang on close: give it 10s, then leave.
+await Promise.race([ctx.close(), new Promise((r) => setTimeout(r, 10000))]);
 if (b) await b.close();
+process.exit(0);
