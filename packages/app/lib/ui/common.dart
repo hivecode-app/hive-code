@@ -55,7 +55,7 @@ String statusIcon(WorkerStatus s) => switch (s) {
       WorkerStatus.stuck => 'warning',
       WorkerStatus.restarting => 'autorenew',
       WorkerStatus.resting => 'bedtime',
-      WorkerStatus.done => 'check',
+      WorkerStatus.done => 'check_circle',
     };
 
 /// The status word follows the worker's grammatical gender (APP-SPEC §6.2).

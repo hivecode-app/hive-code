@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/store.ts';
-import { ensureRuntimeIdentity, listProjects, parseOrg, renameLegacyTaskWorkers, syncOrg, taskWorkerName } from '../src/org.ts';
+import { ensureRuntimeIdentity, listProjects, parseOrg, renameTaskWorkers, syncOrg, taskWorkerName } from '../src/org.ts';
 import { sessionIdFor, uuidv5 } from '../src/proc.ts';
 import { ORG_YAML } from './helpers.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -201,15 +201,15 @@ test('task workers get a human name and a title, never one a live worker already
   };
   try {
     const a = taskWorkerName(store, 0);
-    assert.deepEqual(a, { name: 'דנה', title: 'מפתחת' });
+    assert.deepEqual(a, { name: 'נעמה', title: 'מפתחת' });
     ensureRuntimeIdentity(store, { id: 'agent-company-t0', ...a, project: 'agent-company', reports_to: 'adi' });
-    assert.equal(taskWorkerName(store, 0).name, 'דנה', 'a worker with no open task does not hold its name');
+    assert.equal(taskWorkerName(store, 0).name, 'נעמה', 'a worker with no open task does not hold its name');
     open('agent-company-t0', 0);
-    assert.deepEqual(taskWorkerName(store, 0), { name: 'איתי', title: 'מפתח' }, 'דנה is taken: the next one');
+    assert.deepEqual(taskWorkerName(store, 0), { name: 'איתי', title: 'מפתח' }, 'נעמה is taken: the next one');
     assert.deepEqual(taskWorkerName(store, 1, true), { name: 'איתי', title: 'עוזר אישי' });
     assert.equal(taskWorkerName(store, 24).name, 'איתי', 'wraps around the pool');
     // 25 open workers at once: all names distinct, the 25th gets a suffix
-    const names = new Set(['דנה']);
+    const names = new Set(['נעמה']);
     for (let i = 1; i <= 24; i++) {
       const w = taskWorkerName(store, i);
       ensureRuntimeIdentity(store, { id: `agent-company-t${i}`, ...w, project: 'agent-company', reports_to: 'adi' });
@@ -217,7 +217,45 @@ test('task workers get a human name and a title, never one a live worker already
       names.add(w.name);
     }
     assert.equal(names.size, 25);
-    assert.ok(names.has('דנה ב׳'));
+    assert.ok(names.has('נעמה ב׳'));
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a task worker never gets a standing identity\'s name, one added to org.yaml later included', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hq-names-'));
+  const store = new Store(join(dir, 'hq.db'));
+  const standing = (id: string, name: string) => store.db.prepare(`INSERT INTO identities (id, name, title, symbol, team, team_kind, project,
+      reports_to, lifecycle, source, active, data, updated_at) VALUES (?, ?, 'ראש צוות', '', 'x', 'project', NULL, 'yoav', 'lead', 'org', 1, '{}', 0)`).run(id, name);
+  try {
+    // The real contract: no pool name is a standing identity's, for every task id.
+    syncOrg(store, join(import.meta.dirname, '../../../company'), [], 'yoav');
+    const names = new Set((store.db.prepare(`SELECT name FROM identities WHERE source = 'org'`).all() as { name: string }[]).map((r) => r.name));
+    assert.ok(names.has('דנה') && names.has('עדי') && names.has('יואב'));
+    for (let i = 0; i < 60; i++) assert.ok(!names.has(taskWorkerName(store, i).name), `task ${i}: ${taskWorkerName(store, i).name}`);
+    // A standing identity added later with a pool name: that name is out from now on, suffixes included.
+    standing('naama', 'נעמה');
+    for (let i = 0; i < 60; i++) assert.notEqual(taskWorkerName(store, i).name.split(' ')[0], 'נעמה');
+    assert.equal(taskWorkerName(store, 0).name, 'איתי');
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('task workers that carry a standing identity\'s name get another one, and keep their role', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hq-names-'));
+  const store = new Store(join(dir, 'hq.db'));
+  try {
+    store.db.prepare(`INSERT INTO identities (id, name, title, symbol, team, team_kind, project, reports_to, lifecycle, source, active, data, updated_at)
+      VALUES ('dana', 'דנה', 'מנכ"לית לומו', '', 'lumo', 'project', 'lumo', 'yoav', 'lead', 'org', 1, '{}', 0)`).run();
+    ensureRuntimeIdentity(store, { id: 'lumo-t22', name: 'דנה', title: 'מפתחת', project: 'lumo', reports_to: 'dana' });
+    ensureRuntimeIdentity(store, { id: 'company-t9', name: 'דנה ב׳', title: 'עוזרת אישית', project: null, reports_to: 'eli' });
+    ensureRuntimeIdentity(store, { id: 'lumo-t23', name: 'קרן', title: 'מפתחת', project: 'lumo', reports_to: 'dana' });
+    assert.equal(renameTaskWorkers(store), 2);
+    const row = (id: string) => store.db.prepare('SELECT name, title FROM identities WHERE id = ?').get(id) as { name: string; title: string };
+    assert.notEqual(row('lumo-t22').name, 'דנה');
+    assert.match(row('lumo-t22').title, /^מפתח/);
+    assert.doesNotMatch(row('company-t9').name, /^דנה/);
+    assert.match(row('company-t9').title, /^עוזר/);
+    assert.equal(row('lumo-t23').name, 'קרן', 'a name no standing identity has stays');
+    assert.equal(renameTaskWorkers(store), 0, 'idempotent');
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -229,11 +267,11 @@ test('legacy t<N> workers are renamed once at startup, helpers as helpers (#51)'
       VALUES ('eli', 'אלי', 'ראש הצוות האישי', '', 'personal', 'personal', NULL, 'owner', 'lead', 'org', 1, '{}', 0)`).run();
     ensureRuntimeIdentity(store, { id: 'agent-company-t12', name: 't12', title: 'Tab handoff into hq', project: 'agent-company', reports_to: 'yoav' });
     ensureRuntimeIdentity(store, { id: 'company-t14', name: 't14', title: 'טופס', project: null, reports_to: 'eli' });
-    assert.equal(renameLegacyTaskWorkers(store), 2);
+    assert.equal(renameTaskWorkers(store), 2);
     const row = (id: string) => store.db.prepare('SELECT name, title FROM identities WHERE id = ?').get(id) as { name: string; title: string };
     assert.doesNotMatch(row('agent-company-t12').name, /^t\d/);
     assert.match(row('agent-company-t12').title, /^מפתח/);
     assert.match(row('company-t14').title, /^עוזר/);
-    assert.equal(renameLegacyTaskWorkers(store), 0, 'idempotent');
+    assert.equal(renameTaskWorkers(store), 0, 'idempotent');
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });

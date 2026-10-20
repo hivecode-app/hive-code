@@ -165,7 +165,7 @@ class WaitRow extends StatelessWidget {
               Text(who.name, style: T.name.copyWith(color: p.text)),
               const SizedBox(width: 6),
               Expanded(
-                child: Rich(who.taskRef != null ? '${who.title} · ${ltr(who.taskRef!)}' : who.title,
+                child: Rich(d.roleLine(item.from),
                     maxLines: 1, style: T.secondary.copyWith(color: p.text2)),
               ),
               const SizedBox(width: 6),

@@ -4,6 +4,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../model/models.dart';
+import '../theme/tokens.dart';
 
 class CompanyData {
   CompanyData({
@@ -64,6 +65,22 @@ class CompanyData {
   /// it has no conversation, and a message to it reaches no one (#55).
   bool canChat(String id) => id != kSystemId;
   Team? teamOf(String identityId) => teams[identities[identityId]?.teamId];
+
+  /// "מפתחת · voice-bot": the title, then the team or project the worker belongs to, wherever a worker is
+  /// shown (#40). The team is left out when the title already names it ("מנכ"לית agent-company").
+  String roleLine(String identityId, {bool short = false}) {
+    final who = this.who(identityId);
+    final title = short ? who.short : who.title;
+    final team = teamOf(identityId);
+    if (team == null || team.name.isEmpty) return title;
+    if (title.contains(team.name) || title.contains(team.id)) return title;
+    // A Latin name ("voice-bot") is isolated, so its hyphen stays inside it in the RTL line.
+    final name = RegExp(r'[\u0590-\u05FF]').hasMatch(team.name) ? team.name : ltr(team.name);
+    return title.isEmpty ? name : '$title · $name';
+  }
+
+  /// A finished task worker (APP-SPEC §4.3): its conversation shows "הושלם" and goes below the live ones.
+  bool isDone(String identityId) => who(identityId).temp && presence[identityId]?.status == WorkerStatus.done;
 }
 
 /// Result of a command that reaches the server. Failure text is one plain sentence (design-taste §7).

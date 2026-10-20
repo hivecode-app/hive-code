@@ -60,7 +60,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   bool _match(CompanyData d, ConversationSummary c) {
     if (q.isEmpty) return true;
     final who = d.who(c.identityId);
-    return '${who.name} ${who.title} ${d.teamOf(c.identityId)?.name ?? ''} ${c.lastLine}'.contains(q);
+    return '${who.name} ${who.title} ${d.teamOf(c.identityId)?.name ?? ''} ${c.lastLine} ${d.isDone(c.identityId) ? d.presence[c.identityId]?.activity ?? '' : ''}'.contains(q);
   }
 
   @override
@@ -69,14 +69,16 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     final d = store.data;
     final p = context.p;
     if (d == null) return const SizedBox.shrink();
-    final all = [
+    final ordered = [
       ...d.conversations.where((c) => c.pinned),
       ...d.conversations.where((c) => !c.pinned),
-    ].where((c) => _match(d, c)).toList();
-    // Task teams that finished go to the end, folded (APP-SPEC §4.3); a search shows everything.
+    ].where((c) => _match(d, c));
+    // Finished task workers go below every live conversation, whatever order the list came in (#40):
+    // the order above is the data's, and this split is the last step, so any sort keeps them at the end.
+    final all = [...ordered.where((c) => !d.isDone(c.identityId)), ...ordered.where((c) => d.isDone(c.identityId))];
+    // Of those, the read ones fold (APP-SPEC §4.3); a search shows everything.
     // Not folded: unread, the selected one, or anything in the desktop sidebar (no room for a toggle).
-    bool closed(ConversationSummary c) =>
-        d.who(c.identityId).temp && d.presence[c.identityId]?.status == WorkerStatus.done && c.unread == 0 && c.identityId != store.selectedConversation;
+    bool closed(ConversationSummary c) => d.isDone(c.identityId) && c.unread == 0 && c.identityId != store.selectedConversation;
     final fold = q.isEmpty && !widget.compact;
     final list = fold ? all.where((c) => !closed(c)).toList() : all;
     final done = fold ? all.where(closed).toList() : const <ConversationSummary>[];
@@ -172,7 +174,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                     const SizedBox(width: 12),
                     Text(who.name, style: T.name.copyWith(color: p.text)),
                     const SizedBox(width: 6),
-                    Expanded(child: Text(who.title, style: T.secondary.copyWith(color: p.text2), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    Expanded(child: Text(d.roleLine(who.id), style: T.secondary.copyWith(color: p.text2), maxLines: 1, overflow: TextOverflow.ellipsis)),
                   ]),
                 ),
               ),
@@ -257,7 +259,10 @@ class ConversationRow extends StatelessWidget {
     final p = context.p;
     final who = d.who(c.identityId);
     final pr = d.presence[c.identityId] ?? const Presence(status: WorkerStatus.free);
-    final title = compact ? who.short : (who.taskRef != null ? '${who.title} · ${ltr(who.taskRef!)}' : who.title);
+    final title = d.roleLine(c.identityId, short: compact);
+    // A finished task worker: the task it did is the second line, under "הושלם" (#40).
+    final done = d.isDone(c.identityId);
+    final task = done ? pr.activity : null;
     final status = Row(children: [
       Flexible(child: StatusWord.of(pr, who.gender, withActivity: pr.status == WorkerStatus.working && !compact)),
       if (c.diffStat != null) ...[const SizedBox(width: 6), DiffStat(c.diffStat!)],
@@ -266,7 +271,7 @@ class ConversationRow extends StatelessWidget {
     final draft = (d.chats[c.identityId]?.draft ?? '').trim();
     return Semantics(
       button: true,
-      label: '${who.name}, ${who.title}, ${statusWord(pr.status, who.gender)}',
+      label: '${who.name}, $title, ${statusWord(pr.status, who.gender)}',
       child: Material(
         color: selected ? p.surface2 : p.surface,
         child: InkWell(
@@ -286,7 +291,12 @@ class ConversationRow extends StatelessWidget {
                     Text(c.time, style: T.meta.copyWith(color: p.text3)),
                   ]),
                   // A draft left in the chat shows instead of the last line, as in WhatsApp.
-                  if (!compact && draft.isNotEmpty)
+                  if (!compact && task != null && task.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Rich(task, auto: true, maxLines: 1, style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text2)),
+                    )
+                  else if (!compact && draft.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text.rich(

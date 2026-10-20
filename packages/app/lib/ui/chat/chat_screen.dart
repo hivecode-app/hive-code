@@ -540,7 +540,7 @@ class _ChatBar extends StatelessWidget {
         trailing: Semantics(button: true, label: 'עצירה', child: GestureDetector(onTap: onStop, child: Text('עצירה', style: TextStyle(fontFamily: kFont, fontSize: 12, height: 1.4, fontWeight: FontWeight.w700, color: p.accent)))),
       );
     } else {
-      status = StatusWord.of(presence, who.gender, size: 12, suffix: team?.name);
+      status = StatusWord.of(presence, who.gender, size: 12);
     }
 
     return Container(
@@ -560,7 +560,7 @@ class _ChatBar extends StatelessWidget {
                     TextSpan(children: [
                       TextSpan(text: who.name, style: const TextStyle(fontWeight: FontWeight.w700)),
                       TextSpan(
-                        text: ' · ${who.title}${who.taskRef != null ? ' · ${ltr(who.taskRef!)}' : ''}${embedded && team != null ? ' · ${team!.name}' : ''}',
+                        text: ' · ${d.roleLine(who.id)}',
                         style: TextStyle(fontWeight: FontWeight.w400, color: p.text2, fontSize: 13.5),
                       ),
                     ]),

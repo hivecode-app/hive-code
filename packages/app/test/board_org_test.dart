@@ -92,6 +92,42 @@ void main() {
     expect(d.teams['agent-company']!.name, 'החברה', reason: 'no name in org.yaml: the built-in one');
   });
 
+  test('#40: every worker shows its team; a task worker shows its project by name, never its task id', () {
+    Map<String, dynamic> w(String id, String name, String team, String kind, String life, {String? project, String? opener, String title = ''}) =>
+        {..._id(id, name, team, kind, life, 'resting', project: project, title: title), 'reports_to': opener};
+    final m = mapSnapshot(
+      board: [
+        ...board,
+        w('eli', 'אלי', 'personal', 'permanent', 'lead', title: 'ראש הצוות האישי'),
+        w('inbal', 'ענבל', 'tiki-bot-go', 'project', 'lead', project: 'tiki-bot-go', title: 'ראשת צוות'),
+        w('voice-bot-t38', 'קרן', 'voice-bot-t38', 'task', 'ephemeral', project: 'voice-bot', opener: 'shachar', title: 'מפתחת'),
+        w('tiki-bot-go-t50', 'ניר', 'tiki-bot-go-t50', 'task', 'ephemeral', project: 'tiki-bot-go', opener: 'inbal', title: 'מפתח'),
+        w('company-t60', 'יעל', 'company-t60', 'task', 'ephemeral', opener: 'eli', title: 'עוזרת אישית'),
+        w('company-t61', 'רון', 'company-t61', 'task', 'ephemeral', opener: 'company-t60', title: 'עוזר אישי'),
+      ],
+      inbox: const [], asks: const [], toggles: const [], tasks: tasks,
+      projects: [
+        ...projects,
+        {'id': 'voice-bot', 'name': null, 'status': 'active', 'team': 'voice-bot'},
+        {'id': 'tiki-bot-go', 'name': 'טיקי בוט', 'status': 'active', 'team': 'tiki-bot-go'},
+      ],
+      now: now,
+    );
+    String plain(String s) => s.replaceAll(RegExp('[\u2066-\u2069]'), '');
+    expect(plain(m.roleLine('voice-bot-t38')), 'מפתחת · voice-bot', reason: 'no name in org.yaml: the id');
+    expect(m.roleLine('tiki-bot-go-t50'), 'מפתח · טיקי בוט');
+    expect(m.roleLine('ac-t16'), 'מפתחת · החברה');
+    expect(m.roleLine('company-t60'), 'עוזרת אישית · הצוות האישי', reason: 'an errand shows the team that opened it');
+    expect(m.roleLine('company-t61'), 'עוזר אישי · הצוות האישי', reason: 'opened by a task worker: its team, not its task id');
+    expect(m.roleLine('yoav'), 'מנהל החברה · הנהלה');
+    expect(m.roleLine('inbal'), 'ראשת צוות · טיקי בוט');
+    expect(m.teamOf('tiki-bot-go-t50')!.symbol, m.teams['tiki-bot-go']!.symbol, reason: 'the badge is the project team\'s');
+    // The org tab, the board and the chips: the owner's name for the project (#77), the id only without one.
+    expect(m.teams['tiki-bot-go']!.name, 'טיקי בוט');
+    expect(m.projects.firstWhere((p) => p.id == 'tiki-bot-go').name, 'טיקי בוט');
+    expect(m.projects.firstWhere((p) => p.id == 'voice-bot').name, 'voice-bot');
+  });
+
   test('an hq without tasks or projects still maps (older hq, older cached snapshot)', () {
     final old = mapSnapshot(board: board, inbox: const [], asks: const [], toggles: const []);
     expect(old.tickets, isEmpty);

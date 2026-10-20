@@ -950,12 +950,33 @@ CompanyData mapSnapshot({
   final teams = <String, Team>{};
   final ids = <String, Identity>{};
   final presence = <String, Presence>{};
+  // A task worker's own team is its task ("agent-company-t40"), an id that means nothing to the owner. It shows as the
+  // team it works for (#40, "קרן · voice-bot"): the project's team, or for an errand with no project the
+  // team of whoever opened it (a personal-team helper shows "הצוות האישי").
+  final projectTeam = <String, String>{
+    for (final p in projects)
+      if (p['id'] is String) p['id'] as String: p['team'] is String ? p['team'] as String : p['id'] as String,
+  };
+  final byId = {for (final b in board) b['id'] as String: b};
+  String? hostTeam(Map<String, dynamic> b, [int depth = 0]) {
+    final project = b['project'] as String?;
+    if (project != null) return projectTeam[project] ?? project;
+    final opener = byId[b['reports_to']];
+    if (opener == null) return null;
+    // Opened by another task worker: that worker's own host, never its task id.
+    if (opener['team_kind'] == 'task') return depth < 3 ? hostTeam(opener, depth + 1) : null;
+    return opener['team'] as String?;
+  }
+
   for (final b in board) {
     final id = b['id'] as String;
     final team = (b['team'] as String?) ?? 'company';
     final own = b['symbol'] as String?;
-    final symbol = teamSymbols[team] ?? (own != null && kIcons.containsKey(own) ? own : 'build');
-    teams.putIfAbsent(team, () => Team(id: team, name: teamNames[team] ?? team, symbol: symbol, permanent: b['team_kind'] == 'permanent'));
+    final host = b['team_kind'] == 'task' ? hostTeam(b) : null;
+    final project = b['project'] as String?;
+    final symbol = teamSymbols[host ?? team] ?? (own != null && kIcons.containsKey(own) ? own : 'build');
+    final teamName = host != null ? (teamNames[host] ?? (project != null ? projectNames[project] : null) ?? host) : (teamNames[team] ?? team);
+    teams.putIfAbsent(team, () => Team(id: team, name: teamName, symbol: symbol, permanent: b['team_kind'] == 'permanent'));
     if (b['lifecycle'] == 'lead' && teams[team]!.leadId == null) {
       teams[team] = Team(id: team, name: teams[team]!.name, symbol: teams[team]!.symbol, leadId: id, permanent: teams[team]!.permanent);
     }

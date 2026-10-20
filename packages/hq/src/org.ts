@@ -111,28 +111,44 @@ export function listIdentities(store: Store): IdentityRow[] {
   return store.db.prepare('SELECT * FROM identities WHERE active = 1 ORDER BY team, lifecycle, id').all() as IdentityRow[];
 }
 
-/** Human names for task workers (#51): a name and a role, not "t12". None of them is a standing identity's name. */
+/**
+ * Human names for task workers (#51): a name and a role, not "t12". Names repeat across tasks; what a task
+ * worker never gets is a standing identity's name (יואב, עדי, דנה…). The pool holds none of today's, and
+ * taskWorkerName checks against the identities in org.yaml at the time, so one added later is skipped too.
+ */
 const TASK_NAMES: ReadonlyArray<readonly [string, 'm' | 'f']> = [
-  ['דנה', 'f'], ['איתי', 'm'], ['תמר', 'f'], ['נועם', 'm'], ['שירה', 'f'], ['עומר', 'm'], ['מאיה', 'f'], ['יונתן', 'm'],
-  ['הדס', 'f'], ['גיל', 'm'], ['ענבל', 'f'], ['אסף', 'm'], ['מיכל', 'f'], ['ניר', 'm'], ['קרן', 'f'], ['עידו', 'm'],
-  ['רעות', 'f'], ['אלון', 'm'], ['שקד', 'f'], ['יובל', 'm'], ['ליאת', 'f'], ['דורון', 'm'], ['אביגיל', 'f'], ['בועז', 'm'],
+  ['נעמה', 'f'], ['איתי', 'm'], ['יעל', 'f'], ['נועם', 'm'], ['שירה', 'f'], ['עומר', 'm'], ['סיון', 'f'], ['יונתן', 'm'],
+  ['הדס', 'f'], ['גיל', 'm'], ['אפרת', 'f'], ['אריאל', 'm'], ['מיכל', 'f'], ['ניר', 'm'], ['קרן', 'f'], ['ליאור', 'm'],
+  ['רעות', 'f'], ['אלון', 'm'], ['שקד', 'f'], ['יובל', 'm'], ['ליאת', 'f'], ['דורון', 'm'], ['אביגיל', 'f'], ['רון', 'm'],
 ];
 
-/** Second, third… "דנה" once the whole pool is in use. */
+/** Second, third… "נעמה" once the whole pool is in use. */
 const ROUND = ['', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ז׳', 'ח׳', 'ט׳'];
 
+/** The names of the standing identities (org.yaml), read now: a task worker never carries one. */
+function standingNames(store: Store): Set<string> {
+  return new Set((store.db.prepare(`SELECT name FROM identities WHERE active = 1 AND source != 'runtime'`).all() as { name: string }[]).map((r) => r.name));
+}
+
+/** "נעמה ב׳" → "נעמה": the name without the round suffix. */
+const baseName = (name: string) => name.replace(/ (\S+׳|\d+)$/, '');
+
 /**
- * Name and title of a new task worker: the pool in order from the task id, skipping names in use (a standing
- * identity, or a task worker whose task is still open), so two live workers are never both "דנה". When every
- * name is in use the round goes on with a suffix ("דנה ב׳"). `helper` = a personal-team errand, not code.
+ * Name and title of a new task worker: the pool in order from the task id, without the standing identities'
+ * names, skipping names a worker on an open task has, so two live workers are never both "נעמה". When every
+ * name is in use the round goes on with a suffix ("נעמה ב׳"). `helper` = a personal-team errand, not code.
  */
 export function taskWorkerName(store: Store, taskId: number, helper = false): { name: string; title: string } {
-  const taken = new Set((store.db.prepare(`SELECT i.name FROM identities i WHERE i.active = 1 AND (i.source != 'runtime'
-      OR EXISTS (SELECT 1 FROM tasks t WHERE t.identity = i.id AND t.state != 'done'))`).all() as { name: string }[]).map((r) => r.name));
-  const n = TASK_NAMES.length;
+  const standing = standingNames(store);
+  const taken = new Set((store.db.prepare(`SELECT i.name FROM identities i WHERE i.active = 1 AND i.source = 'runtime'
+      AND EXISTS (SELECT 1 FROM tasks t WHERE t.identity = i.id AND t.state != 'done')`).all() as { name: string }[]).map((r) => r.name));
+  const free = TASK_NAMES.filter(([base]) => !standing.has(base));
+  // Only if org.yaml ever held every pool name: a plain role, never a standing identity's name.
+  const pool: ReadonlyArray<readonly [string, 'm' | 'f']> = free.length ? free : [['עובד משימה', 'm']];
+  const n = pool.length;
   const start = ((taskId % n) + n) % n;
   for (let k = 0; ; k++) {
-    const [base, g] = TASK_NAMES[(start + k) % n]!;
+    const [base, g] = pool[(start + k) % n]!;
     const round = Math.floor(k / n);
     const name = round === 0 ? base : `${base} ${ROUND[round] ?? round + 1}`;
     if (taken.has(name) && k < n * 50) continue;
@@ -140,16 +156,25 @@ export function taskWorkerName(store: Store, taskId: number, helper = false): { 
   }
 }
 
-/** Task workers opened before #51 were named "t<N>" with the task title as their title: give them a name and a role. */
-export function renameLegacyTaskWorkers(store: Store): number {
-  const rows = store.db.prepare(`SELECT i.id, i.name, i.project, o.team AS opener_team FROM identities i
-      LEFT JOIN identities o ON o.id = i.reports_to WHERE i.source = 'runtime' AND i.team_kind = 'task'`).all() as
-    { id: string; name: string; project: string | null; opener_team: string | null }[];
+/**
+ * Task workers that need a new name, when hq loads the contract (on start, so after every deploy): the ones
+ * opened before #51 ("t<N>", with the task title as their title), and any that carry a standing identity's
+ * name (from before the pool was cleaned, or a standing identity added to org.yaml since). Each gets a name
+ * and a role. A worker whose task is still open is renamed too: two workers with one name is the confusion
+ * this prevents, and the shift picks the new name up from its next system prompt.
+ */
+export function renameTaskWorkers(store: Store): number {
+  const rows = store.db.prepare(`SELECT i.id, i.name, i.title, i.project, o.team AS opener_team FROM identities i
+      LEFT JOIN identities o ON o.id = i.reports_to WHERE i.source = 'runtime' AND i.team_kind = 'task' ORDER BY i.id`).all() as
+    { id: string; name: string; title: string; project: string | null; opener_team: string | null }[];
+  const standing = standingNames(store);
   let n = 0;
   for (const r of rows) {
-    const m = /^t(\d+)$/.exec(r.name);
-    if (!m) continue;
-    const w = taskWorkerName(store, Number(m[1]), !r.project && r.opener_team === HELPER_TEAM);
+    const legacy = /^t(\d+)$/.exec(r.name);
+    if (!legacy && !standing.has(baseName(r.name))) continue;
+    const taskId = Number(legacy?.[1] ?? /-t(\d+)$/.exec(r.id)?.[1] ?? 0);
+    const helper = legacy ? !r.project && r.opener_team === HELPER_TEAM : r.title.startsWith('עוזר');
+    const w = taskWorkerName(store, taskId, helper);
     store.db.prepare('UPDATE identities SET name = ?, title = ?, updated_at = ? WHERE id = ?').run(w.name, w.title, store.now(), r.id);
     n++;
   }
