@@ -22,6 +22,7 @@ import { HomeError } from './home.ts';
 import { waitingLine } from './mailbox.ts';
 import { FILE_MODES, memoryFilePath } from './memory-files.ts';
 import { blobSha, MAX_TEXT_BYTES, secretIn } from './memory-registry.ts';
+import { guarded, requestUrl } from './http-guard.ts';
 
 const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home']);
 
@@ -437,7 +438,8 @@ export class Ingest {
 
   /** Route a request; returns false if the path is not ours. */
   async handle(req: IncomingMessage, res: ServerResponse, readBody: () => Promise<unknown>): Promise<boolean> {
-    const url = new URL(req.url ?? '/', 'http://hq');
+    const url = requestUrl(req);
+    if (!url) return false;
     const path = url.pathname;
     const handoff = /^\/v1\/handoffs(?:\/(h-[0-9a-f]+)(\/end)?)?$/.exec(path);
     if (!handoff && (req.method !== 'POST' || (path !== '/v1/ops' && path !== '/v1/recall'))) return false;
@@ -494,12 +496,12 @@ export function readJson(req: IncomingMessage, limit = 1 << 20): Promise<unknown
 /** The local ingest socket: `<state>/hq.sock`, mode 0600. */
 export async function startIngestSocket(ingest: Ingest, path: string): Promise<Server> {
   if (existsSync(path)) rmSync(path, { force: true }); // stale socket from a previous run
-  const srv = createServer(async (req, res) => {
+  const srv = createServer(guarded(async (req, res) => {
     if (!(await ingest.handle(req, res, () => readJson(req)))) {
       res.writeHead(404, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: 'not found' }));
     }
-  });
+  }));
   await new Promise<void>((resolve, reject) => { srv.once('error', reject); srv.listen(path, () => resolve()); });
   chmodSync(path, 0o600);
   return srv;

@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { TabHandoffs } from './handoffs.ts';
+import { guarded, guardedUpgrade, rejectUpgrade, requestUrl } from '../http-guard.ts';
 
 const PAGE_HTML = readFileSync(join(import.meta.dirname, 'phone.html'), 'utf8');
 const TOKEN = '([A-Za-z0-9_-]{32})';
@@ -26,7 +27,7 @@ function cookieOf(req: IncomingMessage, id: string): string | undefined {
 export interface TabServer { port: number; close(): Promise<void> }
 
 export function startTabServer(tab: TabHandoffs, host: string, port: number, log: (msg: string, data?: unknown) => void): Promise<TabServer> {
-  const server = createServer((req, res) => {
+  const server = createServer(guarded((req, res) => {
     const m = new RegExp(`^/h/${TOKEN}$`).exec((req.url ?? '').split('?')[0]!);
     if (req.method !== 'GET' || !m) { res.writeHead(404).end('not found'); return; }
     const headers: Record<string, string> = {
@@ -46,11 +47,12 @@ export function startTabServer(tab: TabHandoffs, host: string, port: number, log
       res.writeHead(403, headers).end(page('used')); return;
     }
     res.writeHead(200, headers).end(page('live'));
-  });
+  }, log));
 
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
-  server.on('upgrade', (req, sock, head) => {
-    const url = new URL(req.url ?? '/', 'http://x');
+  server.on('upgrade', guardedUpgrade((req, sock, head) => {
+    const url = requestUrl(req);
+    if (!url) return rejectUpgrade(sock, 400, 'Bad Request');
     const m = new RegExp(`^/ws/${TOKEN}$`).exec(url.pathname);
     const found = m ? tab.byToken(m[1]!) : null;
     const row = found && !found.gone ? found.row : undefined;
@@ -76,7 +78,7 @@ export function startTabServer(tab: TabHandoffs, host: string, port: number, log
         ws.close();
       }
     });
-  });
+  }, log));
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);

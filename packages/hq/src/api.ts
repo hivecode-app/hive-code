@@ -17,6 +17,7 @@ import { readRaw, UploadError } from './uploads.ts';
 import { OWNER } from '@company/shared';
 import { HomeError } from './home.ts';
 import { assetLinks, pairPage } from './pairing.ts';
+import { guarded, guardedUpgrade, rejectUpgrade, requestUrl } from './http-guard.ts';
 
 export function loadOrCreateToken(stateDir: string): string {
   if (process.env.HQ_TOKEN) return process.env.HQ_TOKEN;
@@ -431,8 +432,9 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
     return false;
   };
 
-  const server = createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', 'http://hq');
+  const server = createServer(guarded(async (req, res) => {
+    const url = requestUrl(req);
+    if (!url) return json(res, 400, { error: 'bad request path' });
     try {
       if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/healthz')) {
         const h = health(hq);
@@ -486,10 +488,13 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
       if (await dispatch(routes, req, res, url, c)) return;
       return json(res, 404, { error: 'not found' });
     } catch (e) {
-      const status = e instanceof HttpError || e instanceof AuthError || e instanceof UploadError ? e.status : /required|invalid|must be/.test((e as Error).message) ? 400 : 500;
+      const status = e instanceof HttpError || e instanceof AuthError || e instanceof UploadError ? e.status
+        : e instanceof URIError || /required|invalid|must be/.test((e as Error).message) ? 400 : 500;
+      if (status === 500) console.error(`api: ${req.method} ${req.url} failed: ${(e as Error)?.stack ?? e}`);
+      if (res.headersSent) return void res.destroy();
       return json(res, status, { error: (e as Error).message });
     }
-  });
+  }));
 
   // WS /ws?after=<seq>&identity=<id>: replays events after seq, then streams live (B.8 "resume from the last seq").
   const wss = new WebSocketServer({ noServer: true });
@@ -498,24 +503,26 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
   const offRevoke = hq.auth.onRevoke((ids) => {
     for (const id of ids) for (const ws of deviceSockets.get(id) ?? []) ws.close(4401, 'device revoked');
   });
-  server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url ?? '/', 'http://hq');
+  server.on('upgrade', guardedUpgrade((req, socket, head) => {
+    const url = requestUrl(req);
+    if (!url) return rejectUpgrade(socket, 400, 'Bad Request');
     const protoToken = String(req.headers['sec-websocket-protocol'] ?? '').split(',').map((s) => s.trim()).find((p) => p.startsWith('token.'))?.slice(6);
     const c = url.pathname === '/ws' ? (caller(req, url, true) ?? who(protoToken)) : null;
-    if (!c) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-      socket.destroy();
-      return;
-    }
+    if (!c) return rejectUpgrade(socket, 401, 'Unauthorized');
     wss.handleUpgrade(req, socket, head, (ws) => {
-      if (c.kind === 'device') {
-        const set = deviceSockets.get(c.id) ?? new Set<WebSocket>();
-        deviceSockets.set(c.id, set.add(ws));
-        ws.on('close', () => { set.delete(ws); if (!set.size) deviceSockets.delete(c.id); });
+      try {
+        if (c.kind === 'device') {
+          const set = deviceSockets.get(c.id) ?? new Set<WebSocket>();
+          deviceSockets.set(c.id, set.add(ws));
+          ws.on('close', () => { set.delete(ws); if (!set.size) deviceSockets.delete(c.id); });
+        }
+        streamEvents(hq, ws, url);
+      } catch (e) {
+        console.error(`api: ws ${req.url} failed: ${(e as Error)?.stack ?? e}`);
+        ws.close(1011, 'internal error');
       }
-      streamEvents(hq, ws, url);
     });
-  });
+  }));
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
