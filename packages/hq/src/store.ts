@@ -330,6 +330,18 @@ const MIGRATIONS: string[] = [
   `,
   // v7: where the run's CLI ran. Claude Code keeps sessions per cwd: a new cwd means a new shift, not a resume.
   `ALTER TABLE shifts ADD COLUMN cwd TEXT;`,
+  // v8: images the owner attaches in the app (uploads.ts). A message lists them by id, with what the app shows.
+  `
+  CREATE TABLE uploads (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    path TEXT NOT NULL,                      -- <state>/uploads/<id>.<ext>: what the worker opens with Read
+    created_at INTEGER NOT NULL
+  );
+  ALTER TABLE messages ADD COLUMN attachments TEXT;                   -- JSON [{id,name,mime,bytes}], NULL = none
+  `,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [

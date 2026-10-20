@@ -29,10 +29,10 @@ class Recording extends FakeBackend {
   }
 
   @override
-  Future<CommandResult> freeAnswer(String askId, String text) async {
+  Future<CommandResult> freeAnswer(String askId, String text, {List<Attachment> attachments = const []}) async {
     answers.add((askId, text));
     if (!answerResult.ok) return answerResult;
-    return super.freeAnswer(askId, text);
+    return super.freeAnswer(askId, text, attachments: attachments);
   }
 
   @override

@@ -106,13 +106,17 @@ abstract class Backend extends ChangeNotifier {
   Future<void> start();
 
   Future<CommandResult> answerAsk(String askId, AskOption option, {String? from});
-  Future<CommandResult> freeAnswer(String askId, String text);
+  /// Free text (and images, [UserMsg.attachments] style) as the answer to a question.
+  Future<CommandResult> freeAnswer(String askId, String text, {List<Attachment> attachments = const []});
   Future<CommandResult> go(WaitItem item);
   Future<CommandResult> notNow(WaitItem item);
   Future<CommandResult> retry(WaitItem item);
 
   /// Sends a message; the backend updates [UserMsg.delivery] as acks come in.
   Future<CommandResult> send(String identityId, UserMsg msg);
+
+  /// The bytes of an attached image the server holds (`GET /api/uploads/:id`); null when it can't.
+  Future<Uint8List?> attachmentData(String id) async => null;
   Future<CommandResult> retract(String identityId, String msgId);
   Future<CommandResult> stop(String identityId);
   Future<CommandResult> setAutomation(String key, bool enabled);

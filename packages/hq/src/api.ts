@@ -10,6 +10,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import type { Hq } from './hq.ts';
 import { AuthError, type Caller } from './auth.ts';
 import { proxyDictate } from './dictate.ts';
+import { readRaw, UploadError } from './uploads.ts';
 import { OWNER } from '@company/shared';
 
 export function loadOrCreateToken(stateDir: string): string {
@@ -73,6 +74,13 @@ const deviceName = (v: unknown): string => {
   const s = typeof v === 'string' ? v.trim().slice(0, 80) : '';
   return s || 'מכשיר';
 };
+const strings = (v: unknown, name: string): string[] | undefined => {
+  if (v == null) return undefined;
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) throw new HttpError(400, `${name} must be an array of strings`);
+  return v as string[];
+};
+/** Text may be left out only when images come instead (an empty list is not images). */
+const hasFiles = (b: Record<string, unknown>): boolean => Array.isArray(b.attachments) && b.attachments.length > 0;
 const URGENCIES = ['urgent', 'normal', 'low'] as const;
 const PRIORITIES = ['now', 'next', 'later'] as const;
 
@@ -127,8 +135,9 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   route('POST', '/api/messages/tell', async ({ body }) => {
     const b = await body();
     return { message: hq.mailbox.tell({
-      msg_id: str(b.msg_id, 'msg_id', false), from: str(b.from, 'from', false), to: str(b.to, 'to')!, body: str(b.body, 'body')!,
+      msg_id: str(b.msg_id, 'msg_id', false), from: str(b.from, 'from', false), to: str(b.to, 'to')!, body: str(b.body, 'body', !hasFiles(b)) ?? '',
       urgency: oneOf(b.urgency, URGENCIES, 'urgency'), priority: oneOf(b.priority, PRIORITIES, 'priority'), ref: str(b.ref, 'ref', false),
+      attachments: strings(b.attachments, 'attachments'),
     }) };
   });
   route('POST', '/api/messages/:id/handled', ({ params }) => ({ ok: hq.mailbox.markHandled(decodeURIComponent(params[0]!)) }));
@@ -146,8 +155,9 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     const b = await body();
     const by = oneOf(b.by, ['owner', 'manager'] as const, 'by') ?? 'owner';
     try {
-      return { ask: hq.mailbox.answer(decodeURIComponent(params[0]!), str(b.answer, 'answer')!, by, str(b.why, 'why', false)) };
-    } catch (e) { throw new HttpError(/no ask/.test((e as Error).message) ? 404 : 409, (e as Error).message); }
+      return { ask: hq.mailbox.answer(decodeURIComponent(params[0]!), str(b.answer, 'answer', !hasFiles(b)) ?? '', by, str(b.why, 'why', false),
+        strings(b.attachments, 'attachments')) };
+    } catch (e) { throw new HttpError(/no ask/.test((e as Error).message) ? 404 : /must be/.test((e as Error).message) ? 400 : 409, (e as Error).message); }
   });
 
   route('GET', '/api/shifts', () => ({ shifts: hq.shifts.active() }));
@@ -320,11 +330,27 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
       const c = caller(req, url);
       if (!c) return json(res, 401, { error: 'unauthorized' });
       if (req.method === 'POST' && url.pathname === '/api/dictate/transcribe') return await proxyDictate(hq.cfg.dictate, req, res);
+      // Attached images (uploads.ts): raw bytes in, raw bytes out, so these two skip the JSON routes.
+      if (req.method === 'POST' && url.pathname === '/api/uploads') {
+        const name = req.headers['x-file-name'];
+        let file: string | undefined;
+        try { file = typeof name === 'string' ? decodeURIComponent(name) : undefined; } catch { throw new HttpError(400, 'x-file-name must be URI-encoded'); }
+        return json(res, 200, { upload: hq.uploads.save(await readRaw(req), file) });
+      }
+      const up = req.method === 'GET' ? /^\/api\/uploads\/([^/]+)$/.exec(url.pathname) : null;
+      if (up) {
+        const f = hq.uploads.read(decodeURIComponent(up[1]!));
+        if (!f) return json(res, 404, { error: 'no such upload' });
+        // An upload never changes: the app may keep it as long as it likes, but only on this device.
+        res.writeHead(200, { 'content-type': f.upload.mime, 'content-length': f.data.length, 'cache-control': 'private, max-age=31536000, immutable',
+          'x-content-type-options': 'nosniff' });
+        return res.end(f.data);
+      }
       if (await hq.ingest.handle(req, res, () => readBody(req))) return;
       if (await dispatch(routes, req, res, url, c)) return;
       return json(res, 404, { error: 'not found' });
     } catch (e) {
-      const status = e instanceof HttpError || e instanceof AuthError ? e.status : /required|invalid|must be/.test((e as Error).message) ? 400 : 500;
+      const status = e instanceof HttpError || e instanceof AuthError || e instanceof UploadError ? e.status : /required|invalid|must be/.test((e as Error).message) ? 400 : 500;
       return json(res, status, { error: (e as Error).message });
     }
   });

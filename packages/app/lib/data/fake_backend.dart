@@ -94,7 +94,7 @@ class FakeBackend extends Backend {
   }
 
   @override
-  Future<CommandResult> freeAnswer(String askId, String text) async {
+  Future<CommandResult> freeAnswer(String askId, String text, {List<Attachment> attachments = const []}) async {
     _answered(askId, text);
     notifyListeners();
     return const CommandResult.ok();

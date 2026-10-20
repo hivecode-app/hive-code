@@ -408,7 +408,7 @@ class _ChatScreenState extends State<ChatScreen> {
           },
           onRetry: () {
             chat.items.remove(it);
-            store.send(widget.identityId, it.text, it.priority, quote: it.replyTo);
+            store.send(widget.identityId, it.text, it.priority, quote: it.replyTo, attachments: it.attachments);
           },
         ),
       TextMsg() => TextBubble(msg: it),

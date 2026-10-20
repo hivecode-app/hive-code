@@ -1,14 +1,19 @@
 // Composer (chat.md §3), WhatsApp layout: rounded field with attach + camera inside, one round
-// button beside it: mic when empty, send when there is text. Tap on send while the worker is busy
-// = "after the current step"; long press opens "when to deliver?". Stop is NOT here (top bar).
+// button beside it: mic when empty, send when there is text or an image. Tap on send while the
+// worker is busy = "after the current step"; long press opens "when to deliver?". Stop is NOT here
+// (top bar). Images (attach, camera, paste) wait above the field as a removable preview, and go
+// with the next message.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../data/dictation.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
+import '../../native/native_bridge.dart';
+import '../../native/paste.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import 'items.dart';
@@ -43,14 +48,18 @@ class _ComposerState extends State<Composer> {
   /// A short dictation; past this the recording stops by itself and goes to transcription.
   static const maxRecSeconds = 120;
 
+  void Function()? _stopPaste;
+
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_changed);
+    _stopPaste = listenPastedImages((bytes, mime, name) => _addImage(bytes, name, mime: mime));
   }
 
   @override
   void dispose() {
+    _stopPaste?.call();
     widget.controller.removeListener(_changed);
     _rec?.cancel();
     if (recording) Dictation.instance.recorder.cancel();
@@ -65,10 +74,14 @@ class _ComposerState extends State<Composer> {
   Future<void> _send(Priority p) async {
     final text = widget.controller.text.trim();
     _closeMenu();
-    if (text.isEmpty) return;
     final store = StoreScope.read(context);
+    final images = [...store.images(widget.identityId)];
+    if (text.isEmpty && images.isEmpty) return;
     widget.controller.clear();
-    await store.send(widget.identityId, text, p, quote: widget.quote);
+    for (final a in images) {
+      store.removeImage(widget.identityId, a);
+    }
+    await store.send(widget.identityId, text, p, quote: widget.quote, attachments: images);
     widget.onClearQuote?.call();
     widget.onSent?.call();
   }
@@ -156,6 +169,35 @@ class _ComposerState extends State<Composer> {
     widget.focus.requestFocus();
   }
 
+  /// An image from any source: checked here, so a wrong file says so at once and not after send.
+  void _addImage(Uint8List bytes, String name, {String? mime}) {
+    if (!mounted) return;
+    final kind = imageMime(bytes);
+    if (kind == null) return _fail('אפשר לצרף תמונות מסוג PNG, ‏JPEG, ‏GIF או WebP.');
+    if (bytes.length > maxImageBytes) return _fail('התמונה גדולה מדי (עד 25MB).');
+    StoreScope.read(context).addImage(widget.identityId, Attachment(name: name.isEmpty ? 'image' : name, bytes: bytes.length, mime: kind, data: bytes));
+    widget.focus.requestFocus();
+  }
+
+  /// Phone photos are big; past this size they say nothing more to a worker and only slow the upload.
+  static const _maxSide = 2048.0;
+
+  Future<void> _pick(ImageSource source) async {
+    final picker = ImagePicker();
+    try {
+      final files = source == ImageSource.gallery
+          ? await picker.pickMultiImage(maxWidth: _maxSide, maxHeight: _maxSide, imageQuality: 85, limit: AppStore.maxImages)
+          : [?await picker.pickImage(source: source, maxWidth: _maxSide, maxHeight: _maxSide, imageQuality: 85)];
+      for (final f in files) {
+        _addImage(await f.readAsBytes(), f.name);
+      }
+    } on PlatformException catch (e) {
+      if (mounted) _fail(e.code.contains('camera') ? 'אין גישה למצלמה. אפשר לאשר אותה בהגדרות המכשיר.' : 'לא הצלחתי לפתוח את התמונות. אפשר לנסות שוב.');
+    } catch (_) {
+      if (mounted) _fail('לא הצלחתי לפתוח את התמונות. אפשר לנסות שוב.');
+    }
+  }
+
   void _attach() {
     final p = context.p;
     showModalBottomSheet(
@@ -164,21 +206,37 @@ class _ComposerState extends State<Composer> {
       showDragHandle: true,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          for (final (icon, label) in [('photo_camera', 'מצלמה'), ('image', 'גלריה'), ('draft', 'קובץ'), ('image', 'צילום מסך אחרון')])
+          for (final (icon, label, source) in [('photo_camera', 'מצלמה', ImageSource.camera), ('image', 'גלריה', ImageSource.gallery)])
             ListTile(
               leading: Ic(icon, color: p.text2),
               title: Text(label, style: T.body.copyWith(color: p.text)),
               onTap: () {
                 Navigator.pop(ctx);
-                final s = StoreScope.read(context);
-                s.error = 'צירוף קבצים יעבוד כשהשרת יקבל העלאות. בינתיים אפשר לשלוח טקסט.';
-                s.touch();
+                _pick(source);
               },
             ),
         ]),
       ),
     );
   }
+
+  /// Android keyboards (Gboard's clipboard chip, a copied screenshot) hand images over this way.
+  void _inserted(KeyboardInsertedContent c) {
+    final data = c.data;
+    if (data == null || data.isEmpty) return _fail('המקלדת לא העבירה את התמונה. אפשר לצרף אותה מהגלריה.');
+    _addImage(data, c.uri.split('/').last, mime: c.mimeType);
+  }
+
+  /// Android's "הדבקה" knows only text: with an image on the clipboard, the menu gets one that takes it.
+  Widget _menu(BuildContext context, EditableTextState state) => _PasteImageMenu(
+        state: state,
+        onPaste: () async {
+          state.hideToolbar();
+          final img = await NativeBridge.instance.clipboardImage();
+          if (img == null) return _fail('לא הצלחתי לקרוא את התמונה מהלוח.');
+          _addImage(img.bytes, img.name, mime: img.mime);
+        },
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -187,7 +245,8 @@ class _ComposerState extends State<Composer> {
     final d = store.data!;
     final who = d.who(widget.identityId);
     final busy = d.chats[widget.identityId]?.live.busy ?? false;
-    final hasText = widget.controller.text.trim().isNotEmpty;
+    final images = store.images(widget.identityId);
+    final hasText = widget.controller.text.trim().isNotEmpty || images.isNotEmpty;
     final f = who.gender == Gender.f;
 
     final field = Container(
@@ -236,6 +295,8 @@ class _ComposerState extends State<Composer> {
                     textDirection: firstStrongDirection(widget.controller.text),
                     style: T.body.copyWith(color: p.text, height: 1.45),
                     cursorColor: p.accent,
+                    contentInsertionConfiguration: ContentInsertionConfiguration(onContentInserted: _inserted, allowedMimeTypes: kImageMimes),
+                    contextMenuBuilder: NativeBridge.instance.supported ? _menu : _defaultMenu,
                     decoration: InputDecoration(
                       isCollapsed: true,
                       border: InputBorder.none,
@@ -247,7 +308,7 @@ class _ComposerState extends State<Composer> {
                 ),
               ),
               _FieldBtn(icon: 'attach_file', tip: 'צירוף', onTap: _attach),
-              if (MediaQuery.sizeOf(context).width < 800) _FieldBtn(icon: 'photo_camera', tip: 'מצלמה', onTap: _attach),
+              if (MediaQuery.sizeOf(context).width < 800) _FieldBtn(icon: 'photo_camera', tip: 'מצלמה', onTap: () => _pick(ImageSource.camera)),
             ]),
     );
 
@@ -281,6 +342,11 @@ class _ComposerState extends State<Composer> {
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
       child: Stack(clipBehavior: Clip.none, children: [
         Column(mainAxisSize: MainAxisSize.min, children: [
+          if (images.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: _ImagePreview(images: images, onRemove: (a) => store.removeImage(widget.identityId, a)),
+            ),
           if (widget.quote != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
@@ -320,6 +386,88 @@ class _ComposerState extends State<Composer> {
           ]),
         ]),
       ]),
+    );
+  }
+}
+
+Widget _defaultMenu(BuildContext context, EditableTextState state) => AdaptiveTextSelectionToolbar.editableText(editableTextState: state);
+
+/// The standard menu, plus "הדבקה" for an image when the clipboard has one (Android only).
+class _PasteImageMenu extends StatefulWidget {
+  const _PasteImageMenu({required this.state, required this.onPaste});
+  final EditableTextState state;
+  final VoidCallback onPaste;
+  @override
+  State<_PasteImageMenu> createState() => _PasteImageMenuState();
+}
+
+class _PasteImageMenuState extends State<_PasteImageMenu> {
+  bool image = false;
+
+  @override
+  void initState() {
+    super.initState();
+    NativeBridge.instance.clipboardHasImage().then((v) {
+      if (mounted && v) setState(() => image = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => AdaptiveTextSelectionToolbar.buttonItems(
+        anchors: widget.state.contextMenuAnchors,
+        buttonItems: [
+          ...widget.state.contextMenuButtonItems,
+          if (image) ContextMenuButtonItem(label: 'הדבקת תמונה', onPressed: widget.onPaste),
+        ],
+      );
+}
+
+/// What waits to go with the next message: a thumbnail each, with an × to take it out (WhatsApp).
+class _ImagePreview extends StatelessWidget {
+  const _ImagePreview({required this.images, required this.onRemove});
+  final List<Attachment> images;
+  final void Function(Attachment) onRemove;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Container(
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(12), boxShadow: p.hairShadow),
+      padding: const EdgeInsets.all(6),
+      height: 88,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: images.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 6),
+        itemBuilder: (context, i) {
+          final a = images[i];
+          return Semantics(
+            label: 'תמונה מצורפת ${i + 1}',
+            child: Stack(children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.memory(a.data!, width: 76, height: 76, fit: BoxFit.cover, gaplessPlayback: true),
+              ),
+              PositionedDirectional(
+                top: 2,
+                end: 2,
+                child: Tooltip(
+                  message: 'הסרה',
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: () => onRemove(a),
+                    child: Container(
+                      width: 26,
+                      height: 26,
+                      decoration: const BoxDecoration(color: Color(0x99000000), shape: BoxShape.circle),
+                      child: const Center(child: Ic('close', size: 16, color: Colors.white, semantic: 'הסרת התמונה')),
+                    ),
+                  ),
+                ),
+              ),
+            ]),
+          );
+        },
+      ),
     );
   }
 }

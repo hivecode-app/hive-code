@@ -602,7 +602,9 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const handoffRow = this.store.db.prepare(`SELECT args FROM ops WHERE identity = ? AND op = 'handoff' ORDER BY received_at DESC LIMIT 1`)
       .get(identity) as { args: string } | undefined;
-    const pending = this.store.db.prepare(`SELECT id, from_identity, body FROM messages WHERE to_identity = ?
+    // An image sent alone has no text: the summary still says something is there.
+    const pending = this.store.db.prepare(`SELECT id, from_identity,
+      CASE WHEN body = '' AND attachments IS NOT NULL THEN '(תמונה מצורפת)' ELSE body END AS body FROM messages WHERE to_identity = ?
       AND state IN ('queued','delivered','seen') ORDER BY created_at LIMIT 20`).all(identity) as { id: string; from_identity: string; body: string }[];
     const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
     const handoffArgs = handoffRow ? (JSON.parse(handoffRow.args) as Record<string, unknown>) : null;

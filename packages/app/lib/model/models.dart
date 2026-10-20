@@ -1,5 +1,6 @@
 // Domain model of the app. Shapes follow docs/app/chat.md §8 (ChatItem) and the hq DTOs
 // in packages/shared (InboxItemDTO, AskDTO, BoardEntry). Rendering never reads hq JSON directly.
+import 'dart:typed_data';
 
 enum Gender { f, m }
 
@@ -228,7 +229,9 @@ class UserMsg extends ChatItem {
   Delivery delivery;
   Priority priority;
   final Quote? replyTo;
-  final List<Attachment> attachments;
+
+  /// Images sent with the message. Replaced by the uploaded ones (with hq ids) once they are up.
+  List<Attachment> attachments;
 }
 
 class Quote {
@@ -242,10 +245,36 @@ class Quote {
 }
 
 class Attachment {
-  const Attachment({required this.name, required this.bytes, required this.mime});
+  const Attachment({required this.name, required this.bytes, required this.mime, this.id, this.data});
   final String name;
   final int bytes;
   final String mime;
+
+  /// hq's upload id (`GET /api/uploads/:id`); null until the image is uploaded.
+  final String? id;
+
+  /// The bytes on this device: the preview before sending, and the bubble without a round trip.
+  final Uint8List? data;
+
+  bool get isImage => mime.startsWith('image/');
+
+  Attachment uploaded(String id) => Attachment(name: name, bytes: bytes, mime: mime, id: id, data: data);
+}
+
+/// The formats hq takes (packages/hq/src/uploads.ts), and what a keyboard may hand over.
+const kImageMimes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+
+/// hq's limit (uploads.ts UPLOAD_MAX_BYTES).
+const maxImageBytes = 25 * 1024 * 1024;
+
+/// The image type by its first bytes, the way hq decides; null when it is not one hq takes.
+String? imageMime(Uint8List b) {
+  bool at(int i, List<int> sig) => b.length >= i + sig.length && Iterable<int>.generate(sig.length).every((k) => b[i + k] == sig[k]);
+  if (at(0, const [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png';
+  if (at(0, const [0xff, 0xd8, 0xff])) return 'image/jpeg';
+  if (at(0, 'GIF87a'.codeUnits) || at(0, 'GIF89a'.codeUnits)) return 'image/gif';
+  if (at(0, 'RIFF'.codeUnits) && at(8, 'WEBP'.codeUnits)) return 'image/webp';
+  return null;
 }
 
 class TextMsg extends ChatItem {

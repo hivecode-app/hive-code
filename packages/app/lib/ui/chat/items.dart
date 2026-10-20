@@ -104,15 +104,21 @@ class UserBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final multi = parseMarkdown(msg.text).length > 1;
+    final images = msg.attachments.where((a) => a.isImage).toList();
     final body = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
       if (msg.replyTo != null) QuoteStrip(quote: msg.replyTo!),
-      Markdown(msg.text, trailerWidth: multi ? 0 : Meta.widthFor(msg.delivery)),
-      if (multi) const SizedBox(height: 14),
+      if (images.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: BubbleImages(images: images, uploading: msg.delivery == Delivery.queued && images.any((a) => a.id == null)),
+        ),
+      if (msg.text.isNotEmpty) Markdown(msg.text, trailerWidth: multi ? 0 : Meta.widthFor(msg.delivery)),
+      if (multi || msg.text.isEmpty) const SizedBox(height: 14),
     ]);
     final bubble = Bubble(
       out: true,
       queued: msg.delivery == Delivery.queued,
-      child: _WithMeta(meta: Meta(time: hm(msg.ts), delivery: msg.delivery), end: markdownEndDirection(msg.text), child: body),
+      child: _WithMeta(meta: Meta(time: hm(msg.ts), delivery: msg.delivery), end: markdownEndDirection(msg.text), child: images.isEmpty ? body : IntrinsicWidth(child: body)), // as wide as the image (or the text), WhatsApp
     );
     final under = switch (msg.delivery) {
       Delivery.queued => _QLine(
@@ -126,6 +132,125 @@ class UserBubble extends StatelessWidget {
     if (under == null) return bubble;
     return Column(crossAxisAlignment: CrossAxisAlignment.end, children: [bubble, under]);
   }
+}
+
+/// The images of a message, WhatsApp style: one fills the bubble, more make a grid of squares.
+/// A tap opens one full screen.
+class BubbleImages extends StatelessWidget {
+  const BubbleImages({super.key, required this.images, this.uploading = false});
+  final List<Attachment> images;
+
+  /// Still going up to hq: a spinner over each image until the message is sent.
+  final bool uploading;
+  @override
+  Widget build(BuildContext context) {
+    Widget one(Attachment a, {double? side}) => uploading ? _uploading(a, side) : _open(context, a, side);
+    if (images.length == 1) {
+      // widthFactor 1: the bubble is as wide as the image, not the whole row.
+      return Align(alignment: AlignmentDirectional.centerStart, widthFactor: 1, child: one(images.single));
+    }
+    return Wrap(spacing: 4, runSpacing: 4, children: [for (final a in images) one(a, side: 128)]);
+  }
+
+  Widget _image(Attachment a, double? side) => ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: side == null
+            ? ConstrainedBox(constraints: const BoxConstraints(maxWidth: 260, maxHeight: 320), child: AttachmentImage(attachment: a, fit: BoxFit.contain))
+            : SizedBox(width: side, height: side, child: AttachmentImage(attachment: a, fit: BoxFit.cover)),
+      );
+
+  Widget _uploading(Attachment a, double? side) => Stack(alignment: Alignment.center, children: [
+        _image(a, side),
+        Container(
+          width: 44,
+          height: 44,
+          decoration: const BoxDecoration(color: Color(0x80000000), shape: BoxShape.circle),
+          padding: const EdgeInsets.all(10),
+          child: Semantics(label: 'מעלה את התמונה', child: const CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)),
+        ),
+      ]);
+
+  Widget _open(BuildContext context, Attachment a, double? side) => GestureDetector(
+          onTap: () => Navigator.of(context).push(PageRouteBuilder(
+            opaque: false,
+            pageBuilder: (_, _, _) => ImageViewer(attachment: a),
+            transitionsBuilder: (_, anim, _, child) => FadeTransition(opacity: anim, child: child),
+          )),
+          child: _image(a, side),
+        );
+}
+
+/// An attached image: from this device's bytes when it has them, otherwise from hq (and kept).
+class AttachmentImage extends StatefulWidget {
+  const AttachmentImage({super.key, required this.attachment, this.fit = BoxFit.cover});
+  final Attachment attachment;
+  final BoxFit fit;
+  @override
+  State<AttachmentImage> createState() => _AttachmentImageState();
+}
+
+class _AttachmentImageState extends State<AttachmentImage> {
+  Future<Uint8List?>? _load;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final a = widget.attachment;
+    _load ??= a.data != null ? Future.value(a.data) : (a.id == null ? Future.value(null) : StoreScope.read(context).backend.attachmentData(a.id!));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return FutureBuilder<Uint8List?>(
+      future: _load,
+      builder: (context, snap) {
+        final data = snap.data;
+        if (data != null) {
+          return Semantics(image: true, label: 'תמונה', child: Image.memory(data, fit: widget.fit, gaplessPlayback: true));
+        }
+        return Container(
+          width: 200,
+          height: 150,
+          color: p.surface2,
+          child: Center(
+            child: snap.connectionState == ConnectionState.done
+                ? Ic('image', size: 32, color: p.text3, semantic: 'התמונה לא נטענה')
+                : SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: p.text3)),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// One image full screen, zoomable; a tap on the dark around it or the × closes it.
+class ImageViewer extends StatelessWidget {
+  const ImageViewer({super.key, required this.attachment});
+  final Attachment attachment;
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: const Color(0xF0000000),
+        body: SafeArea(
+          child: Stack(children: [
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: InteractiveViewer(maxScale: 5, child: Center(child: AttachmentImage(attachment: attachment, fit: BoxFit.contain))),
+              ),
+            ),
+            PositionedDirectional(
+              top: 4,
+              start: 4,
+              child: IconButton(
+                tooltip: 'סגירה',
+                onPressed: () => Navigator.pop(context),
+                icon: const Ic('close', color: Colors.white),
+              ),
+            ),
+          ]),
+        ),
+      );
 }
 
 class _QLine extends StatelessWidget {

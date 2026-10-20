@@ -175,7 +175,30 @@ class AppStore extends ChangeNotifier {
 
   int _n = 0;
 
-  Future<UserMsg> send(String identityId, String text, Priority priority, {Quote? quote}) async {
+  // ── images waiting in the composer (WhatsApp: a preview, removable, sent with the next message) ──
+
+  /// At most this many per message, like hq (mailbox.ts).
+  static const maxImages = 10;
+
+  final Map<String, List<Attachment>> _images = {};
+  List<Attachment> images(String identityId) => _images[identityId] ?? const [];
+
+  void addImage(String identityId, Attachment a) {
+    final list = _images.putIfAbsent(identityId, () => []);
+    if (list.length >= maxImages) {
+      error = 'אפשר לצרף עד $maxImages תמונות להודעה אחת.';
+    } else {
+      list.add(a);
+    }
+    notifyListeners();
+  }
+
+  void removeImage(String identityId, Attachment a) {
+    _images[identityId]?.remove(a);
+    notifyListeners();
+  }
+
+  Future<UserMsg> send(String identityId, String text, Priority priority, {Quote? quote, List<Attachment> attachments = const []}) async {
     final msg = UserMsg(
       id: 'm-${DateTime.now().millisecondsSinceEpoch}-${_n++}',
       ts: DateTime.now(),
@@ -183,9 +206,18 @@ class AppStore extends ChangeNotifier {
       priority: priority,
       replyTo: quote,
       delivery: Delivery.queued,
+      attachments: [...attachments],
     );
     setDraft(identityId, '');
     if (quote?.askId != null) return _answer(identityId, msg, quote!.askId!);
+    if (!_online && attachments.isNotEmpty) {
+      // The outbox keeps text only: an image waits on screen as "לא נמסר", with "ניסיון נוסף".
+      msg.delivery = Delivery.failed;
+      data?.chats[identityId]?.items.add(msg);
+      error = 'אין חיבור לשרת, ולכן התמונה לא נשלחה. אפשר לנסות שוב כשהחיבור יחזור.';
+      notifyListeners();
+      return msg;
+    }
     if (!_online) {
       // Durable outbox: shown with a clock and "ממתינה לחיבור" until the link is back.
       msg.delivery = Delivery.pendingConnection;
@@ -209,18 +241,19 @@ class AppStore extends ChangeNotifier {
     final chat = data?.chats[identityId];
     chat?.items.add(msg);
     notifyListeners();
-    final r = await backend.freeAnswer(askId, msg.text);
+    final r = await backend.freeAnswer(askId, msg.text, attachments: msg.attachments);
     if (r.ok) {
       msg.delivery = Delivery.delivered;
+      final said = msg.text.isEmpty && msg.attachments.isNotEmpty ? 'תמונה' : msg.text;
       for (final c in chat?.items.whereType<AskCard>() ?? const <AskCard>[]) {
         if (c.askId == askId) {
           c.state = AskState.answered;
-          c.answer = msg.text;
+          c.answer = said;
         }
       }
       for (final w in data?.waiting.where((w) => w.askId == askId) ?? const <WaitItem>[]) {
         w.state = WaitState.answered;
-        w.answerLine = 'ענית: ${msg.text}';
+        w.answerLine = 'ענית: $said';
       }
     } else {
       msg.delivery = Delivery.failed;

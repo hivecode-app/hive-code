@@ -9,6 +9,7 @@ import { syncOrg, getIdentity, listIdentities, listProjects, renameLegacyTaskWor
 import { Inbox } from './inbox.ts';
 import { ShiftManager, TemplateLauncher, type Launcher, type ConnectionFactory } from './shifts.ts';
 import { Mailbox, noForeignInjector, type ForeignInjector } from './mailbox.ts';
+import { Uploads } from './uploads.ts';
 import { Scheduler } from './scheduler.ts';
 import { Night, type IssueSource } from './night.ts';
 import { Watchdog } from './watchdog.ts';
@@ -62,6 +63,7 @@ export class Hq {
   readonly inbox: Inbox;
   readonly shifts: ShiftManager;
   readonly mailbox: Mailbox;
+  readonly uploads: Uploads;
   readonly scheduler: Scheduler;
   readonly night: Night;
   readonly watchdog: Watchdog;
@@ -83,7 +85,8 @@ export class Hq {
     this.inbox = new Inbox(this.store);
     this.auth = new Auth(this.store, cfg.auth);
     this.shifts = new ShiftManager(this.store, cfg, deps.launcher ?? lazyTemplateLauncher(cfg), deps.connect);
-    this.mailbox = new Mailbox(this.store, cfg, this.shifts, this.inbox, deps.foreign ?? noForeignInjector);
+    this.uploads = new Uploads(this.store, cfg.stateDir);
+    this.mailbox = new Mailbox(this.store, cfg, this.shifts, this.inbox, deps.foreign ?? noForeignInjector, this.uploads);
     this.scheduler = new Scheduler(this.store, cfg, this.shifts, this.mailbox);
     this.night = new Night(this.store, cfg, this.scheduler, this.mailbox, this.inbox, deps.issues);
     this.accounts = new AccountManager(this.store, cfg, this.shifts, this.mailbox, this.inbox, deps.accounts);

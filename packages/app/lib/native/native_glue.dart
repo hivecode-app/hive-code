@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/backend_select.dart';
@@ -142,8 +143,21 @@ class NativeGlue {
       store.setDraft(to, draft);
     }
     if (s.imagePath != null) {
-      store.error = 'התמונה נשמרה במכשיר. שליחת תמונות תעבוד כשהשרת יקבל העלאות.';
-      store.touch();
+      // Into the composer's preview, like an attached one: he adds a line and sends, or removes it.
+      try {
+        final f = XFile(s.imagePath!);
+        final bytes = await f.readAsBytes();
+        final mime = imageMime(bytes);
+        if (mime == null) {
+          store.error = 'אפשר לשלוח תמונות מסוג PNG, ‏JPEG, ‏GIF או WebP.';
+          store.touch();
+        } else {
+          store.addImage(to, Attachment(name: f.name, bytes: bytes.length, mime: mime, data: bytes));
+        }
+      } catch (_) {
+        store.error = 'לא הצלחתי לקרוא את התמונה ששיתפת. אפשר לצרף אותה מהגלריה.';
+        store.touch();
+      }
     }
     ChatScreen.pendingQuote[to] = null;
     if (_ctx != null) Nav.chat(_ctx!, to, focus: true);

@@ -2,6 +2,7 @@
 // lane's branch (packages/hq/src/api.ts):
 //   GET  /api/org /api/board /api/inbox /api/asks /api/toggles /api/messages?identity= /api/events?identity=&after=
 //   POST /api/asks/:id/answer  /api/inbox/:id/{done,dismiss,ack}  /api/messages/tell  /api/shifts/:id/interrupt
+//   POST /api/uploads (raw image bytes) → {upload:{id,…}}  ·  GET /api/uploads/:id (the bytes)
 //   PUT  /api/toggles/:key
 //   WS   /ws?after=<seq>  (replay, then {type:'live'}, then live events; deltas have seq 0)
 // The app reaches hq through Caddy at <base>/hq (deploy/caddy/agent-company.caddy).
@@ -240,7 +241,7 @@ class HqBackend extends Backend {
       final i = d.conversations.indexWhere((c) => c.identityId == other);
       final c = ConversationSummary(
         identityId: other,
-        lastLine: (m['from_identity'] == 'owner' ? 'את/ה: ' : '') + (m['body'] as String).split('\n').first,
+        lastLine: (m['from_identity'] == 'owner' ? 'את/ה: ' : '') + lastLineOf(m),
         time: _hm(m['created_at'] as int),
         lastIsMine: m['from_identity'] != 'owner',
         unread: m['to_identity'] == 'owner' && m['state'] != 'handled' && openIdentity != other ? 1 : 0,
@@ -323,7 +324,7 @@ class HqBackend extends Backend {
       out.add({
         'from_identity': m['from_identity'],
         'to_identity': m['to_identity'],
-        'body': (m['body'] as String).split('\n').first,
+        'body': lastLineOf(m),
         'created_at': m['created_at'],
         'state': m['state'],
       });
@@ -494,6 +495,7 @@ class HqBackend extends Backend {
         text: m['body'] as String,
         delivery: mapDelivery(m['state'] as String?),
         priority: Priority.values.byName((m['priority'] as String?) ?? 'next'),
+        attachments: attachmentsOf(m),
       );
     }
     if (m['to_identity'] == 'owner') {
@@ -682,9 +684,17 @@ class HqBackend extends Backend {
       await _send('POST', '/api/asks/${Uri.encodeComponent(askId)}/answer', {'answer': option.label, 'by': 'owner'}).then(_after);
 
   @override
-  Future<CommandResult> freeAnswer(String askId, String text) async =>
-      await _stale(askId, null) ??
-      await _send('POST', '/api/asks/${Uri.encodeComponent(askId)}/answer', {'answer': text, 'by': 'owner'}).then(_after);
+  Future<CommandResult> freeAnswer(String askId, String text, {List<Attachment> attachments = const []}) async {
+    final stale = await _stale(askId, null);
+    if (stale != null) return stale;
+    final up = await _uploadAll(attachments);
+    if (up == null) return const CommandResult.fail(_uploadFailed);
+    return _send('POST', '/api/asks/${Uri.encodeComponent(askId)}/answer', {
+      'answer': text,
+      'by': 'owner',
+      if (up.isNotEmpty) 'attachments': [for (final a in up) a.id],
+    }).then(_after);
+  }
 
   @override
   Future<CommandResult> go(WaitItem item) async {
@@ -751,16 +761,75 @@ class HqBackend extends Backend {
     chat?.items.add(msg);
     msg.delivery = Delivery.queued;
     notifyListeners();
+    // Images go up first; the message carries their ids. One that fails fails the message, with
+    // "ניסיון נוסף" (what is already up is not uploaded again).
+    final up = await _uploadAll(msg.attachments);
+    if (up == null) {
+      msg.delivery = Delivery.failed;
+      notifyListeners();
+      return const CommandResult.fail(_uploadFailed);
+    }
+    msg.attachments = up;
     final r = await _send('POST', '/api/messages/tell', {
       'msg_id': msg.id,
       'from': 'owner',
       'to': identityId,
       'body': msg.replyTo == null ? msg.text : '> ${msg.replyTo!.text}\n\n${msg.text}',
       'priority': msg.priority.name,
+      if (up.isNotEmpty) 'attachments': [for (final a in up) a.id],
     });
     if (!r.ok) msg.delivery = Delivery.failed;
     notifyListeners();
     return r;
+  }
+
+  static const _uploadFailed = 'התמונה לא עלתה לשרת, ולכן ההודעה לא נשלחה. אפשר לנסות שוב.';
+
+  /// Every image that is not up yet goes up; the list with their ids, or null when one did not get there.
+  Future<List<Attachment>?> _uploadAll(List<Attachment> list) async {
+    final up = <Attachment>[];
+    for (final a in list) {
+      final id = a.id ?? await _upload(a);
+      if (id == null) return null;
+      up.add(a.id == null ? a.uploaded(id) : a);
+    }
+    return up;
+  }
+
+  /// One image to hq; its upload id, or null when it did not get there.
+  Future<String?> _upload(Attachment a) async {
+    final data = a.data;
+    if (data == null) return null;
+    try {
+      final r = await _http.post(Uri.parse('$baseUrl/api/uploads'),
+          headers: {'authorization': 'Bearer $token', 'content-type': a.mime, 'x-file-name': Uri.encodeComponent(a.name)}, body: data)
+          .timeout(const Duration(seconds: 90));
+      if (r.statusCode == 401) _refused();
+      if (r.statusCode != 200) return null;
+      final id = ((jsonDecode(utf8.decode(r.bodyBytes)) as Map)['upload'] as Map)['id'] as String;
+      _images[id] = data;
+      return id;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Images already on this device, by upload id: sent from here, or fetched once.
+  final _images = <String, Uint8List>{};
+
+  @override
+  Future<Uint8List?> attachmentData(String id) async {
+    final hit = _images[id];
+    if (hit != null) return hit;
+    try {
+      final r = await _http.get(Uri.parse('$baseUrl/api/uploads/${Uri.encodeComponent(id)}'), headers: {'authorization': 'Bearer $token'})
+          .timeout(const Duration(seconds: 30));
+      if (r.statusCode == 401) _refused();
+      if (r.statusCode != 200) return null;
+      return _images[id] = r.bodyBytes;
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
@@ -1076,6 +1145,20 @@ CompanyData mapSnapshot({
 
 /// Internal message ids mean nothing to the owner: "(מזהה agent-company-t5-2:mvfww7y1-010ec676ca)"
 /// and bare ids of that shape are dropped from the one-line view of messages between workers.
+/// The images a stored message carries (hq: `attachments`, [{id,name,mime,bytes}] or null).
+List<Attachment> attachmentsOf(Map<String, dynamic> m) => [
+      for (final a in ((m['attachments'] as List?) ?? const []).cast<Map<String, dynamic>>())
+        Attachment(id: a['id'] as String, name: (a['name'] as String?) ?? '', mime: (a['mime'] as String?) ?? 'image/png', bytes: (a['bytes'] as num?)?.toInt() ?? 0),
+    ];
+
+/// A conversation's last line: the first line of the text, or "תמונה" for an image sent alone.
+String lastLineOf(Map<String, dynamic> m) {
+  final first = (m['body'] as String).split('\n').first;
+  if (first.isNotEmpty) return first;
+  final n = ((m['attachments'] as List?) ?? const []).length;
+  return n > 1 ? '$n תמונות' : (n == 1 ? 'תמונה' : '');
+}
+
 String withoutIds(String s) => s
     .replaceAll(RegExp(r'\s*\((?:מזהה|id|ref)[: ]+[^)]*\)'), '')
     .replaceAll(RegExp(r'\b[\w.-]+-\d+:[a-z0-9]{6,}-[a-z0-9]{6,}\b'), '')

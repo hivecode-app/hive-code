@@ -10,6 +10,7 @@ import type { HqConfig } from './config.ts';
 import type { Inbox } from './inbox.ts';
 import type { ShiftManager, ShiftRow } from './shifts.ts';
 import { getIdentity } from './org.ts';
+import { toDTO, type AttachmentDTO, type Uploads } from './uploads.ts';
 
 export interface MessageRow {
   id: string; from_identity: string; to_identity: string; kind: MessageKind; body: string; urgency: Urgency;
@@ -18,7 +19,12 @@ export interface MessageRow {
   handled_at: number | null; failed_at: number | null;
   /** Engine messageId of the assistant text this message was made from (an owner reply, chat.md §2.3א). */
   text_ref: string | null;
+  /** Images the owner attached (uploads.ts). Stored as JSON; get() and list() return the array. */
+  attachments: AttachmentDTO[] | null;
 }
+
+type StoredRow = Omit<MessageRow, 'attachments'> & { attachments: string | null };
+const hydrate = (r: StoredRow): MessageRow => ({ ...r, attachments: r.attachments ? JSON.parse(r.attachments) as AttachmentDTO[] : null });
 
 /** Tools whose output the owner already sees as its own item: a turn that used one has no text reply (chat.md §2.3א). */
 const OWNER_FACING_TOOLS = new Set(['mcp__company__ask', 'mcp__company__request_go']);
@@ -43,8 +49,11 @@ export class Mailbox {
   private shifts: ShiftManager;
   private inbox: Inbox;
   private foreign: ForeignInjector;
-  constructor(store: Store, cfg: HqConfig, shifts: ShiftManager, inbox: Inbox, foreign: ForeignInjector = noForeignInjector) {
+  private uploads: Uploads | null;
+  constructor(store: Store, cfg: HqConfig, shifts: ShiftManager, inbox: Inbox, foreign: ForeignInjector = noForeignInjector,
+    uploads: Uploads | null = null) {
     this.store = store;
+    this.uploads = uploads;
     this.cfg = cfg;
     this.shifts = shifts;
     this.inbox = inbox;
@@ -69,19 +78,28 @@ export class Mailbox {
     return i ? i.name : id; // symbols are icon names (Material Symbols), not text
   }
 
-  /** The stdin envelope (B.4): the worker knows who it's from and replies with `ref`. */
-  envelope(m: Pick<MessageRow, 'id' | 'from_identity' | 'urgency' | 'body' | 'kind' | 'ref'>): string {
+  /**
+   * The stdin envelope (B.4): the worker knows who it's from and replies with `ref`. An attached image is
+   * a path on this machine: Read on it shows the worker the image itself.
+   */
+  envelope(m: Pick<MessageRow, 'id' | 'from_identity' | 'urgency' | 'body' | 'kind' | 'ref'> & { attachments?: AttachmentDTO[] | null }): string {
     const ref = m.ref ? ` · ref: ${m.ref}` : '';
-    return `[הודעה מ-${this.label(m.from_identity)} (${m.from_identity}) · דחיפות: ${URGENCY_HE[m.urgency]} · ${m.id}${ref}]\n${m.body}`;
+    const files = (m.attachments ?? []).map((a) => {
+      const path = this.uploads?.get(a.id)?.path ?? '(הקובץ לא נמצא בשרת)';
+      return `[תמונה מצורפת: ${path} · כדי לראות אותה, פותחים את הנתיב ב-Read]`;
+    });
+    const body = [m.body, ...files].filter(Boolean).join('\n');
+    return `[הודעה מ-${this.label(m.from_identity)} (${m.from_identity}) · דחיפות: ${URGENCY_HE[m.urgency]} · ${m.id}${ref}]\n${body}`;
   }
 
   get(id: string): MessageRow | undefined {
-    return this.store.db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as MessageRow | undefined;
+    const r = this.store.db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as StoredRow | undefined;
+    return r && hydrate(r);
   }
 
   list(identity: string, limit = 200, beforeTs?: number): MessageRow[] {
-    return this.store.db.prepare(`SELECT * FROM messages WHERE (to_identity = ? OR from_identity = ?) AND created_at < ?
-      ORDER BY created_at DESC, rowid DESC LIMIT ?`).all(identity, identity, beforeTs ?? Number.MAX_SAFE_INTEGER, limit) as MessageRow[];
+    return (this.store.db.prepare(`SELECT * FROM messages WHERE (to_identity = ? OR from_identity = ?) AND created_at < ?
+      ORDER BY created_at DESC, rowid DESC LIMIT ?`).all(identity, identity, beforeTs ?? Number.MAX_SAFE_INTEGER, limit) as StoredRow[]).map(hydrate);
   }
 
   private setState(id: string, state: MessageState, extra: Record<string, unknown> = {}): void {
@@ -93,11 +111,12 @@ export class Mailbox {
   }
 
   /** Store then deliver. Idempotent by msg_id: a retried request returns the existing message. */
-  tell(req: TellRequest & { kind?: MessageKind; text_ref?: string }): MessageRow {
+  tell(req: TellRequest & { kind?: MessageKind; text_ref?: string; attachments?: string[] }): MessageRow {
     const id = req.msg_id ?? `m-${randomUUID()}`;
     const existing = this.get(id);
     if (existing) return existing;
-    if (!req.to || !req.body) throw new Error('to and body are required');
+    const files = this.attachmentsFor(req.attachments ?? []);
+    if (!req.to || (!req.body && !files.length)) throw new Error('to and body are required');
     const from = req.from ?? OWNER;
     // Answering an ask = a reply with ref=<ask id> to the asker: from the owner, or from the manager once
     // it was escalated to him (A.4 "החלטתי במקומך"). It goes through answer() so the inbox closes too.
@@ -105,14 +124,15 @@ export class Mailbox {
       const a = this.getAsk(req.ref);
       if (a && a.from_identity === req.to && (a.state === 'open' || a.state === 'escalated')
         && (from === OWNER || a.state === 'escalated')) {
-        this.answer(a.id, req.body, from === OWNER ? 'owner' : 'manager');
+        this.answer(a.id, req.body ?? '', from === OWNER ? 'owner' : 'manager', undefined, req.attachments);
         return this.get(`${a.id}-answer`)!;
       }
     }
     const now = this.store.now();
-    this.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, ref, text_ref, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, from, req.to, req.kind ?? 'tell', req.body, req.urgency ?? 'normal',
-      req.priority ?? (req.urgency === 'urgent' ? 'now' : 'next'), req.ref ?? null, req.text_ref ?? null, now);
+    this.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, ref, text_ref, attachments, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, from, req.to, req.kind ?? 'tell', req.body ?? '', req.urgency ?? 'normal',
+      req.priority ?? (req.urgency === 'urgent' ? 'now' : 'next'), req.ref ?? null, req.text_ref ?? null,
+      files.length ? JSON.stringify(files) : null, now);
     const m = this.get(id)!;
     this.store.emit('message.new', req.to, m);
     // A reply that references a message marks that message handled (B.4 `handled`).
@@ -122,6 +142,17 @@ export class Mailbox {
     }
     this.store.bg(this.deliver(id), 'mailbox.deliver');
     return this.get(id)!;
+  }
+
+  /** Upload ids → what the message carries. An id that was never uploaded is the client's error, not a silent drop. */
+  private attachmentsFor(ids: string[]): AttachmentDTO[] {
+    if (!ids.length) return [];
+    if (ids.length > 10) throw new Error('attachments must be at most 10');
+    return ids.map((id) => {
+      const u = this.uploads?.get(id);
+      if (!u) throw new Error(`attachments must be uploaded first: no upload ${id}`);
+      return toDTO(u);
+    });
   }
 
   markHandled(id: string): boolean {
@@ -276,8 +307,8 @@ export class Mailbox {
   /** B.4 visible failures: 60s → retry with resurrection; another 60s → failed, in both inboxes. */
   async sweep(): Promise<void> {
     const cutoff = this.store.now() - this.cfg.timers.deliveryTimeoutMs;
-    const stale = this.store.db.prepare(`SELECT * FROM messages WHERE state = 'queued' AND last_attempt_at IS NOT NULL AND last_attempt_at <= ?
-      ORDER BY created_at, rowid`).all(cutoff) as MessageRow[];
+    const stale = (this.store.db.prepare(`SELECT * FROM messages WHERE state = 'queued' AND last_attempt_at IS NOT NULL AND last_attempt_at <= ?
+      ORDER BY created_at, rowid`).all(cutoff) as StoredRow[]).map(hydrate);
     for (const m of stale.filter((x) => x.resurrected)) this.fail(m);
     // One resurrection per identity, however many of its messages are stale.
     const byIdentity = new Map<string, MessageRow[]>();
@@ -377,11 +408,14 @@ export class Mailbox {
   }
 
   /** Owner (from the app) or manager (after escalation) answers; the answer goes back to the asker's mailbox. */
-  answer(id: string, answer: string, by: 'owner' | 'manager' = 'owner', why?: string): AskDTO {
+  answer(id: string, answer: string, by: 'owner' | 'manager' = 'owner', why?: string, attachments: string[] = []): AskDTO {
     const a = this.getAsk(id);
     if (!a) throw new Error(`no ask ${id}`);
     if (a.state === 'answered' || a.state === 'cancelled') return a;
     if (by === 'manager' && a.state !== 'escalated') throw new Error('manager may answer only escalated asks');
+    // An image can be the whole answer ("זה מה שאני רואה"): the asker gets it with the answer line.
+    this.attachmentsFor(attachments);
+    if (!answer && attachments.length) answer = '(תמונה מצורפת)';
     // hq's own asks (account login) carry a one-time code: it is handed over live only (never in asks,
     // events or backups), and hq has no mailbox to deliver an answer to.
     const fromHq = a.from_identity === 'hq';
@@ -391,7 +425,7 @@ export class Mailbox {
     if (fromHq) this.onHqAnswer?.(id, answer);
     const from = by === 'owner' ? OWNER : this.cfg.managerId;
     if (!fromHq) this.tell({ msg_id: `${id}-answer`, from, to: a.from_identity, kind: 'answer', ref: id, urgency: a.urgency, priority: 'now',
-      body: by === 'owner' ? `תשובה לשאלה ${id}: ${answer}` : `יואב החליט במקום רן (${id}): ${answer}${why ? `, כי ${why}` : ''}` });
+      body: by === 'owner' ? `תשובה לשאלה ${id}: ${answer}` : `יואב החליט במקום רן (${id}): ${answer}${why ? `, כי ${why}` : ''}`, attachments });
     if (by === 'manager') {
       // "החלטתי במקומך: X, כי Y" — informational, never pushed.
       this.inbox.add({ kind: 'escalation_note', title: `${this.label(this.cfg.managerId)} החליט במקומך`, from_identity: this.cfg.managerId,

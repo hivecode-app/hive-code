@@ -137,6 +137,18 @@ class NativeBridge {
   /// What was shared when the app was launched by a share, once; null otherwise.
   Future<SharedPayload?> getSharedPayload() async => SharedPayload.fromMap(await _call<Object>('getSharedPayload'));
 
+  /// Whether the clipboard holds an image (and no text) that "הדבקה" can put in a message.
+  Future<bool> clipboardHasImage() async => await _call<bool>('clipboardHasImage') ?? false;
+
+  /// That image: {bytes, mime, name}, or null when there is none or it can't be read.
+  Future<({Uint8List bytes, String mime, String name})?> clipboardImage() async {
+    final raw = await _call<Object>('clipboardImage');
+    if (raw is! Map) return null;
+    final bytes = raw['bytes'], mime = raw['mime'], name = raw['name'];
+    if (bytes is! Uint8List || mime is! String) return null;
+    return (bytes: bytes, mime: mime, name: name is String ? name : 'image');
+  }
+
   /// The in-app waiting counter is the source of truth for the launcher badge (APP-SPEC §5.6).
   Future<void> setWaitingCount(int count) => _call<void>('setWaitingCount', {'count': count});
 }

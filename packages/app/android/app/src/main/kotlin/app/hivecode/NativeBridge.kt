@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -130,6 +131,19 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
                     result.success(false)
                 }
             }
+            // Pasting an image into the composer (Flutter's own paste knows only text).
+            "clipboardHasImage" -> result.success(clipboardHasImage(ctx))
+            "clipboardImage" -> {
+                val uri = clipboardImageUri(ctx)
+                if (uri == null) {
+                    result.success(null)
+                } else {
+                    thread(name = "company-paste") {
+                        val image = readImage(ctx, uri)
+                        main.post { result.success(image) }
+                    }
+                }
+            }
             "passkeyCreate" -> passkeys.create(call.argument<String>("json").orEmpty(), result)
             "passkeyGet" -> passkeys.get(call.argument<String>("json").orEmpty(), result)
             else -> result.notImplemented()
@@ -212,6 +226,41 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
             val identity = intent.getStringExtra(ShortcutManagerCompat.EXTRA_SHORTCUT_ID)?.removePrefix("worker-")
             return mapOf("text" to text, "imagePath" to image, "identityId" to identity)
         }
+
+        /**
+         * Only the description: reading the clip itself makes Android 12+ show "pasted from your
+         * clipboard" on every long press, even when he pastes nothing.
+         */
+        fun clipboardHasImage(context: Context): Boolean {
+            val desc = context.getSystemService(ClipboardManager::class.java)?.primaryClipDescription ?: return false
+            return desc.hasMimeType("image/*") && !desc.hasMimeType("text/*")
+        }
+
+        /** The first image on the clipboard, if another app put one there (same rule as a share). Read on paste only. */
+        fun clipboardImageUri(context: Context): Uri? {
+            val cm = context.getSystemService(ClipboardManager::class.java) ?: return null
+            val clip = cm.primaryClip ?: return null
+            if (clip.description.hasMimeType("text/plain") && clip.getItemAt(0)?.text?.isNotBlank() == true) return null
+            for (i in 0 until clip.itemCount) {
+                val uri = clip.getItemAt(i).uri ?: continue
+                if (uri.scheme != "content" || uri.authority?.startsWith(context.packageName) != false) continue
+                if (context.contentResolver.getType(uri)?.startsWith("image/") == true) return uri
+            }
+            return null
+        }
+
+        /** {bytes, mime, name} of an image, or null when it can't be read or is too big to send. */
+        fun readImage(context: Context, uri: Uri): Map<String, Any?>? = try {
+            val type = context.contentResolver.getType(uri) ?: "image/png"
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (bytes == null || bytes.isEmpty() || bytes.size > MAX_IMAGE_BYTES) null
+            else mapOf("bytes" to bytes, "mime" to type, "name" to (uri.lastPathSegment ?: "image"))
+        } catch (_: Exception) {
+            null
+        }
+
+        /** hq's limit (packages/hq/src/uploads.ts). */
+        private const val MAX_IMAGE_BYTES = 25 * 1024 * 1024
 
         private fun copyToCache(context: Context, uri: Uri): String? = try {
             val type = context.contentResolver.getType(uri)
