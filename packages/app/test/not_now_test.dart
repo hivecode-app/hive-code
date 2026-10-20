@@ -44,7 +44,7 @@ class _Hq {
           ],
         };
       } else if (path == '/api/board' || path == '/api/toggles') {
-        body = jsonDecode(File('test/fixtures/hq/${path.substring(5)}.json').readAsStringSync());
+        body = jsonDecode(File('test/fixtures/samples/hq/${path.substring(5)}.json').readAsStringSync());
       } else {
         body = {'messages': [], 'events': []};
       }

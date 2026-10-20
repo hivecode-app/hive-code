@@ -75,10 +75,6 @@ fi
 for u in agent-company-hq.service actions-runner-company.service agent-company-drift.service agent-company-drift.timer; do
   [[ "$(readlink "$UNITS/$u")" == "$PROD/deploy/$u" ]] || d "היחידה $u לא מקושרת ל-$PROD/deploy/$u"
 done
-cmp -s scripts/vscode-workspace.mjs "$HOME/.local/lib/agent-company/vscode-workspace.mjs" || d "vscode-workspace.mjs המותקן שונה מה-repo"
-for u in vscode-workspace.service vscode-workspace.timer; do
-  cmp -s "deploy/$u" "$UNITS/$u" || d "היחידה $u המותקנת שונה מה-repo"
-done
 systemctl --user is-enabled -q agent-company-drift.timer || d "agent-company-drift.timer לא מופעל"
 # The company (COMPANY_HOME, scripts/company-home.mjs): this checkout, or its own checkout after the split.
 chome="$(node scripts/company-home.mjs "$STATE")"
@@ -90,6 +86,11 @@ else
   cmain="$("${cgit[@]}" rev-parse origin/main 2>/dev/null)" || d "אין origin/main בחברה ב-$chome"
   [[ "$("${cgit[@]}" rev-parse HEAD 2>/dev/null)" == "$cmain" ]] || d "החברה ב-$chome לא ב-origin/main (פריסה מעדכנת אותה)"
   [[ -z "$("${cgit[@]}" status --porcelain 2>/dev/null)" ]] || d "החברה ב-$chome לא נקייה"
+fi
+# This machine's own checks, next to its own deploy steps (company/local/deploy-hq.sh): one line per difference.
+if [[ -f "$chome/company/local/drift-check.sh" ]]; then
+  local_out="$(UNITS="$UNITS" bash "$chome/company/local/drift-check.sh")" || d "$chome/company/local/drift-check.sh נכשל (קוד $?)"
+  while IFS= read -r l; do [[ -n "$l" ]] && d "$l"; done <<<"$local_out"
 fi
 "${cgit[@]}" show "$cmain:company/hq.config.json" 2>/dev/null | cmp -s - "$STATE/hq.config.json" \
   || d "$STATE/hq.config.json שונה מ-company/hq.config.json ב-main של החברה ($chome) (או חסר: אז hq רץ עם ברירות מחדל גנריות)"

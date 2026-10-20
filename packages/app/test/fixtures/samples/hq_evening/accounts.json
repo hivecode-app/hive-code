@@ -1,0 +1,44 @@
+{
+ "pinned": null,
+ "active": "owner-main",
+ "accounts": [
+  {
+   "name": "second",
+   "label": "חשבון שני",
+   "plan": "default_claude_max_20x",
+   "health": "ok",
+   "note": null,
+   "verified_at": 1792501057812,
+   "managed": false,
+   "usable": true,
+   "blocked_until": null,
+   "five_hour_pct": 0,
+   "seven_day_pct": 69,
+   "five_hour_resets_at": 1792511400382,
+   "seven_day_resets_at": 1792814400382,
+   "snapshot_at": 1792501059493,
+   "room": 31,
+   "shifts": 0,
+   "login_pending": false
+  },
+  {
+   "name": "owner-main",
+   "label": "owner-main",
+   "plan": "default_claude_max_20x",
+   "health": "ok",
+   "note": null,
+   "verified_at": 1792501053785,
+   "managed": true,
+   "usable": true,
+   "blocked_until": null,
+   "five_hour_pct": 47,
+   "seven_day_pct": 8,
+   "five_hour_resets_at": 1792505400382,
+   "seven_day_resets_at": 1792929600382,
+   "snapshot_at": 1792501166209,
+   "room": 53,
+   "shifts": 8,
+   "login_pending": false
+  }
+ ]
+}

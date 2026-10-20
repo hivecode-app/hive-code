@@ -1,19 +1,24 @@
 // Bet-9 recall replay: 20 Hebrew questions vs the owner's (mostly English)
-// memory corpus. Needs the real corpus + the keywords cache, so it skips in CI.
+// memory corpus. Needs the real corpus, its questions (the company's, <COMPANY_HOME>/company/bench/bet9-questions.json)
+// and the keywords cache, so it skips in CI and in any other company.
 //   BET9_NO_KEYWORDS=1  measure without the keyword bridge (prints, no assert)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { companyDirOf, resolveCompanyHome } from '@company/shared';
 import {
   addNameStopWords, bet9Sources, createIndex, defaultStateRoot, keywordCachePath, loadKeywordCache, loadRecords, openL3, sha1, tokenize, variants,
 } from '../src/l3.ts';
 
 interface Q { id: number; project: string; q: string; src: string }
-const QUESTIONS = JSON.parse(readFileSync(new URL('./fixtures/bet9-questions.json', import.meta.url), 'utf8')) as Q[];
+const COMPANY_HOME = resolveCompanyHome();
+const QUESTIONS_PATH = join(companyDirOf(COMPANY_HOME), 'bench', 'bet9-questions.json');
 
 test('bet9: src record ranks in top 5 for >= 18/20 questions', (t) => {
+  if (!existsSync(QUESTIONS_PATH)) { t.skip(`no bet9 questions (${QUESTIONS_PATH})`); return; }
+  const QUESTIONS = JSON.parse(readFileSync(QUESTIONS_PATH, 'utf8')) as Q[];
   const sources = bet9Sources();
   if (!sources.length) { t.skip('no memoryImport in hq.config.json'); return; }
   const missing = sources.filter((s) => !existsSync(s.dir)).map((s) => s.dir);
@@ -27,7 +32,7 @@ test('bet9: src record ranks in top 5 for >= 18/20 questions', (t) => {
   if (!noKw && !records.some((r) => r.keywordsHe.length)) {
     t.skip('keywords cache has no entry for the bet9 corpus; run scripts/memory-keywords.mjs --bet9'); return;
   }
-  addNameStopWords(join(import.meta.dirname, '..', '..', '..', 'company')); // as recall does, from org.yaml
+  addNameStopWords(companyDirOf(COMPANY_HOME)); // as recall does, from org.yaml
   const idx = createIndex(records);
   let rank1 = 0, top5 = 0;
   const rows: string[] = [];

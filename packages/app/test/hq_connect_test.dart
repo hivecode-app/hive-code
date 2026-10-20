@@ -34,7 +34,7 @@ class _FakeHq {
         return;
       }
       final name = switch (path) { '/api/board' => 'board', '/api/inbox' => 'inbox', '/api/asks' => 'asks', '/api/toggles' => 'toggles', _ => null };
-      final body = name != null ? File('test/fixtures/hq/$name.json').readAsStringSync() : jsonEncode({'messages': [], 'events': []});
+      final body = name != null ? File('test/fixtures/samples/hq/$name.json').readAsStringSync() : jsonEncode({'messages': [], 'events': []});
       req.response.headers.contentType = ContentType.json;
       req.response.write(body);
       await req.response.close();

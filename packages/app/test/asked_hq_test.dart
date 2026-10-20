@@ -34,8 +34,8 @@ void main() {
         return;
       }
       final Object body = switch (path) {
-        '/api/board' => {...jsonDecode(File('test/fixtures/hq/board.json').readAsStringSync()) as Map<String, dynamic>, 'asked': asked},
-        '/api/toggles' => jsonDecode(File('test/fixtures/hq/toggles.json').readAsStringSync()) as Object,
+        '/api/board' => {...jsonDecode(File('test/fixtures/samples/hq/board.json').readAsStringSync()) as Map<String, dynamic>, 'asked': asked},
+        '/api/toggles' => jsonDecode(File('test/fixtures/samples/hq/toggles.json').readAsStringSync()) as Object,
         '/api/inbox' => {'items': []},
         '/api/asks' => {'asks': []},
         _ => {'messages': [], 'events': []},

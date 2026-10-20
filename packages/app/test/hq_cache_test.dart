@@ -26,7 +26,7 @@ class _Hq {
       }
       final name = switch (path) { '/api/board' => 'board', '/api/inbox' => 'inbox', '/api/asks' => 'asks', '/api/toggles' => 'toggles', _ => null };
       final body = name != null
-          ? File('test/fixtures/hq/$name.json').readAsStringSync()
+          ? File('test/fixtures/samples/hq/$name.json').readAsStringSync()
           : jsonEncode({
               // Rotem wrote last, then Yoav: the list's order.
               'messages': [
@@ -97,8 +97,8 @@ void main() {
 
   test('an answer taken on cached data waits for fresh data, and is refused if already handled', () async {
     // A cache whose inbox still holds item 7, which the server has since closed.
-    final board = File('test/fixtures/hq/board.json').readAsStringSync();
-    final toggles = File('test/fixtures/hq/toggles.json').readAsStringSync();
+    final board = File('test/fixtures/samples/hq/board.json').readAsStringSync();
+    final toggles = File('test/fixtures/samples/hq/toggles.json').readAsStringSync();
     final hq = _Hq();
     await hq.start();
     addTearDown(() => hq.server.close(force: true));

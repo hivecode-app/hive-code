@@ -2,7 +2,7 @@
 # Renders one golden test twice, against <base>'s lib/ and against the working tree's, and writes
 # side-by-side BEFORE|AFTER images. Never touches the working tree: both runs happen in temporary
 # copies of the package, and the committed goldens are not rewritten.
-# Usage: tool/qa/before_after.sh test/bidi_corpus_test.dart goldens/bidi [base=origin/main]
+# Usage: tool/qa/before_after.sh test/bidi_corpus_test.dart goldens/sample_bidi [base=origin/main]
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 test="$1"; dir="$2"; base="${3:-origin/main}"

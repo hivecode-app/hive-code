@@ -8,7 +8,7 @@ import 'package:agent_company/ui/common.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'fixtures/bidi/corpus.dart';
+import 'fixtures/samples/bidi_samples.dart';
 import 'helpers.dart';
 
 // A token: non-space run with a Latin letter or digit, without leading/trailing punctuation.

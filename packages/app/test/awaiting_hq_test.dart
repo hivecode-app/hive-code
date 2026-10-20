@@ -44,9 +44,9 @@ class _Hq {
           body = {'ok': true};
         }
       } else if (path == '/api/board') {
-        body = {...jsonDecode(File('test/fixtures/hq/board.json').readAsStringSync()) as Map<String, dynamic>, 'awaiting': awaiting};
+        body = {...jsonDecode(File('test/fixtures/samples/hq/board.json').readAsStringSync()) as Map<String, dynamic>, 'awaiting': awaiting};
       } else if (path == '/api/toggles') {
-        body = jsonDecode(File('test/fixtures/hq/toggles.json').readAsStringSync());
+        body = jsonDecode(File('test/fixtures/samples/hq/toggles.json').readAsStringSync());
       } else if (path == '/api/inbox') {
         body = {'items': []};
       } else if (path == '/api/asks') {

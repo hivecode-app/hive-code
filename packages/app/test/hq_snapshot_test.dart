@@ -1,5 +1,5 @@
-// Every screen renders a real hq snapshot (fixtures captured from the live hq on 20/10/2026,
-// test/fixtures/hq/*.json; no token inside) without throwing.
+// Every screen renders an hq snapshot (test/fixtures/samples/hq/*.json: the shape the live hq returned on
+// 20/10/2026, with invented projects, titles and messages) without throwing.
 import 'dart:convert';
 import 'dart:io';
 
@@ -29,11 +29,11 @@ class SnapshotBackend extends FakeBackend {
 }
 
 List<Map<String, dynamic>> _load(String name, String key) =>
-    (jsonDecode(File('test/fixtures/hq/$name.json').readAsStringSync())[key] as List).cast<Map<String, dynamic>>();
+    (jsonDecode(File('test/fixtures/samples/hq/$name.json').readAsStringSync())[key] as List).cast<Map<String, dynamic>>();
 
 void main() {
   for (final size in [kPhone, const Size(1440, 860)]) {
-    testWidgets('real hq snapshot renders on every tab (${size.width.toInt()}px)', (tester) async {
+    testWidgets('hq snapshot renders on every tab (${size.width.toInt()}px)', (tester) async {
       await loadFonts();
       Motion.frozen = true;
       SharedPreferences.setMockInitialValues({});

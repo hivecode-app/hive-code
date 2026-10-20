@@ -14,7 +14,7 @@ scripts/deploy.sh all          # או hq | app | caddy
 1. **בדיקה מקדימה.** רץ רק מ-`~/projects/agent-company` (משם hq רץ), על `main` נקי. אם `origin/main` מקדים, הוא עושה fast-forward. אם הענף התפצל או שיש שינויים מקומיים, הוא נעצר. הפריסה הראשונה חייבת להיות `all`, כי היא זו שממירה את ה-Caddyfile הראשי. ‏`npm ci` רץ רק כש-`package-lock.json` השתנה, כדי לא להחליף את `node_modules` מתחת ל-hq שרץ.
 2. **בדיקות.** `npm ci`, ‏contract, ‏`test:deploy`, ‏typecheck ו-`npm test`. ל-`app` ול-`all` גם `flutter analyze` ו-`flutter test`.
 3. **פריסה** של היעד:
-   - **`hq`:** כותב את `~/.config/agent-company/hq.env` (הרשאות 600) מתוך `.env` של dictate-server. מקשר ל-`~/.config/systemd/user` את `agent-company-hq`, ‏`actions-runner-company` ו-`agent-company-drift` (service ו-timer), ומתקין עותק של vscode-workspace. אחרי זה `daemon-reload` ו-restart ל-hq. בסוף בודק ש-`/health` חזר, ושכל יחידות `company-shift@` שרצו לפני ה-restart עדיין רצות.
+   - **`hq`:** כותב את `~/.config/agent-company/hq.env` (הרשאות 600) מתוך `.env` של dictate-server. מקשר ל-`~/.config/systemd/user` את `agent-company-hq`, ‏`actions-runner-company` ו-`agent-company-drift` (service ו-timer), ואחרי `daemon-reload` מריץ את השלבים המקומיים של החברה, אם יש (למטה. הם עושים `daemon-reload` משלהם אם הם מוסיפים יחידות). אחרי זה restart ל-hq. בסוף בודק ש-`/health` חזר, ושכל יחידות `company-shift@` שרצו לפני ה-restart עדיין רצות.
    - **`app`:** בונה web בשורש ו-APK ‏(arm64, בלי כתובת שרת: האפליקציה לומדת אותה מקישור הצימוד או ממסך הכניסה). בודק את הגודל ואת חתימת השחרור, ואז כותב release ב-`/var/www/hq-app/releases/<sha>/` (web, ‏`agent-company.apk`, ‏`.well-known/assetlinks.json`). ההחלפה היא symlink אטומי `current`. נשמרים ה-release הנוכחי, הקודם ושלושת האחרונים.
    - **`caddy`:** מתקין את `deploy/caddy/agent-company.caddy` ל-`/etc/caddy/sites/agent-company.caddy`. ב-Caddyfile הראשי הוא מוודא שיש שורת `import sites/*.caddy` אחת ואין אף בלוק של החברה (`scripts/caddy-main.mjs`). בלוקים של אתרים אחרים (desk, ‏dictate, ‏calltr, ‏k8s) נשארים כמו שהם. ההגדרה נבדקת ב-`caddy validate` לפני ההתקנה, ואחרי זה `reload`.
 4. **אימות מקצה לקצה** (`scripts/verify-prod.mjs`), מבחוץ כמו טלפון:
@@ -58,28 +58,11 @@ scripts/deploy.sh all          # או hq | app | caddy
 
 `agent-company-drift.timer` מריץ אותו כל לילה ב-03:40 (שעון בנגקוק), עם `--report`. כל סטייה נכנסת לתיבה של רן מנגה. האוטומציה היא `noga/drift-check` ב-`company/org.yaml`, ואפשר לכבות אותה בלוח. התיקון לסטייה הוא תמיד פריסה מה-repo.
 
-## heartbeat חיצוני מ-ci-host (B.17)
+## שלבים מקומיים של החברה
 
-ci-host היא מכונה אחרת, ולכן היא לא חלק מ-`deploy.sh`. **מותקן מ-20/10/2026.** נבדק בכיבוי של hq: הטלגרם הגיע אחרי 205 שניות, והודעת "חזר" הגיעה בדקה שאחרי ההפעלה. הפקודות למטה הן להתקנה מחדש.
+מה ששייך למכונה של חברה מסוימת ולא למנוע נמצא בחברה עצמה, ב-`<COMPANY_HOME>/company/local/`:
 
-התקנה (ב-ci-host linger כבר מופעל):
+- **`deploy-hq.sh`:** אם הוא קיים, `scripts/deploy.sh hq` מריץ אותו אחרי היחידות של המנוע ולפני ה-restart של hq. כישלון בו מכשיל את הפריסה ומחזיר אותה אחורה. השורה האחרונה שלו נכנסת לסיכום.
+- **`drift-check.sh`:** אם הוא קיים, `scripts/drift-check.sh` מריץ אותו. כל שורה שהוא מדפיס היא סטייה.
 
-```bash
-# מ-hq-host
-scp -i ~/.ssh/ci2_ed25519 deploy/ci-host/heartbeat.sh deploy/ci-host/agent-company-heartbeat.{service,timer} ran@203.0.113.11:/tmp/
-ssh -i ~/.ssh/ci2_ed25519 ran@203.0.113.11 '
-  mkdir -p ~/agent-company-heartbeat ~/.config/systemd/user ~/.config/agent-company
-  mv /tmp/heartbeat.sh ~/agent-company-heartbeat/ && chmod +x ~/agent-company-heartbeat/heartbeat.sh
-  mv /tmp/agent-company-heartbeat.service /tmp/agent-company-heartbeat.timer ~/.config/systemd/user/'
-# טוקן הבוט: אותו בוט ש-~/bin/telegram-send משתמש בו
-TOKEN=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.openclaw/openclaw.json")))["channels"]["telegram"]["botToken"])')
-ssh -i ~/.ssh/ci2_ed25519 ran@203.0.113.11 "umask 077; cat > ~/.config/agent-company/heartbeat.env" <<EOF
-HQ_HEALTH_URLS="https://api.hq.example.com/health"
-TELEGRAM_BOT_TOKEN=$TOKEN
-TELEGRAM_CHAT=100000001
-HQ_HOST_HOST=203.0.113.10
-EOF
-ssh -i ~/.ssh/ci2_ed25519 ran@203.0.113.11 'systemctl --user daemon-reload && systemctl --user enable --now agent-company-heartbeat.timer'
-```
-
-בדיקה (מבחן קבלה 5 של שלב 1): `systemctl --user stop agent-company-hq` ב-hq-host. תוך 3 דקות מגיעה הודעה מ-ci-host, ואחרי `start` מגיעה הודעת "חזר".
+למשל: כלי אישי שרץ על אותה מכונה עם timer משלו, או בדיקה ממכונה אחרת. מה שבתיקייה הזאת עובר עם החברה (גם אחרי הפיצול), לא עם המנוע.

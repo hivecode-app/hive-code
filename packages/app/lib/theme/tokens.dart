@@ -1,4 +1,4 @@
-// Design tokens, copied 1:1 from the CSS variables of docs/app/mockups/index.html.
+// Design tokens, copied 1:1 from the CSS variables of docs/app/prototype/index.html.
 // The mockup is the visual source of truth; when it changes, this file changes with it.
 import 'package:flutter/material.dart';
 

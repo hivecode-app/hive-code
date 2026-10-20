@@ -1,9 +1,9 @@
-// The head of the chats screen drawn from hq's recipe (ui/convs/home_blocks.dart), on the real hq of
-// 20/10/2026 23:10 (test/fixtures/hq-2310: /api/board, /api/inbox, /api/asks, /api/toggles and
-// /api/messages?identity=owner; no token inside, bodies cut to one line). Three recipes the way עדי would
+// The head of the chats screen drawn from hq's recipe (ui/convs/home_blocks.dart), on a sample hq at
+// 20/10/2026 23:10 (test/fixtures/samples/hq_night: /api/board, /api/inbox, /api/asks, /api/toggles and
+// /api/messages?identity=owner, in the shape of a real day of hq, with invented projects, titles and messages). Three recipes the way עדי would
 // compose them on that day ("בוקר שקט", "יש תקלה", "יום עמוס"), and hq's own default. The two GOs of
-// "יום עמוס" are the real ones of 19:57 (hq-1957/inbox-earlier); the incident of "יש תקלה" is made up, and so is
-// "מה לבדוק" (#108 was not deployed at 23:10): two real tasks of the day, marked the way their workers would.
+// "יום עמוס" are the ones of 19:57 (samples/hq_evening/inbox-earlier); the incident of "יש תקלה" is made up, and so is
+// "מה לבדוק" (#108 was not deployed at 23:10): two tasks of the day, marked the way their workers would.
 import 'dart:convert';
 import 'dart:io';
 
@@ -23,7 +23,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'helpers.dart';
 
-const _dir = 'test/fixtures/hq-2310';
+const _dir = 'test/fixtures/samples/hq_night';
 final _at = DateTime(2026, 10, 20, 23, 10);
 final _seen = DateTime(2026, 10, 20, 20, 0);
 
@@ -33,8 +33,8 @@ List<Map<String, dynamic>> _list(String name, String key) => (_json('$_dir/$name
 final _incident = <String, dynamic>{
   'id': 90,
   'kind': 'incident',
-  'title': 'האתר של לומו לא עונה',
-  'body': 'example.app/healthz מחזיר 502 כבר 4 דקות.',
+  'title': 'האתר של החנות לא עונה',
+  'body': 'shop.example.com/healthz מחזיר 502 כבר 4 דקות.',
   'from_identity': 'rotem',
   'urgency': 'urgent',
   'blocking': true,
@@ -42,11 +42,11 @@ final _incident = <String, dynamic>{
   'state': 'open',
   'created_at': DateTime(2026, 10, 20, 23, 6).millisecondsSinceEpoch,
   'link': null,
-  'headline': 'האתר של לומו לא עונה',
+  'headline': 'האתר של החנות לא עונה',
   'snoozed_at': null,
 };
 
-List<Map<String, dynamic>> get _gos => (_json('test/fixtures/hq-1957/inbox-earlier.json')['items'] as List).cast<Map<String, dynamic>>();
+List<Map<String, dynamic>> get _gos => (_json('test/fixtures/samples/hq_evening/inbox-earlier.json')['items'] as List).cast<Map<String, dynamic>>();
 
 class _Snapshot extends FakeBackend {
   _Snapshot(this.snapshot) : super(simulate: false);
@@ -60,9 +60,9 @@ class _Snapshot extends FakeBackend {
 }
 
 final _awaiting = [
-  AwaitingTask(id: 49, kind: AwaitingKind.deploy, title: 'מיזוג מה שמשה הכניס בוורקר 2.6.9, והכנה לפריסה', summary: 'ורקר 2.6.10 מוכן לפריסה',
-      note: 'מחכה ל-GO שלך', identity: 'yonatan', project: 'lumo-bot', at: DateTime(2026, 10, 20, 19, 37)),
-  AwaitingTask(id: 62, kind: AwaitingKind.check, title: 'אפליקציה: ראש מסך השיחות, תוכן מוגדר ושלושה כיווני עיצוב',
+  AwaitingTask(id: 49, kind: AwaitingKind.deploy, title: 'מיזוג מה שגיל הכניס בשרת 2.6.9, והכנה לפריסה', summary: 'ורקר 2.6.10 מוכן לפריסה',
+      note: 'מחכה ל-GO שלך', identity: 'yonatan', project: 'shop-bot', at: DateTime(2026, 10, 20, 19, 37)),
+  AwaitingTask(id: 62, kind: AwaitingKind.check, title: 'אפליקציה: ראש מסך השיחות, שלושה כיווני עיצוב',
       summary: 'יש שלוש הצעות לראש מסך השיחות, מצולמות מהאפליקציה', note: 'לבחור כיוון', identity: 'agent-company-t62', project: 'agent-company', at: DateTime(2026, 10, 20, 22, 20)),
 ];
 
@@ -88,18 +88,18 @@ HomeRecipe _recipe(List<Map<String, dynamic>> blocks, {String by = 'adi', DateTi
 final _quiet = _recipe([
   {'type': 'headline', 'text': 'שקט. שלוש משימות רצות בחברה, ושום דבר לא מחכה לך'},
   {'type': 'people', 'identities': ['agent-company-t63', 'agent-company-t64', 'agent-company-t65'], 'caption': 'בונים את ראש המסך החדש'},
-  {'type': 'since', 'items': ['יש שלוש הצעות לראש מסך השיחות, מצולמות מהאפליקציה', 'הבוט הקולי מבין לאן הלקוח נוסע לפי "מ-" ו"ל-"', 'הפרויקט "מה חדש בעיר" עבר לחברה, עם מתן כראש צוות']},
-  {'type': 'lanes', 'projects': ['agent-company', 'voice-bot', 'lumo-bot'], 'emphasis': 'quiet'},
-  {'type': 'note', 'text': 'בלומו בוט שתי משימות של רון והילה מחכות למשבצת פנויה', 'icon': 'schedule', 'emphasis': 'quiet'},
+  {'type': 'since', 'items': ['יש שלוש הצעות לראש מסך השיחות, מצולמות מהאפליקציה', 'המוקד הקולי מבין לאן הלקוח נוסע לפי "מ-" ו"ל-"', 'הפרויקט "החדשות" עבר לחברה, עם מתן כראש צוות']},
+  {'type': 'lanes', 'projects': ['agent-company', 'voice', 'shop-bot'], 'emphasis': 'quiet'},
+  {'type': 'note', 'text': 'בבוט ההזמנות שתי משימות של רון והילה מחכות למשבצת פנויה', 'icon': 'schedule', 'emphasis': 'quiet'},
 ]);
 
 /// Lumo's site is down: that first and heavy, what Rotem knows, the project it stops.
 final _incidentRecipe = _recipe([
-  {'type': 'headline', 'text': 'האתר של לומו לא עונה כבר 4 דקות', 'emphasis': 'strong'},
+  {'type': 'headline', 'text': 'האתר של החנות לא עונה כבר 4 דקות', 'emphasis': 'strong'},
   {'type': 'alert', 'inbox': 90, 'emphasis': 'strong'},
   {'type': 'note', 'text': 'רותם בודקת. בפעם הקודמת זה היה ה-ingress, וחזר אחרי הפעלה מחדש', 'icon': 'monitor_heart'},
-  {'type': 'project', 'project': 'lumo-bot', 'note': 'הפריסה של 2.6.10 מחכה עד שהאתר יחזור'},
-  {'type': 'lanes', 'projects': ['lumo-bot', 'lumo', 'agent-company']},
+  {'type': 'project', 'project': 'shop-bot', 'note': 'הפריסה של 2.6.10 מחכה עד שהאתר יחזור'},
+  {'type': 'lanes', 'projects': ['shop-bot', 'shop', 'agent-company']},
 ]);
 
 /// Two GOs wait, three tasks run, a lot finished: the decisions first, then the day.
@@ -107,10 +107,10 @@ List<Map<String, dynamic>> get _busyBlocks => [
       {'type': 'headline', 'text': 'יום עמוס: שני GO מחכים לך, ושלוש משימות רצות'},
       {'type': 'waiting', 'inbox': [36, 34]},
       {'type': 'awaiting', 'tasks': [49, 62]},
-      {'type': 'lanes', 'projects': ['agent-company', 'voice-bot', 'lumo-bot', 'nws']},
+      {'type': 'lanes', 'projects': ['agent-company', 'voice', 'shop-bot', 'news']},
       {'type': 'project', 'project': 'agent-company', 'note': 'ראש המסך החדש בשלושה צוותים, מוכן לראות הלילה'},
-      {'type': 'project', 'project': 'voice-bot'},
-      {'type': 'since', 'items': ['הבוט הקולי מבין לאן הלקוח נוסע לפי "מ-" ו"ל-"', 'תמונות בהודעה של עובד אליך מוצגות', 'הפרויקט "מה חדש בעיר" עבר לחברה']},
+      {'type': 'project', 'project': 'voice'},
+      {'type': 'since', 'items': ['המוקד הקולי מבין לאן הלקוח נוסע לפי "מ-" ו"ל-"', 'תמונות בהודעה של עובד אליך מוצגות', 'הפרויקט "החדשות" עבר לחברה']},
       {'type': 'note', 'text': 'שווה לאשר את 2.6.10 לפני הלילה, כדי שהקנרי ירוץ עד הבוקר', 'icon': 'rocket_launch'},
     ];
 
@@ -150,7 +150,7 @@ Future<AppStore> _pump(WidgetTester tester, CompanyData d, HomeRecipe? recipe, {
 Future<void> _shot(WidgetTester tester, String name) async {
   await tester.pumpAndSettle();
   expect(tester.takeException(), isNull);
-  await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/home/$name.png'));
+  await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/sample_home/$name.png'));
 }
 
 /// The blocks on screen, top to bottom, by the card's label or the block's own widget.
@@ -289,13 +289,13 @@ void main() {
         {'type': 'chart', 'data': []},
         {'type': 'alert', 'inbox': 4},
         {'type': 'alert', 'shift': 'keren-2'},
-        {'type': 'project', 'project': 'lumo', 'note': 'ב'},
+        {'type': 'project', 'project': 'shop', 'note': 'ב'},
         {'type': 'awaiting', 'tasks': [12]},
       ],
     });
     expect(r.blocks.map((b) => b.type), ['headline', 'alert', 'alert', 'project', 'awaiting']);
     expect(r.blocks.first.emphasis, Emphasis.strong);
-    expect(r.blocks.map((b) => b.key), ['headline', 'alert:4', 'alert:keren-2', 'project:lumo', 'awaiting']);
+    expect(r.blocks.map((b) => b.key), ['headline', 'alert:4', 'alert:keren-2', 'project:shop', 'awaiting']);
     expect(HomeRecipe.fromJson(r.toJson()).toJson(), r.toJson());
     expect(shiftIdentity('agent-company-t65-1'), 'agent-company-t65');
   });
@@ -322,7 +322,7 @@ void main() {
   test('titles without PR or ticket numbers: what project lines and "since" fall back to without a summary', () {
     expect(plainTitle('סיום PR #43: health probes לוורקרים'), 'health probes לוורקרים');
     expect(plainTitle('hq: הודעת סגירה מעירה עובד (#99)'), 'הודעת סגירה מעירה עובד');
-    expect(plainTitle('#23 passkey ו-token לכל מכשיר'), 'passkey ו-token לכל מכשיר');
+    expect(plainTitle('#23 כניסה לכל מכשיר'), 'כניסה לכל מכשיר');
     expect(plainTitle('תיקון ב-ingest #12 ומיזוג'), 'תיקון ב-ingest ומיזוג');
   });
 }

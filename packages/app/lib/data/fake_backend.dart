@@ -1,4 +1,4 @@
-// In-app backend with the mockup's content (docs/app/mockups/index.html), so every screen can be
+// In-app backend with the mockup's content (docs/app/prototype/index.html), so every screen can be
 // built, tested and shown before hq is live. Behaviour mirrors the mockup script: 3s undo is the
 // UI's job; this class only applies the result, simulates delivery acks and Dana's streaming.
 import 'dart:async';

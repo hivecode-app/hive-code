@@ -33,7 +33,7 @@ class _FakeHq {
       final name = switch (path) { '/api/board' => 'board', '/api/inbox' => 'inbox', '/api/asks' => 'asks', '/api/toggles' => 'toggles', _ => null };
       Object out;
       if (name != null) {
-        out = jsonDecode(File('test/fixtures/hq/$name.json').readAsStringSync()) as Object;
+        out = jsonDecode(File('test/fixtures/samples/hq/$name.json').readAsStringSync()) as Object;
       } else if (path == '/api/seen') {
         out = {'seen': {'chats': 5000}};
       } else if (path == '/api/conversations') {

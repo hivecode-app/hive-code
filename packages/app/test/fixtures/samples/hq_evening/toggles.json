@@ -1,0 +1,130 @@
+{
+ "toggles": [
+  {
+   "key": "backup",
+   "enabled": true,
+   "manual": false,
+   "description": "גיבוי hq.db כל שעה",
+   "updated_at": 1792448992808
+  },
+  {
+   "key": "escalation",
+   "enabled": true,
+   "manual": false,
+   "description": "שאלה חוסמת שלא נענתה עוברת ליואב",
+   "updated_at": 1792448992808
+  },
+  {
+   "key": "focus",
+   "enabled": false,
+   "manual": true,
+   "description": "מצב פוקוס: רק תקלה דחופה בפרודקשן מתריעה",
+   "updated_at": 1792450928627
+  },
+  {
+   "key": "night",
+   "enabled": false,
+   "manual": false,
+   "description": "מצב לילה (B.16)",
+   "updated_at": 1792448992808
+  },
+  {
+   "key": "noga/claude-code-canaries",
+   "enabled": false,
+   "manual": false,
+   "description": "מריצה את ה-canaries של adapter/contract.yaml על כל גרסה חדשה של Claude Code לפני שדרוג",
+   "updated_at": 1792501053405
+  },
+  {
+   "key": "noga/drift-check",
+   "enabled": true,
+   "manual": false,
+   "description": "בדיקת סטייה - האם הפרודקשן (hq, האפליקציה, Caddy, היחידות, hq.env) הוא בדיוק מה ש-scripts/deploy.sh בונה מ-origin/main. כל הבדל נכנס לתיבה של הבעלים, והתיקון הוא תמיד פריסה מה-repo",
+   "updated_at": 1792501053405
+  },
+  {
+   "key": "noga/memory-consolidation",
+   "enabled": false,
+   "manual": false,
+   "description": "איחוד הזיכרון (\"חלימה\") - ממזגת כפילויות, מעבירה לארכיון מה שלא נגעו בו 90 יום, מסמנת סתירות. הכול כ-PR",
+   "updated_at": 1792501053405
+  },
+  {
+   "key": "noga/model-backtest",
+   "enabled": false,
+   "manual": false,
+   "description": "מריצה מחדש משימות שנסגרו על מודל זול יותר מול סוקר עיוור. ההמלצה נכנסת רק כ-PR",
+   "updated_at": 1792501053405
+  },
+  {
+   "key": "noga/said-twice",
+   "enabled": false,
+   "manual": false,
+   "description": "מאתרת הוראות שהבעלים אמר יותר מפעם אחת, ומציעה תיקון קבוע",
+   "updated_at": 1792501053405
+  },
+  {
+   "key": "noga/weekly-quality-report",
+   "enabled": false,
+   "manual": false,
+   "description": "דוח שבועי של מדדי האיכות (A.14)",
+   "updated_at": 1792501053405
+  },
+  {
+   "key": "push",
+   "enabled": true,
+   "manual": false,
+   "description": "התראות כשמשהו חסום עליך",
+   "updated_at": 1792448992808
+  },
+  {
+   "key": "residents",
+   "enabled": true,
+   "manual": false,
+   "description": "התושבים (יואב) רצים תמיד",
+   "updated_at": 1792448992808
+  },
+  {
+   "key": "rotem/offsite-heartbeat",
+   "enabled": true,
+   "manual": false,
+   "description": "השרת השני בודק את hq ואת hq-host, ושולח טלגרם ישיר אחרי 3 דקות בלי תשובה, ועוד הודעה כשהוא חוזר. (הבדיקה ההפוכה, hq בודק את ה-timer של השרת השני, עוד לא נבנתה)",
+   "updated_at": 1792501053405
+  },
+  {
+   "key": "rotem/prod-probes",
+   "enabled": true,
+   "manual": false,
+   "description": "probe-runner מריץ את בדיקות הפרודקשן מהאמנות (HTTP, kubectl, לוגים, TLS), בלי טוקנים. חריגה מעירה את רותם",
+   "updated_at": 1792501053405
+  },
+  {
+   "key": "scheduler",
+   "enabled": true,
+   "manual": false,
+   "description": "המתזמן ממלא משבצות פנויות מהתור",
+   "updated_at": 1792448992808
+  },
+  {
+   "key": "yoav/accounts",
+   "enabled": true,
+   "manual": false,
+   "description": "מנהל החשבונות (B.7) - קורא מכסה לכל חשבון, בודק שכל חשבון מחובר לאדם הנכון, ומעביר משמרת לחשבון השני כשהמכסה נגמרת",
+   "updated_at": 1792501053405
+  },
+  {
+   "key": "yoav/morning-summary",
+   "enabled": false,
+   "manual": false,
+   "description": "סיכום בוקר אחד מתוך ה-store - מה נעשה, מה מחכה לך, מה דולג ולמה, דקות של משבצת ריקה",
+   "updated_at": 1792501053405
+  },
+  {
+   "key": "yoav/night-scheduler",
+   "enabled": false,
+   "manual": false,
+   "description": "במצב לילה ממלא כל משבצת שמתפנה מהתור הקבוע (modes/night.md)",
+   "updated_at": 1792501053405
+  }
+ ]
+}

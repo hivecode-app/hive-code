@@ -229,7 +229,7 @@ void main() {
   });
 
   test('revoked while the live link was down: the reconnect finds out and signs out', () async {
-    String fixture(String name) => File('test/fixtures/hq/$name.json').readAsStringSync();
+    String fixture(String name) => File('test/fixtures/samples/hq/$name.json').readAsStringSync();
     var revoked = false;
     final client = MockClient((r) async {
       // Only the retry's probe sees the refusal, so nothing else can trip it.

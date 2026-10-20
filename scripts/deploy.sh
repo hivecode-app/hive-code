@@ -224,14 +224,15 @@ deploy_hq() {
   for u in agent-company-hq.service actions-runner-company.service agent-company-drift.service agent-company-drift.timer; do
     [[ "$(readlink "$UNITS/$u" || true)" == "$repo/deploy/$u" ]] || { ln -sfn "$repo/deploy/$u" "$UNITS/$u"; say "יחידה $u מקושרת ל-repo"; }
   done
-  # vscode-workspace runs an installed copy on purpose: a branch switch in a checkout must not break it.
-  install -Dm644 scripts/vscode-workspace.mjs "$HOME/.local/lib/agent-company/vscode-workspace.mjs"
-  install -Dm644 deploy/vscode-workspace.service "$UNITS/vscode-workspace.service"
-  install -Dm644 deploy/vscode-workspace.timer "$UNITS/vscode-workspace.timer"
-  mkdir -p "$HOME/live"
   systemctl --user daemon-reload
   systemctl --user enable -q agent-company-hq actions-runner-company
-  systemctl --user enable -q --now agent-company-drift.timer vscode-workspace.timer
+  systemctl --user enable -q --now agent-company-drift.timer
+  # This machine's own steps (not the engine's): <COMPANY_HOME>/company/local/deploy-hq.sh, when the company has one.
+  local hook="$CHOME/company/local/deploy-hq.sh" out
+  if [[ -f "$hook" ]]; then
+    out="$(UNITS="$UNITS" bash "$hook")" || fail "$hook נכשל"
+    say "השלבים המקומיים של החברה ($hook): $(tail -1 <<<"$out")"
+  fi
 
   # Safe restart: shifts are their own units (company-shift@), outside hq's cgroup (scripts/lib/hq-restart.sh).
   hq_restarted=1

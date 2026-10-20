@@ -1,0 +1,34 @@
+{
+ "items": [
+  {
+   "id": 36,
+   "kind": "go",
+   "title": "GO: לא מצאתי בעיה בצד שלנו. נראה שזה אצל ספק המשלוחים.",
+   "body": "תעשי לפי הכיוון השני. מוזג. הבדיקות עברו, ושום דבר לא מחכה לך.",
+   "from_identity": "adi",
+   "urgency": "normal",
+   "blocking": true,
+   "ref": "adi-1:mvgotkfi-0c7fbdd9e8",
+   "state": "open",
+   "created_at": 1792501011634,
+   "link": null,
+   "headline": "מיכל, תפעול עסקי בבוט ההזמנות, נכנסת לעבודה",
+   "snoozed_at": null
+  },
+  {
+   "id": 34,
+   "kind": "go",
+   "title": "GO: העומס על השרת ירד אחרי שהזזנו את הדוח הלילי לשלוש בבוקר.",
+   "body": "העומס על השרת ירד אחרי שהזזנו את הדוח הלילי לשלוש בבוקר.",
+   "from_identity": "boaz",
+   "urgency": "normal",
+   "blocking": true,
+   "ref": "boaz-1:mvgo4lmi-012670d0b5",
+   "state": "open",
+   "created_at": 1792499846787,
+   "link": null,
+   "headline": "עדכון לשרת: חשבון חסום זמנית לא ינסה להתחבר כל דקה",
+   "snoozed_at": null
+  }
+ ]
+}

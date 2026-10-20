@@ -19,7 +19,7 @@ import 'helpers.dart';
 final _at = DateTime(2026, 10, 20, 13, 30).millisecondsSinceEpoch;
 
 Map<String, dynamic> _open(int id, String state, {String? worker, int? position, String? reason, String opener = 'yoav', String title = 'משימה'}) => {
-      'id': id, 'ref': null, 'project': 'lumo', 'title': title, 'opened_by': opener, 'worker': worker, 'state': state,
+      'id': id, 'ref': null, 'project': 'shop', 'title': title, 'opened_by': opener, 'worker': worker, 'state': state,
       'position': position, 'reason': reason, 'since': _at,
     };
 
@@ -83,7 +83,7 @@ void main() {
 
   test('lanes: the queue of a project, in its order', () {
     final d = mapSnapshot(board: const [], inbox: const [], asks: const [], toggles: const [], openTasks: _hq,
-        projects: [{'id': 'lumo', 'name': 'לומו', 'status': 'active'}]);
+        projects: [{'id': 'shop', 'name': 'החנות', 'status': 'active'}]);
     final lane = LanesData.of(d, now: DateTime(2026, 10, 20, 14)).lanes.single;
     expect(lane.queued, ['דוח שבועי']);
     expect(Lane.fromJson(jsonDecode(jsonEncode(lane.toJson())) as Map<String, dynamic>).queued, ['דוח שבועי']);

@@ -31,9 +31,9 @@ class _Hq {
       Object body;
       switch (path) {
         case '/api/board':
-          body = jsonDecode(File('test/fixtures/hq/board.json').readAsStringSync()) as Object;
+          body = jsonDecode(File('test/fixtures/samples/hq/board.json').readAsStringSync()) as Object;
         case '/api/toggles':
-          body = jsonDecode(File('test/fixtures/hq/toggles.json').readAsStringSync()) as Object;
+          body = jsonDecode(File('test/fixtures/samples/hq/toggles.json').readAsStringSync()) as Object;
         case '/api/inbox':
           body = {'items': inbox};
         case '/api/asks':
@@ -238,7 +238,7 @@ void main() {
     final (b, hq) = await up();
     hq.events = [
       {'seq': 5, 'ts': 2000, 'type': 'inbox.new', 'identity': 'yoav',
-        'data': {'id': 3, 'kind': 'ask', 'from_identity': 'yoav', 'title': 'יואב שואל/ת', 'headline': 'הבוטים של לומו', 'body': 'להעביר גם את הבוטים?', 'blocking': true, 'ref': 'a9', 'created_at': 2000}},
+        'data': {'id': 3, 'kind': 'ask', 'from_identity': 'yoav', 'title': 'יואב שואל/ת', 'headline': 'הבוטים של החנות', 'body': 'להעביר גם את הבוטים?', 'blocking': true, 'ref': 'a9', 'created_at': 2000}},
       {'seq': 6, 'ts': 2000, 'type': 'ask.new', 'identity': 'yoav', 'data': {'id': 'a9', 'options': ['כן', 'לא']}},
       {'seq': 7, 'ts': 2100, 'type': 'inbox.new', 'identity': 'yoav',
         'data': {'id': 4, 'kind': 'go', 'from_identity': 'yoav', 'title': 'GO: x', 'headline': 'עדכון', 'body': 'x', 'blocking': true, 'ref': 'op-4', 'created_at': 2100}},
@@ -251,7 +251,7 @@ void main() {
     await b.openConversation('yoav');
     final items = b.data!.chats['yoav']!.items;
     final ask = items.whereType<AskCard>().firstWhere((c) => c is! GoCard);
-    expect(ask.headline, 'הבוטים של לומו');
+    expect(ask.headline, 'הבוטים של החנות');
     expect([for (final o in ask.options) o.label], ['כן', 'לא']);
     expect(ask.state, AskState.answered);
     expect(ask.answer, 'לא, בלי הבוטים');

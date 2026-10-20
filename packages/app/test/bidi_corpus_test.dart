@@ -1,5 +1,5 @@
-// Bidi corpus (docs/app/qa/QA-LOG.md, "RTL/bidi"): 44 real mixed Hebrew/English messages from
-// Claude Code transcripts and hq.db (tool/qa/bidi_corpus.py), each rendered as a chat bubble in
+// Bidi corpus (docs/app/qa/QA-LOG.md, "RTL/bidi"): 44 synthetic mixed Hebrew/English messages
+// (test/fixtures/samples/bidi_samples.dart, one per bidi case), each rendered as a chat bubble in
 // light and dark side by side. A change to how any of them lays out shows up as a golden diff.
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -12,7 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'fixtures/bidi/corpus.dart';
+import 'fixtures/samples/bidi_samples.dart';
 import 'helpers.dart';
 
 void main() {
@@ -63,7 +63,7 @@ void main() {
           File('$hires/${m['id']}.png').writeAsBytesSync(png!.buffer.asUint8List());
         });
       }
-      await expectLater(find.byKey(const ValueKey('pair')), matchesGoldenFile('goldens/bidi/${m['id']}.png'));
+      await expectLater(find.byKey(const ValueKey('pair')), matchesGoldenFile('goldens/sample_bidi/${m['id']}.png'));
     });
   }
 }

@@ -1,8 +1,8 @@
-// #53: the layout (chats · status · projects · settings) on the real hq of 20/10/2026 19:59
-// (test/fixtures/hq-1957, captured from /api/board, /api/inbox, /api/asks, /api/toggles,
-// /api/messages?identity=owner and /api/accounts; no token inside, message bodies cut to one line), with
-// the names this PR gives in org.yaml (project agent-company is "החברה"; titles without project ids).
-// The approved mockup is docs/app/mockups/t53/; these goldens are the same screens as built.
+// #53: the layout (chats · status · projects · settings) on a sample hq at 20/10/2026 19:59
+// (test/fixtures/samples/hq_evening: /api/board, /api/inbox, /api/asks, /api/toggles,
+// /api/messages?identity=owner and /api/accounts, in the shape of a real day of hq, with invented
+// projects, titles and messages), with the project names of org.yaml (agent-company is "החברה").
+// These goldens are the screens of the approved mockup (#53), as built.
 import 'dart:convert';
 import 'dart:io';
 
@@ -30,7 +30,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'helpers.dart';
 
-const _dir = 'test/fixtures/hq-1957';
+const _dir = 'test/fixtures/samples/hq_evening';
 final _at = DateTime(2026, 10, 20, 19, 59);
 
 Map<String, dynamic> _json(String name) => jsonDecode(File('$_dir/$name.json').readAsStringSync()) as Map<String, dynamic>;
@@ -106,19 +106,19 @@ void _lastLines(CompanyData d) {
 // The summaries hq had not written yet at 19:59 (no task had one): one line in his words per finished task,
 // for the head's "מאז שהיית פה". Everything else is the snapshot as it was.
 const _summaries = {
-  51: 'מיכל התחילה לעבוד בלומו בוט',
-  47: 'רכב ל-7 מבוגרים: הבוט הקולי מפנה לטנדר',
-  49: 'ורקר 2.6.10 מוכן לפריסה',
+  51: 'מיכל התחילה לעבוד בבוט ההזמנות',
+  47: 'מעל 7 פריטים: המוקד הקולי מפנה לשליח',
+  49: 'שרת 2.6.10 מוכן לפריסה',
   48: 'בלשונית "ארגון" רואים את העובדים הקבועים',
-  46: 'ורקר 2.6.7 יציב אחרי 24 שעות',
+  46: 'שרת 2.6.7 יציב אחרי 24 שעות',
 };
 
 // Something burning, for the head's "everything" state (nothing burned at 19:59): an incident from monitoring.
 final _incident = <String, dynamic>{
   'id': 90,
   'kind': 'incident',
-  'title': 'האתר של לומו לא עונה',
-  'body': 'example.app/healthz מחזיר 502 כבר 4 דקות.',
+  'title': 'האתר של החנות לא עונה',
+  'body': 'shop.example.com/healthz מחזיר 502 כבר 4 דקות.',
   'from_identity': 'rotem',
   'urgency': 'urgent',
   'blocking': true,
@@ -126,7 +126,7 @@ final _incident = <String, dynamic>{
   'state': 'open',
   'created_at': DateTime(2026, 10, 20, 19, 55).millisecondsSinceEpoch,
   'link': null,
-  'headline': 'האתר של לומו לא עונה',
+  'headline': 'האתר של החנות לא עונה',
   'snoozed_at': null,
 };
 
@@ -172,7 +172,7 @@ Future<BuildContext> _pump(WidgetTester tester,
 Future<void> _shot(WidgetTester tester, String name) async {
   await tester.pumpAndSettle();
   expect(tester.takeException(), isNull);
-  await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/layout/$name.png'));
+  await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/sample_layout/$name.png'));
 }
 
 const _tall = Size(342, 1500);
@@ -192,7 +192,7 @@ void main() {
     final working = [for (final w in tester.widgetList<WorkingRow>(find.byType(WorkingRow))) w.c.identityId];
     expect(working, ['keren']);
     final lines = {for (final w in tester.widgetList<OpenTasksLine>(find.byType(OpenTasksLine))) w.identityId: openTasksLine(w.tasks)};
-    expect(lines, {'adi': '2 משימות · 2 רצות', 'shachar': 'רצה: שעת איסוף "לא ידוע" לא נאמרת ללקוח'});
+    expect(lines, {'adi': '2 משימות · 2 רצות', 'shachar': 'רצה: שעת משלוח "לא ידוע" לא נאמרת ללקוח'});
     expect(find.byWidgetPredicate((w) => w is Ic && w.name == 'play_arrow'), findsNWidgets(3));
     // Then one list by latest, who works now in his own place in it, each once; task workers without an
     // unread message are not here.
@@ -207,7 +207,7 @@ void main() {
   testWidgets('chats: what waits is the card on top, a face and a line each; nothing else above the list', (tester) async {
     await _pump(tester, earlierWaiting: true);
     expect(find.byType(ChatsHead), findsOneWidget);
-    expect(findShown('מיכל, תפעול עסקי בלומו בוט, נכנסת לעבודה'), findsOneWidget);
+    expect(findShown('מיכל, תפעול עסקי בבוט ההזמנות, נכנסת לעבודה'), findsOneWidget);
     expect(findShown('עדי · GO לפרודקשן'), findsOneWidget);
     expect(findShown('בועז · GO לפרודקשן'), findsOneWidget);
     expect(find.textContaining('מאז'), findsNothing, reason: 'he was here just now: nothing since');
@@ -222,10 +222,10 @@ void main() {
     expect(find.text('מ-18:00'), findsOneWidget);
     // Since 18:00: 14 finished with a worker on them (the one closed into another task has none, and is left out).
     expect(findShown('עוד 8 · בפרויקטים'), findsOneWidget);
-    expect(findShown('עובדת קבועה חדשה, מיכל, תפעול עסקי'), findsOneWidget, reason: 'the title without "לומו בוט: "');
+    expect(findShown('עובדת קבועה חדשה, מיכל, תפעול עסקי'), findsOneWidget, reason: 'the title without "בוט ההזמנות: "');
     expect(findShown('החברה · תומר · 19:56'), findsOneWidget, reason: 'the project by its name, never agent-company');
     expect(findShown('שקט, אין משימה שרצה'), findsNWidgets(3));
-    expect(findShown('קרן: שעת איסוף'), findsOneWidget);
+    expect(findShown('קרן: שעת משלוח'), findsOneWidget);
     await _shot(tester, '03-status');
   });
 
@@ -235,11 +235,11 @@ void main() {
     final i = d.tickets.indexWhere((t) => t.number == 't51');
     final t = d.tickets[i];
     d.tickets[i] = Ticket(number: t.number, title: t.title, project: t.project, projectName: t.projectName, group: t.group, assignee: t.assignee,
-        status: t.status, assigneeId: t.assigneeId, doneAt: t.doneAt, summary: 'מיכל בצוות של לומו בוט');
+        status: t.status, assigneeId: t.assigneeId, doneAt: t.doneAt, summary: 'מיכל בצוות של בוט ההזמנות');
     StoreScope.read(ctx).touch();
     NavScope.read(ctx).go(AppTab.status);
     await tester.pump();
-    expect(findShown('מיכל בצוות של לומו בוט'), findsOneWidget);
+    expect(findShown('מיכל בצוות של בוט ההזמנות'), findsOneWidget);
     expect(findShown('עובדת קבועה חדשה'), findsNothing);
   });
 
@@ -280,8 +280,8 @@ void main() {
     expect(find.byType(ProjectScreen), findsNothing);
     await back();
 
-    // "קרן: שעת איסוף" in "בפרויקטים עכשיו" opens Keren.
-    await tester.tap(findShown('קרן: שעת איסוף'));
+    // "קרן: שעת משלוח" in "בפרויקטים עכשיו" opens Keren.
+    await tester.tap(findShown('קרן: שעת משלוח'));
     await tester.pumpAndSettle();
     expect(open(), 'keren');
   });
@@ -290,7 +290,7 @@ void main() {
     final ctx = await _pump(tester, size: _tall);
     NavScope.read(ctx).go(AppTab.projects);
     await tester.pump();
-    for (final name in ['החברה', 'האפליקציה לומו', 'לומו בוט', 'טיקי בוט', 'הבוט הקולי', 'צוותים קבועים']) {
+    for (final name in ['החברה', 'החנות', 'בוט ההזמנות', 'בוט התמיכה', 'המוקד הקולי', 'צוותים קבועים']) {
       expect(findShown(name), findsWidgets, reason: name);
     }
     expect(find.text('agent-company'), findsNothing);
@@ -315,9 +315,9 @@ void main() {
 
   testWidgets('project: a standing worker\'s task shows under the team', (tester) async {
     final ctx = await _pump(tester);
-    Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => const ProjectScreen(projectId: 'voice-bot')));
-    await _shot(tester, '06-project-voice-bot');
-    expect(findShown('שעת איסוף "לא ידוע" לא נאמרת ללקוח'), findsNWidgets(2), reason: 'under Keren, and as the open task');
+    Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => const ProjectScreen(projectId: 'voice')));
+    await _shot(tester, '06-project-voice');
+    expect(findShown('שעת משלוח "לא ידוע" לא נאמרת ללקוח'), findsNWidgets(2), reason: 'under Keren, and as the open task');
   });
 
   testWidgets('settings: automations, accounts, devices', (tester) async {
@@ -325,7 +325,7 @@ void main() {
     NavScope.read(ctx).go(AppTab.settings);
     await tester.pumpAndSettle();
     expect(findShown('9 פועלות · מתוך 18'), findsOneWidget);
-    expect(find.text('החשבון הראשי'), findsOneWidget);
+    expect(find.text('חשבון שני'), findsOneWidget);
     await _shot(tester, '07-settings');
     await tester.tap(findShown('9 פועלות'));
     await tester.pumpAndSettle();
@@ -358,12 +358,12 @@ void main() {
     final ctx = await _pump(tester);
     final store = StoreScope.read(ctx);
     final d = store.data!;
-    d.tickets.add(Ticket(number: 't99', title: 'עוזר: השוואת ביטוחים', project: '', projectName: '', group: TicketGroup.working, assignee: d.who('agent-company-t14').name,
+    d.tickets.add(Ticket(number: 't99', title: 'עוזר: השוואת מחירים', project: '', projectName: '', group: TicketGroup.working, assignee: d.who('agent-company-t14').name,
         status: WorkerStatus.working, assigneeId: 'agent-company-t14', openedBy: 'eli'));
     store.touch();
     await tester.pump();
     final line = tester.widgetList<OpenTasksLine>(find.byType(OpenTasksLine)).where((w) => w.identityId == 'eli').single;
-    expect(openTasksLine(line.tasks), 'רצה: השוואת ביטוחים');
+    expect(openTasksLine(line.tasks), 'רצה: השוואת מחירים');
     expect(line.tasks.single.worker, 'agent-company-t14');
   });
 
@@ -372,25 +372,25 @@ void main() {
   Future<void> headShot(WidgetTester tester, String name) async {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/head/$name.png'));
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/sample_head/$name.png'));
   }
 
   final at19 = DateTime(2026, 10, 20, 19, 0);
 
   testWidgets('head: everything. Burning first and heavier, then what waits, then "since" in one folded line', (tester) async {
     await _pump(tester, earlierWaiting: true, burning: true, summaries: true, chatsSeen: at19);
-    expect(findShown('האתר של לומו לא עונה'), findsOneWidget);
+    expect(findShown('האתר של החנות לא עונה'), findsOneWidget);
     expect(findShown('תקלה בפרודקשן · רותם'), findsOneWidget);
     expect(find.text("4 דק'"), findsOneWidget, reason: 'how long, at the end');
-    final title = tester.widget<RichText>(findShown('האתר של לומו לא עונה'));
+    final title = tester.widget<RichText>(findShown('האתר של החנות לא עונה'));
     expect(title.text.style?.fontWeight ?? (title.text as TextSpan).children?.first.style?.fontWeight, isNotNull);
     // The order: burning, waiting, since.
     double y(String s) => tester.getTopLeft(findShown(s)).dy;
-    expect(y('האתר של לומו לא עונה'), lessThan(y('עדי · GO לפרודקשן')));
+    expect(y('האתר של החנות לא עונה'), lessThan(y('עדי · GO לפרודקשן')));
     expect(y('בועז · GO לפרודקשן'), lessThan(y('מאז 19:00')));
     expect(find.text('ועוד 4'), findsOneWidget);
-    expect(findShown('ורקר 2.6.7 יציב'), findsNothing, reason: 'folded: only the newest sentence');
-    expect(find.bySemanticsLabel(RegExp(r'^בוער, תקלה בפרודקשן, רותם, לפני 4 דקות\. האתר של לומו לא עונה$')), findsOneWidget);
+    expect(findShown('שרת 2.6.7 יציב'), findsNothing, reason: 'folded: only the newest sentence');
+    expect(find.bySemanticsLabel(RegExp(r'^בוער, תקלה בפרודקשן, רותם, לפני 4 דקות\. האתר של החנות לא עונה$')), findsOneWidget);
     expect(find.bySemanticsLabel(RegExp(r'^מחכה לך, GO לפרודקשן, עדי')), findsOneWidget);
     expect(find.bySemanticsLabel('מאז 19:00, הסתיימו 5 דברים'), findsOneWidget);
     await headShot(tester, 'all');
@@ -400,7 +400,7 @@ void main() {
     await _pump(tester, summaries: true, chatsSeen: at19, size: const Size(342, 900));
     await tester.tap(findShown('מאז 19:00'));
     await tester.pump(const Duration(milliseconds: 100));
-    expect(findShown('ורקר 2.6.7 יציב אחרי 24 שעות'), findsOneWidget, reason: 'opening, animated');
+    expect(findShown('שרת 2.6.7 יציב אחרי 24 שעות'), findsOneWidget, reason: 'opening, animated');
     await tester.pumpAndSettle();
     for (final line in _summaries.values) {
       expect(findShown(line), findsWidgets, reason: line);
@@ -408,7 +408,7 @@ void main() {
     await headShot(tester, 'since-open');
     await tester.tap(findShown('מאז 19:00'));
     await tester.pumpAndSettle();
-    expect(findShown('ורקר 2.6.7 יציב'), findsNothing);
+    expect(findShown('שרת 2.6.7 יציב'), findsNothing);
   });
 
   testWidgets('head: quiet. Nothing burns, waits or finished since: no card at all', (tester) async {
@@ -470,7 +470,7 @@ void main() {
     store.touch();
     await tester.pumpAndSettle();
     expect(findShown('תקוע · קרן'), findsOneWidget);
-    expect(findShown('שעת איסוף "לא ידוע" לא נאמרת ללקוח'), findsWidgets);
+    expect(findShown('שעת משלוח "לא ידוע" לא נאמרת ללקוח'), findsWidgets);
   });
 
   testWidgets('leaving the chats tab, or the app, is the visit: "since" starts there, kept for every device', (tester) async {
@@ -499,7 +499,7 @@ void main() {
     expect(sinceLabel(DateTime(2026, 10, 17, 9, 0), _at), 'מאז 17/10');
   });
 
-  // ── the home blocks (lib/ui/blocks), on the real day ──────────────────
+  // ── the home blocks (lib/ui/blocks), on the sample day ──────────────────
 
   Future<BuildContext> blocks(WidgetTester tester, {bool dark = false, double textScale = 1, Size size = const Size(342, 1700)}) async {
     final ctx = await _pump(tester, earlierWaiting: true, burning: true, summaries: true, size: size, dark: dark, textScale: textScale, chatsSeen: DateTime(2026, 10, 20, 19, 0));
@@ -530,7 +530,7 @@ void main() {
                   if (i > 0) const BlockHairline(),
                   ProjectBlock(
                     data: i == 1
-                        ? ProjectLine.fromJson({...ProjectLine.of(d, pr.id).toJson(), 'note': 'קרן מחכה לתשובה מהלקוח על שעת האיסוף'})
+                        ? ProjectLine.fromJson({...ProjectLine.of(d, pr.id).toJson(), 'note': 'קרן מחכה לתשובה מהלקוח על שעת המשלוח'})
                         : ProjectLine.of(d, pr.id),
                     now: _at,
                   ),
@@ -539,7 +539,7 @@ void main() {
             ),
           ),
           BlockCard(label: 'מי עובד עכשיו', child: PeopleBlock(data: PeopleData.of(d))),
-          const BlockCard(child: NoteBlock(data: NoteData(text: 'היום נסגרו 30 משימות בחברה, רובן באפליקציה. לומו בוט מחכה ל-GO שלך מ-19:57.', from: 'adi'))),
+          const BlockCard(child: NoteBlock(data: NoteData(text: 'היום נסגרו 30 משימות בחברה, רובן באפליקציה. בוט ההזמנות מחכה ל-GO שלך מ-19:57.', from: 'adi'))),
           BlockCard(label: 'מאז שהיית פה', child: SinceBlock(data: SinceData.of(d, since: DateTime(2026, 10, 20, 19, 0)), now: _at, max: 3)),
         ]),
       ),
@@ -555,10 +555,10 @@ void main() {
     expect(lanes.from, DateTime(2026, 10, 20, 5), reason: 'the day started at 05:45: from that hour, nothing cut and nothing empty');
     expect(lanes.lanes.first.id, 'agent-company', reason: 'open ones first');
     expect(lanes.lanes.first.running.length, 2);
-    expect(lanes.lanes.firstWhere((l) => l.id == 'lumo-bot').waiting, 1, reason: 'Boaz\'s GO');
+    expect(lanes.lanes.firstWhere((l) => l.id == 'shop-bot').waiting, 1, reason: 'Boaz\'s GO');
     expect(find.text('עכשיו'), findsOneWidget);
-    expect(findShown('עכשיו: שעת איסוף "לא ידוע" לא נאמרת ללקוח · קרן'), findsOneWidget);
-    expect(findShown('שקט · אחרון: ורקר 2.6.10 מוכן לפריסה'), findsOneWidget);
+    expect(findShown('עכשיו: שעת משלוח "לא ידוע" לא נאמרת ללקוח · קרן'), findsOneWidget);
+    expect(findShown('שקט · אחרון: שרת 2.6.10 מוכן לפריסה'), findsOneWidget);
     expect(find.bySemanticsLabel(RegExp(r'^החברה, 2 רצות, \d+ הסתיימו היום, דבר אחד מחכה לך')), findsOneWidget);
     expect(find.bySemanticsLabel(RegExp(r'^\d+ הסתיימו, \d\d:\d\d עד \d\d:\d\d\. ')), findsWidgets, reason: 'dots on the same pixels are one, with a count');
     await headShot(tester, 'blocks');
@@ -566,7 +566,7 @@ void main() {
     await tester.tap(find.bySemanticsLabel(RegExp(r'^\d+ הסתיימו, ')).first);
     await tester.pumpAndSettle();
     expect(find.byWidgetPredicate((w) => w is RichText && RegExp(r'^\d+ הסתיימו · מ-\d\d:\d\d עד \d\d:\d\d$').hasMatch(stripBidi(w.text.toPlainText()).trim())), findsOneWidget);
-    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/head/blocks-bubble.png'));
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/sample_head/blocks-bubble.png'));
   });
 
   testWidgets('blocks: dark and text at 130%', (tester) async {
@@ -581,8 +581,8 @@ void main() {
     final d = _data(earlierWaiting: true, summaries: true);
     final lanes = LanesData.of(d, now: _at);
     expect(jsonEncode(LanesData.fromJson(jsonDecode(jsonEncode(lanes.toJson())) as Map<String, dynamic>).toJson()), jsonEncode(lanes.toJson()));
-    final pl = ProjectLine.of(d, 'voice-bot');
-    expect(pl.now, 'שעת איסוף "לא ידוע" לא נאמרת ללקוח');
+    final pl = ProjectLine.of(d, 'voice');
+    expect(pl.now, 'שעת משלוח "לא ידוע" לא נאמרת ללקוח');
     expect(ProjectLine.fromJson(pl.toJson()).toJson(), pl.toJson());
     final since = SinceData.of(d, since: DateTime(2026, 10, 20, 19, 0));
     expect(since.items.first.text, _summaries[51]);
@@ -632,7 +632,7 @@ void main() {
 
   test('project: each worker once in who', () {
     final d = _data();
-    final pl = ProjectLine.of(d, 'tiki-bot-go');
+    final pl = ProjectLine.of(d, 'support');
     expect(ProjectLine.fromJson({...pl.toJson(), 'who': ['keren', 'keren']}).who.length, 2, reason: 'JSON is taken as given');
     expect(ProjectLine.of(d, 'agent-company').who.toSet().length, ProjectLine.of(d, 'agent-company').who.length, reason: 'each worker once');
   });

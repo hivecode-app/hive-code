@@ -18,7 +18,6 @@
     "test:contract": "node --test scripts/check-contract.test.mjs",
     "canary": "node scripts/canary.mjs",
     "smoke": "node scripts/smoke-shift-host.mjs",
-    "test:vscode-workspace": "node --test scripts/vscode-workspace.test.mjs",
     "test:deploy": "node --test scripts/caddy-main.test.mjs scripts/deploy-report.test.mjs scripts/split-links.test.mjs scripts/company-home-check.test.mjs scripts/install.test.mjs scripts/engine.test.mjs scripts/company-doctor.test.mjs scripts/company-update.test.mjs"
   },
   "devDependencies": {
