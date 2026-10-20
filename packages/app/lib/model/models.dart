@@ -223,7 +223,33 @@ class ConversationSummary {
   /// Extra text after the status ("· יואב פתח לו עוזר").
   final String? extra;
   final bool pinned;
+
+  /// Muted (hq `muted_until`): its count shows, but it alerts nothing and stays out of the total.
   final bool muted;
+
+  ConversationSummary copyWith({int? unread, bool? muted}) => ConversationSummary(
+        identityId: identityId,
+        lastLine: lastLine,
+        time: time,
+        lastIsMine: lastIsMine,
+        unread: unread ?? this.unread,
+        diffStat: diffStat,
+        extra: extra,
+        pinned: pinned,
+        muted: muted ?? this.muted,
+      );
+}
+
+/// How long "השתקה" lasts (hq `POST /api/conversations/:id/mute {for}`); [off] is "ביטול השתקה".
+enum MuteFor {
+  hours8('8h', '8 שעות'),
+  week('week', 'שבוע'),
+  always('always', 'תמיד'),
+  off('off', 'ביטול השתקה');
+
+  const MuteFor(this.wire, this.label);
+  final String wire;
+  final String label;
 }
 
 // ───────────────────────────── chat items (chat.md §2, §8) ─────────────────────────────

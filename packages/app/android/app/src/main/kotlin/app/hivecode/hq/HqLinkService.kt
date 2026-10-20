@@ -4,8 +4,8 @@ package app.hivecode.hq
  * HqLinkService: the push transport, self-hosted.
  *
  * The phone keeps one WebSocket to hq (`/ws?after=<seq>`) open from a foreground service on the
- * "service" channel (APP-SPEC §5.2, minimal importance). On every inbox or ask event it refetches
- * /api/inbox, /api/asks and /api/board and re-posts the notifications itself. No Firebase: there is
+ * "service" channel (APP-SPEC §5.2, minimal importance). On every inbox, ask or conversation event it
+ * refetches /api/inbox, /api/asks, /api/board and /api/conversations and re-posts the notifications itself. No Firebase: there is
  * no project for it and the company should not depend on Google to reach its owner.
  *
  * The alternative is UnifiedPush through an ntfy server on hq-host: no permanent connection held
@@ -132,9 +132,10 @@ class HqLinkService : Service() {
                 when {
                     // End of replay: whatever happened while we were away, one refresh covers it.
                     type == "live" -> { live = true; refreshDebounced() }
-                    // Inbox and asks change what is shown; toggles change what may alert; shifts change "עצירה".
+                    // Inbox and asks change what is shown; toggles change what may alert; shifts change "עצירה";
+                    // conv.* is a worker's message that may alert, or one read or muted on any device.
                     live && (type.startsWith("inbox.") || type.startsWith("ask.") || type == "toggle.changed" ||
-                        type == "shift.state") -> refreshDebounced()
+                        type == "shift.state" || type.startsWith("conv.")) -> refreshDebounced()
                 }
             }
         }

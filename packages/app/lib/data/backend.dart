@@ -59,6 +59,11 @@ class CompanyData {
 
   int get waitingCount => waiting.where((w) => w.state == WaitState.open || w.state == WaitState.pending).length;
 
+  /// The number on "שיחות" and the app icon: unread messages, muted conversations left out (as in WhatsApp).
+  int get unreadCount => conversations.fold(0, (n, c) => c.muted ? n : n + c.unread);
+
+  ConversationSummary? conversation(String identityId) => conversations.where((c) => c.identityId == identityId).firstOrNull;
+
   Identity who(String id) => identities[id] ?? (id == kSystemId ? kSystem : Identity(id: id, name: id, title: '', teamId: ''));
 
   /// A worker the owner can talk to. hq itself (the accounts manager, pairing, failures) is not:
@@ -164,4 +169,11 @@ abstract class Backend extends ChangeNotifier {
   /// That screen left: what arrives for it from now on is not "read" (unless another screen for
   /// the same worker is still showing).
   void closeConversation(String identityId) {}
+
+  /// The app came to the front or went to the background: an open conversation is read only while he sees it,
+  /// and a message there alerts him only when he doesn't.
+  void setVisible(bool visible) {}
+
+  /// "השתקה" for 8 hours, a week or always, or its undo; kept on the server, the same on every device.
+  Future<CommandResult> mute(String identityId, MuteFor duration) async => const CommandResult.fail('השתקה לא זמינה כאן.');
 }

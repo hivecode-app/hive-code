@@ -34,8 +34,11 @@ class FakeBackend extends Backend {
     if (simulate) _streamDana();
   }
 
+  bool _disposed = false;
+
   @override
   void dispose() {
+    _disposed = true;
     for (final t in _timers) {
       t.cancel();
     }
@@ -186,6 +189,27 @@ class FakeBackend extends Backend {
     chat!.items.remove(m);
     notifyListeners();
     return const CommandResult.ok();
+  }
+
+  /// Opening a conversation reads it, as on hq.
+  @override
+  void showConversation(String identityId) => _setConv(identityId, (c) => c.copyWith(unread: 0));
+
+  @override
+  Future<CommandResult> mute(String identityId, MuteFor duration) async {
+    _setConv(identityId, (c) => c.copyWith(muted: duration != MuteFor.off));
+    return const CommandResult.ok();
+  }
+
+  void _setConv(String identityId, ConversationSummary Function(ConversationSummary) f) {
+    final convs = _data?.conversations;
+    final i = convs?.indexWhere((c) => c.identityId == identityId) ?? -1;
+    if (i < 0) return;
+    convs![i] = f(convs[i]);
+    // Called from a screen being built (ChatScreen.didChangeDependencies): redraw after this frame's build.
+    scheduleMicrotask(() {
+      if (!_disposed) notifyListeners();
+    });
   }
 
   @override
@@ -444,7 +468,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
     ConversationSummary(identityId: 'noa', lastLine: 'מריצה `flutter test` על הנגן ב-web', time: '14:05', diffStat: '+31 −6'),
     ConversationSummary(identityId: 'itai', lastLine: 'אותה בדיקה נכשלת כבר 20 דקות', time: '13:44', extra: '· יואב פתח לו עוזר'),
     ConversationSummary(identityId: 'amit', lastLine: 'נדרש קוד אימות ל-Mercury', time: '14:04', lastIsMine: true),
-    ConversationSummary(identityId: 'noga', lastLine: '14 זיכרונות כפולים אוחדו הלילה', time: '13:57'),
+    ConversationSummary(identityId: 'noga', lastLine: '14 זיכרונות כפולים אוחדו הלילה', time: '13:57', unread: 3, muted: true),
     ConversationSummary(identityId: 'eli', lastLine: 'הפוליסה חודשה. אין צורך לעשות דבר.', time: 'אתמול'),
   ];
 
@@ -512,7 +536,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
       TeamActivity(symbol: 'build', team: 'החברה', line: 'נגה כותבת את הדוח השבועי'),
       TeamActivity(symbol: 'graphic_eq', team: 'voice-bot', line: 'רדום · הניטור ממשיך', dormant: true),
     ],
-    conversations: convs,
+    conversations: [...convs],
     chats: chats,
     tickets: tickets,
     ticketDetails: {'#3711': detail},

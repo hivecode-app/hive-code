@@ -28,6 +28,12 @@ class HqClient(private val baseUrl: String, private val token: String) {
     fun asksJson(): String = get("/api/asks")
     fun boardJson(): String = get("/api/board")
     fun togglesJson(): String = get("/api/toggles")
+    fun conversationsJson(): String = get("/api/conversations")
+
+    /** He read the conversation (a tap on "סימון כנקרא"): clears it on every device. */
+    fun markRead(identityId: String) {
+        post("/api/conversations/${enc(identityId)}/read", JSONObject())
+    }
 
     fun answerAsk(askId: String, answer: String) {
         post("/api/asks/${enc(askId)}/answer", JSONObject().put("answer", answer).put("by", "owner"))

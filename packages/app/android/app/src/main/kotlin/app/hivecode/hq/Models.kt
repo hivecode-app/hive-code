@@ -46,6 +46,23 @@ data class Identity(
     val shiftLive: Boolean,
 )
 
+/** One unread message from a worker, as its notification shows it. */
+data class ConvMessage(val id: String, val body: String, val createdAt: Long)
+
+/** One conversation's state on hq (GET /api/conversations): unread, mute, and the newest message allowed to alert. */
+data class ConvState(
+    val identity: String,
+    /** "דנה · מנכ"לית לומו". */
+    val title: String,
+    val unread: Int,
+    val readAt: Long,
+    /** Null = not muted. hq already left a muted one's messages out of alertAt. */
+    val mutedUntil: Long?,
+    val alertAt: Long?,
+    /** Newest unread messages, oldest first. */
+    val recent: List<ConvMessage>,
+)
+
 /** Everything the notification surface needs at one moment, from hq. */
 data class Snapshot(
     val items: List<InboxItem>,
@@ -53,6 +70,8 @@ data class Snapshot(
     val identities: Map<String, Identity>,
     /** Focus or night is on: only an urgent production incident may alert (APP-SPEC §5.5). */
     val quiet: Boolean,
+    /** The owner's conversations (unread, mute). Empty from an hq without them. */
+    val convs: List<ConvState> = emptyList(),
 ) {
     companion object {
         val EMPTY = Snapshot(emptyList(), emptyMap(), emptyMap(), false)
@@ -110,6 +129,23 @@ object HqJson {
                 shiftLive = shiftState == "live" || shiftState == "starting",
             )
         }.associateBy { it.id }
+    }
+
+    fun conversations(json: String): List<ConvState> {
+        val arr = JSONObject(json).optJSONArray("conversations") ?: return emptyList()
+        return arr.objects().map { o ->
+            ConvState(
+                identity = o.getString("identity"),
+                title = o.optString("title").ifBlank { o.getString("identity") },
+                unread = o.optInt("unread"),
+                readAt = o.optLong("read_at"),
+                mutedUntil = if (o.isNull("muted_until")) null else o.optLong("muted_until"),
+                alertAt = if (o.isNull("alert_at") || !o.has("alert_at")) null else o.optLong("alert_at"),
+                recent = o.optJSONArray("recent")?.objects()?.map {
+                    ConvMessage(it.optString("id"), it.optString("body"), it.optLong("created_at"))
+                } ?: emptyList(),
+            )
+        }
     }
 
     fun toggles(json: String): Map<String, Boolean> {

@@ -60,10 +60,14 @@ class AppStore extends ChangeNotifier {
   /// Desktop: which conversation is open in the main column.
   String? selectedConversation;
 
-  /// Desktop selection with a default: the first conversation with something unread, else Yoav.
+  /// Desktop selection with a default: the first conversation with something unread (not muted), else Yoav.
+  /// The default sticks once data is in: opening it reads it, and the selection must not then jump to the next unread one.
   String get currentConversation {
     final convs = data?.conversations ?? const [];
-    return selectedConversation ?? (convs.where((c) => c.unread > 0).firstOrNull ?? convs.where((c) => c.pinned).firstOrNull ?? convs.firstOrNull)?.identityId ?? 'yoav';
+    final pick = selectedConversation ??
+        (convs.where((c) => c.unread > 0 && !c.muted).firstOrNull ?? convs.where((c) => c.pinned).firstOrNull ?? convs.firstOrNull)?.identityId;
+    if (pick != null && data != null) selectedConversation = pick;
+    return pick ?? 'yoav';
   }
 
   /// Last error to show as a dismissable bar ("הבנתי"), never a self-hiding snackbar (design-taste E16).
@@ -302,6 +306,11 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> stop(String identityId) async => _check(await backend.stop(identityId));
+
+  Future<void> mute(String identityId, MuteFor duration) async {
+    _check(await backend.mute(identityId, duration));
+    notifyListeners();
+  }
 
   Future<void> toggleAutomation(Automation a) async {
     final on = !a.enabled;

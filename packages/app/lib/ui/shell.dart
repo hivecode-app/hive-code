@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../data/backend.dart';
 import '../data/store.dart';
 import '../theme/tokens.dart';
 import 'board/board_screen.dart';
@@ -115,7 +116,7 @@ const kDests = [
 ];
 
 /// Mockup `.nav`: 72dp, pill 56x30 in accent-soft on the active tab, FILL 1 icon,
-/// count on home = things waiting for you, dot on chats = unread (APP-SPEC §3).
+/// count on home = things waiting for you, count on chats = unread messages, muted ones left out.
 class BottomNav extends StatelessWidget {
   const BottomNav({super.key});
   @override
@@ -123,7 +124,6 @@ class BottomNav extends StatelessWidget {
     final nav = NavScope.of(context);
     final d = StoreScope.of(context).data;
     final p = context.p;
-    final unread = d?.conversations.any((c) => c.unread > 0) ?? false;
     return Container(
       height: 72,
       decoration: BoxDecoration(color: p.surface, border: Border(top: BorderSide(color: p.line))),
@@ -133,8 +133,7 @@ class BottomNav extends StatelessWidget {
             child: NavItem(
               dest: dest,
               on: nav.tab == dest.tab,
-              count: dest.tab == AppTab.home ? d?.waitingCount : null,
-              dot: dest.tab == AppTab.convs && unread && nav.tab != AppTab.convs,
+              count: navCount(dest.tab, d),
               onTap: () => nav.go(dest.tab),
             ),
           ),
@@ -142,6 +141,13 @@ class BottomNav extends StatelessWidget {
     );
   }
 }
+
+/// The number on a tab: "בית" counts what waits for him, "שיחות" the messages he hasn't read.
+int? navCount(AppTab tab, CompanyData? d) => switch (tab) {
+      AppTab.home => d?.waitingCount,
+      AppTab.convs => d?.unreadCount,
+      _ => null,
+    };
 
 class NavItem extends StatelessWidget {
   const NavItem({super.key, required this.dest, required this.on, this.count, this.dot = false, this.warn = false, required this.onTap, this.pillWidth = 56, this.fontSize = 12});
@@ -161,7 +167,7 @@ class NavItem extends StatelessWidget {
     return Semantics(
       selected: on,
       button: true,
-      label: count != null && count! > 0 ? '${dest.label}, $count מחכים לך' : dest.label,
+      label: count != null && count! > 0 ? '${dest.label}, $count ${dest.tab == AppTab.convs ? 'לא נקראו' : 'מחכים לך'}' : dest.label,
       child: InkWell(
         onTap: onTap,
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [

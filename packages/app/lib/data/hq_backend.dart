@@ -4,6 +4,7 @@
 //   POST /api/asks/:id/answer  /api/inbox/:id/{done,dismiss,snooze,ack}  /api/messages/tell  /api/shifts/:id/interrupt
 //   POST /api/uploads (raw image bytes) → {upload:{id,…}}  ·  GET /api/uploads/:id (the bytes)
 //   PUT  /api/toggles/:key
+//   GET  /api/conversations  ·  POST /api/conversations/:id/{read,mute}  ·  PUT /api/presence {identity}
 //   WS   /ws?after=<seq>  (replay, then {type:'live'}, then live events; deltas have seq 0)
 // The app reaches hq through Caddy at <base>/hq (deploy/caddy/agent-company.caddy).
 import 'dart:async';
@@ -137,6 +138,8 @@ class HqBackend extends Backend {
     _replayGuard?.cancel();
     _onlineAgain?.cancel();
     _saveTimer?.cancel();
+    _heartbeat?.cancel();
+    _convsSoon?.cancel();
     _retry?.cancel();
     _refresh?.cancel();
     _wsSub?.cancel();
@@ -227,6 +230,7 @@ class HqBackend extends Backend {
     if (d == null) return;
     try {
       final res = (await _get('/api/messages?identity=owner&limit=200')) as Map<String, dynamic>;
+      await _loadConvs();
       final now = _data;
       if (now == null) return;
       _applyLastLines(now, res);
@@ -234,6 +238,34 @@ class HqBackend extends Backend {
       notifyListeners();
       _saveSoon();
     } catch (_) {}
+  }
+
+  /// hq's unread count and mute per conversation (GET /api/conversations); null from an hq without it.
+  Map<String, Map<String, dynamic>>? _convs;
+
+  Future<void> _loadConvs() async {
+    try {
+      final res = (await _get('/api/conversations')) as Map<String, dynamic>;
+      _convs = {for (final c in _list(res, 'conversations')) c['identity'] as String: c};
+    } catch (_) {
+      // An older hq (404) or a blip: the counts keep what they had.
+    }
+  }
+
+  /// A conversation read or muted on any device: fresh counts from hq, applied in place.
+  Timer? _convsSoon;
+  void _refreshConvs() {
+    _convsSoon?.cancel();
+    _convsSoon = Timer(const Duration(milliseconds: 300), () async {
+      await _loadConvs();
+      final d = _data, convs = _convs;
+      if (d == null || convs == null) return;
+      for (final (i, c) in d.conversations.indexed) {
+        final st = convs[c.identityId];
+        if (st != null) d.conversations[i] = c.copyWith(unread: openIdentity == c.identityId && _visible ? 0 : st['unread'] as int? ?? 0, muted: st['muted_until'] != null);
+      }
+      notifyListeners();
+    });
   }
 
   /// The owner's latest messages (raw /api/messages), kept for ordering the conversation list.
@@ -247,13 +279,20 @@ class HqBackend extends Backend {
       final other = m['from_identity'] == 'owner' ? m['to_identity'] as String : m['from_identity'] as String;
       if (other == kSystemId || !seen.add(other)) continue; // the system has no conversation (#55)
       final i = d.conversations.indexWhere((c) => c.identityId == other);
+      final st = _convs?[other];
       final c = ConversationSummary(
         identityId: other,
         lastLine: (m['from_identity'] == 'owner' ? 'את/ה: ' : '') + lastLineOf(m),
         time: _hm(m['created_at'] as int),
         lastIsMine: m['from_identity'] != 'owner',
-        unread: m['to_identity'] == 'owner' && m['state'] != 'handled' && openIdentity != other ? 1 : 0,
+        // hq's count, read on any device; an hq without it: the latest message, until it is handled.
+        unread: openIdentity == other && _visible
+            ? 0
+            : st != null
+                ? st['unread'] as int? ?? 0
+                : (m['to_identity'] == 'owner' && m['state'] != 'handled' ? 1 : 0),
         pinned: other == 'yoav',
+        muted: st?['muted_until'] != null,
       );
       if (i >= 0) {
         d.conversations[i] = c;
@@ -443,6 +482,7 @@ class HqBackend extends Backend {
     if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'task.new' || type == 'task.state' || type == 'toggle.changed' || type.startsWith('watchdog.')) {
       _refreshSoon();
     }
+    if (type == 'conv.read' || type == 'conv.muted') _refreshConvs();
     // The first replay is history the snapshot and openConversation already cover: building chats
     // from it only cost time at start.
     if (_skipEngineReplay && _replaying && type.startsWith('engine.')) return;
@@ -472,7 +512,10 @@ class HqBackend extends Backend {
           if (!streamedAlready(chat.items, m)) {
             chat.items.add(TextMsg(id: 'msg:${m['id']}', ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int), text: m['body'] as String));
           }
-          if (openIdentity == from) unawaited(_send('POST', '/api/messages/${Uri.encodeComponent(m['id'] as String)}/handled'));
+          if (openIdentity == from) {
+            unawaited(_send('POST', '/api/messages/${Uri.encodeComponent(m['id'] as String)}/handled'));
+            if (_visible) _markRead(from);
+          }
           _bumpConversation(from, m['body'] as String, m['created_at'] as int);
           notifyListeners();
         }
@@ -541,7 +584,85 @@ class HqBackend extends Backend {
   final _shown = <String>[];
 
   @override
-  void showConversation(String identityId) => _shown.add(identityId);
+  void showConversation(String identityId) {
+    _shown.add(identityId);
+    _onScreenChanged();
+  }
+
+  /// The app is in front (AppLifecycleListener in main.dart): an open conversation is read only while he sees it.
+  bool _visible = true;
+  Timer? _heartbeat;
+
+  @override
+  void setVisible(bool visible) {
+    if (_visible == visible) return;
+    _visible = visible;
+    _onScreenChanged();
+  }
+
+  /// Read what is on screen, and tell hq which conversation is there so a message in it doesn't alert him.
+  /// Said again every 30 s while it stays (hq forgets a screen after 60 s: a killed app must not mute him).
+  void _onScreenChanged() {
+    final open = _visible ? openIdentity : null;
+    if (open != null) _markRead(open);
+    _sayPresence(open);
+    _heartbeat?.cancel();
+    _heartbeat = open == null
+        ? null
+        : Timer.periodic(const Duration(seconds: 30), (_) {
+            final now = _visible ? openIdentity : null;
+            if (now != null) _sayPresence(now);
+          });
+  }
+
+  /// One presence request at a time, the latest value last: switching chats sends "closed" and "opened" back to
+  /// back, and if they crossed on the way hq would keep the wrong one for 30 s.
+  String? _presenceWanted;
+  bool _presenceBusy = false;
+  void _sayPresence(String? identity) {
+    _presenceWanted = identity;
+    if (_presenceBusy) return;
+    _presenceBusy = true;
+    unawaited(() async {
+      try {
+        String? sent;
+        do {
+          sent = _presenceWanted;
+          await _send('PUT', '/api/presence', {'identity': sent});
+        } while (!_disposed && sent != _presenceWanted);
+      } finally {
+        _presenceBusy = false;
+      }
+    }());
+  }
+
+  void _markRead(String identityId) {
+    final d = _data;
+    final i = d?.conversations.indexWhere((c) => c.identityId == identityId) ?? -1;
+    if (i >= 0 && d!.conversations[i].unread > 0) {
+      d.conversations[i] = d.conversations[i].copyWith(unread: 0);
+      // Called from a screen being built (ChatScreen.didChangeDependencies): redraw after this frame's build.
+      scheduleMicrotask(notifyListeners);
+    }
+    final st = _convs?[identityId];
+    if (st != null) st['unread'] = 0;
+    unawaited(_send('POST', '/api/conversations/${Uri.encodeComponent(identityId)}/read'));
+  }
+
+  @override
+  Future<CommandResult> mute(String identityId, MuteFor duration) async {
+    final r = await _send('POST', '/api/conversations/${Uri.encodeComponent(identityId)}/mute', {'for': duration.wire}, (j) {
+      final c = j['conversation'];
+      if (c is Map<String, dynamic>) (_convs ??= {})[identityId] = c;
+    });
+    final d = _data;
+    final i = d?.conversations.indexWhere((c) => c.identityId == identityId) ?? -1;
+    if (r.ok && i >= 0) {
+      d!.conversations[i] = d.conversations[i].copyWith(muted: duration != MuteFor.off);
+      notifyListeners();
+    }
+    return r;
+  }
 
   void _bumpConversation(String id, String line, int ts) {
     final d = _data;
@@ -555,20 +676,24 @@ class HqBackend extends Backend {
       _lastLines = {'messages': list};
     }
     final i = d.conversations.indexWhere((c) => c.identityId == id);
+    final prev = i >= 0 ? d.conversations[i] : null;
+    // The first replay's tail is old news (the snapshot already counted it): only a live message adds one.
+    final read = (openIdentity == id && _visible) || (_skipEngineReplay && _replaying);
+    final unread = read ? (openIdentity == id ? 0 : prev?.unread ?? 0) : (prev?.unread ?? 0) + 1;
+    final st = _convs?[id];
+    if (st != null) st['unread'] = unread; // so a reload before hq's next count doesn't take it back
     final c = ConversationSummary(
       identityId: id,
       lastLine: line.split('\n').first,
       time: _hm(ts),
       lastIsMine: true,
-      // The first replay's tail is old news (already handled): don't mark it unread.
-      unread: openIdentity == id || (_skipEngineReplay && _replaying) ? 0 : 1,
-      pinned: i >= 0 && d.conversations[i].pinned,
+      unread: unread,
+      pinned: prev?.pinned ?? false,
+      muted: prev?.muted ?? false,
     );
-    if (i >= 0) {
-      d.conversations[i] = c;
-    } else {
-      d.conversations.add(c);
-    }
+    // Newest first, as in WhatsApp: a new message brings its conversation to the top of "אחרון".
+    if (i >= 0) d.conversations.removeAt(i);
+    d.conversations.insert(0, c);
   }
 
   @override
@@ -654,6 +779,7 @@ class HqBackend extends Backend {
   void closeConversation(String identityId) {
     final i = _shown.lastIndexOf(identityId);
     if (i >= 0) _shown.removeAt(i);
+    if (!_disposed) _onScreenChanged();
   }
 
   /// Question and GO cards follow the inbox: one appears in the conversation of whoever asked, and

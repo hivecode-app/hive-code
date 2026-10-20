@@ -17,6 +17,7 @@ object Wording {
     const val CANCEL = "ביטול"
     const val RETRY = "ניסיון נוסף"
     const val ME = "אני"
+    const val MARK_READ = "סימון כנקרא"
 
     const val SUBTEXT_URGENT = "דחוף בפרודקשן"
     const val SUBTEXT_HANDOFF = "כניסה לאתר"
@@ -37,7 +38,7 @@ object Wording {
 
     fun failed(reason: String): String = "לא נשלח · $reason"
 
-    /** The group summary and launcher badge text. N is the waiting count (§5.6), not unread messages. */
+    /** The group summary text. N is the waiting count (§5.6); unread messages carry their own number. */
     fun summary(count: Int): String = when {
         count <= 0 -> "אין דברים שמחכים לך"
         count == 1 -> "דבר אחד מחכה לך"

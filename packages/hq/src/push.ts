@@ -1,6 +1,7 @@
-// Web Push (VAPID) for "blocked on you" only, with Telegram as fallback (B.8).
-// Fallback fires when there is no subscription, when every push fails, or when an urgent push
-// is not acknowledged within pushAckTimeoutMs. A failed send is always visible (event + push_error).
+// Web Push (VAPID) for "blocked on you", with Telegram as fallback (B.8), and for a worker's message to him
+// (conversations.ts decides which ones may alert). Fallback fires when there is no subscription, when every push
+// fails, or when an urgent push is not acknowledged within pushAckTimeoutMs. A failed send is always visible
+// (event + push_error). Messages have no Telegram fallback: the phone gets them over its link (conv.alert).
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -70,8 +71,26 @@ export class Pusher {
   async notify(item: InboxItemDTO): Promise<void> {
     if (!this.store.toggle('push')) return;
     if (!pushWorthy(item, this.store.toggle('focus'))) return;
-    const subs = this.store.db.prepare('SELECT endpoint, keys FROM push_subscriptions').all() as { endpoint: string; keys: string }[];
     const payload = JSON.stringify({ id: item.id, kind: item.kind, title: item.title, body: item.body.slice(0, 300), url: `/?inbox=${item.id}` });
+    const { delivered, errors } = await this.sendAll(payload);
+    const err = delivered ? null : (errors.join('; ') || 'no push subscription');
+    this.inbox.markPushed(item.id, err);
+    this.store.emit(delivered ? 'push.sent' : 'push.failed', item.from_identity, { inbox: item.id, delivered, errors });
+    if (!delivered) await this.toTelegram(item, 'push לא נמסר');
+  }
+
+  /** A worker's message that may alert him: "דנה · מנכ"לית לומו" and its first lines; a tap opens the conversation. */
+  async notifyMessage(m: { identity: string; title: string; body: string; message: string }): Promise<void> {
+    const subs = (this.store.db.prepare('SELECT COUNT(*) n FROM push_subscriptions').get() as { n: number }).n;
+    if (!subs) return; // no browser subscribed: the phone has it over its link, nothing failed
+    const payload = JSON.stringify({ kind: 'message', identity: m.identity, message: m.message, title: m.title, body: m.body,
+      tag: `chat-${m.identity}`, url: `/?chat=${encodeURIComponent(m.identity)}` });
+    const { delivered, errors } = await this.sendAll(payload);
+    if (!delivered) this.store.emit('push.failed', m.identity, { message: m.message, delivered, errors });
+  }
+
+  private async sendAll(payload: string): Promise<{ delivered: number; errors: string[] }> {
+    const subs = this.store.db.prepare('SELECT endpoint, keys FROM push_subscriptions').all() as { endpoint: string; keys: string }[];
     let delivered = 0;
     const errors: string[] = [];
     for (const s of subs) {
@@ -86,10 +105,7 @@ export class Pusher {
         else this.store.db.prepare('UPDATE push_subscriptions SET failures = failures + 1 WHERE endpoint = ?').run(s.endpoint);
       }
     }
-    const err = delivered ? null : (errors.join('; ') || 'no push subscription');
-    this.inbox.markPushed(item.id, err);
-    this.store.emit(delivered ? 'push.sent' : 'push.failed', item.from_identity, { inbox: item.id, delivered, errors });
-    if (!delivered) await this.toTelegram(item, 'push לא נמסר');
+    return { delivered, errors };
   }
 
   /** Sweep: pushed but not acknowledged within the window → Telegram as well (B.8). */

@@ -7,6 +7,7 @@ import type { HqConfig } from './config.ts';
 import { Store } from './store.ts';
 import { syncOrg, getIdentity, listIdentities, listProjects, renameTaskWorkers } from './org.ts';
 import { Inbox } from './inbox.ts';
+import { Conversations } from './conversations.ts';
 import { ShiftManager, TemplateLauncher, type Launcher, type ConnectionFactory } from './shifts.ts';
 import { Mailbox, noForeignInjector, type ForeignInjector } from './mailbox.ts';
 import { Uploads } from './uploads.ts';
@@ -62,6 +63,7 @@ export class Hq {
   readonly store: Store;
   readonly auth: Auth;
   readonly inbox: Inbox;
+  readonly conversations: Conversations;
   readonly shifts: ShiftManager;
   readonly mailbox: Mailbox;
   readonly uploads: Uploads;
@@ -102,6 +104,8 @@ export class Hq {
     this.ingest = new Ingest(this, deps.ticketer);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
+    this.conversations = new Conversations(this.store, (id) => this.conversationTitle(id));
+    this.conversations.setAlert((m) => this.store.bg(this.pusher.notifyMessage(m), 'push.message'));
     this.shifts.on('delta', (row, ev) => this.store.publish('engine.delta', row.identity, { shift: row.id, ...ev }));
     this.shifts.on('launchFailed', (identity, shiftId, err) => {
       this.store.emit('shift.launch_failed', identity, { shift: shiftId, error: err.message });
@@ -121,6 +125,25 @@ export class Hq {
       t.get(key)!.members.push(i.id);
     }
     return [...t.values()];
+  }
+
+  /** "קרן · מפתחת · voice-bot": the worker, its title, and the project its team works on when the title doesn't say it. */
+  conversationTitle(id: string): string {
+    const i = getIdentity(this.store, id);
+    if (!i) return id;
+    const project = i.team_kind === 'project' && i.project ? this.projectName(i.project) : null;
+    const title = i.title && project && !i.title.includes(project) ? `${i.title} · ${project}` : i.title || project || '';
+    return title ? `${i.name} · ${title}` : i.name;
+  }
+
+  /** org.yaml is read at most once a minute for names: a list of every conversation asks once per row. */
+  private projectNames: { at: number; names: Map<string, string | null> } | null = null;
+  private projectName(id: string): string {
+    const now = Date.now();
+    if (!this.projectNames || now - this.projectNames.at > 60_000) {
+      this.projectNames = { at: now, names: new Map(this.projects().map((p) => [p.id, p.name])) };
+    }
+    return this.projectNames.names.get(id) ?? id;
   }
 
   /** The projects in org.yaml with their charter status (the board's filter, APP-SPEC §4.5). */

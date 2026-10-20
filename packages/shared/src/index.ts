@@ -102,6 +102,28 @@ export interface HqEvent {
 
 export const OWNER: IdentityId = 'owner';
 
+/** `muted_until` of a conversation muted "תמיד". */
+export const MUTE_FOREVER = 8_640_000_000_000_000;
+
+/** One conversation as he sees it (WhatsApp): what he hasn't read yet, and whether it may alert him. */
+export interface ConversationStateDTO {
+  identity: IdentityId;
+  /** "דנה · מנכ"לית לומו": the notification's title. */
+  title: string;
+  /** Messages from the worker to him after `read_at`. */
+  unread: number;
+  /** He has read everything in it up to here (epoch ms), on any device. */
+  read_at: number;
+  /** Muted until (epoch ms; MUTE_FOREVER = always). Null = not muted. A muted conversation counts, but never alerts. */
+  muted_until: number | null;
+  /** created_at of the newest message that was allowed to alert him. A device alerts when it is newer than `read_at`. */
+  alert_at: number | null;
+  /** The newest message either way. */
+  last_at: number | null;
+  /** The newest unread messages from the worker (oldest first, at most 5): what a notification shows. */
+  recent: { id: string; body: string; created_at: number }[];
+}
+
 // Priority, EngineEvent, HostToHq/HqToHost frames: see shift-protocol.ts (engine lane).
 export * from './shift-protocol.ts';
 export * from './company-api.ts';

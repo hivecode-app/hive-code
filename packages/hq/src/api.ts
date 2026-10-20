@@ -11,6 +11,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import type { Hq } from './hq.ts';
 import { AuthError, type Caller } from './auth.ts';
 import { proxyDictate } from './dictate.ts';
+import { MUTE_FOR } from './conversations.ts';
 import { readRaw, UploadError } from './uploads.ts';
 import { OWNER } from '@company/shared';
 
@@ -162,6 +163,24 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     }) };
   });
   route('POST', '/api/messages/:id/handled', ({ params }) => ({ ok: hq.mailbox.markHandled(decodeURIComponent(params[0]!)) }));
+
+  // His conversations as in WhatsApp (conversations.ts): unread per conversation, read on any device, mute.
+  route('GET', '/api/conversations', () => ({ conversations: hq.conversations.list(), unread_total: hq.conversations.unreadTotal() }));
+  route('POST', '/api/conversations/:id/read', ({ params }) => ({ conversation: hq.conversations.markRead(decodeURIComponent(params[0]!)) }));
+  route('POST', '/api/conversations/:id/mute', async ({ params, body }) => {
+    const b = await body();
+    const duration = oneOf(b.for, MUTE_FOR, 'for');
+    if (!duration) throw new HttpError(400, 'for is required');
+    return { conversation: hq.conversations.mute(decodeURIComponent(params[0]!), duration) };
+  });
+  // The conversation open on this device's screen right now (null = none, or the app is in the background):
+  // a message there doesn't alert him. Said again every 30 s while it stays open.
+  route('PUT', '/api/presence', async ({ body, caller }) => {
+    const b = await body();
+    hq.conversations.setScreen(caller.kind === 'device' ? `device:${caller.id}` : `admin:${str(b.device, 'device', false) ?? ''}`,
+      str(b.identity, 'identity', false) ?? null);
+    return { ok: true };
+  });
 
   route('GET', '/api/asks', () => ({ asks: hq.mailbox.openAsks() }));
   route('POST', '/api/asks', async ({ body }) => {

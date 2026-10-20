@@ -25,7 +25,7 @@ class Prefs(context: Context) {
 
     fun clearConfig() = p.edit {
         remove(K_BASE); remove(K_TOKEN); remove(K_SEQ)
-        remove(K_INBOX); remove(K_ASKS); remove(K_BOARD); remove(K_TOGGLES)
+        remove(K_INBOX); remove(K_ASKS); remove(K_BOARD); remove(K_TOGGLES); remove(K_CONVS)
     }
 
     /**
@@ -47,6 +47,33 @@ class Prefs(context: Context) {
     var asksJson: String? by string(K_ASKS)
     var boardJson: String? by string(K_BOARD)
     var togglesJson: String? by string(K_TOGGLES)
+    var conversationsJson: String? by string(K_CONVS)
+
+    /** identity -> the alertAt that already made a sound: a re-post of the same message is silent. */
+    var msgAlerted: Map<String, Long>
+        get() = (p.getStringSet(K_MSG_ALERTED, emptySet()) ?: emptySet()).mapNotNull {
+            val i = it.lastIndexOf('=')
+            if (i <= 0) return@mapNotNull null
+            it.substring(0, i) to (it.substring(i + 1).toLongOrNull() ?: return@mapNotNull null)
+        }.toMap()
+        set(v) = p.edit { putStringSet(K_MSG_ALERTED, v.map { "${it.key}=${it.value}" }.toSet()) }
+
+    /** Read-modify-write of [msgDismissed] from the sync thread and the receiver, without losing a swipe. */
+    fun updateMsgDismissed(f: (Map<String, Long>) -> Map<String, Long>) = synchronized(LOCK) { msgDismissed = f(msgDismissed) }
+
+    /** identity -> the alertAt of a message notification he swiped away: not re-posted until a newer one. */
+    var msgDismissed: Map<String, Long>
+        get() = (p.getStringSet(K_MSG_DISMISSED, emptySet()) ?: emptySet()).mapNotNull {
+            val i = it.lastIndexOf('=')
+            if (i <= 0) return@mapNotNull null
+            it.substring(0, i) to (it.substring(i + 1).toLongOrNull() ?: return@mapNotNull null)
+        }.toMap()
+        set(v) = p.edit(commit = true) { putStringSet(K_MSG_DISMISSED, v.map { "${it.key}=${it.value}" }.toSet()) }
+
+    /** Message notification ids currently posted, so the read ones can be cancelled. */
+    var postedMsgIds: Set<Int>
+        get() = (p.getStringSet(K_MSG_POSTED, emptySet()) ?: emptySet()).mapNotNull { it.toIntOrNull() }.toSet()
+        set(v) = p.edit { putStringSet(K_MSG_POSTED, v.map { it.toString() }.toSet()) }
 
     /** Items the owner swiped away. Dismissing is not an answer, but we do not re-post them either. */
     var dismissed: Set<Long>
@@ -90,6 +117,7 @@ class Prefs(context: Context) {
     }
 
     private companion object {
+        val LOCK = Any()
         const val K_BASE = "base_url"
         const val K_TOKEN = "token"
         const val K_SEQ = "last_seq"
@@ -98,6 +126,10 @@ class Prefs(context: Context) {
         const val K_ASKS = "asks_json"
         const val K_BOARD = "board_json"
         const val K_TOGGLES = "toggles_json"
+        const val K_CONVS = "conversations_json"
+        const val K_MSG_ALERTED = "msg_alerted"
+        const val K_MSG_POSTED = "msg_posted_ids"
+        const val K_MSG_DISMISSED = "msg_dismissed"
         const val K_DISMISSED = "dismissed"
         const val K_ALERTED = "alerted"
         const val K_SNOOZE = "snoozed"

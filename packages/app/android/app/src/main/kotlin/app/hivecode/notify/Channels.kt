@@ -4,12 +4,13 @@ import android.content.Context
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationManagerCompat
 
-/** The five channels of APP-SPEC §5.2. Ids are stable: renaming one would reset his settings. */
+/** The channels of APP-SPEC §5.2. Ids are stable: renaming one would reset his settings. */
 object Channels {
     const val BLOCKING = "blocking"
     const val URGENT_PROD = "urgent_prod"
     const val HANDOFF = "handoff"
     const val DIGEST = "digest"
+    const val MESSAGES = "messages"
     const val SERVICE = "service"
 
     /** A login handoff is only good for 10 minutes (§5.2, timeoutAfter). */
@@ -28,6 +29,7 @@ object Channels {
                 ch(URGENT_PROD, NotificationManagerCompat.IMPORTANCE_HIGH, "דחוף בפרודקשן",
                     "תקלה דחופה. כדאי לאפשר לערוץ הזה לעקוף את נא לא להפריע"),
                 ch(HANDOFF, NotificationManagerCompat.IMPORTANCE_HIGH, "כניסה לאתר", "בקשה להיכנס לאתר מהטלפון, בתוקף 10 דקות"),
+                ch(MESSAGES, NotificationManagerCompat.IMPORTANCE_HIGH, "הודעות", "הודעה מעובד, כמו בוואטסאפ. שיחה מושתקת לא מתריעה"),
                 ch(DIGEST, NotificationManagerCompat.IMPORTANCE_LOW, "סיכום", "סיכום הבוקר וסיום פוקוס"),
                 ch(SERVICE, NotificationManagerCompat.IMPORTANCE_MIN, "חיבור", "החיבור לחברה ברקע"),
             ),

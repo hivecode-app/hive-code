@@ -224,7 +224,7 @@ object NotificationPoster {
     }
 
     /** Long-lived shortcut per worker: makes the notification a real Android conversation and a Direct Share target. */
-    private fun pushShortcut(context: Context, who: Identity, person: Person, convTitle: String) {
+    fun pushShortcut(context: Context, who: Identity, person: Person, convTitle: String) {
         val sid = shortcutId(who.id)
         val intent = Intent(context, MainActivity::class.java)
             .setAction(Intent.ACTION_VIEW)

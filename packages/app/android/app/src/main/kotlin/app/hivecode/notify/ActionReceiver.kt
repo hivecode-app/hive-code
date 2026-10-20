@@ -44,6 +44,23 @@ class ActionReceiver : BroadcastReceiver() {
                 val prefs = Prefs(context)
                 prefs.dismissed = prefs.dismissed + ids.toSet()
             }
+            ACTION_MARK_READ -> {
+                // Read on hq, so every device clears it; the notification goes now, not after the round trip.
+                val identity = intent.getStringExtra(EXTRA_IDENTITY) ?: return
+                val app = context.applicationContext
+                NotificationManagerCompat.from(app).cancel(intent.getIntExtra(EXTRA_NOTIF, 0))
+                val async = goAsync()
+                thread(name = "company-read") {
+                    try { HqClient.from(app)?.markRead(identity) } catch (_: Exception) {}
+                    HqSync.refresh(app, fetch = true) { async.finish() }
+                }
+            }
+            ACTION_MSG_DISMISSED -> {
+                // Swiping a message away is not reading it: the count stays, the notification stays down until a newer message.
+                val identity = intent.getStringExtra(EXTRA_IDENTITY) ?: return
+                val at = intent.getLongExtra(EXTRA_ALERT_AT, 0L)
+                Prefs(context).updateMsgDismissed { it + (identity to at) }
+            }
             ACTION_SNOOZE_END -> {
                 val async = goAsync()
                 HqSync.refresh(context, fetch = true) { async.finish() }
@@ -104,6 +121,10 @@ class ActionReceiver : BroadcastReceiver() {
         const val ACTION_SNOOZE_END = "app.hivecode.action.SNOOZE_END"
         const val ACTION_REPLY = "app.hivecode.action.REPLY"
         const val ACTION_FAILED_DISMISSED = "app.hivecode.action.FAILED_DISMISSED"
+        const val ACTION_MARK_READ = "app.hivecode.action.MARK_READ"
+        const val ACTION_MSG_DISMISSED = "app.hivecode.action.MSG_DISMISSED"
+        private const val EXTRA_IDENTITY = "identity"
+        private const val EXTRA_ALERT_AT = "alert_at"
         private const val EXTRA_ITEM = "item"
 
         /** GO is never sent from a locked screen (APP-SPEC §5.3). */
@@ -143,6 +164,16 @@ class ActionReceiver : BroadcastReceiver() {
 
         fun dismissedIntent(context: Context, notifId: Int, itemIds: List<Long>): PendingIntent = PendingIntent.getBroadcast(
             context, notifId, base(context, ACTION_DISMISSED, "$notifId").putExtra(EXTRA_ITEMS, itemIds.toLongArray()),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        fun markReadIntent(context: Context, identityId: String, notifId: Int): PendingIntent = PendingIntent.getBroadcast(
+            context, notifId, base(context, ACTION_MARK_READ, "$notifId").putExtra(EXTRA_IDENTITY, identityId).putExtra(EXTRA_NOTIF, notifId),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        fun messageDismissedIntent(context: Context, identityId: String, notifId: Int, alertAt: Long): PendingIntent = PendingIntent.getBroadcast(
+            context, notifId, base(context, ACTION_MSG_DISMISSED, "$notifId").putExtra(EXTRA_IDENTITY, identityId).putExtra(EXTRA_ALERT_AT, alertAt),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 

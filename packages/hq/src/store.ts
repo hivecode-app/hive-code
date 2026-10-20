@@ -349,13 +349,26 @@ const MIGRATIONS: string[] = [
   `,
   // v10: "לא עכשיו" is his, kept here: the card stays down with the others he put off, on every device and refresh (#74).
   `ALTER TABLE inbox ADD COLUMN snoozed_at INTEGER;`,
+  // v11: unread and mute per conversation, his on every device (conversations.ts, as in WhatsApp). What was
+  // already there when this shipped counts as read: a deploy must not light up every old conversation.
+  `
+  CREATE TABLE conversations (
+    identity TEXT PRIMARY KEY,
+    read_at INTEGER NOT NULL DEFAULT 0,      -- he read everything from this worker up to here
+    muted_until INTEGER,                     -- NULL = not muted; MUTE_FOREVER = always
+    alert_at INTEGER,                        -- created_at of the newest message that was allowed to alert him
+    updated_at INTEGER NOT NULL
+  );
+  INSERT INTO conversations (identity, read_at, updated_at)
+    SELECT from_identity, MAX(created_at), MAX(created_at) FROM messages WHERE to_identity = 'owner' GROUP BY from_identity;
+  `,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [
   { key: 'scheduler', enabled: true, description: 'המתזמן ממלא משבצות פנויות מהתור' },
   { key: 'residents', enabled: true, description: 'התושבים (יואב) רצים תמיד' },
   { key: 'escalation', enabled: true, description: 'שאלה חוסמת שלא נענתה עוברת ליואב' },
-  { key: 'push', enabled: true, description: 'התראות כשמשהו חסום עליך' },
+  { key: 'push', enabled: true, description: 'התראות: מה שחסום עליך, והודעות מעובדים' },
   { key: 'backup', enabled: true, description: 'גיבוי hq.db כל שעה' },
   { key: 'focus', enabled: false, description: 'מצב פוקוס: רק תקלה דחופה בפרודקשן מתריעה' },
   { key: 'night', enabled: false, description: 'מצב לילה (B.16)' },

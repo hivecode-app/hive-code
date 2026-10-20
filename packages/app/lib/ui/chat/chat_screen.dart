@@ -8,6 +8,7 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../convs/conversations_screen.dart';
 import 'composer.dart';
 import 'items.dart';
 
@@ -268,6 +269,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       _stop(chat, who);
                     case 'tools':
                       setState(() => openAllTools = true);
+                    case 'mute':
+                      pickMute(context, widget.identityId);
                     default:
                       break;
                   }
@@ -585,6 +588,7 @@ class _ChatBar extends StatelessWidget {
               ('search', 'חיפוש בשיחה'),
               ('stop', 'עצירה'),
               ('tools', 'פתיחת כל הכלים'),
+              ('mute', d.conversation(who.id)?.muted ?? false ? 'ביטול השתקה' : 'השתקה'),
             ])
               PopupMenuItem(value: v, child: Text(t, style: T.body.copyWith(color: p.text))),
           ],

@@ -6,8 +6,10 @@ import 'data/backend.dart';
 import 'data/backend_select.dart';
 import 'data/hq_backend.dart';
 import 'data/store.dart';
+import 'native/badge.dart';
 import 'native/native_bridge.dart';
 import 'native/native_glue.dart';
+import 'native/window_focus.dart';
 import 'theme/theme.dart';
 import 'theme/tokens.dart';
 import 'ui/auth/sign_in_screen.dart';
@@ -156,15 +158,41 @@ class _CompanyAppState extends State<CompanyApp> {
   final navigatorKey = GlobalKey<NavigatorState>();
   late final glue = NativeGlue(widget.store, navigatorKey);
 
+  AppLifecycleListener? _life;
+  void Function()? _offFocus;
+  int? _badge;
+
   @override
   void initState() {
     super.initState();
     kGlue = glue;
     glue.start();
+    // An open conversation is read, and doesn't alert, only while the app is in front and has focus: a desktop
+    // window left open behind another one (inactive) must not read his messages or keep them from alerting.
+    // The lifecycle only hears changes and, on the web, can miss the first focus: start from the truth and
+    // follow the window's own focus events too (window_focus.dart).
+    void sync() => widget.backend.setVisible(windowFocused());
+    _life = AppLifecycleListener(onStateChange: (_) => sync());
+    _offFocus = onWindowFocusChange(sync);
+    sync();
+    widget.store.addListener(_syncBadge);
+  }
+
+  /// The icon's number on the web app: what waits for him plus what he hasn't read.
+  void _syncBadge() {
+    final d = widget.store.data;
+    if (d == null) return;
+    final n = d.waitingCount + d.unreadCount;
+    if (n == _badge) return;
+    _badge = n;
+    setAppBadge(n);
   }
 
   @override
   void dispose() {
+    _life?.dispose();
+    _offFocus?.call();
+    widget.store.removeListener(_syncBadge);
     glue.dispose();
     super.dispose();
   }

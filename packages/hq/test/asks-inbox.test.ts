@@ -106,7 +106,7 @@ test('push only when blocked on him; focus lets only urgent incidents through; n
     hq.pusher.subscribe({ endpoint: 'https://push.example/2', keys: { p256dh: 'p', auth: 'a' } });
     hq.inbox.add({ kind: 'login', from_identity: 'eli', title: 'קוד ל-Mercury', blocking: true });
     const urgent = hq.inbox.add({ kind: 'ask', from_identity: 'rotem', title: 'prod למטה', blocking: true, urgency: 'urgent' });
-    await until(() => env.webPushes.length === 2, 2000, 'pushes');
+    await until(() => env.webPushes.length === 2 && hq.inbox.get(urgent.id)!.pushed_at != null, 2000, 'pushes');
     clock.advance(4 * 60_000);
     await hq.pusher.sweepUnacked();
     assert.equal(env.telegrams.length, 1);

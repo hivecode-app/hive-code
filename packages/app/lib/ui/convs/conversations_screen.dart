@@ -210,6 +210,42 @@ const kConvSortLabels = {
   ConvSort.name: 'לפי שם',
 };
 
+/// "השתקה" (8 hours, a week, always) or its undo, from a long press on the row or the chat menu.
+/// Muted: no notification, and its count stays out of the total (as in WhatsApp).
+void pickMute(BuildContext context, String identityId) {
+  final store = StoreScope.read(context);
+  final p = context.p;
+  final muted = store.data?.conversation(identityId)?.muted ?? false;
+  final name = store.nameOf(identityId);
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: p.surface,
+    showDragHandle: true,
+    builder: (ctx) => SafeArea(
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(muted ? 'השיחה עם $name מושתקת' : 'השתקת ההתראות מ$name', style: T.name.copyWith(color: p.text)),
+        ),
+        if (!muted)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text('ההודעות ממשיכות להגיע לשיחה, בלי התראה.', style: T.small.copyWith(color: p.text2)),
+          ),
+        for (final f in muted ? const [MuteFor.off] : const [MuteFor.hours8, MuteFor.week, MuteFor.always])
+          ListTile(
+            leading: Ic(f == MuteFor.off ? 'notifications' : 'notifications_off', color: p.text2),
+            title: Text(f.label, style: T.body.copyWith(color: p.text)),
+            onTap: () {
+              Navigator.pop(ctx);
+              store.mute(identityId, f);
+            },
+          ),
+      ]),
+    ),
+  );
+}
+
 /// The sort choice, as a sheet: the current one is marked with a check, not a colour.
 void pickConvSort(BuildContext context) {
   final store = StoreScope.read(context);
@@ -313,19 +349,32 @@ class ConversationRow extends StatelessWidget {
     // A finished task worker: the task it did is the second line, under "הושלם" (#40).
     final done = d.isDone(c.identityId);
     final task = done ? pr.activity : null;
-    final status = Row(children: [
+    final statusLine = Row(children: [
       Flexible(child: StatusWord.of(pr, who.gender, withActivity: pr.status == WorkerStatus.working && !compact)),
       if (c.diffStat != null) ...[const SizedBox(width: 6), DiffStat(c.diffStat!)],
       if (c.extra != null && !compact) ...[const SizedBox(width: 6), Text(c.extra!, style: T.small.copyWith(color: p.text2))],
     ]);
     final draft = (d.chats[c.identityId]?.draft ?? '').trim();
+    final unread = c.unread > 0;
+    final pill = unread ? UnreadPill(c.unread, muted: c.muted) : null;
+    // The pill sits at the end of the last line, as in WhatsApp; rows without one carry it on the status line.
+    final lineShown = !compact && (task == null || task.isEmpty) && draft.isEmpty && c.lastLine.isNotEmpty;
+    final status = Row(children: [
+      Expanded(child: statusLine),
+      if (pill != null && !lineShown) ...[const SizedBox(width: 6), pill],
+    ]);
     return Semantics(
       button: true,
-      label: '${who.name}, $title, ${statusWord(pr.status, who.gender)}',
+      label: [
+        who.name, title, statusWord(pr.status, who.gender),
+        if (unread) c.unread == 1 ? 'הודעה אחת שלא נקראה' : '${c.unread} הודעות שלא נקראו',
+        if (c.muted) 'מושתקת',
+      ].join(', '),
       child: Material(
         color: selected ? p.surface2 : p.surface,
         child: InkWell(
           onTap: () => Nav.chat(context, c.identityId),
+          onLongPress: () => pickMute(context, c.identityId),
           child: Padding(
             padding: compact ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10) : const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -335,10 +384,11 @@ class ConversationRow extends StatelessWidget {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
                     Text(who.name, style: T.name.copyWith(color: p.text)),
+                    if (c.muted) ...[const SizedBox(width: 4), Ic('notifications_off', size: 16, color: p.text3, semantic: 'מושתקת')],
                     const SizedBox(width: 6),
                     Expanded(child: Rich(title, maxLines: 1, style: T.secondary.copyWith(color: p.text2))),
                     const SizedBox(width: 6),
-                    Text(c.time, style: T.meta.copyWith(color: p.text3)),
+                    Text(c.time, style: T.meta.copyWith(color: unread && !c.muted ? p.text : p.text3, fontWeight: unread && !c.muted ? FontWeight.w700 : null)),
                   ]),
                   // A draft left in the chat shows instead of the last line, as in WhatsApp.
                   if (!compact && task != null && task.isNotEmpty)
@@ -370,8 +420,15 @@ class ConversationRow extends StatelessWidget {
                           child: Rich(c.lastLine,
                               auto: true,
                               maxLines: 1,
-                              style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: c.lastIsMine ? p.text : p.text2)),
+                              // Unread: the line stands out, the way WhatsApp makes the row bold.
+                              style: TextStyle(
+                                  fontFamily: kFont,
+                                  fontSize: 14.5,
+                                  height: 1.45,
+                                  fontWeight: unread ? FontWeight.w500 : null,
+                                  color: c.lastIsMine || unread ? p.text : p.text2)),
                         ),
+                        if (pill != null) ...[const SizedBox(width: 8), pill],
                       ]),
                     ),
                   Padding(padding: const EdgeInsets.only(top: 4), child: status),
@@ -380,6 +437,28 @@ class ConversationRow extends StatelessWidget {
             ]),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The unread count on a row: dark on light like the count on "בית"; a muted conversation's is quieter.
+class UnreadPill extends StatelessWidget {
+  const UnreadPill(this.count, {super.key, this.muted = false});
+  final int count;
+  final bool muted;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return ExcludeSemantics(
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 20),
+        height: 20,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        decoration: BoxDecoration(color: muted ? p.surface2 : p.text, borderRadius: BorderRadius.circular(10)),
+        alignment: Alignment.center,
+        child: Text(count > 99 ? '99+' : '$count',
+            style: TextStyle(fontFamily: kFont, fontSize: 11.5, height: 1, fontWeight: FontWeight.w700, color: muted ? p.text2 : p.surface)),
       ),
     );
   }

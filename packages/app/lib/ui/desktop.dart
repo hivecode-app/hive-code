@@ -229,7 +229,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
                     child: SizedBox(
                       width: 64,
                       height: 56,
-                      child: NavItem(dest: dest, on: nav.tab == dest.tab, count: dest.tab == AppTab.home ? d?.waitingCount : null, pillWidth: 52, fontSize: 11.5, onTap: () => nav.go(dest.tab)),
+                      child: NavItem(dest: dest, on: nav.tab == dest.tab, count: navCount(dest.tab, d), pillWidth: 52, fontSize: 11.5, onTap: () => nav.go(dest.tab)),
                     ),
                   ),
               ]),

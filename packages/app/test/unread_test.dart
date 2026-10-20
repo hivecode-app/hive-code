@@ -1,0 +1,54 @@
+// Unread and mute on screen, as in WhatsApp (#task-50): a count on each row and on "שיחות" (muted ones left
+// out, shown quieter with notifications_off), long press and the chat menu mute, opening a chat reads it.
+import 'package:agent_company/ui/chat/chat_screen.dart';
+import 'package:agent_company/ui/common.dart';
+import 'package:agent_company/ui/convs/conversations_screen.dart';
+import 'package:agent_company/ui/nav.dart';
+import 'package:agent_company/ui/shell.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'helpers.dart';
+
+void main() {
+  testWidgets('rows show their count, muted ones quieter with notifications_off; "שיחות" counts the rest', (tester) async {
+    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen(), bottomNavigationBar: BottomNav()));
+    expect(find.descendant(of: find.byType(UnreadPill), matching: find.text('2')), findsOneWidget, reason: 'Ido');
+    expect(find.descendant(of: find.byType(UnreadPill), matching: find.text('3')), findsOneWidget, reason: 'Noga, muted');
+    expect(find.byWidgetPredicate((w) => w is Ic && w.name == 'notifications_off'), findsOneWidget);
+    expect(store.data!.unreadCount, 2);
+    final tab = tester.widget<NavItem>(find.byWidgetPredicate((w) => w is NavItem && w.dest.tab == AppTab.convs));
+    expect(tab.count, 2);
+  });
+
+  testWidgets('long press mutes for a week; the total drops; long press again offers "ביטול השתקה"', (tester) async {
+    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen()));
+    await tester.longPress(find.text('עידו'));
+    await tester.pumpAndSettle();
+    expect(find.text('8 שעות'), findsOneWidget);
+    expect(find.text('תמיד'), findsOneWidget);
+    await tester.tap(find.text('שבוע'));
+    await tester.pumpAndSettle();
+    expect(store.data!.conversation('ido')!.muted, isTrue);
+    expect(store.data!.unreadCount, 0);
+    await tester.longPress(find.text('עידו'));
+    await tester.pumpAndSettle();
+    expect(find.text('שבוע'), findsNothing);
+    await tester.tap(find.text('ביטול השתקה'));
+    await tester.pumpAndSettle();
+    expect(store.data!.conversation('ido')!.muted, isFalse);
+  });
+
+  testWidgets('opening a conversation reads it; the chat menu mutes it', (tester) async {
+    final store = await pumpApp(tester, home: const ChatScreen(identityId: 'ido'));
+    await tester.pumpAndSettle();
+    expect(store.data!.conversation('ido')!.unread, 0);
+    await tester.tap(find.byTooltip('עוד'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('השתקה'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('תמיד'));
+    await tester.pumpAndSettle();
+    expect(store.data!.conversation('ido')!.muted, isTrue);
+  });
+}
