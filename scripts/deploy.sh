@@ -309,6 +309,9 @@ fi
 trap - ERR
 # What runs now, for drift-check: written only after the end-to-end check passed.
 if [[ "$target" == hq || "$target" == all ]]; then echo "$sha" >"$DSTATE/hq.sha"; fi
+if [[ "$target" == caddy || "$target" == all ]]; then echo "$sha" >"$DSTATE/caddy.sha"; fi
+# "מה לבדוק" (#108): hq hears which merged PRs are now live. Production is already verified: a failure here is said, not fatal.
+if out="$(node scripts/deploy-report.mjs "$target" "$sha" 2>&1)"; then say "$out"; else say "$out (הפריסה עצמה הצליחה. לשלוח שוב: node scripts/deploy-report.mjs $target $sha)"; fi
 
 # ── leftovers, only once production is verified ──────────────────────────────
 # /var/www/hq-app holds exactly current, releases/ and qa/; hand-made Caddyfile backups of our sites

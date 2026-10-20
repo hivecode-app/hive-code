@@ -364,6 +364,25 @@ const MIGRATIONS: string[] = [
   `,
   // v12: what a finished task did, one line in his words ("התמונות עלו"), from status done or close_team (#53).
   `ALTER TABLE tasks ADD COLUMN summary TEXT;`,
+  // v13: "מה לבדוק" (awaiting.ts, #108): a finished task that waits for a deploy or for him to check something,
+  // the PR it merged in (a deploy reports PRs), and every deploy that was reported.
+  `
+  ALTER TABLE tasks ADD COLUMN awaiting TEXT;                         -- NULL | deploy | check
+  ALTER TABLE tasks ADD COLUMN awaiting_note TEXT;                    -- one line in his words
+  ALTER TABLE tasks ADD COLUMN awaiting_at INTEGER;
+  ALTER TABLE tasks ADD COLUMN pr TEXT;                               -- PR number in the project's repo
+  CREATE INDEX tasks_awaiting ON tasks(awaiting) WHERE awaiting IS NOT NULL;
+  CREATE TABLE deploys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project TEXT NOT NULL,
+    sha TEXT NOT NULL,
+    target TEXT,                             -- hq | app | caddy | all, or the project's own word
+    tasks TEXT NOT NULL DEFAULT '[]',        -- JSON task ids it reported
+    prs TEXT NOT NULL DEFAULT '[]',          -- JSON PR numbers it reported
+    cleared TEXT NOT NULL DEFAULT '[]',      -- JSON task ids that left "מה לבדוק" because of it
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [

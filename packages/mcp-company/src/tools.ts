@@ -19,6 +19,16 @@ function tool(name: ToolDef['name'], description: string, properties: Record<str
   return { name, description, inputSchema: { type: 'object', properties, required, additionalProperties: false } };
 }
 
+// "מה לבדוק" (#108): what a finished task still waits for, shown to him until a deploy or his "בדקתי" clears it.
+const awaitingArgs: Record<string, Schema> = {
+  awaiting: oneOf(['deploy', 'check', 'none'], 'מה המשימה עוד מחכה לו: deploy = מוזג ומחכה ל-GO או לפריסה (מתנקה לבד כשפריסה כוללת אותה), '
+    + 'check = כבר בפרודקשן ורן צריך לבדוק משהו בעצמו (מתנקה כשהוא מסמן "בדקתי"), none = כלום, מנקה. בלי: לא מחכה לכלום '
+    + '/ deploy = merged, waits for GO or a deploy; check = live, he has to check something himself; none = clears'),
+  awaiting_note: s('עם awaiting: שורה אחת במילים שלו, מה מחכה או מה לבדוק, e.g. "לשלוח תמונה מהטלפון ולראות שהיא עולה" '
+    + '/ with awaiting: one line in his words, what waits or what to check'),
+  pr: s('ה-PR שמוזג, מספר או קישור. פריסה שמדווחת עליו מנקה את deploy / the merged PR, number or url; a deploy that reports it clears deploy'),
+};
+
 export const TOOLS: readonly ToolDef[] = [
   tool('tell', 'שליחת הודעה לעובד לפי identity. Send a message to a teammate by identity.', {
     to: s('identity של הנמען / recipient identity, e.g. "dana"'),
@@ -68,11 +78,14 @@ export const TOOLS: readonly ToolDef[] = [
     task: s('מזהה משימה / task id'),
   }, ['state']),
   tool('status', 'עדכון מצב העובד. עם state: "done" המשימה נסגרת, ו-summary הוא מה שרן רואה ב"מה הסתיים". '
-    + 'Update your working status. With state "done" the task closes; summary is the line he sees under "what finished".', {
+    + 'אם משהו עוד מחכה לו (פריסה אחרי GO, או משהו שהוא צריך לבדוק בעצמו), מוסיפים awaiting ו-awaiting_note, וזה מופיע אצלו ב"מה לבדוק". '
+    + 'Update your working status. With state "done" the task closes; summary is the line he sees under "what finished". '
+    + 'If it still waits on something (a deploy, or something he must check), add awaiting and awaiting_note: it shows under "what to check".', {
     state: s('מצב, e.g. working | blocked | idle | done / state'),
     note: s('הערה קצרה / short note'),
     summary: s('ב-done: שורה אחת במילים שלו, מה השתנה אצלו, בלי מספרי PR ובלי מונחים טכניים, e.g. "התמונות בצ\'אט עולות גם מהטלפון" '
       + '/ with done: one line in his words on what changed for him, no PR numbers or jargon'),
+    ...awaitingArgs,
   }, ['state']),
   tool('open_team', 'פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. עם assignee המשימה הולכת לעובד הקבוע שהתחום שלו: '
     + 'worktree משלה ו-session נקי, ואם הוא באמצע משימה אחרת היא מחכה בתור שלו. אם hq דוחה (למשל פרויקט רדום או assignee לא חוקי), הדחייה והסיבה חוזרות כשגיאה. '
@@ -87,11 +100,13 @@ export const TOOLS: readonly ToolDef[] = [
     members: strs('identities של חברי הצוות / member identities'),
   }, ['name', 'purpose']),
   tool('close_team', 'סגירת צוות משימה: המשימה נסגרת, המשמרת נעצרת והעבודה נשמרת. רק מי שפתח, המנהל שלו, המנהל של העובד או יואב. '
+    + 'awaiting ו-awaiting_note גוברים על מה שהעובד סימן, ואפשר לסמן אותם גם על משימה שכבר נסגרה. '
     + 'Close a task team: the task is done, its shift stops, uncommitted work is preserved.', {
     team: s('מזהה המשימה (t22), ה-identity של העובד (lumo-t22) או השם שלו / task id, worker identity or name'),
     reason: s('סיבה, נשלחת לעובד לפני העצירה / reason, sent to the worker before the stop'),
     summary: s('שורה אחת במילים שלו על מה שהמשימה עשתה, בלי מספרי PR, e.g. "מיכל בצוות של לומו בוט". גוברת על מה שהעובד כתב '
       + '/ one line in his words on what the task did, no PR numbers; overrides the worker\'s'),
+    ...awaitingArgs,
   }, ['team']),
   tool('request_go', 'בקשת אישור לפעולה. מופיעה אצלו כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. '
     + 'מה שהוא כותב בשיחה כשהבקשה פתוחה הוא התשובה. '
@@ -151,6 +166,7 @@ const HEBREW_TEXT: Partial<Record<ToolDef['name'], string[]>> = {
 };
 const HEBREW_TITLE: Partial<Record<ToolDef['name'], string[]>> = {
   open_team: ['name'], open_ticket: ['title'], ask: ['headline'], request_go: ['headline'],
+  status: ['awaiting_note'], close_team: ['awaiting_note'],
 };
 
 /** The rewrite request when a field that a person reads is English, else null. */

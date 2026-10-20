@@ -99,7 +99,9 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   const route = (method: string, path: string, h: Handler) => r.push([method, new RegExp(`^${path.replace(/:\w+/g, '([^/]+)')}$`), h]);
 
   route('GET', '/api/org', () => ({ identities: hq.board(), teams: hq.teams() }));
-  route('GET', '/api/board', () => ({ identities: hq.board(), tasks: hq.scheduler.tasks(), projects: hq.projects(), slots: hq.scheduler.slots(), probes: hq.probes.summary() }));
+  // awaiting: "מה לבדוק" (#108), finished tasks that wait for a deploy or for him to check (awaiting.ts).
+  route('GET', '/api/board', () => ({ identities: hq.board(), tasks: hq.scheduler.tasks(), awaiting: hq.awaiting.list(), projects: hq.projects(),
+    slots: hq.scheduler.slots(), probes: hq.probes.summary() }));
 
   route('GET', '/api/inbox', () => ({ items: hq.inbox.open() }));
   route('POST', '/api/inbox/:id/ack', ({ params }) => ({ ok: hq.inbox.ack(Number(params[0])) }));
@@ -250,6 +252,25 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     const t = await hq.scheduler.completeTask(Number(params[0]));
     if (!t) throw new HttpError(404, `no task ${params[0]}`);
     return { task: t };
+  });
+
+  // "בדקתי" (#108): off "מה לבדוק", whichever it waited for.
+  route('POST', '/api/tasks/:id/checked', ({ params }) => {
+    const id = Number(params[0]);
+    if (!hq.scheduler.task(id)) throw new HttpError(404, `no task ${params[0]}`);
+    return { ok: hq.awaiting.clear(id, OWNER, 'checked'), task: hq.scheduler.task(id) };
+  });
+
+  // A deploy reports what it put in production (scripts/deploy.sh; any project's deploy may call it): the
+  // tasks it includes leave "מה לבדוק" if they waited for a deploy. By task id, or by PR number in the project.
+  route('POST', '/api/deploys', async ({ body }) => {
+    const b = await body();
+    const tasks = b.tasks == null ? [] : b.tasks;
+    if (!Array.isArray(tasks) || tasks.some((t) => !Number.isInteger(t))) throw new HttpError(400, 'tasks must be an array of task ids');
+    const prs = b.prs == null ? [] : b.prs;
+    if (!Array.isArray(prs) || prs.some((p) => typeof p !== 'string' && !Number.isInteger(p))) throw new HttpError(400, 'prs must be an array of PR numbers');
+    return { deploy: hq.awaiting.deployed({ project: str(b.project, 'project')!, sha: str(b.sha, 'sha')!, target: str(b.target, 'target', false),
+      tasks: tasks as number[], prs: (prs as (string | number)[]).map(String) }) };
   });
 
   // Night mode (B.16): the same as writing "לילה" / the first message in the morning, for the app.

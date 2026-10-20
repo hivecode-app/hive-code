@@ -18,7 +18,7 @@
     "canary": "node scripts/canary.mjs",
     "smoke": "node scripts/smoke-shift-host.mjs",
     "test:vscode-workspace": "node --test scripts/vscode-workspace.test.mjs",
-    "test:deploy": "node --test scripts/caddy-main.test.mjs"
+    "test:deploy": "node --test scripts/caddy-main.test.mjs scripts/deploy-report.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

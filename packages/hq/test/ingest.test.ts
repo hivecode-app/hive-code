@@ -334,3 +334,34 @@ test('#53: a task\'s summary comes from status done, and close_team\'s overrides
     assert.equal(hq.scheduler.task(id)!.summary, 'התמונות בצ\'אט עולות גם מהטלפון', 'a blank one changes nothing');
   } finally { await env.cleanup(); }
 });
+
+test('#108: status done marks what the task still waits for; close_team overrides it, also after the fact', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock } = env;
+    const r = await post(sock, '/v1/ops', entry('open_team', { name: 'אפליקציה: תמונות', purpose: 'משהו', project: 'agent-company' }, 'eli-1:60'));
+    const id = r.json.result.task as number;
+    const worker = `agent-company-t${id}`;
+    await hq.scheduler.fill();
+    await until(() => hq.shifts.current(worker)?.state === 'live', 3000, 'task worker live');
+    await post(sock, '/v1/ops', entry('status', { state: 'done', summary: 'התמונות עולות', awaiting: 'deploy',
+      awaiting_note: 'מחכה ל-GO\nשורה שנייה', pr: 'https://github.com/hivecode-app/hive-code/pull/77' }, `${worker}-1:01`, worker));
+    await until(() => hq.scheduler.task(id)!.state === 'done', 3000, 'task done');
+    let t = hq.scheduler.task(id)!;
+    assert.equal(t.awaiting, 'deploy');
+    assert.equal(t.awaiting_note, 'מחכה ל-GO', 'one line');
+    assert.equal(t.pr, '77', 'the number, from the url');
+    assert.deepEqual(hq.awaiting.list().map((x) => x.id), [id]);
+
+    await post(sock, '/v1/ops', entry('close_team', { team: `t${id}`, awaiting: 'check', awaiting_note: 'לשלוח תמונה מהטלפון' }, 'eli-1:61'));
+    t = hq.scheduler.task(id)!;
+    assert.equal(t.awaiting, 'check', 'the closer has the last word, on a task already done');
+    assert.equal(t.awaiting_note, 'לשלוח תמונה מהטלפון');
+
+    await post(sock, '/v1/ops', entry('close_team', { team: `t${id}`, awaiting: 'later' }, 'eli-1:62'));
+    assert.equal(hq.scheduler.task(id)!.awaiting, 'check', 'an unknown value changes nothing');
+    await post(sock, '/v1/ops', entry('close_team', { team: `t${id}`, awaiting: 'none' }, 'eli-1:63'));
+    assert.equal(hq.scheduler.task(id)!.awaiting, null);
+    assert.equal(hq.awaiting.list().length, 0);
+  } finally { await env.cleanup(); }
+});

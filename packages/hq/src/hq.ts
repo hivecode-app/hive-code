@@ -8,6 +8,7 @@ import { Store } from './store.ts';
 import { syncOrg, getIdentity, listIdentities, listProjects, renameTaskWorkers } from './org.ts';
 import { Inbox } from './inbox.ts';
 import { Conversations } from './conversations.ts';
+import { AwaitingBoard } from './awaiting.ts';
 import { ShiftManager, TemplateLauncher, type Launcher, type ConnectionFactory } from './shifts.ts';
 import { Mailbox, noForeignInjector, type ForeignInjector } from './mailbox.ts';
 import { Uploads } from './uploads.ts';
@@ -64,6 +65,7 @@ export class Hq {
   readonly auth: Auth;
   readonly inbox: Inbox;
   readonly conversations: Conversations;
+  readonly awaiting: AwaitingBoard;
   readonly shifts: ShiftManager;
   readonly mailbox: Mailbox;
   readonly uploads: Uploads;
@@ -104,6 +106,7 @@ export class Hq {
     this.ingest = new Ingest(this, deps.ticketer);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
+    this.awaiting = new AwaitingBoard(this.store);
     this.conversations = new Conversations(this.store, (id) => this.conversationTitle(id));
     this.conversations.setAlert((m) => this.store.bg(this.pusher.notifyMessage(m), 'push.message'));
     this.shifts.on('delta', (row, ev) => this.store.publish('engine.delta', row.identity, { shift: row.id, ...ev }));
