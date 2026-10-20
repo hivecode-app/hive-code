@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/store.ts';
-import { parseOrg, syncOrg } from '../src/org.ts';
+import { ensureRuntimeIdentity, parseOrg, renameLegacyTaskWorkers, syncOrg, taskWorkerName } from '../src/org.ts';
 import { sessionIdFor, uuidv5 } from '../src/proc.ts';
 import { ORG_YAML } from './helpers.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -123,17 +123,20 @@ test('system prompt (L0+L1): dossier, how to reply, Authority, charter; task wor
   assert.match(yoav, /לא מסכמים לעצמך מה עשית/);
   assert.match(yoav, /ההודעה נכנסה לתור המסירה/);
   assert.doesNotMatch(yoav, /טקסט רגיל בתשובה שלך לא מגיע לאף אחד/, 'the old rule that made every reply a tell');
-  const worker = buildSystemPrompt(companyDir, { ...base, id: 'agent-company-t7', name: 't7', title: 'fix typo', team_kind: 'task',
+  const worker = buildSystemPrompt(companyDir, { ...base, id: 'agent-company-t7', name: 'דנה', title: 'מפתחת', team_kind: 'task',
     project: 'agent-company', reports_to: 'adi', lifecycle: 'ephemeral', source: 'runtime' }, 'yoav');
-  assert.match(worker, /צוות משימה/);
+  assert.match(worker, /# אתה דנה, מפתחת, בצוות משימה \(`agent-company-t7`\)/);
+  // #51: Hebrew to everyone, titles included, even when the message came in English.
+  assert.match(worker, /\*\*עברית בכל הודעה\*\*: לרן, ליואב ולכל עובד, גם כשכתבו לך באנגלית/);
+  assert.match(worker, /`open_team`\) וטיקטים \(`open_ticket`\) בעברית/);
   assert.match(worker, /gh pr merge --squash/);
   assert.match(worker, /# אמנת agent-company/);                  // project charter
   assert.match(worker, /מדווח ל-`adi`/);
   // A helper eli opens has no project: the errand itself, no worktree/PR, outward acts need the owner (#24).
   const task = { ...base, team_kind: 'task', lifecycle: 'ephemeral', source: 'runtime' };
   const eli = { ...base, id: 'eli', name: 'אלי', title: 'ראש הצוות האישי', team: 'personal', lifecycle: 'lead' };
-  const helper = buildSystemPrompt(companyDir, { ...task, id: 'company-t9', name: 't9', title: 'טופס TM.30', reports_to: 'eli' }, 'yoav', eli);
-  assert.match(helper, /עוזר חד-פעמי/);
+  const helper = buildSystemPrompt(companyDir, { ...task, id: 'company-t9', name: 'איתי', title: 'עוזר אישי', reports_to: 'eli' }, 'yoav', eli);
+  assert.match(helper, /# אתה איתי, עוזר אישי: עוזר חד-פעמי/);
   assert.match(helper, /`eli` פתח אותך/);
   assert.match(helper, /כלפי אנשים בחוץ/);
   assert.doesNotMatch(helper.split('\n---\n')[0]!, /git worktree|gh pr merge/); // company.md below still mentions them
@@ -151,4 +154,49 @@ test('host-args.json carries the system prompt file when there is one', async ()
   const args = hostArgs({ shiftId: 'yoav-3', identity: 'yoav', shiftNo: 3, sessionId: sessionIdFor('yoav', 3), resume: false,
     kind: 'resident', cwd: '/w', socketPath: '/s', taskId: null, unit: shiftUnit('yoav-3'), systemPromptFile: '/state/shifts/yoav-3/system.md' }, '/state');
   assert.equal(args['append-system-prompt-file'], '/state/shifts/yoav-3/system.md');
+});
+
+test('task workers get a human name and a title, never one a live worker already has (#51)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hq-names-'));
+  const store = new Store(join(dir, 'hq.db'));
+  const open = (id: string, n: number, state = 'running') => {
+    store.db.prepare(`INSERT INTO tasks (title, state, identity, created_at, updated_at) VALUES (?, ?, ?, 0, 0)`).run(`משימה ${n}`, state, id);
+  };
+  try {
+    const a = taskWorkerName(store, 0);
+    assert.deepEqual(a, { name: 'דנה', title: 'מפתחת' });
+    ensureRuntimeIdentity(store, { id: 'agent-company-t0', ...a, project: 'agent-company', reports_to: 'adi' });
+    assert.equal(taskWorkerName(store, 0).name, 'דנה', 'a worker with no open task does not hold its name');
+    open('agent-company-t0', 0);
+    assert.deepEqual(taskWorkerName(store, 0), { name: 'איתי', title: 'מפתח' }, 'דנה is taken: the next one');
+    assert.deepEqual(taskWorkerName(store, 1, true), { name: 'איתי', title: 'עוזר אישי' });
+    assert.equal(taskWorkerName(store, 24).name, 'איתי', 'wraps around the pool');
+    // 25 open workers at once: all names distinct, the 25th gets a suffix
+    const names = new Set(['דנה']);
+    for (let i = 1; i <= 24; i++) {
+      const w = taskWorkerName(store, i);
+      ensureRuntimeIdentity(store, { id: `agent-company-t${i}`, ...w, project: 'agent-company', reports_to: 'adi' });
+      open(`agent-company-t${i}`, i);
+      names.add(w.name);
+    }
+    assert.equal(names.size, 25);
+    assert.ok(names.has('דנה ב׳'));
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('legacy t<N> workers are renamed once at startup, helpers as helpers (#51)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hq-names-'));
+  const store = new Store(join(dir, 'hq.db'));
+  try {
+    store.db.prepare(`INSERT INTO identities (id, name, title, symbol, team, team_kind, project, reports_to, lifecycle, source, active, data, updated_at)
+      VALUES ('eli', 'אלי', 'ראש הצוות האישי', '', 'personal', 'personal', NULL, 'owner', 'lead', 'org', 1, '{}', 0)`).run();
+    ensureRuntimeIdentity(store, { id: 'agent-company-t12', name: 't12', title: 'Tab handoff into hq', project: 'agent-company', reports_to: 'yoav' });
+    ensureRuntimeIdentity(store, { id: 'company-t14', name: 't14', title: 'טופס', project: null, reports_to: 'eli' });
+    assert.equal(renameLegacyTaskWorkers(store), 2);
+    const row = (id: string) => store.db.prepare('SELECT name, title FROM identities WHERE id = ?').get(id) as { name: string; title: string };
+    assert.doesNotMatch(row('agent-company-t12').name, /^t\d/);
+    assert.match(row('agent-company-t12').title, /^מפתח/);
+    assert.match(row('company-t14').title, /^עוזר/);
+    assert.equal(renameLegacyTaskWorkers(store), 0, 'idempotent');
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });

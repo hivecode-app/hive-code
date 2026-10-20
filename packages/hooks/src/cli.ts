@@ -3,7 +3,7 @@
 // the prime context. Always exits 0, never touches the network (B.3.3, B.5).
 import { appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { ENV, shiftDir, statePaths } from '@company/shared';
+import { ENV, englishLines, hebrewReason, shiftDir, statePaths } from '@company/shared';
 import { writeCompactHandoff } from './compact.ts';
 import { appendSpool, mkdirp, UNKNOWN_SHIFT } from './spool.ts';
 
@@ -52,6 +52,16 @@ async function main(): Promise<void> {
     appendSpool(stateRoot, shift, { ts: new Date().toISOString(), event, pid: process.pid, payload });
   } catch (e) { logError('spool', e); }
 
+  if (event === 'Stop') {
+    // Hebrew everywhere (dir-0002, #51): the owner's ~/.claude hebrew-reply-guard does not load in
+    // shifts (--setting-sources project,local), so the same rule rides on this Stop hook. One retry:
+    // a second block on the rewrite would loop.
+    const st = payload as { stop_hook_active?: unknown; last_assistant_message?: unknown } | null;
+    if (st?.stop_hook_active === true || typeof st?.last_assistant_message !== 'string') return;
+    const bad = englishLines(st.last_assistant_message);
+    if (bad.length) process.stdout.write(JSON.stringify({ decision: 'block', reason: hebrewReason('הטקסט שלך', bad) }));
+    return;
+  }
   if (event === 'PostCompact') {
     const cs = (payload as { compact_summary?: unknown } | null)?.compact_summary;
     if (typeof cs === 'string' && cs.trim()) {

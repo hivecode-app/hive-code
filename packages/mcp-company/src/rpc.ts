@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { COMPANY_API_VERSION } from '@company/shared';
 import type { OpName, WalEntry } from '@company/shared';
 import type { RecallQuery, RecallResult } from './recall.ts';
-import { TOOL_BY_NAME, TOOLS, validateArgs } from './tools.ts';
+import { hebrewProblem, TOOL_BY_NAME, TOOLS, validateArgs } from './tools.ts';
 
 export const SERVER_NAME = 'company';
 export const SERVER_VERSION = '0.1.0';
@@ -49,6 +49,8 @@ export function createServer(deps: ServerDeps) {
     const args = (params.arguments ?? {}) as Record<string, unknown>;
     const invalid = validateArgs(def, args);
     if (invalid) return text(`invalid arguments: ${invalid}`, true);
+    const english = hebrewProblem(def, args);
+    if (english) return text(english, true);
 
     if (def.name === 'recall') {
       const queries = Array.isArray(args.queries) ? (args.queries as string[]).filter((q) => q.trim()) : [];

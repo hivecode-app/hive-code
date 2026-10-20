@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import {
   ClaudeProcess, buildSettings, injectForeign, readTranscript, readLiveSession, resolveClaudeBin, PINNED_VERSION,
 } from '../packages/adapter/src/index.ts';
+import { englishLines } from '../packages/shared/src/index.ts';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { values: opt } = parseArgs({ options: {
@@ -125,6 +126,14 @@ try {
     const r2 = await next((e) => e.kind === 'result', 45_000, 'socket turn');
     mark('socket_inject', (r2.text ?? '').includes('SOCKET-OK') && !peerHold, peerHold ? `held: ${peerHold.cause}` : `"${(r2.text ?? '').slice(0, 30)}"`);
   } catch (e) { mark('socket_inject', false, peerHold ? `held: ${peerHold.cause}` : e.message); }
+
+  // Hebrew guard (#51): the company Stop hook blocks an English reply; the rewrite is in Hebrew
+  try {
+    p.sendUser('Answer in English only, in two full sentences: what does a code reviewer look for in a pull request?');
+    const rh = await next((e) => e.kind === 'result', 120_000, 'hebrew turn');
+    const t = rh.text ?? '';
+    mark('hebrew_guard', /[\u0590-\u05FF]/.test(t) && englishLines(t).length === 0, `"${t.replace(/\s+/g, ' ').slice(0, 60)}"`);
+  } catch (e) { mark('hebrew_guard', false, e.message); }
 
   // interrupt during a long tool
   try {

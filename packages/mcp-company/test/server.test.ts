@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LineSplitter } from '@company/shared';
 import type { WalEntry } from '@company/shared';
+import { hebrewProblem, TOOL_BY_NAME } from '../src/tools.ts';
 
 const SERVER = new URL('../src/server.ts', import.meta.url).pathname;
 
@@ -80,6 +81,18 @@ test('handshake, tools/list, write tools queue to WAL while hq is down', async (
     assert.equal(e!.identity, 'yoav');
     assert.equal(e!.sessionId, 'sess-1');
     assert.deepEqual(e!.args, { to: 'dana', body: 'שלום', urgency: 'now' });
+
+    // Hebrew everywhere (#51): English text or titles are sent back for a rewrite, never queued.
+    const en = await c.call('tools/call', { name: 'tell', arguments: { to: 'yoav', body: 'Done. The PR is merged and the deploy went fine, see the link.' } });
+    assert.equal(en.result.isError, true);
+    assert.match(en.result.content[0].text, /בעברית/);
+    const enTitle = await c.call('tools/call', { name: 'open_team', arguments: { name: 'Tab handoff into hq', purpose: 'להעביר את ה-handoff של הטאב ל-hq' } });
+    assert.equal(enTitle.result.isError, true);
+    const enTicket = await c.call('tools/call', { name: 'open_ticket', arguments: { repo: 'a/b', title: 'Fix login flow', body: 'תיקון' } });
+    assert.equal(enTicket.result.isError, true);
+    assert.equal(walLines(root, 'yoav-3', 'wal.ndjson').length, 1, 'none of them reached the WAL');
+    const open = TOOL_BY_NAME.get('open_team')!;
+    assert.equal(hebrewProblem(open, { name: 'העברת ה-handoff של הטאב ל-hq', purpose: 'PR עם `company-ci` ירוק' }), null);
 
     const bad = await c.call('tools/call', { name: 'remember', arguments: { scope: 'galaxy', kind: 'fact', text: 'x' } });
     assert.equal(bad.result.isError, true);

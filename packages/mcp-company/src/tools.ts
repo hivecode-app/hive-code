@@ -1,5 +1,6 @@
 // Tool catalogue of the `company` MCP server (B.4, B.3, B.6). Every tool but
 // recall is a write: it goes to the local WAL and is answered {queued:true}.
+import { englishLines, hebrewReason, isEnglishTitle } from '@company/shared';
 import type { OpName } from '@company/shared';
 
 type Schema = Record<string, unknown>;
@@ -121,6 +122,26 @@ export function validateArgs(def: ToolDef, args: unknown): string | null {
         if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) return `${k} must be an array of strings`;
         break;
     }
+  }
+  return null;
+}
+
+/** Everything a person reads goes out in Hebrew (dir-0002, #51): message text by line, titles whole. */
+const HEBREW_TEXT: Partial<Record<ToolDef['name'], string[]>> = {
+  tell: ['body'], ask: ['question'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'],
+};
+const HEBREW_TITLE: Partial<Record<ToolDef['name'], string[]>> = { open_team: ['name'], open_ticket: ['title'] };
+
+/** The rewrite request when a field that a person reads is English, else null. */
+export function hebrewProblem(def: ToolDef, args: Record<string, unknown>): string | null {
+  for (const k of HEBREW_TITLE[def.name] ?? []) {
+    const v = args[k];
+    if (typeof v === 'string' && isEnglishTitle(v)) return hebrewReason(`${def.name}.${k} (כותרת)`, [v]);
+  }
+  for (const k of HEBREW_TEXT[def.name] ?? []) {
+    const v = args[k];
+    const bad = typeof v === 'string' ? englishLines(v) : [];
+    if (bad.length) return hebrewReason(`${def.name}.${k}`, bad);
   }
   return null;
 }

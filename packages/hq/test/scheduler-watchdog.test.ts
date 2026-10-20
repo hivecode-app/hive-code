@@ -44,8 +44,12 @@ test('scheduler fills free slots immediately with task workers under the project
     assert.equal(launcher.launches.length, 2, 'no third slot');
     assert.equal(hq.scheduler.task(t1.id)!.state, 'running');
     assert.equal(hq.scheduler.task(t3.id)!.state, 'queued');
-    const ident = hq.store.db.prepare('SELECT * FROM identities WHERE id = ?').get(`agent-company-t${t1.id}`) as { reports_to: string; lifecycle: string };
+    const ident = hq.store.db.prepare('SELECT * FROM identities WHERE id = ?').get(`agent-company-t${t1.id}`) as { reports_to: string; lifecycle: string; name: string; title: string };
     assert.equal(ident.reports_to, 'ac-ceo');
+    assert.match(ident.name, /^[\u05D0-\u05EA]+$/, 'a human Hebrew name, not t<N> (#51)');
+    assert.match(ident.title, /^מפתח/);
+    const other = hq.store.db.prepare('SELECT name FROM identities WHERE id = ?').get(`agent-company-t${t2.id}`) as { name: string };
+    assert.notEqual(other.name, ident.name);
     assert.equal(ident.lifecycle, 'ephemeral');
     const promptOf = (id: number) => hq.store.db.prepare(`SELECT state FROM messages WHERE id LIKE ?`).get(`task-${id}-agent-company-t${id}-1-%`) as { state: string } | undefined;
     await until(() => promptOf(t1.id)?.state === 'delivered', 3000, 'task prompt');

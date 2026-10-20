@@ -6,7 +6,8 @@ import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import type { Mailbox } from './mailbox.ts';
 import type { ShiftManager } from './shifts.ts';
-import { ensureRuntimeIdentity, getIdentity, projectLead } from './org.ts';
+import { ensureRuntimeIdentity, getIdentity, projectLead, taskWorkerName } from './org.ts';
+import { HELPER_TEAM } from './system-prompt.ts';
 import { memInfoMb } from './proc.ts';
 import { dirname, join } from 'node:path';
 import { noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
@@ -177,7 +178,8 @@ export class Scheduler {
     const openedBy = (JSON.parse(t.labels || '[]') as string[]).find((l) => l.startsWith(OPENED_BY))?.slice(OPENED_BY.length);
     const identity = t.identity ?? `${t.project ?? 'company'}-t${t.id}`;
     if (!t.identity) {
-      ensureRuntimeIdentity(this.store, { id: identity, name: `t${t.id}`, title: t.title.slice(0, 60), project: t.project,
+      const helper = !t.project && !!openedBy && getIdentity(this.store, openedBy)?.team === HELPER_TEAM;
+      ensureRuntimeIdentity(this.store, { id: identity, ...taskWorkerName(this.store, t.id, helper), project: t.project,
         reports_to: openedBy ?? lead ?? this.cfg.managerId });
       this.store.db.prepare('UPDATE tasks SET identity = ? WHERE id = ?').run(identity, t.id);
     }

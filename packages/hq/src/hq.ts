@@ -5,7 +5,7 @@ import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 import type { HqConfig } from './config.ts';
 import { Store } from './store.ts';
-import { syncOrg, getIdentity, listIdentities } from './org.ts';
+import { syncOrg, getIdentity, listIdentities, renameLegacyTaskWorkers } from './org.ts';
 import { Inbox } from './inbox.ts';
 import { ShiftManager, TemplateLauncher, type Launcher, type ConnectionFactory } from './shifts.ts';
 import { Mailbox, noForeignInjector, type ForeignInjector } from './mailbox.ts';
@@ -107,6 +107,7 @@ export class Hq {
 
   reloadContract(): void {
     syncOrg(this.store, this.cfg.companyDir, this.cfg.capacity.residents, this.cfg.managerId);
+    renameLegacyTaskWorkers(this.store);
     this.probes.reload();
   }
 

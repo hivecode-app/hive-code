@@ -96,3 +96,4 @@ export const OWNER: IdentityId = 'owner';
 // Priority, EngineEvent, HostToHq/HqToHost frames: see shift-protocol.ts (engine lane).
 export * from './shift-protocol.ts';
 export * from './company-api.ts';
+export * from './hebrew.ts';

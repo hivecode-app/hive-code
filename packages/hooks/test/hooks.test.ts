@@ -137,3 +137,29 @@ test('CLI latency (spool only)', async () => {
   assert.ok(median < 500, `median ${median}ms`);
   assert.ok(ss < 500, `SessionStart ${ss}ms`);
 });
+
+test('Stop: an English reply is blocked once, Hebrew and code pass (#51)', async () => {
+  const root = tmpState();
+  const env = { COMPANY_STATE_DIR: root, COMPANY_SHIFT: 'dana-1' };
+  const english = 'I merged the pull request and the deploy finished without any problems.';
+  const r = await runCli(['hook', 'Stop'], JSON.stringify({ hook_event_name: 'Stop', last_assistant_message: english }), env);
+  assert.equal(r.code, 0);
+  const out = JSON.parse(r.stdout) as { decision: string; reason: string };
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /בעברית/);
+  assert.match(out.reason, /I merged the pull request/);
+  // the rewrite is not blocked again (no loop)
+  const again = await runCli(['hook', 'Stop'], JSON.stringify({ hook_event_name: 'Stop', stop_hook_active: true, last_assistant_message: english }), env);
+  assert.equal(again.stdout, '');
+  for (const ok of [
+    'PR #17 מוזג, ה-CI ירוק, והבדיקה company-ci עברה על ה-commit האחרון',
+    'הנה הפלט:\n```\nError: something went wrong in the build pipeline step\n```',
+    '`npm run check:contract && npm test && npm run typecheck`',
+    'ZEBRA-1A2B3C',
+  ]) {
+    const p = await runCli(['hook', 'Stop'], JSON.stringify({ hook_event_name: 'Stop', last_assistant_message: ok }), env);
+    assert.equal(p.stdout, '', ok);
+  }
+  // still spooled
+  assert.ok(spoolLines(root, 'dana-1').every((l) => l.event === 'Stop'));
+});

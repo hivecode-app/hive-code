@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
+import { HELPER_TEAM } from './system-prompt.ts';
 import type { Store } from './store.ts';
 
 interface OrgPerson {
@@ -109,7 +110,52 @@ export function listIdentities(store: Store): IdentityRow[] {
   return store.db.prepare('SELECT * FROM identities WHERE active = 1 ORDER BY team, lifecycle, id').all() as IdentityRow[];
 }
 
-/** Runtime identity for a task worker ("עידו · מפתח · t3711"), reporting to the project CEO. */
+/** Human names for task workers (#51): a name and a role, not "t12". None of them is a standing identity's name. */
+const TASK_NAMES: ReadonlyArray<readonly [string, 'm' | 'f']> = [
+  ['דנה', 'f'], ['איתי', 'm'], ['תמר', 'f'], ['נועם', 'm'], ['שירה', 'f'], ['עומר', 'm'], ['מאיה', 'f'], ['יונתן', 'm'],
+  ['הדס', 'f'], ['גיל', 'm'], ['ענבל', 'f'], ['אסף', 'm'], ['מיכל', 'f'], ['ניר', 'm'], ['קרן', 'f'], ['עידו', 'm'],
+  ['רעות', 'f'], ['אלון', 'm'], ['שקד', 'f'], ['יובל', 'm'], ['ליאת', 'f'], ['דורון', 'm'], ['אביגיל', 'f'], ['בועז', 'm'],
+];
+
+/** Second, third… "דנה" once the whole pool is in use. */
+const ROUND = ['', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ז׳', 'ח׳', 'ט׳'];
+
+/**
+ * Name and title of a new task worker: the pool in order from the task id, skipping names in use (a standing
+ * identity, or a task worker whose task is still open), so two live workers are never both "דנה". When every
+ * name is in use the round goes on with a suffix ("דנה ב׳"). `helper` = a personal-team errand, not code.
+ */
+export function taskWorkerName(store: Store, taskId: number, helper = false): { name: string; title: string } {
+  const taken = new Set((store.db.prepare(`SELECT i.name FROM identities i WHERE i.active = 1 AND (i.source != 'runtime'
+      OR EXISTS (SELECT 1 FROM tasks t WHERE t.identity = i.id AND t.state != 'done'))`).all() as { name: string }[]).map((r) => r.name));
+  const n = TASK_NAMES.length;
+  const start = ((taskId % n) + n) % n;
+  for (let k = 0; ; k++) {
+    const [base, g] = TASK_NAMES[(start + k) % n]!;
+    const round = Math.floor(k / n);
+    const name = round === 0 ? base : `${base} ${ROUND[round] ?? round + 1}`;
+    if (taken.has(name) && k < n * 50) continue;
+    return { name, title: helper ? (g === 'f' ? 'עוזרת אישית' : 'עוזר אישי') : (g === 'f' ? 'מפתחת' : 'מפתח') };
+  }
+}
+
+/** Task workers opened before #51 were named "t<N>" with the task title as their title: give them a name and a role. */
+export function renameLegacyTaskWorkers(store: Store): number {
+  const rows = store.db.prepare(`SELECT i.id, i.name, i.project, o.team AS opener_team FROM identities i
+      LEFT JOIN identities o ON o.id = i.reports_to WHERE i.source = 'runtime' AND i.team_kind = 'task'`).all() as
+    { id: string; name: string; project: string | null; opener_team: string | null }[];
+  let n = 0;
+  for (const r of rows) {
+    const m = /^t(\d+)$/.exec(r.name);
+    if (!m) continue;
+    const w = taskWorkerName(store, Number(m[1]), !r.project && r.opener_team === HELPER_TEAM);
+    store.db.prepare('UPDATE identities SET name = ?, title = ?, updated_at = ? WHERE id = ?').run(w.name, w.title, store.now(), r.id);
+    n++;
+  }
+  return n;
+}
+
+/** Runtime identity for a task worker ("דנה · מפתחת", id agent-company-t3711), reporting to the project CEO. */
 export function ensureRuntimeIdentity(store: Store, p: { id: string; name: string; title: string; project: string | null; reports_to: string | null; symbol?: string }): void {
   store.db.prepare(`INSERT OR IGNORE INTO identities
       (id, name, title, symbol, team, team_kind, project, reports_to, lifecycle, source, active, data, updated_at)

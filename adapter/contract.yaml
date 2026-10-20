@@ -362,6 +362,26 @@ rows:
     disables: none (alert)
     evidence: B.3
 
+  - id: hebrew_stop_guard
+    internal: "Stop hook decision:block + last_assistant_message / stop_hook_active in the hook input"
+    use: "Hebrew everywhere (dir-0002, #51): the company Stop hook in the generated --settings blocks an English reply once and the worker rewrites it. The owner's ~/.claude hebrew-reply-guard does not load in shifts (--setting-sources project,local). Gap: only the final text of the turn is checked; text written before a tool call is held only by the L1 rule"
+    stability: medium
+    canary: '"answer in English only" -> the final result of the turn is Hebrew (englishLines empty)'
+    check: [hebrew_guard]
+    fast: true
+    disables: none (alert; tell/ask/open_team/open_ticket still refuse English in the company MCP)
+    evidence: "#51: on 20/10 yoav wrote the owner a whole message in English and task t12's card showed an English title"
+
+  - id: hebrew_relay
+    internal: "L1 howWeTalk Hebrew rule + company MCP hebrewProblem (tell, ask, request_go, open_team, open_ticket)"
+    use: "a worker that gets an English message answers yoav in Hebrew, and yoav answers the owner in Hebrew (#51)"
+    stability: medium
+    canary: "tell a fresh task worker in English 'status? reply to yoav'; its tell to yoav is Hebrew (englishLines empty); yoav's next message to the owner likewise"
+    check: "-"
+    fast: false
+    disables: none (alert)
+    evidence: "#51"
+
   - id: disallow_ask_user
     internal: "--disallowedTools AskUserQuestion"
     use: questions only through company ask
