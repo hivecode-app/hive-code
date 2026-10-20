@@ -25,6 +25,9 @@ class PendingAnswer {
   String get label => text != null ? text!(secondsLeft) : isGo ? "GO יישלח ${toName(to)} בעוד $secondsLeft שנ'" : "יישלח ${toName(to)} בעוד $secondsLeft שנ'";
 }
 
+/// How the conversation list is ordered. [recent] is the data's order (newest message first).
+enum ConvSort { recent, working, waiting, name }
+
 class AppStore extends ChangeNotifier {
   AppStore(this.backend, {this.undoSeconds = 3, SharedPreferences? prefs}) : _prefs = prefs { // ignore: prefer_initializing_formals
     backend.addListener(_onBackend);
@@ -72,6 +75,7 @@ class AppStore extends ChangeNotifier {
     } catch (_) {
       // Tests without a mock store: drafts stay in memory.
     }
+    _convSort = ConvSort.values.asNameMap()[_prefs?.getString(kConvSortKey)] ?? ConvSort.recent;
     await backend.start();
     _restoreDrafts();
     if (_online) unawaited(flushOutbox()); // came up online: what waited from last time goes now
@@ -323,6 +327,19 @@ class AppStore extends ChangeNotifier {
     final d = data;
     if (d == null) return;
     _check(await backend.setFocus(!d.focus));
+  }
+
+  // ── conversation list order, kept on this device ─────────────────────────
+
+  static const kConvSortKey = 'convs.sort';
+  ConvSort _convSort = ConvSort.recent;
+  ConvSort get convSort => _convSort;
+
+  void setConvSort(ConvSort s) {
+    if (s == _convSort) return;
+    _convSort = s;
+    _prefs?.setString(kConvSortKey, s.name);
+    notifyListeners();
   }
 
   // ── drafts and outbox, persisted ─────────────────────────────────────────

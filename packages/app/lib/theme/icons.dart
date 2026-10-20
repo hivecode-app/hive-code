@@ -96,4 +96,5 @@ const Map<String, IconData> kIcons = {
   'group': Symbols.group_rounded,
   'domain': Symbols.domain_rounded,
   'expand_less': Symbols.expand_less_rounded,
+  'sort': Symbols.sort_rounded,
 };

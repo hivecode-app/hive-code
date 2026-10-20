@@ -69,10 +69,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     final d = store.data;
     final p = context.p;
     if (d == null) return const SizedBox.shrink();
-    final ordered = [
-      ...d.conversations.where((c) => c.pinned),
-      ...d.conversations.where((c) => !c.pinned),
-    ].where((c) => _match(d, c));
+    final ordered = sortConversations(d, d.conversations, store.convSort).where((c) => _match(d, c));
     // Finished task workers go below every live conversation, whatever order the list came in (#40):
     // the order above is the data's, and this split is the last step, so any sort keeps them at the end.
     final all = [...ordered.where((c) => !d.isDone(c.identityId)), ...ordered.where((c) => d.isDone(c.identityId))];
@@ -88,7 +85,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
       return Container(
         color: p.surface,
         child: Column(children: [
-          const TopBar(title: 'שיחות'),
+          TopBar(title: 'שיחות', actions: [IBtn('sort', tip: 'מיון', onTap: () => pickConvSort(context))]),
           _QuickSwitch(onChanged: (v) => setState(() => q = v)),
           Expanded(
             child: ListView(padding: EdgeInsets.zero, children: [
@@ -121,6 +118,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
               )
             : TopBar(title: 'שיחות', showLink: true, actions: [
                 IBtn('search', tip: 'חיפוש', onTap: _openSearch),
+                IBtn('sort', tip: 'מיון', onTap: () => pickConvSort(context)),
                 IBtn('more_vert', tip: 'עוד', onTap: () => Nav.settings(context)),
               ]),
         const SystemBar(),
@@ -183,6 +181,58 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
       ),
     );
   }
+}
+
+/// The list's order: pinned first, then by [sort]; ties keep the data's order (newest message first).
+/// Finished task workers still go last, after this (the split in the list widget).
+List<ConversationSummary> sortConversations(CompanyData d, List<ConversationSummary> convs, ConvSort sort) {
+  final at = {for (final (i, c) in convs.indexed) c.identityId: i};
+  WorkerStatus st(ConversationSummary c) => d.presence[c.identityId]?.status ?? WorkerStatus.free;
+  int key(ConversationSummary c) => switch (sort) {
+        ConvSort.working => st(c) == WorkerStatus.working ? 0 : 1,
+        ConvSort.waiting => st(c) == WorkerStatus.waiting ? 0 : 1,
+        _ => 0,
+      };
+  int cmp(ConversationSummary a, ConversationSummary b) {
+    if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+    var r = key(a).compareTo(key(b));
+    if (r == 0 && sort == ConvSort.name) r = d.who(a.identityId).name.compareTo(d.who(b.identityId).name);
+    return r != 0 ? r : at[a.identityId]!.compareTo(at[b.identityId]!);
+  }
+
+  return [...convs]..sort(cmp);
+}
+
+const kConvSortLabels = {
+  ConvSort.recent: 'אחרון',
+  ConvSort.working: 'עובדים עכשיו למעלה',
+  ConvSort.waiting: 'מחכה לך למעלה',
+  ConvSort.name: 'לפי שם',
+};
+
+/// The sort choice, as a sheet: the current one is marked with a check, not a colour.
+void pickConvSort(BuildContext context) {
+  final store = StoreScope.read(context);
+  final p = context.p;
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: p.surface,
+    showDragHandle: true,
+    builder: (ctx) => SafeArea(
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text('מיון השיחות', style: T.name.copyWith(color: p.text))),
+        for (final s in ConvSort.values)
+          ListTile(
+            title: Text(kConvSortLabels[s]!, style: T.body.copyWith(color: p.text)),
+            trailing: s == store.convSort ? Ic('check', color: p.text, semantic: 'נבחר') : null,
+            onTap: () {
+              Navigator.pop(ctx);
+              store.setConvSort(s);
+            },
+          ),
+      ]),
+    ),
+  );
 }
 
 class _QuickSwitch extends StatelessWidget {
