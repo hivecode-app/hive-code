@@ -26,7 +26,7 @@ class _OrgScreenState extends State<OrgScreen> {
     final d = store.data;
     if (d == null) return const SizedBox.shrink();
     return Column(children: [
-      TopBar(actions: [IBtn('more_vert', tip: 'עוד', onTap: () => Nav.settings(context))]),
+      TopBar(showLink: true, actions: [IBtn('more_vert', tip: 'עוד', onTap: () => Nav.settings(context))]),
       const SystemBar(),
       Expanded(
         child: ListView(padding: EdgeInsets.zero, children: [

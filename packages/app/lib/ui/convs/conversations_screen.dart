@@ -82,7 +82,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                   ),
                 ]),
               )
-            : TopBar(title: 'שיחות', actions: [
+            : TopBar(title: 'שיחות', showLink: true, actions: [
                 IBtn('search', tip: 'חיפוש', onTap: () => setState(() => searching = true)),
                 IBtn('more_vert', tip: 'עוד', onTap: () => Nav.settings(context)),
               ]),

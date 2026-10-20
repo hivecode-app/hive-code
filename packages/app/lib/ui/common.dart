@@ -9,6 +9,7 @@ import '../model/models.dart';
 import '../theme/icons.dart';
 import '../theme/tokens.dart';
 import 'bidi.dart';
+import 'system_bar.dart';
 
 export 'bidi.dart';
 
@@ -604,8 +605,11 @@ String hm(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toStri
 
 /// Top app bar of the main screens (`.tbar`).
 class TopBar extends StatelessWidget {
-  const TopBar({super.key, this.title, this.actions = const [], this.leading});
+  const TopBar({super.key, this.title, this.actions = const [], this.leading, this.showLink = false});
   final String? title;
+
+  /// The four main screens show "מתעדכן" next to the title while the link comes up (LinkHint).
+  final bool showLink;
   final List<Widget> actions;
   final Widget? leading;
   @override
@@ -618,7 +622,10 @@ class TopBar extends StatelessWidget {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(title ?? '', style: T.bar.copyWith(color: context.p.text), maxLines: 1),
+                child: Row(children: [
+                  Flexible(child: Text(title ?? '', style: T.bar.copyWith(color: context.p.text), maxLines: 1)),
+                  if (showLink) ...[const SizedBox(width: 10), const LinkHint()],
+                ]),
               ),
             ),
             ...actions,

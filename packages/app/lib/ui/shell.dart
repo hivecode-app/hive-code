@@ -197,7 +197,7 @@ class _FirstLoad extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
     return Column(children: [
-      const TopBar(title: 'החברה'),
+      const TopBar(title: 'החברה', showLink: true),
       const SystemBar(),
       Expanded(
         child: Center(

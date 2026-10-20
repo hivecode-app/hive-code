@@ -284,6 +284,9 @@ class StoreScope extends InheritedWidget {
   static AppStore of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<StoreScope>()!.store;
   static AppStore read(BuildContext context) => context.getInheritedWidgetOfExactType<StoreScope>()!.store;
 
+  /// Null on screens that come before there is a store (sign-in, devices).
+  static AppStore? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<StoreScope>()?.store;
+
   @override
   bool updateShouldNotify(StoreScope old) => old.version != version || old.store != store;
 }

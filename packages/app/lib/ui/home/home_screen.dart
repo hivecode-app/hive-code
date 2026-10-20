@@ -52,7 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (d == null) return const SizedBox.shrink();
     final items = _sorted(d);
     return Column(children: [
-      TopBar(title: 'החברה', actions: [
+      TopBar(title: 'החברה', showLink: true, actions: [
         const IBtn('search', tip: 'חיפוש'),
         IBtn(d.focus ? 'do_not_disturb_on' : 'do_not_disturb_on', tip: d.focus ? 'פוקוס פעיל · כיבוי' : 'פוקוס', fill: d.focus, color: d.focus ? p.text : null, onTap: store.toggleFocus),
         IBtn('more_vert', tip: 'עוד', onTap: () => Nav.settings(context)),

@@ -34,6 +34,20 @@ class HqBackend extends Backend {
   bool _disposed = false;
   DateTime? _downSince;
   final _engines = <String, EngineModel>{};
+
+  /// Between connecting and hq's {type:'live'}: replayed events change data but don't redraw the
+  /// screen one by one; one redraw comes with 'live'.
+  bool _replaying = false;
+  bool _skipEngineReplay = false;
+  bool _connectedOnce = false;
+  Timer? _replayGuard;
+  Timer? _onlineAgain;
+
+  @override
+  void notifyListeners() {
+    if (_replaying || _disposed) return;
+    super.notifyListeners();
+  }
   final _boardShift = <String, String>{}; // identity -> live shift id
   final _askToInbox = <String, int>{};
 
@@ -45,6 +59,7 @@ class HqBackend extends Backend {
   void _refused() {
     if (_unauthorized || _disposed) return;
     _unauthorized = true;
+    _replaying = false;
     _retry?.cancel();
     notifyListeners();
   }
@@ -87,17 +102,20 @@ class HqBackend extends Backend {
   Future<void> start() async {
     try {
       await _load();
+      notifyListeners(); // the snapshot shows at once; the WebSocket only adds what is new
       _connect();
     } catch (_) {
       _setDown();
       _scheduleRetry();
+      notifyListeners();
     }
-    notifyListeners();
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _replayGuard?.cancel();
+    _onlineAgain?.cancel();
     _retry?.cancel();
     _refresh?.cancel();
     _wsSub?.cancel();
@@ -107,6 +125,7 @@ class HqBackend extends Backend {
   }
 
   void _setDown() {
+    _replaying = false; // a failed connection must still say so on screen
     _downSince ??= DateTime.now();
     final t = _downSince!;
     _status = SystemStatus(LinkState.offline, since: '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}');
@@ -122,6 +141,7 @@ class HqBackend extends Backend {
         // error; one plain request tells them apart, and a 401 there sends the app to sign-in.
         if (_data == null) {
           await _load();
+          notifyListeners(); // show the snapshot before the WebSocket replays
         } else {
           await _get('/api/toggles');
         }
@@ -204,9 +224,21 @@ class HqBackend extends Backend {
   void _connect() {
     _wsSub?.cancel();
     final u = Uri.parse(baseUrl);
-    final ws = u.replace(scheme: u.scheme == 'https' ? 'wss' : 'ws', path: '${u.path}/ws', queryParameters: {'after': '$_seq', 'token': token});
+    // First connect: no cursor, so hq sends only its recent tail (the snapshot already has the
+    // state). Sending after=0 made it replay its whole history, 6,000 events and growing, on every
+    // start. A reconnect resumes from the last seq it saw, so nothing is lost.
+    final first = !_connectedOnce;
+    final ws = u.replace(scheme: u.scheme == 'https' ? 'wss' : 'ws', path: '${u.path}/ws', queryParameters: {if (!first) 'after': '$_seq', 'token': token});
     _status = const SystemStatus(LinkState.connecting);
     _replayed = 0;
+    _replaying = true;
+    _skipEngineReplay = first;
+    _replayGuard?.cancel();
+    _replayGuard = Timer(const Duration(seconds: 4), () {
+      if (_disposed || !_replaying) return;
+      _replaying = false;
+      notifyListeners();
+    });
     try {
       _ws = WebSocketChannel.connect(ws);
       // A failed handshake also reaches the stream's onError below, which retries.
@@ -236,12 +268,18 @@ class HqBackend extends Backend {
   void _onEvent(Map<String, dynamic> e) {
     final type = e['type'] as String? ?? '';
     if (type == 'live') {
+      _replaying = false;
+      _connectedOnce = true;
+      _replayGuard?.cancel();
+      final liveSeq = (e['seq'] as num?)?.toInt() ?? 0;
+      if (liveSeq > _seq) _seq = liveSeq;
       final wasDown = _downSince != null;
       _downSince = null;
       _status = wasDown ? SystemStatus(LinkState.reconnected, updated: _replayed) : const SystemStatus(LinkState.online);
       if (wasDown) {
-        Timer(const Duration(seconds: 3), () {
-          if (_status.state == LinkState.reconnected) {
+        _onlineAgain?.cancel();
+        _onlineAgain = Timer(const Duration(seconds: 3), () {
+          if (!_disposed && _status.state == LinkState.reconnected) {
             _status = const SystemStatus(LinkState.online);
             notifyListeners();
           }
@@ -263,6 +301,9 @@ class HqBackend extends Backend {
     if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'toggle.changed' || type.startsWith('watchdog.')) {
       _refreshSoon();
     }
+    // The first replay is history the snapshot and openConversation already cover: building chats
+    // from it only cost time at start.
+    if (_skipEngineReplay && _replaying && type.startsWith('engine.')) return;
     if (identity != null && (type.startsWith('engine.') || type == 'shift.state')) {
       final chat = d.chats.putIfAbsent(identity, () => Conversation(identityId: identity, items: []));
       _engineFor(identity, chat).apply(e);
@@ -311,7 +352,8 @@ class HqBackend extends Backend {
       lastLine: line.split('\n').first,
       time: _hm(ts),
       lastIsMine: true,
-      unread: openIdentity == id ? 0 : 1,
+      // The first replay's tail is old news (already handled): don't mark it unread.
+      unread: openIdentity == id || (_skipEngineReplay && _replaying) ? 0 : 1,
       pinned: i >= 0 && d.conversations[i].pinned,
     );
     if (i >= 0) {

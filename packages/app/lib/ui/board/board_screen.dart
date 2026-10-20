@@ -33,7 +33,7 @@ class _BoardScreenState extends State<BoardScreen> {
 
     return Stack(children: [
       Column(children: [
-        TopBar(actions: [const IBtn('search', tip: 'חיפוש'), IBtn('more_vert', tip: 'עוד', onTap: () => Nav.settings(context))]),
+        TopBar(showLink: true, actions: [const IBtn('search', tip: 'חיפוש'), IBtn('more_vert', tip: 'עוד', onTap: () => Nav.settings(context))]),
         const SystemBar(),
         Expanded(
           child: ListView(padding: EdgeInsets.zero, children: [
