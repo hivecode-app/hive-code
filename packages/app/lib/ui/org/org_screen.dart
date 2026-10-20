@@ -18,7 +18,8 @@ class OrgScreen extends StatefulWidget {
 
 class _OrgScreenState extends State<OrgScreen> {
   bool autos = false;
-  /// Teams the owner opened or closed this session; a project team with workers starts open.
+  /// Teams the owner opened or closed this session; a project team with someone at work (besides
+  /// its lead) starts open.
   final toggled = <String>{};
 
   @override
@@ -50,7 +51,8 @@ class _OrgScreenState extends State<OrgScreen> {
     for (final (i, t) in d.orgTeams.indexed) {
       final team = d.teams[t.teamId]!;
       final expandable = t.members.isNotEmpty;
-      final isOpen = toggled.contains(t.teamId) != (!team.permanent && t.members.length > 1);
+      final busy = t.members.any((m) => m.identityId != team.leadId && !const [WorkerStatus.resting, WorkerStatus.done].contains(d.presence[m.identityId]?.status ?? WorkerStatus.resting));
+      final isOpen = toggled.contains(t.teamId) != (!team.permanent && busy);
       if (i > 0) rows.add(Container(color: p.surface, padding: const EdgeInsetsDirectional.only(start: 16), child: Container(height: 1, color: p.line)));
       Widget end;
       if (t.canWake) {
@@ -251,4 +253,4 @@ class Toggle extends StatelessWidget {
 }
 
 /// A standing worker's row on the org tab: its role, then the task it is on now ("אחראי שרת · משימה: שדרוג השרת").
-String memberLine(String line, Presence pr) => pr.currentTask == null ? line : '$line · משימה: ${pr.currentTask}';
+String memberLine(String line, Presence pr) => pr.currentTask == null || pr.currentTask == line ? line : '$line · משימה: ${pr.currentTask}';

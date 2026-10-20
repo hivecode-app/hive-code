@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import WebSocket from 'ws';
-import { makeEnv, until } from './helpers.ts';
+import { ORG_YAML, makeEnv, until } from './helpers.ts';
 import { backupOnce } from '../src/backup.ts';
 import { Store } from '../src/store.ts';
 
@@ -258,5 +258,14 @@ test('API: "לא עכשיו" and closing a card are kept by hq, so a refresh doe
 
     assert.equal((await call('POST', `/api/inbox/${ask.id}/snooze`, {})).status, 409, 'already handled');
     assert.equal((await call('POST', '/api/inbox/99999/snooze', {})).status, 404);
+  } finally { await env.cleanup(); }
+});
+
+test('API: a project team in /api/org carries the owner\'s name for the project (org.yaml projects[].name)', async () => {
+  const env = await makeEnv({ org: `${ORG_YAML}projects:\n  - {id: agent-company, name: החברה, status: active, team: agent-company}\n` });
+  try {
+    const teams = env.hq.teams();
+    assert.equal(teams.find((t) => t.id === 'agent-company')?.name, 'החברה');
+    assert.equal(teams.find((t) => t.id === 'personal')?.name, null, 'a permanent team: no project name');
   } finally { await env.cleanup(); }
 });

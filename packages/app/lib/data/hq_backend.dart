@@ -1012,7 +1012,8 @@ CompanyData mapSnapshot({
     final host = b['team_kind'] == 'task' ? hostTeam(b) : null;
     final project = b['project'] as String?;
     final symbol = teamSymbols[host ?? team] ?? (own != null && kIcons.containsKey(own) ? own : 'build');
-    final teamName = host != null ? (teamNames[host] ?? (project != null ? projectNames[project] : null) ?? host) : (teamNames[team] ?? team);
+    final named = host ?? team;
+    final teamName = teamNames[named] ?? (project != null ? projectNames[project] : null) ?? named;
     teams.putIfAbsent(team, () => Team(id: team, name: teamName, symbol: symbol, permanent: b['team_kind'] == 'permanent'));
     if (b['lifecycle'] == 'lead' && teams[team]!.leadId == null) {
       teams[team] = Team(id: team, name: teams[team]!.name, symbol: teams[team]!.symbol, leadId: id, permanent: teams[team]!.permanent);
@@ -1162,8 +1163,9 @@ CompanyData mapSnapshot({
       if (p['id'] is String) ProjectInfo(id: p['id'] as String, name: projectNames[p['id']], active: p['status'] == 'active'),
   ];
 
-  // Org (APP-SPEC §4.6): the permanent teams, then each project's team: its lead, then the workers
-  // on its open tasks with the task as the second line. A task team is not a team of its own here,
+  // Org (APP-SPEC §4.6): the permanent teams, then each project's team: its lead, its standing
+  // workers (each with its state, its current task and how many wait for it), then the workers on
+  // its open tasks with the task as the second line. A task team is not a team of its own here,
   // and one whose task closed is gone.
   final teamKind = {for (final b in board) (b['team'] as String?) ?? 'company': b['team_kind'] as String?};
   final orgTeams = <OrgTeam>[];
@@ -1173,17 +1175,28 @@ CompanyData mapSnapshot({
     final lead = t.leadId != null ? ids[t.leadId] : null;
     if (kind == 'project') {
       final project = board.where((b) => b['team'] == t.id).map((b) => b['project'] as String?).firstWhere((p) => p != null, orElse: () => t.id);
+      final standing = [
+        for (final b in board)
+          if (b['team'] == t.id && b['id'] != lead?.id) b['id'] as String,
+      ];
       final workers = [
         for (final b in board)
           if (b['team_kind'] == 'task' && b['project'] == project && taskOf.containsKey(b['id'])) b['id'] as String,
       ];
+      final people = (lead != null ? 1 : 0) + standing.length + workers.length;
+      final openTasks = tickets.where((k) => k.project == project && k.group != TicketGroup.doneToday).length;
       orgTeams.add(OrgTeam(
         teamId: t.id,
-        line: [if (lead != null) lead.name, workers.isEmpty ? 'אין משימות פתוחות' : (workers.length == 1 ? 'משימה פתוחה אחת' : '${workers.length} משימות פתוחות')].join(' · '),
+        line: [
+          if (lead != null) lead.name,
+          people == 1 ? 'עובד אחד' : '$people עובדים',
+          openTasks == 0 ? 'אין משימות פתוחות' : (openTasks == 1 ? 'משימה פתוחה אחת' : '$openTasks משימות פתוחות'),
+        ].join(' · '),
         statusIcon: '',
         statusWord: '',
         members: [
           if (lead != null) OrgMember(identityId: lead.id, line: lead.title),
+          for (final s in standing) OrgMember(identityId: s, line: ids[s]!.title),
           for (final w in workers) OrgMember(identityId: w, line: taskOf[w]!),
         ],
       ));

@@ -111,10 +111,13 @@ export class Hq {
   board() { return board(this.store, this.cfg.timers.livenessMs * 3); }
 
   teams() {
-    const t = new Map<string, { id: string; kind: string | null; project: string | null; members: string[] }>();
+    // A project's team shows the owner's name for the project (org.yaml `projects[].name`), or null.
+    const names = new Map(this.projects().map((p) => [p.id, p.name]));
+    const t = new Map<string, { id: string; name: string | null; kind: string | null; project: string | null; members: string[] }>();
     for (const i of listIdentities(this.store)) {
       const key = i.team ?? 'none';
-      if (!t.has(key)) t.set(key, { id: key, kind: i.team_kind, project: i.project, members: [] });
+      const name = i.team_kind === 'project' && i.project ? names.get(i.project) ?? null : null;
+      if (!t.has(key)) t.set(key, { id: key, name, kind: i.team_kind, project: i.project, members: [] });
       t.get(key)!.members.push(i.id);
     }
     return [...t.values()];

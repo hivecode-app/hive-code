@@ -3,7 +3,15 @@
 import 'package:agent_company/data/hq_backend.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/org/org_screen.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'hq_snapshot_test.dart' show SnapshotBackend;
+import 'helpers.dart';
+import 'package:agent_company/data/store.dart';
+import 'package:agent_company/main.dart';
+import 'package:agent_company/ui/common.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 Map<String, dynamic> _id(String id, String name, String team, String kind, String lifecycle, String status, {String? project, String title = ''}) =>
     {'id': id, 'name': name, 'title': title, 'symbol': '', 'team': team, 'team_kind': kind, 'project': project, 'lifecycle': lifecycle, 'status': status, 'shift': null};
@@ -73,7 +81,8 @@ void main() {
     // The interrupted task's worker rests, but its task team is still open, so it stays.
     expect([for (final m in ac.members) m.identityId], ['adi', 'ac-t16', 'ac-t17', 'ac-t18', 'ac-t23', 'ac-t24']);
     expect(ac.members[1].line, 'העברת לומו לחברה');
-    expect(ac.line, 'עדי · 5 משימות פתוחות');
+    // Everyone on the team (the lead and 5 workers), and every open task of the project (7, two of them queued).
+    expect(ac.line, 'עדי · 6 עובדים · 7 משימות פתוחות');
     // The closed task's worker is not counted: 5 working, waiting or free (yoav, t16, t17, t18, t24), 3 resting.
     expect(d.orgSubtitle, '5 עובדים פעילים · 3 נחים');
   });
@@ -153,5 +162,65 @@ void main() {
     expect(idle.currentTask, isNull);
     expect(idle.queued, 0, reason: 'an older hq without the fields');
     expect(memberLine('מנכ"לית', idle), 'מנכ"לית');
+  });
+
+  group('#t48: a project team lists its lead and standing workers, then task workers, under the project\'s name', () {
+    Map<String, dynamic> w(String id, String name, String team, String kind, String life, String status, {String title = '', Map<String, dynamic>? current, int queued = 0}) =>
+        {..._id(id, name, team, kind, life, status, project: 'voice-bot', title: title), 'reports_to': 'shachar', 'current_task': current, 'queued': queued};
+    final voice = mapSnapshot(
+      board: [
+        ...board,
+        w('shachar', 'שחר', 'voice-bot', 'project', 'lead', 'free', title: 'ראש צוות'),
+        {...w('keren', 'קרן', 'voice-bot', 'project', 'dormant', 'working', title: 'אחראית קול', current: {'id': 47, 'ref': null, 'title': 'השהיה בשיחה', 'state': 'running'}, queued: 1), 'gender': 'f'},
+        w('nir', 'ניר', 'voice-bot', 'project', 'dormant', 'resting', title: 'אחראי בדיקות'),
+        w('voice-bot-t50', 'אורית', 'voice-bot-t50', 'task', 'ephemeral', 'working', title: 'מפתחת', current: {'id': 50, 'ref': null, 'title': 'תיקון הקלטה', 'state': 'running'}),
+      ],
+      inbox: const [], asks: const [], toggles: const [],
+      tasks: [
+        ...tasks,
+        {'id': 47, 'title': 'השהיה בשיחה', 'project': 'voice-bot', 'state': 'running', 'identity': 'keren', 'updated_at': ms(14, 0)},
+        {'id': 48, 'title': 'הבא בתור של קרן', 'project': 'voice-bot', 'state': 'queued', 'identity': 'keren', 'updated_at': ms(14, 0)},
+        {'id': 50, 'title': 'תיקון הקלטה', 'project': 'voice-bot', 'state': 'running', 'identity': 'voice-bot-t50', 'updated_at': ms(14, 0)},
+      ],
+      // The project has a name in org.yaml; the team row does not (hq's /api/org gave name: null).
+      projects: [...projects, {'id': 'voice-bot', 'name': 'הבוט הקולי', 'status': 'active', 'team': null}],
+      now: now,
+    );
+
+    test('members, lines and the summary', () {
+      final t = voice.orgTeams.firstWhere((t) => t.teamId == 'voice-bot');
+      expect(voice.teams['voice-bot']!.name, 'הבוט הקולי', reason: 'the project\'s name, never its id');
+      expect([for (final m in t.members) m.identityId], ['shachar', 'keren', 'nir', 'voice-bot-t50']);
+      expect([for (final m in t.members) memberLine(m.line, voice.presence[m.identityId]!)],
+          ['ראש צוות', 'אחראית קול · משימה: השהיה בשיחה', 'אחראי בדיקות', 'תיקון הקלטה']);
+      expect(voice.presence['keren']!.status, WorkerStatus.working);
+      expect(voice.presence['keren']!.queued, 1);
+      expect(voice.presence['nir']!.status, WorkerStatus.resting);
+      expect(t.line, 'שחר · 4 עובדים · 3 משימות פתוחות');
+    });
+
+    testWidgets('the org tab shows them with their state in a word', (tester) async {
+      await loadFonts();
+      Motion.frozen = true;
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(342, 1400) * 2;
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      final store = AppStore(SnapshotBackend(voice));
+      await store.start();
+      await tester.pumpWidget(CompanyApp(store: store, themeMode: ThemeMode.light, home: const Scaffold(body: OrgScreen())));
+      await tester.pump();
+      expect(find.text('הבוט הקולי'), findsOneWidget);
+      expect(find.text('voice-bot'), findsNothing);
+      expect(findShown('שחר · 4 עובדים · 3 משימות פתוחות'), findsOneWidget);
+      // Someone besides the lead is at work: the team starts open.
+      expect(find.text('קרן'), findsOneWidget);
+      expect(find.text('ניר'), findsOneWidget);
+      expect(find.text('אורית'), findsOneWidget);
+      expect(findShown('אחראית קול · משימה: השהיה בשיחה'), findsOneWidget);
+      // The state in a word, next to its icon: Keren works with one waiting, Nir rests.
+      final states = {for (final w in tester.widgetList<StatusWord>(find.byType(StatusWord))) (w.icon, w.word)};
+      expect(states, containsAll([(statusIcon(WorkerStatus.working), '${statusWord(WorkerStatus.working, Gender.f)} · 1 בתור'), (statusIcon(WorkerStatus.resting), statusWord(WorkerStatus.resting, Gender.m))]));
+    });
   });
 }
