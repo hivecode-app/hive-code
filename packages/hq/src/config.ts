@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import type { TabConfig } from './tab/handoffs.ts';
 
 export interface HqConfig {
   stateDir: string;
@@ -58,6 +59,8 @@ export interface HqConfig {
   accounts: AccountDef[];
   /** The owner's global Claude dir: read-only for us, source of the shared projects/sessions symlinks. */
   claudeHome: string;
+  /** B.9 tab handoff: the phone page listener (tab.hq behind Caddy) and the shared Chrome's CDP. */
+  tab: TabConfig;
 }
 
 export interface AccountDef {
@@ -118,6 +121,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       { name: 'hive-owner', label: 'hive-owner', expect: 'hive-owner', managed: true },
     ],
     claudeHome: join(homedir(), '.claude'),
+    tab: { listen: '127.0.0.1:7422', baseUrl: 'https://tab.hq.example.com', cdpUrl: 'http://127.0.0.1:9222', ttlMin: 10 },
   };
   const file = join(stateDir, 'hq.config.json');
   let fromFile: Partial<HqConfig> = {};
@@ -127,6 +131,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     timers: { ...base.timers, ...fromFile.timers, ...overrides.timers },
     capacity: { ...base.capacity, ...fromFile.capacity, ...overrides.capacity },
     auth: { ...base.auth, ...fromFile.auth, ...overrides.auth },
+    tab: { ...base.tab, ...fromFile.tab, ...overrides.tab },
   };
   if (!overrides.dbPath && !fromFile.dbPath) cfg.dbPath = join(cfg.stateDir, 'hq.db');
   if (process.env.HQ_PORT) cfg.port = Number(process.env.HQ_PORT);

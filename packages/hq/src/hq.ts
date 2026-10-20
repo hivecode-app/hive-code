@@ -20,6 +20,12 @@ import { startApi, loadOrCreateToken, health, type ApiServer } from './api.ts';
 import { Auth } from './auth.ts';
 import { Ingest, startIngestSocket, type Ticketer } from './ingest.ts';
 import { AccountManager, type AccountDeps } from './accounts.ts';
+import { TabHandoffs } from './tab/handoffs.ts';
+import { CdpTabBrowser, type TabBrowser } from './tab/browser.ts';
+import { startTabServer, type TabServer } from './tab/server.ts';
+
+/** The phone view's own diagnostics go to the journal, not the event log (frames and taps are not events). */
+const tabLog = (msg: string, data?: unknown) => console.log(`tab: ${msg}${data === undefined ? '' : ` ${JSON.stringify(data)}`}`);
 
 export interface HqDeps {
   launcher?: Launcher;
@@ -30,6 +36,7 @@ export interface HqDeps {
   ticketer?: Ticketer;
   issues?: IssueSource;
   accounts?: AccountDeps;
+  tabBrowser?: TabBrowser;
   now?: () => number;
 }
 
@@ -62,6 +69,8 @@ export class Hq {
   readonly pusher: Pusher;
   readonly ingest: Ingest;
   readonly accounts: AccountManager;
+  readonly tab: TabHandoffs;
+  private tabServer: TabServer | null = null;
   private ingestServer: Server | null = null;
   private timers: NodeJS.Timeout[] = [];
   private api: ApiServer | null = null;
@@ -82,6 +91,8 @@ export class Hq {
     this.probes = new ProbeRunner(this.store, cfg, this.mailbox);
     this.pusher = new Pusher(this.store, this.inbox, cfg, loadOrCreateVapid(cfg.stateDir),
       deps.telegram ?? telegramVia(cfg.telegramCmd, cfg.telegramChat), deps.webPush);
+    // The CDP connection is opened on first use, so an hq with no handoff never touches Chrome.
+    this.tab = new TabHandoffs(this.store, this.inbox, this.mailbox, cfg.tab, deps.tabBrowser ?? new CdpTabBrowser(cfg.tab.cdpUrl, tabLog));
     this.ingest = new Ingest(this, deps.ticketer);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
@@ -141,6 +152,9 @@ export class Hq {
       this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); await this.night.sweep(); });
       this.every(5_000, 'probes', () => this.probes.tick());
       this.every(30_000, 'push', () => this.pusher.sweepUnacked());
+      // A handoff link never outlives its 10 minutes, and never leaves a phone viewport on a tab.
+      this.every(15_000, 'tab', () => this.tab.sweep());
+      this.store.bg(this.tab.clearStale(), 'tab.clearStale');
       // B.7: quota per account every 10 minutes (get_usage, no inference) + the identity check again.
       this.every(T.accountsMs, 'accounts', async () => {
         if (!this.store.toggle('yoav/accounts')) return;
@@ -160,12 +174,18 @@ export class Hq {
     if (opts.listen !== false) {
       this.api = await startApi(this, loadOrCreateToken(this.cfg.stateDir), this.cfg.host, this.cfg.port);
       if (this.cfg.healthListen) this.healthServer = await this.startHealthListener(this.cfg.healthListen);
+      if (this.cfg.tab.listen) {
+        const i = this.cfg.tab.listen.lastIndexOf(':');
+        this.tabServer = await startTabServer(this.tab, this.cfg.tab.listen.slice(0, i), Number(this.cfg.tab.listen.slice(i + 1)),
+          tabLog);
+      }
       // mcp-company and hooks write here (company-api.ts); 0600 socket, no token.
       this.ingestServer = await startIngestSocket(this.ingest, join(this.cfg.stateDir, 'hq.sock'));
     }
   }
 
   get port(): number | null { return this.api?.port ?? null; }
+  get tabPort(): number | null { return this.tabServer?.port ?? null; }
 
   /** Optional second listener that serves only GET /health — for the ci-host heartbeat, nothing else exposed. */
   private startHealthListener(spec: string): Promise<Server> {
@@ -186,6 +206,8 @@ export class Hq {
     this.timers = [];
     this.accounts.stop();
     await this.api?.close();
+    await this.tabServer?.close();
+    this.tab.browser.close?.();
     await new Promise<void>((r) => (this.healthServer ? this.healthServer.close(() => r()) : r()));
     if (this.ingestServer) { this.ingestServer.closeAllConnections(); await new Promise<void>((r) => this.ingestServer!.close(() => r())); }
     // Shift-hosts are separate units and keep running across hq restarts (B.5): only drop our sockets.

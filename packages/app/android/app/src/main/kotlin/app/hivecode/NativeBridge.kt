@@ -120,6 +120,20 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
                 HqSync.startDemo(ctx)
                 result.success(NotificationManagerCompat.from(ctx).areNotificationsEnabled())
             }
+            // A tab handoff link (B.9): the phone page opens in the browser, as the bet6 spike had it.
+            "openUrl" -> {
+                val url = call.argument<String>("url").orEmpty()
+                if (!url.startsWith("https://")) {
+                    result.error("bad_url", "only https links", null)
+                    return
+                }
+                try {
+                    activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE))
+                    result.success(true)
+                } catch (e: ActivityNotFoundException) {
+                    result.success(false)
+                }
+            }
             "passkeyCreate" -> passkeys.create(call.argument<String>("json").orEmpty(), result)
             "passkeyGet" -> passkeys.get(call.argument<String>("json").orEmpty(), result)
             else -> result.notImplemented()

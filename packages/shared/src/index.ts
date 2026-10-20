@@ -42,6 +42,8 @@ export interface InboxItemDTO {
   urgency: Urgency;
   blocking: boolean;
   ref: string | null;          // ask id / message id / probe id
+  /** Where "פתיחה" goes when it is not the app itself: the one-time tab handoff link (B.9). */
+  link: string | null;
   state: 'open' | 'resolved' | 'dismissed';
   created_at: number;          // epoch ms
   pushed_at: number | null;

@@ -302,6 +302,32 @@ const MIGRATIONS: string[] = [
   ALTER TABLE accounts ADD COLUMN blocked_until INTEGER;              -- rate limit rejected until (ms)
   ALTER TABLE accounts ADD COLUMN note TEXT;                          -- last verdict, in Hebrew, for the app
   `,
+  // B.9 tab handoff (tab/handoffs.ts). The token and the phone's cookie are stored hashed.
+  `
+  ALTER TABLE inbox ADD COLUMN link TEXT;                             -- where "פתיחה" goes (a handoff link)
+  CREATE TABLE tab_handoffs (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    from_identity TEXT,
+    inbox_id INTEGER,
+    target_id TEXT NOT NULL,                 -- CDP target of the tab being handed over
+    own_window INTEGER NOT NULL DEFAULT 0,   -- hq opened this window, and closes it at the end
+    url TEXT NOT NULL DEFAULT '',
+    domain TEXT NOT NULL DEFAULT '',         -- the login lock: one live handoff per site
+    what TEXT NOT NULL DEFAULT '',
+    need TEXT,
+    state TEXT NOT NULL DEFAULT 'live',      -- live | done | expired | closed | cancelled
+    bound_hash TEXT,                         -- the first device that opened the link
+    viewed INTEGER NOT NULL DEFAULT 0,       -- a phone viewport may be on the tab (cleared after a restart)
+    final_url TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    ended_by TEXT
+  );
+  CREATE INDEX tab_handoffs_live ON tab_handoffs(state, domain);
+  CREATE INDEX tab_handoffs_inbox ON tab_handoffs(inbox_id);
+  `,
 ];
 
 export const DEFAULT_TOGGLES: { key: string; enabled: boolean; description: string }[] = [

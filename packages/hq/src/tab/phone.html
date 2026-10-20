@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>כניסה לאתר</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; color: #eee; font: 15px -apple-system, system-ui, sans-serif; overflow: hidden; overscroll-behavior: none; }
+  #bar { position: fixed; top: 0; left: 0; right: 0; height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 8px; padding-top: env(safe-area-inset-top); background: #1c1c1e; z-index: 2; }
+  #host { flex: 1; direction: ltr; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: #9ad; }
+  button { font: inherit; border: 0; border-radius: 10px; padding: 8px 12px; color: #fff; background: #3a3a3c; }
+  #done { background: #1f9d55; font-size: 17px; font-weight: 700; padding: 9px 18px; }
+  #screen { position: fixed; top: calc(52px + env(safe-area-inset-top)); left: 0; width: 100vw; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; display: block; }
+  #kbd { position: fixed; bottom: 0; left: 0; width: 1px; height: 1px; opacity: 0; font-size: 16px; border: 0; padding: 0; }
+  #msg { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 24px; font-size: 20px; background: #111; z-index: 3; }
+  #status { position: fixed; bottom: 10px; left: 10px; font-size: 12px; color: #888; z-index: 2; direction: ltr; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="done">סיימתי</button>
+  <button id="back" aria-label="אחורה">→</button>
+  <button id="kb" aria-label="מקלדת">⌨</button>
+  <div id="host">…</div>
+</div>
+<img id="screen" alt="">
+<form id="f" autocomplete="on" onsubmit="return false"><input id="kbd" value="&#8203;" autocomplete="one-time-code" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go"></form>
+<div id="status">connecting…</div>
+<div id="msg"></div>
+<script>
+const STATE = '__STATE__';
+const $ = (id) => document.getElementById(id);
+const screen = $('screen'), kbd = $('kbd'), msgBox = $('msg'), status = $('status');
+const BAR = $('bar').getBoundingClientRect().height;
+function show(text) { msgBox.textContent = text; msgBox.style.display = 'flex'; }
+if (STATE === 'expired') show('הלינק פג תוקף או שכבר סיימת. אפשר לסגור את הדף.');
+else if (STATE === 'used') show('הלינק הזה כבר נפתח במכשיר אחר.');
+else start();
+
+function start() {
+  const token = location.pathname.split('/').pop();
+  const vw = innerWidth, vh = innerHeight - BAR;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  let ws, finished = false, retry = 0, frames = 0, t0 = performance.now();
+  let pageW = vw, pageH = vh; // CSS size of the emulated tab
+
+  function connect() {
+    ws = new WebSocket(`${proto}://${location.host}/ws/${token}?w=${vw}&h=${Math.round(vh)}&dpr=${devicePixelRatio}`);
+    ws.onopen = () => { retry = 0; status.textContent = 'live'; };
+    ws.onmessage = (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.t === 'frame') {
+        pageW = m.m.deviceWidth; pageH = m.m.deviceHeight;
+        screen.onload = () => {
+          if (!m.hi && ws.readyState === 1) ws.send('{"t":"ack"}');
+          if (!frames++) status.textContent = `first frame ${Math.round(performance.now() - t0)}ms`;
+        };
+        screen.src = 'data:image/jpeg;base64,' + m.d;
+      } else if (m.t === 'url') {
+        try { $('host').textContent = new URL(m.url).host + new URL(m.url).pathname; } catch { $('host').textContent = m.url; }
+      } else if (m.t === 'focus') {
+        if (m.editable) {
+          resetKbd();
+          kbd.inputMode = (m.inputmode === 'numeric' || m.autocomplete === 'one-time-code' || m.type === 'tel' || m.type === 'number') ? 'numeric' : 'text';
+          kbd.type = m.type === 'email' ? 'email' : 'text';
+          if (document.activeElement !== kbd) kbd.focus();
+        } else kbd.blur();
+      } else if (m.t === 'finished') { finished = true; show('תודה! הסוכן ממשיך מכאן. אפשר לסגור את הדף.'); }
+      else if (m.t === 'expired') { finished = true; show('הזמן נגמר. הסוכן יבקש שוב אם צריך.'); }
+      else if (m.t === 'closed') { finished = true; show('הסוכן סגר את הטאב. אפשר לסגור את הדף.'); }
+      else if (m.t === 'cancelled') { finished = true; show('בוטל. אפשר לסגור את הדף.'); }
+    };
+    ws.onclose = () => {
+      if (finished) return;
+      status.textContent = 'reconnecting…';
+      setTimeout(connect, Math.min(5000, 500 * 2 ** retry++)); // phone slept / 4G blip
+    };
+  }
+  connect();
+  const send = (o) => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
+
+  // ---- touch: screen px -> tab CSS px ----
+  const active = new Map();
+  let downAt = 0, moved = 0, startXY = null, pendingMove = false;
+  function pt(e) {
+    const r = screen.getBoundingClientRect();
+    return [ (e.clientX - r.left) * pageW / r.width, (e.clientY - r.top) * pageH / r.height, e.pointerId % 1000 ];
+  }
+  const pts = () => [...active.values()];
+  screen.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    active.set(e.pointerId, pt(e));
+    if (active.size === 1) { downAt = Date.now(); moved = 0; startXY = [e.clientX, e.clientY]; }
+    send({ t: 'touch', type: 'touchStart', pts: pts() });
+  });
+  screen.addEventListener('pointermove', (e) => {
+    if (!active.has(e.pointerId)) return;
+    active.set(e.pointerId, pt(e));
+    if (startXY) moved = Math.max(moved, Math.hypot(e.clientX - startXY[0], e.clientY - startXY[1]));
+    if (!pendingMove) { pendingMove = true; requestAnimationFrame(() => { pendingMove = false; send({ t: 'touch', type: 'touchMove', pts: pts() }); }); }
+  });
+  function up(e) {
+    if (!active.has(e.pointerId)) return;
+    active.delete(e.pointerId);
+    if (active.size) { send({ t: 'touch', type: 'touchMove', pts: pts() }); return; }
+    const tap = moved < 10 && Date.now() - downAt < 600;
+    // Focus the hidden input INSIDE the user gesture, so iOS/Android open the keyboard.
+    // The server then tells us whether the tapped thing was editable; if not we blur again.
+    if (tap) { resetKbd(); kbd.focus({ preventScroll: true }); }
+    send({ t: 'touch', type: 'touchEnd', tap });
+  }
+  screen.addEventListener('pointerup', up);
+  screen.addEventListener('pointercancel', up);
+
+  // ---- typing: diff the hidden input, so IME composition, autocorrect and SMS-code autofill all work.
+  // A zero-width sentinel stays in the field so Backspace on an "empty" field still produces an input event
+  // (Android keyboards send keyCode 229 instead of a real Backspace keydown).
+  const SENT = '\u200B';
+  let last = SENT;
+  function resetKbd() { kbd.value = SENT; last = SENT; kbd.setSelectionRange(1, 1); }
+  kbd.addEventListener('focus', () => { const n = kbd.value.length; kbd.setSelectionRange(n, n); });
+  kbd.addEventListener('input', () => {
+    const v = kbd.value;
+    let i = 0; while (i < last.length && i < v.length && last[i] === v[i]) i++;
+    let del = last.length - i;
+    const ins = v.slice(i).replaceAll(SENT, '');
+    if (ins && i === 0 && last[0] === SENT) del--; // whole-value replacement (autofill) also removed the sentinel
+    for (; del > 0; del--) send({ t: 'key', k: 'Backspace' });
+    if (ins) send({ t: 'text', s: ins });
+    if (v.startsWith(SENT)) last = v;
+    else { kbd.value = SENT + v.replaceAll(SENT, ''); last = kbd.value; kbd.setSelectionRange(last.length, last.length); } // caret had slipped before the sentinel
+  });
+  kbd.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); send({ t: 'key', k: 'Enter' }); resetKbd(); }
+    else if (e.key === 'Tab') { e.preventDefault(); send({ t: 'key', k: 'Tab' }); }
+  });
+  $('kb').onclick = () => { resetKbd(); kbd.focus(); };
+  $('back').onclick = () => send({ t: 'back' });
+  $('done').onclick = () => send({ t: 'done' });
+
+  // ---- keyboard open/close: shrink the tab so the field is not under the keyboard ----
+  if (window.visualViewport) {
+    let lastH = vh, timer;
+    visualViewport.addEventListener('resize', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const h = Math.round(visualViewport.height - BAR);
+        if (Math.abs(h - lastH) > 60) { lastH = h; send({ t: 'resize', h }); }
+      }, 150);
+    });
+  }
+}
+</script>
+</body>
+</html>

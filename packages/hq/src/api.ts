@@ -106,11 +106,14 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   // He finished it ("סיימתי") or declined: the requester hears it now, through its mailbox.
   route('POST', '/api/inbox/:id/done', async ({ params, body }) => {
     const b = await body();
+    // A tab handoff ends as one: the view is released, the link burnt, the requester woken (tab/handoffs.ts).
+    if (await hq.tab.fromInbox(Number(params[0]), false)) return { item: hq.inbox.get(Number(params[0])), message: null };
     try { return hq.mailbox.complete(Number(params[0]), { note: str(b.note, 'note', false) }); }
     catch (e) { throw new HttpError(404, (e as Error).message); }
   });
   route('POST', '/api/inbox/:id/dismiss', async ({ params, body }) => {
     const b = await body();
+    if (await hq.tab.fromInbox(Number(params[0]), true)) return { item: hq.inbox.get(Number(params[0])), message: null };
     try { return hq.mailbox.complete(Number(params[0]), { note: str(b.note, 'note', false), declined: true }); }
     catch (e) { throw new HttpError(404, (e as Error).message); }
   });

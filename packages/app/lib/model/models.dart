@@ -101,6 +101,7 @@ class WaitItem {
     this.askId,
     this.inboxId,
     this.domain,
+    this.link,
     this.doneLine,
     this.state = WaitState.open,
     this.answerLine,
@@ -131,6 +132,9 @@ class WaitItem {
   final String? askId;
   final int? inboxId;
   final String? domain;
+
+  /// The one-time tab handoff link from hq (B.9); "פתיחה" goes there. Null in demo mode.
+  final String? link;
 
   /// What the collapsed row says after delivery ("GO נשלח · דנה מתחילה פריסה").
   final String? doneLine;

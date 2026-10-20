@@ -112,6 +112,9 @@ class NativeBridge {
     return (baseUrl: url, token: token);
   }
 
+  /// Opens an https link in the browser (a tab handoff, B.9). False when nothing could open it.
+  Future<bool> openUrl(String url) async => await _call<bool>('openUrl', {'url': url}) ?? false;
+
   /// Forgets the hq config, stops the link and removes hq notifications.
   Future<void> clearConfig() => _call<void>('clearConfig');
 

@@ -100,7 +100,8 @@ export class Pusher {
   }
 
   private async toTelegram(item: InboxItemDTO, why: string): Promise<void> {
-    const text = `⏸ ${item.title}\n${item.body.slice(0, 1500)}\n(${why} · inbox #${item.id})`;
+    const link = item.link ? `\n${item.link}` : '';
+    const text = `⏸ ${item.title}\n${item.body.slice(0, 1500)}${link}\n(${why} · inbox #${item.id})`;
     try {
       await this.telegram(text);
       this.inbox.markTelegram(item.id, null);

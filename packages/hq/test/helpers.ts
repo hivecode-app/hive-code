@@ -10,6 +10,8 @@ import {
 import { loadConfig, type HqConfig } from '../src/config.ts';
 import { Hq, type HqDeps } from '../src/hq.ts';
 import type { LaunchSpec, Launcher } from '../src/shifts.ts';
+import type { PhoneCallbacks, PhoneSize, TabBrowser } from '../src/tab/browser.ts';
+import type { WebSocket as WsSocket } from 'ws';
 
 export class Clock {
   t = Date.UTC(2026, 9, 20, 9, 0, 0); // fixed: fake hosts stamp frames from this clock too
@@ -225,6 +227,30 @@ export class FakeLauncher implements Launcher {
 }
 
 // Same shape as company/org.yaml (the contract): teams reference ids, identities carry the people.
+/** The shared Chrome, faked: tests never touch the real browser on 9222. */
+export class FakeTabBrowser implements TabBrowser {
+  targets = new Set<string>(['agent-tab']);
+  opened: string[] = [];
+  closed: string[] = [];
+  released: { targetId: string; tell?: string }[] = [];
+  phones: { targetId: string; phone: WsSocket; size: PhoneSize; cb: PhoneCallbacks }[] = [];
+  onTargetGone: (targetId: string) => void = () => {};
+  onConnected: () => void = () => {};
+  async openWindow(url: string) { const id = `win-${this.opened.length + 1}`; this.opened.push(url); this.targets.add(id); return id; }
+  async hasTarget(id: string) { return this.targets.has(id); }
+  async closeTarget(id: string) { this.closed.push(id); this.targets.delete(id); }
+  async attachPhone(targetId: string, phone: WsSocket, size: PhoneSize, cb: PhoneCallbacks) {
+    this.phones.push({ targetId, phone, size, cb });
+    phone.send(JSON.stringify({ t: 'url', url: 'https://github.com/login' }));
+    phone.on('message', (raw) => { if (JSON.parse(raw.toString()).t === 'done') cb.onDone('https://github.com/'); });
+  }
+  async release(targetId: string, tell?: string) {
+    this.released.push({ targetId, tell });
+    for (const p of this.phones.filter((x) => x.targetId === targetId)) { if (tell) p.phone.send(JSON.stringify({ t: tell })); p.phone.close(); }
+  }
+  async clearStale() {}
+}
+
 export const ORG_YAML = `
 version: 1
 owner: ran
@@ -252,7 +278,7 @@ identities:
 
 export interface TestEnv {
   hq: Hq; cfg: HqConfig; clock: Clock; launcher: FakeLauncher; dir: string;
-  telegrams: string[]; webPushes: { endpoint: string; payload: string }[];
+  telegrams: string[]; webPushes: { endpoint: string; payload: string }[]; tabBrowser: FakeTabBrowser;
   cleanup(): Promise<void>;
 }
 
@@ -264,12 +290,16 @@ export async function makeEnv(opts: { cfg?: Partial<HqConfig>; deps?: HqDeps; pr
   for (const [p, md] of Object.entries(opts.projects ?? {})) writeFileSync(join(company, 'projects', `${p}.md`), md);
   // claudeHome: never the real ~/.claude (its token would go to /api/oauth/profile from a test).
   const cfg = loadConfig({ stateDir: join(dir, 'state'), companyDir: company, port: 0, claudeHome: join(dir, 'claude-home'), ...opts.cfg });
+  // The phone listener stays off unless a test asks for it (it would collide on 7422 across test files).
+  cfg.tab.listen = opts.cfg?.tab?.listen ?? null;
   const clock = new Clock();
   const launcher = new FakeLauncher();
   launcher.now = clock.now;
   const telegrams: string[] = [];
   const webPushes: { endpoint: string; payload: string }[] = [];
+  const tabBrowser = new FakeTabBrowser();
   const hq = new Hq(cfg, {
+    tabBrowser,
     launcher, now: clock.now,
     telegram: async (t) => { telegrams.push(t); },
     webPush: async (sub, payload) => { webPushes.push({ endpoint: sub.endpoint, payload }); },
@@ -278,7 +308,7 @@ export async function makeEnv(opts: { cfg?: Partial<HqConfig>; deps?: HqDeps; pr
   hq.scheduler.memInfo = () => ({ totalMb: 23_000, availableMb: 19_000 });
   if (!opts.noStart) await hq.start({ listen: false, timers: false });
   return {
-    hq, cfg, clock, launcher, dir, telegrams, webPushes,
+    hq, cfg, clock, launcher, dir, telegrams, webPushes, tabBrowser,
     async cleanup() {
       await hq.stop().catch(() => {});
       await launcher.closeAll();

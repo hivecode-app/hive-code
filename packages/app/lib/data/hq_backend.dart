@@ -917,6 +917,7 @@ CompanyData mapSnapshot({
       body: (ask?['question'] as String?) ?? ((i['body'] as String?)?.isNotEmpty == true ? i['body'] as String : i['title'] as String),
       options: options,
       domain: kind == WaitKind.login ? (i['title'] as String?) : null,
+      link: i['link'] as String?,
     ));
   }
 

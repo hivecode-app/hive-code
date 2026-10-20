@@ -1,6 +1,9 @@
 // Server side of the mcp-company / hooks ingest API (packages/shared/src/company-api.ts, engine lane).
 //   POST /v1/ops     WalEntry → OpAck   (idempotent on entry.id; 4xx = permanent reject, 5xx = retry)
 //   POST /v1/recall  RecallRequest → RecallResponse
+//   POST /v1/handoffs              {identity, target?, url?, what?, need?, ttl_min?} → {handoff, link, inbox_id} | 409 {busy}
+//   GET  /v1/handoffs/<id>?wait=ms  long-poll until it ends (browser_ask_user's wake-up, B.9)
+//   POST /v1/handoffs/<id>/end     {state: done|cancelled, final_url?}  (the worker's page watcher saw it done)
 // Served on the unix socket <state>/hq.sock (0600, no token: filesystem permissions are the auth) and
 // on the TCP API behind the token. Every op is stored first (ops table), then applied.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -13,6 +16,7 @@ import {
 } from '@company/shared';
 import type { Hq } from './hq.ts';
 import { noWorkers, readCharter } from './workspace.ts';
+import { HandoffError } from './tab/handoffs.ts';
 
 const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket']);
 
@@ -219,17 +223,54 @@ export class Ingest {
     return { top: { ref: first!.ref, body }, others: rest.map((i) => i.ref) };
   }
 
+  /** B.9: browser-memory's browser_ask_user creates a handoff and waits on it here. */
+  private async handoff(method: string, id: string | undefined, end: boolean, url: URL, readBody: () => Promise<unknown>,
+    signal: AbortSignal): Promise<unknown> {
+    const tab = this.hq.tab;
+    if (!id && method === 'POST') {
+      const b = (await readBody()) as Record<string, unknown>;
+      const from = s(b.identity) ?? s(b.from) ?? null;
+      if (from && !this.hq.identityExists(from) && from !== OWNER) throw new IngestError(400, `unknown identity ${from}`);
+      return { ok: true, ...(await tab.create({ from, target: s(b.target), url: s(b.url), what: s(b.what), need: s(b.need),
+        ttlMin: typeof b.ttl_min === 'number' ? b.ttl_min : undefined })) };
+    }
+    if (id && !end && method === 'GET') {
+      const v = await tab.wait(id, Number(url.searchParams.get('wait') ?? 0), signal);
+      if (!v) throw new IngestError(404, `no handoff ${id}`);
+      return { ok: true, handoff: v };
+    }
+    if (id && end && method === 'POST') {
+      const b = (await readBody()) as Record<string, unknown>;
+      const state = s(b.state) ?? 'done';
+      if (state !== 'done' && state !== 'cancelled') throw new IngestError(400, 'state must be done|cancelled');
+      const v = tab.end(id, state, 'worker', s(b.final_url));
+      if (!v) throw new IngestError(404, `no handoff ${id}`);
+      return { ok: true, handoff: v };
+    }
+    throw new IngestError(405, 'method not allowed');
+  }
+
   /** Route a request; returns false if the path is not ours. */
   async handle(req: IncomingMessage, res: ServerResponse, readBody: () => Promise<unknown>): Promise<boolean> {
-    const path = new URL(req.url ?? '/', 'http://hq').pathname;
-    if (req.method !== 'POST' || (path !== '/v1/ops' && path !== '/v1/recall')) return false;
+    const url = new URL(req.url ?? '/', 'http://hq');
+    const path = url.pathname;
+    const handoff = /^\/v1\/handoffs(?:\/(h-[0-9a-f]+)(\/end)?)?$/.exec(path);
+    if (!handoff && (req.method !== 'POST' || (path !== '/v1/ops' && path !== '/v1/recall'))) return false;
     let status = 200, out: unknown;
     try {
-      const body = await readBody();
-      out = path === '/v1/ops' ? this.op(body) : this.recall(body);
+      if (handoff) {
+        // A long-poll whose caller went away (tool call cancelled, gateway died) stops being a waiter.
+        const gone = new AbortController();
+        res.on('close', () => { if (!res.writableEnded) gone.abort(); });
+        out = await this.handoff(req.method ?? 'GET', handoff[1], !!handoff[2], url, readBody, gone.signal);
+      }
+      else {
+        const body = await readBody();
+        out = path === '/v1/ops' ? this.op(body) : this.recall(body);
+      }
     } catch (e) {
-      status = e instanceof IngestError ? e.status : (e as { status?: number }).status ?? 500;
-      out = { ok: false, error: (e as Error).message };
+      status = e instanceof IngestError || e instanceof HandoffError ? e.status : (e as { status?: number }).status ?? 500;
+      out = { ok: false, error: (e as Error).message, ...(e instanceof HandoffError && e.busy ? { busy: e.busy } : {}) };
     }
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(out));

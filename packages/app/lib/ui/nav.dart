@@ -5,6 +5,7 @@ import '../data/store.dart';
 import '../model/models.dart';
 import 'board/ticket_screen.dart';
 import 'chat/chat_screen.dart';
+import '../native/open_url.dart';
 import 'handoff/handoff_screen.dart';
 import 'settings/settings_screen.dart';
 
@@ -70,8 +71,16 @@ class Nav {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => TicketScreen(number: number)));
   }
 
-  static void handoff(BuildContext context, WaitItem item) =>
-      Navigator.of(context).push(MaterialPageRoute(fullscreenDialog: true, builder: (_) => HandoffScreen(item: item)));
+  /// A real handoff (hq gave a link) opens the phone page in the browser, as the bet6 spike had it;
+  /// "סיימתי" there wakes the worker. The in-app screen stays for demo mode.
+  static void handoff(BuildContext context, WaitItem item) {
+    final link = item.link;
+    if (link != null) {
+      openExternalUrl(link);
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute(fullscreenDialog: true, builder: (_) => HandoffScreen(item: item)));
+  }
 
   static void settings(BuildContext context) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
 }
