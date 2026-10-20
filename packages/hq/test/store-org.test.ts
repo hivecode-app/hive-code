@@ -231,7 +231,14 @@ test('a task worker never gets a standing identity\'s name, one added to org.yam
     syncOrg(store, join(import.meta.dirname, '../../../company'), [], 'yoav');
     const names = new Set((store.db.prepare(`SELECT name FROM identities WHERE source = 'org'`).all() as { name: string }[]).map((r) => r.name));
     assert.ok(names.has('דנה') && names.has('עדי') && names.has('יואב'));
+    assert.ok(names.has('מיכל'), 'מיכל is a standing identity in lumo-bot');
     for (let i = 0; i < 60; i++) assert.ok(!names.has(taskWorkerName(store, i).name), `task ${i}: ${taskWorkerName(store, i).name}`);
+    // A task worker named מיכל from before she joined org.yaml: renamed at load, so the name is hers alone.
+    ensureRuntimeIdentity(store, { id: 'lumo-bot-t7', name: 'מיכל', title: 'מפתחת', project: 'lumo-bot', reports_to: 'boaz' });
+    assert.equal(renameTaskWorkers(store), 1);
+    const renamed = store.db.prepare(`SELECT name, title FROM identities WHERE id = 'lumo-bot-t7'`).get() as { name: string; title: string };
+    assert.ok(!names.has(renamed.name.split(' ')[0]!), renamed.name);
+    assert.match(renamed.title, /^מפתח/);
     // A standing identity added later with a pool name: that name is out from now on, suffixes included.
     standing('naama', 'נעמה');
     for (let i = 0; i < 60; i++) assert.notEqual(taskWorkerName(store, i).name.split(' ')[0], 'נעמה');
