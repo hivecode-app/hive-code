@@ -466,7 +466,7 @@ export class Mailbox {
    * A reply in his own words (`inbox-<n>-reply`) still is: those words never arrived.
    */
   private fromInboxClose(m: MessageRow): boolean {
-    return m.from_identity === OWNER && m.kind === 'answer' && /^inbox-\d+-(done|declined)$/.test(m.id);
+    return m.from_identity === OWNER && m.kind === 'answer' && /^inbox-\d+-(done|declined|failed)$/.test(m.id);
   }
 
   private fail(m: MessageRow): void {

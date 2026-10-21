@@ -21,7 +21,7 @@ export interface TaskRow {
   identity: string | null; shift_id: string | null; created_at: number; updated_at: number; started_at: number | null;
   /** One line in his words on what it did, written when it closed (status done / close_team); null = none given. */
   summary?: string | null;
-  /** "מה לבדוק" (awaiting.ts): deploy | check, with one line in his words; null = nothing waits. */
+  /** "מה לבדוק" (awaiting.ts): deploy | check | verify, with one line in his words; null = nothing waits. */
   awaiting?: string | null; awaiting_note?: string | null; awaiting_at?: number | null; pr?: string | null;
   /** Where its worktree and shifts are (nodes.ts): 'local' or a node's name; null = not placed yet. */
   machine?: string | null;

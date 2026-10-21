@@ -161,12 +161,14 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     const b = await body();
     // A tab handoff ends as one: the view is released, the link burnt, the requester woken (tab/handoffs.ts).
     if (await hq.tab.fromInbox(Number(params[0]), false)) return { item: hq.inbox.get(Number(params[0])), message: null };
+    if (hq.inbox.get(Number(params[0]))?.kind === 'awaiting') return awaitingOutcome(Number(params[0]), 'done');
     try { return hq.mailbox.complete(Number(params[0]), { note: str(b.note, 'note', false) }); }
     catch (e) { throw new HttpError(404, (e as Error).message); }
   });
   // His own words on an open question or GO, typed in the conversation: the item closes with them.
   route('POST', '/api/inbox/:id/answer', async ({ params, body }) => {
     const b = await body();
+    if (hq.inbox.get(Number(params[0]))?.kind === 'awaiting') throw new HttpError(409, 'a task card closes with done or failed');
     const answer = str(b.answer, 'answer', !hasFiles(b)) ?? '';
     try { return hq.mailbox.reply(Number(params[0]), answer, strings(b.attachments, 'attachments')); }
     catch (e) {
@@ -174,8 +176,17 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
       throw new HttpError(/no inbox item/.test(why) ? 404 : /already handled/.test(why) ? 409 : 400, why);
     }
   });
+  // #219: "נכשל" on a finished task's card. No details here: he writes them in the conversation, if at all.
+  route('POST', '/api/inbox/:id/failed', ({ params }) => awaitingOutcome(Number(params[0]), 'failed'));
+  function awaitingOutcome(id: number, outcome: 'done' | 'failed') {
+    const item = hq.inbox.get(id);
+    if (!item || item.kind !== 'awaiting') throw new HttpError(404, `no awaiting inbox item ${id}`);
+    if (item.state !== 'open') throw new HttpError(409, `inbox item ${id} is already handled`);
+    return { task: hq.awaiting.outcome(id, outcome), item: hq.inbox.get(id) };
+  }
   route('POST', '/api/inbox/:id/dismiss', async ({ params, body }) => {
     const b = await body();
+    if (hq.inbox.get(Number(params[0]))?.kind === 'awaiting') throw new HttpError(409, 'a task card closes with done or failed');
     if (await hq.tab.fromInbox(Number(params[0]), true)) return { item: hq.inbox.get(Number(params[0])), message: null };
     try { return hq.mailbox.complete(Number(params[0]), { note: str(b.note, 'note', false), declined: true }); }
     catch (e) { throw new HttpError(404, (e as Error).message); }

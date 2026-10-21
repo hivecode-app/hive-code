@@ -25,9 +25,10 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
   const G = (male: string, female: string) => g(n.owner, male, female);
   // "מה לבדוק" (#108): what a finished task still waits for, shown to him until a deploy or his "בדקתי" clears it.
   const awaitingArgs: Record<string, Schema> = {
-    awaiting: oneOf(['deploy', 'check', 'none'], 'מה המשימה עוד מחכה ' + G('לו', 'לה') + ': deploy = מוזג ומחכה ל-GO או לפריסה (מתנקה לבד כשפריסה כוללת אותה), '
-      + 'check = כבר בפרודקשן ' + pre('ו', O) + ' ' + G('צריך', 'צריכה') + ' לבדוק משהו ' + G('בעצמו', 'בעצמה') + ' (מתנקה ' + G('כשהוא מסמן', 'כשהיא מסמנת') + ' "בדקתי"), none = כלום, מנקה. בלי: לא מחכה לכלום '
-      + '/ deploy = merged, waits for GO or a deploy; check = live, ' + G('he has', 'she has') + ' to check something ' + G('himself', 'herself') + '; none = clears'),
+    awaiting: oneOf(['deploy', 'check', 'verify', 'none'], 'מה המשימה עוד מחכה ' + G('לו', 'לה') + ': deploy = מוזג ומחכה ל-GO או לפריסה (מתנקה לבד כשפריסה כוללת אותה), '
+      + 'check = כבר בפרודקשן ' + pre('ו', O) + ' ' + G('צריך', 'צריכה') + ' לבדוק משהו ' + G('בעצמו', 'בעצמה') + ' (מתנקה ' + G('כשהוא מסמן', 'כשהיא מסמנת') + ' "בוצע"), verify = לבדוק לפני שחרור, למשל build ב-TestFlight, none = כלום, מנקה. בלי: לא מחכה לכלום. '
+      + 'check ו-verify מופיעים מיד ' + G('אצלו', 'אצלה') + ' ב"מחכה לך" עם "בוצע" ו"נכשל", ו"נכשל" מגיע לפותח המשימה. deploy מופיע שם רק אם עברו 6 שעות בלי פריסה ובלי בקשת GO עליו '
+      + '/ deploy = merged, waits for GO or a deploy; check = live, ' + G('he has', 'she has') + ' to check something ' + G('himself', 'herself') + '; verify = to check before release (a TestFlight build); none = clears'),
     awaiting_note: s('עם awaiting: שורה אחת במילים ' + G('שלו', 'שלה') + ', מה מחכה או מה לבדוק, e.g. "לשלוח תמונה מהטלפון ולראות שהיא עולה" '
       + '/ with awaiting: one line in ' + G('his', 'her') + ' words, what waits or what to check'),
     pr: s('ה-PR שמוזג, מספר או קישור. פריסה שמדווחת עליו מנקה את deploy / the merged PR, number or url; a deploy that reports it clears deploy'),
@@ -104,7 +105,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
     }, ['state']),
     tool('status', 'עדכון מצב העובד. עם state: "done" המשימה נסגרת, ותמיד כותבים summary: זו השורה ' + pre('ש', O) + ' רואה ב"מאז שהיית פה" וב"מה הסתיים". '
       + 'בלי summary ' + G('הוא רואה', 'היא רואה') + ' רק את שם המשימה. '
-      + 'אם משהו עוד מחכה ' + G('לו', 'לה') + ' (פריסה אחרי GO, או משהו ' + G('שהוא צריך', 'שהיא צריכה') + ' לבדוק ' + G('בעצמו', 'בעצמה') + '), מוסיפים awaiting ו-awaiting_note, וזה מופיע ' + G('אצלו', 'אצלה') + ' ב"מה לבדוק". '
+      + 'אם משהו עוד מחכה ' + G('לו', 'לה') + ' (פריסה אחרי GO, או משהו ' + G('שהוא צריך', 'שהיא צריכה') + ' לבדוק ' + G('בעצמו', 'בעצמה') + '), מוסיפים awaiting ו-awaiting_note, וזה מופיע ' + G('אצלו', 'אצלה') + ' ב"מחכה לך". '
       + 'המשימה נסגרת כשהסבב נגמר, ורק אם ענית על כל מה ' + pre('ש', O) + ' ' + G('שלח', 'שלחה') + ' לך. אחרת hq כותב לך "' + O + ' מחכה לתשובה על…" והיא נשארת פתוחה. '
       + 'The task closes when the turn ends, and only if every message ' + G('he', 'she') + ' sent you was answered; else hq tells you so and it stays open. '
       + 'Update your working status. With state "done" the task closes; always give summary: it is the line ' + G('he sees', 'she sees') + ' under "since you were here" '

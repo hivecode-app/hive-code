@@ -468,16 +468,19 @@ class MoreRow extends StatelessWidget {
 
 /// `.done`: the collapsed line after an answer lands ("ענית: X · 14:03").
 class DoneLine extends StatelessWidget {
-  const DoneLine(this.text, {super.key, this.top = 8});
+  const DoneLine(this.text, {super.key, this.top = 8, this.icon = 'check'});
   final String text;
   final double top;
+
+  /// `check` for what was done; `close` for "נכשל" (#219).
+  final String icon;
   @override
   Widget build(BuildContext context) {
     final p = context.p;
     return Padding(
       padding: EdgeInsets.only(top: top),
       child: Row(children: [
-        Ic('check', size: 18, color: p.text2),
+        Ic(icon, size: 18, color: p.text2),
         const SizedBox(width: 6),
         Expanded(child: Rich(text, style: T.secondary.copyWith(color: p.text2))),
       ]),

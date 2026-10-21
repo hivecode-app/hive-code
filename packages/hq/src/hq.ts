@@ -1,12 +1,12 @@
 // `company hq` composition root: one process (B.1) wiring store, mailboxes, inbox, scheduler,
 // watchdog, probe-runner, push, backups and the API. Timers are plain intervals; every loop is
 // independently guarded so one failing loop never stops the others.
-import { loadNames } from '@company/shared';
+import { g, loadNames, OWNER } from '@company/shared';
 import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 import type { HqConfig } from './config.ts';
 import { Store } from './store.ts';
-import { syncOrg, getIdentity, listIdentities, listProjects, listTones, renameTaskWorkers } from './org.ts';
+import { syncOrg, getIdentity, listIdentities, listProjects, listTones, projectLead, renameTaskWorkers } from './org.ts';
 import { Inbox } from './inbox.ts';
 import { Conversations } from './conversations.ts';
 import { AwaitingBoard } from './awaiting.ts';
@@ -22,7 +22,7 @@ import { ProbeRunner } from './probes.ts';
 import { Pusher, loadOrCreateVapid, telegramVia, type TelegramSend, type WebPushSend } from './push.ts';
 import { backupOnce } from './backup.ts';
 import { board } from './board.ts';
-import { openTasks } from './open-tasks.ts';
+import { openedBy, openTasks } from './open-tasks.ts';
 import { Home } from './home.ts';
 import { MemoryFiles, type Run } from './memory-files.ts';
 import { StallWatch, type OpenFilesReader } from './stall-watch.ts';
@@ -136,7 +136,20 @@ export class Hq {
     this.stallWatch = new StallWatch(this, deps.openFiles);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
-    this.awaiting = new AwaitingBoard(this.store);
+    this.awaiting = new AwaitingBoard(this.store, this.inbox);
+    // Whose the card is and who hears "נכשל": the task's opener, else its project's lead, else the manager. One that
+    // can't hear it (gone from org.yaml, or a task worker whose task closed) is skipped: the message would bounce
+    // back to him as a delivery failure (21/10).
+    this.awaiting.openerOf = (t) => [openedBy(t), t.project ? projectLead(this.store, t.project) : null, this.cfg.managerId]
+      .find((id): id is string => !!id && id !== OWNER && !!getIdentity(this.store, id)?.active && !this.mailbox.taskClosed(id)) ?? null;
+    // #219: "נכשל" on a task's card reaches the opener at once, with no details: if he has any, he writes them in
+    // that conversation afterwards, as a message of his own. "בוצע" only takes the task off; nobody is woken for it.
+    this.awaiting.onOutcome = (t, itemId, to) => {
+      const o = this.mailbox.names.owner;
+      const what = t.awaiting_note ?? t.summary ?? t.title;
+      this.mailbox.tell({ msg_id: `inbox-${itemId}-failed`, from: OWNER, to, kind: 'answer', ref: `task-${t.id}`, priority: 'now',
+        body: `${o.name} ${g(o, 'סימן', 'סימנה')} "נכשל" על משימה ${t.id} (${t.title}): ${what}\nאם יש פרטים, הם יגיעו ${g(o, 'ממנו', 'ממנה')} בהודעה נפרדת. המשימה ירדה מ"מחכה לך".` });
+    };
     this.estimates = new Estimates(this.store);
     this.night.estimates = this.estimates;
     this.scheduler.onTaskDone = (id) => this.estimates.cancelForTask(id);
@@ -240,6 +253,8 @@ export class Hq {
     await this.shifts.restoreLost(this.watchdog.procCheck);
     this.store.bg(this.ingest.drainPendingTickets(), 'open_ticket.drain');
     this.ingest.resumePendingDone();
+    // #219: what waited on him before this version (and anything a crash left half-done) gets its card now.
+    this.awaiting.sweep();
     this.store.emit('hq.started', null, { pid: process.pid });
     if (opts.timers !== false) {
       const T = this.cfg.timers;
@@ -248,7 +263,7 @@ export class Hq {
       this.every(5_000, 'spool', () => this.shifts.collectSpools());
       this.every(T.watchdogMs, 'watchdog', async () => { await this.watchdog.sweep(); await this.shifts.releaseEnded(); });
       this.every(T.livenessMs, 'liveness', () => this.shifts.pingAll());
-      this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); await this.night.sweep(); this.home.sweep(); this.home.watchAsked(); });
+      this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); await this.night.sweep(); this.home.sweep(); this.home.watchAsked(); this.awaiting.sweep(); });
       this.every(5_000, 'probes', () => this.probes.tick());
       this.every(30_000, 'push', () => this.pusher.sweepUnacked());
       // A handoff link never outlives its 10 minutes, and never leaves a phone viewport on a tab.

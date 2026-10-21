@@ -73,7 +73,8 @@ export function taskSteps(project: string | null, companyDir: string, o: { stand
   const G = (male: string, female: string) => g(own, male, female);
   const done = `שורה אחת במילים ${G('שלו', 'שלה')} על מה שהשתנה ${G('אצלו', 'אצלה')}, בלי מספרי PR ("התמונות בצ'אט עולות גם מהטלפון"). `
     + `אם משהו עוד מחכה ${G('לו', 'לה')}, מוסיפים \`awaiting\` ו-\`awaiting_note\` (וגם \`pr\`): \`deploy\` כשמוזג ומחכה ל-GO או לפריסה, `
-    + `\`check\` כשהוא בפרודקשן ${pre('ו', own.name)} ${G('צריך', 'צריכה')} לבדוק משהו בעצמ${G('ו', 'ה')}.`;
+    + `\`check\` כשהוא בפרודקשן ${pre('ו', own.name)} ${G('צריך', 'צריכה')} לבדוק משהו בעצמ${G('ו', 'ה')}, `
+    + `\`verify\` כש${G('הוא', 'היא')} ${G('צריך', 'צריכה')} לבדוק לפני שחרור (למשל build ב-TestFlight). \`check\` ו-\`verify\` מופיעים ${G('אצלו', 'אצלה')} מיד ב"מחכה לך".`;
   const steps = [
     'עובדים ב-worktree שבהודעת המשימה ("איפה עובדים"): hq פתח אותו בשבילך מה-checkout שבאמנה, על ענף משלו, והוא ה-cwd שלך. לא פותחים worktree נוסף, לא מסירים אותו (hq שומר ומסיר בסגירה), ולא נוגעים ב-checkout הראשי. רק אם בהודעה אין worktree: `git worktree add -b <branch> .worktrees/<task>` מתוך ה-repo.',
     'PR עם `gh`. גוף ה-PR בעברית.',

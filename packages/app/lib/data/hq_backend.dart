@@ -1119,6 +1119,15 @@ class HqBackend extends Backend {
     return _after(r);
   }
 
+  @override
+  Future<CommandResult> awaitingOutcome(WaitItem item, bool done) async {
+    final stale = await _stale(null, item.inboxId);
+    if (stale != null) return stale;
+    final r = await _send('POST', '/api/inbox/${item.inboxId}/${done ? 'done' : 'failed'}', {});
+    if (r.ok) item.state = WaitState.answered;
+    return _after(r);
+  }
+
   /// Tasks whose "בדקתי" is on its way to hq.
   final _checking = <int>{};
 
@@ -1483,6 +1492,7 @@ CompanyData mapSnapshot({
       'login' => 'כניסה לאתר',
       'delivery_failure' => 'הודעה לא נמסרה',
       'shift_failure' => 'עובד לא חזר אחרי קריסה',
+      'awaiting' => 'לבדוק',
       _ => i['blocking'] == true ? 'חוסם' : 'שאלה',
     };
   }
@@ -1497,11 +1507,13 @@ CompanyData mapSnapshot({
       'login' => WaitKind.login,
       'delivery_failure' || 'shift_failure' => WaitKind.failure,
       'ask' || 'escalation_note' => i['blocking'] == true ? WaitKind.blockingAsk : WaitKind.softAsk,
+      'awaiting' => WaitKind.awaiting,
       _ => WaitKind.softAsk,
     };
     final ask = askById[i['ref']];
     final options = <AskOption>[
       if (kind == WaitKind.go || kind == WaitKind.urgentProd) const AskOption(id: 'go', label: 'GO', primary: true),
+      if (kind == WaitKind.awaiting) ...kAwaitingOptions,
       if (ask != null) for (final o in (ask['options'] as List).cast<String>()) AskOption(id: o, label: o),
     ];
     final headline = ((i['headline'] as String?) ?? (ask?['headline'] as String?))?.trim();

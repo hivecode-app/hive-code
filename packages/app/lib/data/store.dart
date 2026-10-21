@@ -135,7 +135,15 @@ class AppStore extends ChangeNotifier {
 
   void answerWait(WaitItem item, AskOption option) {
     final to = nameOf(item.from);
-    if (option.id == 'go') {
+    if (item.kind == WaitKind.awaiting) {
+      final done = option.id == 'done';
+      startUndo(item.id, to, () async {
+        item.failed = !done;
+        final r = await backend.awaitingOutcome(item, done);
+        item.answerLine = done ? 'בוצע' : 'נכשל';
+        return r;
+      }, text: (s) => "יסומן ${done ? 'בוצע' : 'נכשל'} בעוד $s שנ'");
+    } else if (option.id == 'go') {
       startUndo(item.id, to, () async {
         final r = await backend.go(item);
         item.answerLine = item.doneLine ?? 'GO נשלח';

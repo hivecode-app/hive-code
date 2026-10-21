@@ -139,8 +139,9 @@ class Presence {
 
 // ───────────────────────────── waiting for you (home) ─────────────────────────────
 
-/// Sort order of APP-SPEC §4.2: urgent prod, blocking ask, GO, login, failure, soft ask.
-enum WaitKind { urgentProd, blockingAsk, go, login, failure, softAsk }
+/// Sort order of APP-SPEC §4.2: urgent prod, blocking ask, GO, login, failure, a finished task to check, soft ask.
+/// `awaiting` (#219): a finished task that waits on him to check or verify something; "בוצע" or "נכשל".
+enum WaitKind { urgentProd, blockingAsk, go, login, failure, awaiting, softAsk }
 
 enum WaitState { open, pending, answered, notNow }
 
@@ -217,8 +218,14 @@ class WaitItem {
   WaitState state;
   String? answerLine;
 
-  bool get blocking => kind != WaitKind.softAsk;
+  bool get blocking => kind != WaitKind.softAsk && kind != WaitKind.awaiting;
+
+  /// He tapped "נכשל" on a finished task's card (#219): its folded line gets `close`, not `check`.
+  bool failed = false;
 }
+
+/// "בוצע" and "נכשל" on a finished task's card (#219). One tap each; "נכשל" asks for nothing more.
+const kAwaitingOptions = [AskOption(id: 'done', label: 'בוצע', primary: true), AskOption(id: 'failed', label: 'נכשל')];
 
 class DecisionByManager {
   const DecisionByManager({required this.by, required this.text, required this.time});

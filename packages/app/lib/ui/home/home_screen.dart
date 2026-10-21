@@ -53,7 +53,7 @@ class WaitRow extends StatelessWidget {
 
     Widget tail;
     if (item.state == WaitState.answered) {
-      tail = DoneLine(item.answerLine ?? item.doneLine ?? 'טופל · ${hm(CompanyTime.now())}', top: 8);
+      tail = DoneLine(item.answerLine ?? item.doneLine ?? 'טופל · ${hm(CompanyTime.now())}', top: 8, icon: item.failed ? 'close' : 'check');
     } else if (pending != null) {
       tail = UndoLine(label: pending.label, onCancel: () => store.cancelUndo(item.id));
     } else if (item.state == WaitState.notNow) {
@@ -187,6 +187,11 @@ class WaitRow extends StatelessWidget {
           Btn('ניסיון נוסף', onTap: () => store.backend.retry(item)),
           Btn('פתיחה', onTap: open),
         ];
+      case WaitKind.awaiting:
+        // A finished task (#219): one tap each, "נכשל" asks for nothing; the details, if any, go in the conversation.
+        return [
+          for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.tonal, onTap: () => store.answerWait(item, o)),
+        ];
       case WaitKind.blockingAsk:
       case WaitKind.softAsk:
         // Without an ask behind it (an escalation note): the conversation is where to answer.
@@ -234,6 +239,8 @@ class WaitRow extends StatelessWidget {
 /// (where its card is), and the system's opens a page of its own (#55).
 void openWait(BuildContext context, WaitItem item) {
   if (item.kind == WaitKind.login) return Nav.handoff(context, item);
+  // A finished task's card (#219) is not in any conversation: its own page has "בוצע" and "נכשל".
+  if (item.kind == WaitKind.awaiting) return Nav.waitItem(context, item);
   final d = StoreScope.read(context).data;
   if (d != null && d.canChat(item.from)) {
     // Straight to its message in the conversation, where the answer buttons are.

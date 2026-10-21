@@ -36,7 +36,8 @@ export type Tone = (typeof TONES)[number];
 export type ShiftState = 'starting' | 'live' | 'ended' | 'dead';
 
 /** Items in the owner's single "waiting for you" inbox (A.4). */
-export type InboxKind = 'ask' | 'go' | 'login' | 'delivery_failure' | 'incident' | 'escalation_note' | 'shift_failure';
+/** `awaiting` (#219): a finished task that waits on him to check or verify something, ref `task-<id>`. */
+export type InboxKind = 'ask' | 'go' | 'login' | 'delivery_failure' | 'incident' | 'escalation_note' | 'shift_failure' | 'awaiting';
 
 export interface InboxItemDTO {
   id: number;

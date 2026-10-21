@@ -45,10 +45,15 @@ class WaitItemScreen extends StatelessWidget {
                 Expanded(child: Text('${item.kicker} · ${item.time}', style: T.secondary.copyWith(color: p.text2))),
               ]),
               const SizedBox(height: 14),
-              CopySelectionArea(child: Rich(item.body, auto: true, style: T.body.copyWith(color: p.text))),
+              // A finished task's card (#219): what to check first, in his words; what changed under it.
+              if (item.kind == WaitKind.awaiting && item.headline != null) ...[
+                Rich(item.headline!, style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+              ],
+              CopySelectionArea(child: Rich(item.body, auto: true, style: T.body.copyWith(color: item.kind == WaitKind.awaiting ? p.text2 : p.text))),
               const SizedBox(height: 20),
               if (item.state == WaitState.answered)
-                DoneLine(item.answerLine ?? item.doneLine ?? 'טופל')
+                DoneLine(item.answerLine ?? item.doneLine ?? 'טופל', icon: item.failed ? 'close' : 'check')
               else if (pending != null)
                 UndoLine(label: pending.label, onCancel: () => store.cancelUndo(item.id))
               else ...[
@@ -62,8 +67,8 @@ class WaitItemScreen extends StatelessWidget {
                       store.notNow(item);
                       Navigator.of(context).maybePop();
                     }),
-                  // Closed without doing it; the worker who asked is told (#74).
-                  if (item.inboxId != null)
+                  // Closed without doing it; the worker who asked is told (#74). A finished task closes with "בוצע" or "נכשל".
+                  if (item.inboxId != null && item.kind != WaitKind.awaiting)
                     Btn('סגירה', onTap: () {
                       store.dismiss(item);
                       Navigator.of(context).maybePop();
