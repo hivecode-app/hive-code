@@ -20,6 +20,9 @@
 set -euo pipefail
 
 FLUTTER="${FLUTTER:-$HOME/flutter/bin/flutter}"
+# task-297: no Gradle or Kotlin daemon outlives the build (a leftover held 8GB for 3 hours on 21/10). The app's
+# gradle.properties says so; this says it for a checkout whose properties file is older.
+export GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.daemon=false -Dorg.gradle.project.kotlin.compiler.execution.strategy=in-process"
 APKSIGNER="${APKSIGNER:-/opt/android-sdk/build-tools/36.0.0/apksigner}"
 AAPT2="${AAPT2:-/opt/android-sdk/build-tools/36.0.0/aapt2}"
 # Not the engine: the company's contract and memory, research notes, spikes and the design docs (scripts/clean-history.sh
