@@ -110,7 +110,7 @@ export function buildReport({ run = sh, state, configDir, data, engine = engineR
     run('node', [join(engine, 'scripts/check-contract.mjs'), companyHome], { timeout: 60_000 }).split('\n').slice(-15).join('\n'),
   ].join('\n'));
 
-  const unitNames = ['agent-company-hq.service', 'agent-company-web.service', 'agent-company-drift.timer', 'actions-runner-company.service'];
+  const unitNames = ['agent-company-hq.service', 'agent-company-web.service', 'agent-company-drift.timer'];
   section('יחידות', [
     run('systemctl', ['--user', 'show', ...unitNames, '-p', 'Id,LoadState,ActiveState,SubState,NRestarts,ActiveEnterTimestamp,FragmentPath']),
     '',

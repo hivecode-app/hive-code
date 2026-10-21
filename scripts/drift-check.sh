@@ -72,7 +72,7 @@ if [[ -n "$until_date" ]] && grep -q '/[0-9a-f]\{32\}/hq/\*' /etc/caddy/sites/ag
 fi
 
 # ── units, hq.env, leftovers ─────────────────────────────────────────────────
-for u in agent-company-hq.service actions-runner-company.service agent-company-drift.service agent-company-drift.timer; do
+for u in agent-company-hq.service agent-company-drift.service agent-company-drift.timer; do
   [[ "$(readlink "$UNITS/$u")" == "$PROD/deploy/$u" ]] || d "היחידה $u לא מקושרת ל-$PROD/deploy/$u"
 done
 systemctl --user is-enabled -q agent-company-drift.timer || d "agent-company-drift.timer לא מופעל"

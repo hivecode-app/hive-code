@@ -1,5 +1,5 @@
 # company-ci: the check every agent-company PR must pass before a worker merges (charter ci_check).
-# Runs on our own runner on hq-host (deploy/actions-runner-company.service, label "company"):
+# Runs on our own runner on ci-host (deploy/ci-host/actions-runner-agent-company.service, label "company"):
 # GitHub-hosted runners are blocked on this account's billing, self-hosted ones are not.
 name: company-ci
 
@@ -18,7 +18,7 @@ concurrency:
 jobs:
   company-ci:
     runs-on: [self-hosted, company]
-    # 40: the flutter steps can wait minutes on the ~/flutter lock other sessions on hq-host share.
+    # 40: the flutter steps can wait minutes on the $HOME/flutter lock, shared on ci-host with the engine's runner.
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -34,8 +34,8 @@ jobs:
       - name: test
         run: npm test
       # The app (#97): flutter analyze and test, as deploy.sh runs them, so a failure shows on the PR and
-      # not at deploy time. Only when the PR (or the push) touches packages/app. Flutter is in ~/flutter
-      # on hq-host; the runner runs as ran.
+      # not at deploy time. Only when the PR (or the push) touches packages/app. Flutter is in $HOME/flutter,
+      # and the unit sets HOME=/home/owner/company-ci-home on ci-host (3.47.2, as on hq-host).
       - name: app changed?
         id: app
         env:
