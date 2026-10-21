@@ -690,6 +690,12 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
         }
         if (!r.more) break;
       }
+    } catch (e) {
+      // A shift that closed (or whose host closed) while we read: nothing left to collect, and not an error to show.
+      // A host that dropped mid-run of a shift still believed live is a real failure, and stays one.
+      const now = this.get(id);
+      if (!now || (now.state !== 'live' && now.state !== 'starting')) return;
+      throw e;
     } finally {
       this.spooling.delete(id);
     }
