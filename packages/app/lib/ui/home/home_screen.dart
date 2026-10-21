@@ -177,7 +177,7 @@ class WaitRow extends StatelessWidget {
     switch (item.kind) {
       case WaitKind.urgentProd:
         return [
-          for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.tonal, onTap: () => store.answerWait(item, o)),
+          for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.plain, onTap: () => store.answerWait(item, o)),
           if (chat) Btn('שאלה', onTap: ask),
           Btn('פתיחה', onTap: open),
         ];
@@ -200,13 +200,13 @@ class WaitRow extends StatelessWidget {
       case WaitKind.awaiting:
         // A finished task (#219): one tap each, "נכשל" asks for nothing; the details, if any, go in the conversation.
         return [
-          for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.tonal, height: 48, onTap: () => store.answerWait(item, o)),
+          for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.plain, height: 48, onTap: () => store.answerWait(item, o)),
         ];
       case WaitKind.blockingAsk:
       case WaitKind.softAsk:
         // Without an ask behind it (an escalation note): the conversation is where to answer.
         return [
-          for (final o in item.options) Btn(o.label, kind: BtnKind.tonal, onTap: () => store.answerWait(item, o)),
+          for (final o in item.options) Btn(o.label, kind: BtnKind.plain, onTap: () => store.answerWait(item, o)),
           if (chat) Btn('תשובה', onTap: ask),
           Btn('פתיחה', onTap: open),
         ];
@@ -309,7 +309,7 @@ class _AnswerFieldState extends State<AnswerField> {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
       if (item.options.isNotEmpty || !open)
         Wrap(spacing: 8, runSpacing: 8, children: [
-          for (final o in item.options) Btn(o.label, kind: BtnKind.tonal, height: 48, onTap: () => store.answerWait(item, o)),
+          for (final o in item.options) Btn(o.label, kind: BtnKind.plain, height: 48, onTap: () => store.answerWait(item, o)),
           if (!open) Btn('תשובה אחרת', height: 48, onTap: () => setState(() => open = true)),
         ]),
       if (open) ...[

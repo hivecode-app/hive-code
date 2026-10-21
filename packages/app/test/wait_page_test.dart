@@ -13,7 +13,7 @@ import 'helpers.dart';
 
 DateTime _at(int h, int m) => DateTime(2026, 10, 20, h, m);
 
-WaitItem _ask() => WaitItem(
+WaitItem _ask({bool marked = false}) => WaitItem(
       id: 'w-ido-new',
       kind: WaitKind.blockingAsk,
       from: 'ido',
@@ -21,7 +21,7 @@ WaitItem _ask() => WaitItem(
       kicker: 'שאלה · חוסמת',
       headline: 'מה עושים עם המנוי של לומו?',
       body: 'המנוי פג אתמול. אפשר לחדש עכשיו או לבטל.\nהחידוש עולה 40 ש"ח לחודש.',
-      options: const [AskOption(id: 'a', label: 'ביטול המנוי מיד', primary: true), AskOption(id: 'b', label: 'חידוש לחודש')],
+      options: [AskOption(id: 'a', label: 'ביטול המנוי מיד', primary: marked), AskOption(id: 'b', label: 'חידוש לחודש')],
       askId: 'ask-ido-new',
       inboxId: 45,
       createdAt: _at(13, 50),
@@ -41,8 +41,8 @@ WaitItem _go() => WaitItem(
       createdAt: _at(13, 41),
     );
 
-Future<AppStore> _open(WidgetTester tester, WaitItem item, {bool dark = false}) async {
-  final store = await pumpApp(tester, dark: dark, size: const Size(390, 800), home: const SizedBox());
+Future<AppStore> _open(WidgetTester tester, WaitItem item, {bool dark = false, double scale = 1}) async {
+  final store = await pumpApp(tester, dark: dark, textScale: scale, size: const Size(390, 800), home: const SizedBox());
   store.data!.waiting.removeWhere((w) => w.kind != WaitKind.awaiting && w.kind != WaitKind.go && w.kind != WaitKind.blockingAsk);
   store.data!.waiting.insert(0, item);
   await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: WaitItemScreen(item: item)));
@@ -77,15 +77,25 @@ void main() {
     await tester.pump(const Duration(seconds: 6));
   });
 
-  for (final dark in [false, true]) {
-    final look = dark ? 'dark' : 'light';
-    testWidgets('page of a question with options ($look)', (tester) async {
-      await _open(tester, _ask(), dark: dark);
+  for (final (look, dark, scale) in [('light', false, 1.0), ('dark', true, 1.0), ('text13', false, 1.3)]) {
+    testWidgets('page of a question, no answer marked: all the same weight ($look)', (tester) async {
+      await _open(tester, _ask(), dark: dark, scale: scale);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/wait_page/ask-$look.png'));
     });
+    testWidgets('page of a question, an answer marked by the worker ($look)', (tester) async {
+      await _open(tester, _ask(marked: true), dark: dark, scale: scale);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/wait_page/ask-marked-$look.png'));
+    });
     testWidgets('page of a GO ($look)', (tester) async {
-      await _open(tester, _go(), dark: dark);
+      await _open(tester, _go(), dark: dark, scale: scale);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/wait_page/go-$look.png'));
     });
   }
+
+  testWidgets('the question is the page\'s title, bigger than the details', (tester) async {
+    await _open(tester, _ask());
+    double sizeOf(String t) => tester.widget<RichText>(find.byWidgetPredicate((w) => w is RichText && w.text.toPlainText().contains(t)).first).text.style!.fontSize!;
+    expect(sizeOf('מה עושים עם המנוי'), 21);
+    expect(sizeOf('החידוש עולה'), lessThan(21));
+  });
 }

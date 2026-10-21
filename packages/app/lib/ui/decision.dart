@@ -10,7 +10,7 @@ import 'common.dart';
 import 'convs/convs_v2.dart' show WordFit;
 import 'convs/kbd.dart';
 
-/// One answer: [primary] is filled in the brand color ("אישור"); the rest are outlined. At least 48 high.
+/// One answer: [primary] is filled in the brand color, only when the worker marked it; the rest are outlined, all of the same weight. At least 48 high.
 class DecisionButton extends StatelessWidget {
   const DecisionButton(this.label, {super.key, required this.onTap, this.primary = false, this.hint});
   final String label;

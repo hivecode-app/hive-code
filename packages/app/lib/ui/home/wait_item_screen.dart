@@ -56,9 +56,9 @@ class WaitItemScreen extends StatelessWidget {
                 Expanded(child: Text(isCaughtFault(item.from, item.askId) ? item.kicker : '${item.kicker} · ${item.time}', style: T.secondary.copyWith(color: p.text2))),
               ]),
               const SizedBox(height: 14),
-              // The question first, in his words when the worker gave them; the details under it, open (#258).
+              // The question first, as a screen's title, in his words when the worker gave them; the details under it, open (#258).
               if (item.headline != null) ...[
-                Rich(item.headline!, style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w700)),
+                Rich(item.headline!, style: T.bar.copyWith(color: p.text)),
                 const SizedBox(height: 6),
                 if (isDecision && item.body.trim().isNotEmpty) Text('פרטים', style: T.small.copyWith(color: p.text2, fontWeight: FontWeight.w700)),
                 if (isDecision && item.body.trim().isNotEmpty) const SizedBox(height: 4),
@@ -79,7 +79,7 @@ class WaitItemScreen extends StatelessWidget {
                 if (isAsk) const SizedBox(height: 12),
                 Wrap(spacing: 8, runSpacing: 8, children: [
                   if (!isAsk)
-                    for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.tonal, onTap: () => store.answerWait(item, o)),
+                    for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.plain, onTap: () => store.answerWait(item, o)),
                   if (item.state != WaitState.notNow)
                     Btn('לא עכשיו', onTap: () {
                       store.notNow(item);
