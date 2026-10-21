@@ -207,3 +207,23 @@ test('#219: a deploy is his only once stuck 6 hours with no GO about it; a deplo
     assert.equal(card(a), undefined, 'deployed: gone');
   } finally { await env.cleanup(); }
 });
+
+test('waitingDeploy: merged PRs waiting for GO or a deploy, for drift-check; deployed and other projects not', async () => {
+  const env = await makeEnv({ noStart: true });
+  try {
+    await env.hq.start({ timers: false });
+    const { scheduler, awaiting, inbox } = env.hq;
+    const mk = (project: string) => { const t = scheduler.addTask({ title: 'x', project }); scheduler.setTaskState(t.id, 'done'); return t.id; };
+    const a = mk('shop'), b = mk('shop'), c = mk('other');
+    awaiting.mark(a, { awaiting: 'deploy', pr: '61' }, 'w');
+    awaiting.mark(c, { awaiting: 'deploy', pr: '63' }, 'w');
+    scheduler.setTaskState(b, 'done');
+    env.hq.store.db.prepare('UPDATE tasks SET pr = ? WHERE id = ?').run('62', b);
+    env.hq.store.db.prepare("INSERT INTO identities (id, name, title, symbol, team_kind, project, lifecycle, source, active, data, updated_at) VALUES ('shop-t9', 'x', 'x', 'build', 'task', 'shop', 'ephemeral', 'runtime', 1, '{}', 0)").run();
+    inbox.add({ kind: 'go', from_identity: 'shop-t9', title: 'GO: פריסה', body: 'נכנס: #64', blocking: true });
+    const w = awaiting.waitingDeploy('shop');
+    assert.deepEqual(w.prs.sort(), ['61', '64'], 'awaiting + a PR named in a live GO of the project; not another project, not an unrelated done task');
+    awaiting.clear(a, 'deploy', 'deployed');
+    assert.deepEqual(awaiting.waitingDeploy('shop').prs, ['64']);
+  } finally { await env.cleanup(); }
+});

@@ -189,6 +189,28 @@ export class AwaitingBoard {
 
 
   /**
+   * The PRs of [project] that are merged and wait for a deploy, for scripts/drift-check.sh: a task that waits
+   * (`awaiting=deploy`), or one with a GO about it, asked or given (goAbout); and any PR a live GO of the project's
+   * own identities names. These are not drift: production is behind main on purpose until the deploy.
+   */
+  waitingDeploy(project: string): { prs: string[]; tasks: { id: number; pr: string | null; why: 'awaiting' | 'go' }[] } {
+    const since = this.store.now() - 14 * 86400_000;
+    const rows = this.store.db.prepare(`SELECT ${COLS} FROM tasks WHERE project = ? AND (awaiting = 'deploy' OR created_at >= ?)`)
+      .all(project, since) as AwaitingTask[];
+    const tasks: { id: number; pr: string | null; why: 'awaiting' | 'go' }[] = [];
+    for (const t of rows) {
+      if (t.awaiting === 'deploy') tasks.push({ id: t.id, pr: t.pr, why: 'awaiting' });
+      else if (t.pr && this.goAbout({ ...t, awaiting: 'deploy' })) tasks.push({ id: t.id, pr: t.pr, why: 'go' });
+    }
+    const prs = new Set(tasks.map((t) => t.pr).filter((p): p is string => !!p));
+    const gos = this.store.db.prepare(`SELECT g.title, g.body, g.headline FROM inbox g JOIN identities i ON i.id = g.from_identity
+      WHERE g.kind = 'go' AND g.state != 'dismissed' AND g.created_at >= ? AND i.project = ?`)
+      .all(since, project) as { title: string; body: string; headline: string | null }[];
+    for (const g of gos) for (const m of `${g.title}\n${g.headline ?? ''}\n${g.body}`.matchAll(/#(\d+)(?!\d)/g)) prs.add(m[1]!);
+    return { prs: [...prs], tasks };
+  }
+
+  /**
    * A deploy happened (scripts/deploy.sh, or any project's own deploy): record it, and clear `deploy` on every
    * task it includes. `check` stays: deployed is exactly when he has something to check.
    */

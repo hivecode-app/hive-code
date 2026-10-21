@@ -376,6 +376,10 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     return { ok: hq.awaiting.clear(id, OWNER, 'checked'), task: hq.scheduler.task(id) };
   });
 
+  // Merged PRs that wait for a deploy or a GO (awaiting=deploy, or a GO about them): scripts/drift-check.sh does not
+  // call production behind main on their account a drift.
+  route('GET', '/api/deploys/waiting', ({ url }) => hq.awaiting.waitingDeploy(url.searchParams.get('project') ?? 'agent-company'));
+
   // A deploy reports what it put in production (scripts/deploy.sh; any project's deploy may call it): the
   // tasks it includes leave "מה לבדוק" if they waited for a deploy. By task id, or by PR number in the project.
   route('POST', '/api/deploys', async ({ body }) => {
