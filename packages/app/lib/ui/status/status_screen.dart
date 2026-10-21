@@ -109,7 +109,7 @@ class _WaitLine extends StatelessWidget {
     final who = d.who(item.from);
     final urgent = item.kind == WaitKind.urgentProd;
     return InkWell(
-      onTap: () => d.canChat(item.from) && item.kind != WaitKind.awaiting ? Nav.chat(context, item.from) : Nav.waitItem(context, item),
+      onTap: () => Nav.waitItem(context, item),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

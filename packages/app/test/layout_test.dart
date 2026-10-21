@@ -24,6 +24,7 @@ import 'package:agent_company/ui/settings/settings_screen.dart';
 import 'package:agent_company/ui/entity_link.dart';
 import 'package:agent_company/ui/projects/project_screen.dart';
 import 'package:agent_company/ui/status/status_screen.dart';
+import 'package:agent_company/ui/home/wait_item_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -386,9 +387,13 @@ void main() {
     await headShot(tester, 'text-130');
   });
 
-  testWidgets('head: a tap on what waits opens the conversation at its card', (tester) async {
+  testWidgets('head: a tap on what waits opens its page, and "לשיחה עם" from there the conversation', (tester) async {
     await _pump(tester, head: true, earlierWaiting: true);
     await tester.tap(findShown('בועז · GO לפרודקשן'));
+    await tester.pumpAndSettle();
+    expect(find.byType(WaitItemScreen), findsOneWidget);
+    expect(find.byType(ChatScreen), findsNothing);
+    await tester.tap(find.textContaining('לשיחה עם'));
     await tester.pumpAndSettle();
     expect(find.byType(ChatScreen), findsOneWidget);
     expect(tester.widget<ChatScreen>(find.byType(ChatScreen)).identityId, 'boaz');

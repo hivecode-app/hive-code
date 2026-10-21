@@ -10,7 +10,6 @@ import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import '../decision.dart';
-import '../chat/chat_screen.dart';
 import '../nav.dart';
 
 /// Everything waiting for him, one [WaitRow] each, most urgent first. The order is frozen at the
@@ -246,18 +245,11 @@ class WaitRow extends StatelessWidget {
   }
 }
 
-/// Opens a waiting item: a site sign-in opens the handoff, a worker's item opens the conversation
-/// (where its card is), and the system's opens a page of its own (#55).
+/// Opens a waiting item: a site sign-in opens the handoff; every other kind opens the item's own page,
+/// with the question in front of him and the decision under it, whoever asked. "לשיחה עם …" at the bottom
+/// of the page is the way to the conversation.
 void openWait(BuildContext context, WaitItem item) {
   if (item.kind == WaitKind.login) return Nav.handoff(context, item);
-  // A finished task's card (#219) is not in any conversation: its own page has "בוצע" and "נכשל".
-  if (item.kind == WaitKind.awaiting) return Nav.waitItem(context, item);
-  final d = StoreScope.read(context).data;
-  if (d != null && d.canChat(item.from)) {
-    // Straight to its message in the conversation, where the answer buttons are.
-    if (item.askId != null) ChatScreen.pendingTarget[item.from] = item.askId!;
-    return Nav.chat(context, item.from);
-  }
   Nav.waitItem(context, item);
 }
 

@@ -8,7 +8,11 @@ import '../../data/error_report.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
+import '../chat/chat_screen.dart';
 import '../common.dart';
+import '../convs/head.dart' show decisionKeysOf;
+import '../decision.dart';
+import '../nav.dart';
 import '../selection.dart';
 import 'home_screen.dart';
 
@@ -24,7 +28,13 @@ class WaitItemScreen extends StatelessWidget {
     if (d == null) return const SizedBox.shrink();
     final who = d.who(item.from);
     final isAsk = (item.kind == WaitKind.blockingAsk || item.kind == WaitKind.softAsk) && item.askId != null;
-    final pending = store.decision(item.askId, item.id) ?? store.pending(item.id);
+    final decided = store.decision(item.askId, item.id);
+    final pending = decided ?? store.pending(item.id);
+    final chat = d.canChat(item.from);
+    // A decision of the card's kind, with a conversation behind it: the same buttons as the card (#258).
+    final keys = chat && item.kind != WaitKind.awaiting && item.state != WaitState.answered && pending == null ? decisionKeysOf(context, item) : null;
+    final isDecision = item.kind == WaitKind.go || isAsk;
+    final bodyStyle = T.body.copyWith(color: item.kind == WaitKind.awaiting ? p.text2 : p.text);
     return Scaffold(
       backgroundColor: p.bg,
       body: SafeArea(
@@ -46,18 +56,25 @@ class WaitItemScreen extends StatelessWidget {
                 Expanded(child: Text(isCaughtFault(item.from, item.askId) ? item.kicker : '${item.kicker} · ${item.time}', style: T.secondary.copyWith(color: p.text2))),
               ]),
               const SizedBox(height: 14),
-              // A finished task's card (#219): what to check first, in his words; what changed under it.
-              if (item.kind == WaitKind.awaiting && item.headline != null) ...[
+              // The question first, in his words when the worker gave them; the details under it, open (#258).
+              if (item.headline != null) ...[
                 Rich(item.headline!, style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 6),
-              ],
-              CopySelectionArea(child: Rich(item.body, auto: true, style: T.body.copyWith(color: item.kind == WaitKind.awaiting ? p.text2 : p.text))),
+                if (isDecision && item.body.trim().isNotEmpty) Text('פרטים', style: T.small.copyWith(color: p.text2, fontWeight: FontWeight.w700)),
+                if (isDecision && item.body.trim().isNotEmpty) const SizedBox(height: 4),
+                CopySelectionArea(child: Rich(item.body, auto: true, style: bodyStyle)),
+              ] else
+                CopySelectionArea(child: Rich(item.body, auto: true, style: isDecision ? bodyStyle.copyWith(fontWeight: FontWeight.w700) : bodyStyle)),
               const SizedBox(height: 20),
               if (item.state == WaitState.answered)
                 DoneLine(item.answerLine ?? item.doneLine ?? 'טופל', icon: item.failed ? 'close' : 'check')
+              else if (decided != null)
+                DecisionLine(icon: pendingIcon(decided), text: pendingLine(decided), onUndo: () => store.cancelUndo(AppStore.decisionKey(item.askId, item.id)))
               else if (pending != null)
                 UndoLine(label: pending.label, onCancel: () => store.cancelUndo(pending.key))
-              else ...[
+              else if (keys != null) ...[
+                DecisionKeys(keys: keys),
+              ] else ...[
                 if (isAsk) AnswerField(item: item, autofocus: item.options.isEmpty),
                 if (isAsk) const SizedBox(height: 12),
                 Wrap(spacing: 8, runSpacing: 8, children: [
@@ -75,6 +92,16 @@ class WaitItemScreen extends StatelessWidget {
                       Navigator.of(context).maybePop();
                     }),
                 ]),
+              ],
+              if (chat && item.kind != WaitKind.awaiting) ...[
+                const SizedBox(height: 20),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: LinkText('לשיחה עם ${who.name}', size: 15, onTap: () {
+                    if (item.askId != null) ChatScreen.pendingTarget[item.from] = item.askId!;
+                    Nav.chat(context, item.from);
+                  }),
+                ),
               ],
             ]),
           ),
