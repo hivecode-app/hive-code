@@ -292,7 +292,7 @@
     "properties": {
      "state": {
       "type": "string",
-      "description": "מצב, e.g. working | blocked | idle | done / state"
+      "description": "מצב, e.g. working | blocked | idle | done. בשרת השני: needs-local כשחסר משהו שיש רק בשרת הראשי, והמשימה עוברת לשם / state; on the second server, needs-local moves the task to the main one"
      },
      "note": {
       "type": "string",
@@ -393,9 +393,9 @@
       },
       "description": "identities של חברי הצוות / member identities"
      },
-     "remote": {
+     "local": {
       "type": "boolean",
-      "description": "true כשהמשימה לא צריכה מפתחות, kubectl, סודות של hq-host, דפדפן או סימולטור. כך היא רצה על השרת השני ולא מחכה בתור. בלי: רק בשרת הראשי / true when the task needs no keys, kubectl, hq-host secrets, browser or simulator: it then runs on the second server instead of waiting in the queue; default: main server only"
+      "description": "true כשהמשימה צריכה משהו שיש רק בשרת הראשי: מפתחות ssh, `.env`, kubectl, סודות של hq-host, דפדפן או סימולטור. בלי: רצה בשרת הפנוי, גם בשרת השני / true when the task needs what only the main server has (ssh keys, .env, kubectl, hq-host secrets, browser, simulator); default: whichever server has room, the second one included"
      }
     },
     "required": [

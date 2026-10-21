@@ -28,6 +28,8 @@ export interface NodeDef {
   identityFile?: string | null;
   /** Projects whose tasks may run there (their checkouts exist there, with what they need to build). */
   projects: string[];
+  /** More repos to copy there at the same path, that a project needs beside its checkouts (scripts/node-install.sh), e.g. ~/projects/whatsmeow. */
+  mirror?: string[];
   /** Cap on task shifts there, whatever the memory says. */
   maxSlots: number;
   /** No new shift while the 1-minute load average per CPU is above this. */
@@ -38,14 +40,15 @@ export const LOCAL = 'local';
 export const nodeToggle = (name: string) => `node:${name}`;
 
 /**
- * A task goes to a node only when whoever opened it said it needs nothing that exists only here (ssh keys, tokens,
- * kubectl, the browser, a simulator): `open_team` with `remote: true` (yoav, 22/10/2026: a task that ran there without
- * ~/.ssh and kubectl came back half empty). The default is here.
+ * A task goes to whichever machine has room, a node included (ran, 22/10/2026: «ששתי השרתים יתנו מהכוח חישוב
+ * שלהם»). Only a task that needs what exists only here (ssh keys, `.env`, kubectl, the browser, a simulator) stays:
+ * `open_team` with `local: true`, or a worker there that finds it is missing something (`status` state `needs-local`,
+ * Scheduler.moveLocal). Until 22/10 it was the other way round, `remote-ok` opting in; that label means nothing now.
  */
-export const REMOTE_OK = 'remote-ok';
+export const NEEDS_LOCAL = 'needs-local';
 
-/** Labels that keep a task here even with REMOTE_OK (fallbackLocal adds `needs-local`). */
-export const LOCAL_LABELS = ['needs-local', 'needs-browser', 'needs-simulator'];
+/** Labels that keep a task here (fallbackLocal and moveLocal add `needs-local`). */
+export const LOCAL_LABELS = [NEEDS_LOCAL, 'needs-browser', 'needs-simulator'];
 
 export interface NodeStatus {
   up: boolean; at: number; error: string | null;

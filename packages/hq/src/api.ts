@@ -339,7 +339,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   });
 
   const HQ_LABELS = ['opened-by:', 'repo:', 'closing-at:'];
-  // Priority (p0..p3, B.16 queue order) and labels (e.g. `remote-ok`, task-235) without editing hq.db by hand.
+  // Priority (p0..p3, B.16 queue order) and labels (e.g. `needs-local`, task-235) without editing hq.db by hand.
   // `labels` are added and `remove_labels` removed; the rest of the task's labels stay as they are.
   route('PATCH', '/api/tasks/:id', async ({ params, body }) => {
     const b = await body();

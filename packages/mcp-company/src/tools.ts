@@ -113,7 +113,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'If it still waits on something (a deploy, or something ' + G('he', 'she') + ' must check), add awaiting and awaiting_note: it shows under "what to check". '
       + 'הערכת זמן ("יהיה מוכן בעוד 40 דקות") נרשמת בשדות eta_min או eta_at, eta_kind ו-eta_what; אחרי done או eta_done היא נסגרת עם הזמן האמיתי. '
       + 'A time estimate goes in the eta_* fields; done or eta_done closes it with the real time.', {
-      state: s('מצב, e.g. working | blocked | idle | done / state'),
+      state: s('מצב, e.g. working | blocked | idle | done. בשרת השני: needs-local כשחסר משהו שיש רק בשרת הראשי, והמשימה עוברת לשם / state; on the second server, needs-local moves the task to the main one'),
       note: s('הערה קצרה / short note'),
       summary: s('ב-done: שורה אחת במילים ' + G('שלו', 'שלה') + ', מה השתנה ' + G('אצלו', 'אצלה') + ', בלי מספרי PR ובלי מונחים טכניים, e.g. "התמונות בצ\'אט עולות גם מהטלפון" '
         + '/ with done: one line in ' + G('his', 'her') + ' words on what changed for ' + G('him', 'her') + ', no PR numbers or jargon'),
@@ -133,8 +133,8 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       repo: s('ה-checkout מהאמנה (name), אם יש בפרויקט יותר מאחד. ברירת מחדל: הראשון / charter checkout name, default the first'),
       assignee: s('העובד הקבוע בפרויקט שהתחום שלו, e.g. ido. בלי: עובד זמני / standing worker of the project; default a temporary worker'),
       members: strs('identities של חברי הצוות / member identities'),
-      remote: { type: 'boolean', description: 'true כשהמשימה לא צריכה מפתחות, kubectl, סודות של hq-host, דפדפן או סימולטור. כך היא רצה על השרת השני ולא מחכה בתור. בלי: רק בשרת הראשי '
-        + '/ true when the task needs no keys, kubectl, hq-host secrets, browser or simulator: it then runs on the second server instead of waiting in the queue; default: main server only' },
+      local: { type: 'boolean', description: 'true כשהמשימה צריכה משהו שיש רק בשרת הראשי: מפתחות ssh, `.env`, kubectl, סודות של hq-host, דפדפן או סימולטור. בלי: רצה בשרת הפנוי, גם בשרת השני '
+        + '/ true when the task needs what only the main server has (ssh keys, .env, kubectl, hq-host secrets, browser, simulator); default: whichever server has room, the second one included' },
     }, ['name', 'purpose']),
     tool('close_team', 'סגירת צוות משימה: המשימה נסגרת, המשמרת נעצרת והעבודה נשמרת. רק מי שפתח, המנהל שלו, המנהל של העובד או ' + n.manager.name + '. '
       + 'awaiting ו-awaiting_note גוברים על מה שהעובד סימן, ואפשר לסמן אותם גם על משימה שכבר נסגרה. '

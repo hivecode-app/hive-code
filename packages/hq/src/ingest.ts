@@ -129,6 +129,15 @@ export class Ingest {
       case 'status': {
         // status{state: done} from a task worker closes its task (ends the shift with task_done).
         const done = a.state === 'done' || a.state === 'task_done';
+        // A worker on a node that needs what exists only on the main server: the task moves there (Scheduler.moveLocal).
+        if (a.state === 'needs-local') {
+          const t = this.hq.store.db.prepare(`SELECT id, machine FROM tasks WHERE identity = ? AND state IN ('running','resting') ORDER BY updated_at DESC LIMIT 1`)
+            .get(e.identity) as { id: number; machine: string | null } | undefined;
+          const there = !!t?.machine && t.machine !== 'local';
+          if (t && there) this.hq.store.bg(this.hq.scheduler.moveLocal(t.id, s(a.note) ?? 'needs-local'), 'task.move_local');
+          return { ok: true, id: e.id, result: { stored: true, moving: there ? t!.id : null,
+            note: there ? 'בסוף הסבב המשמרת כאן נגמרת, והמשימה ממשיכה בשרת הראשי מהענף שלך' : 'המשימה כבר רצה בשרת הראשי: לא זז כלום' } };
+        }
         const estimate = this.estimate(e, a, s(a.note) ?? null, done);
         if (done) {
           const t = this.hq.store.db.prepare(`SELECT id FROM tasks WHERE identity = ? AND state IN ('running','resting') ORDER BY updated_at DESC LIMIT 1`)
@@ -181,8 +190,9 @@ export class Ingest {
         const ref = open?.ref ?? (taken ? `${base} · ${e.id}` : base);
         const task = this.hq.scheduler.addTask({
           title: need('name'), body: need('purpose'), project, ref, labels: [`opened-by:${e.identity}`, ...(s(a.repo) ? [`repo:${s(a.repo)}`] : []),
-            // Needs nothing that is only here: may run on a node (nodes.ts REMOTE_OK). Default: here.
-            ...(a.remote === true ? ['remote-ok'] : [])],
+            // Needs what exists only here: stays here (nodes.ts NEEDS_LOCAL). Default: wherever there is room.
+            // `remote` (before 22/10) is ignored: every task may go to a node now.
+            ...(a.local === true ? ['needs-local'] : [])],
           identity: worker?.id,
         });
         return { ok: true, id: e.id, ref: `task-${task.id}`, result: { task: task.id, state: task.state } };

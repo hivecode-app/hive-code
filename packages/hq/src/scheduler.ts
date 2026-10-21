@@ -13,7 +13,7 @@ import { HELPER_TEAM, taskSteps } from './system-prompt.ts';
 import { loadInfo, memInfoMb } from './proc.ts';
 import { dirname, join } from 'node:path';
 import { noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
-import { LOCAL, LOCAL_LABELS, NodeUnreachable, REMOTE_OK, nodeToggle, RemoteWorkspaces, type Nodes, type RemoteNode } from './nodes.ts';
+import { LOCAL, LOCAL_LABELS, NEEDS_LOCAL, NodeUnreachable, nodeToggle, RemoteWorkspaces, type Nodes, type RemoteNode } from './nodes.ts';
 
 export interface TaskRow {
   id: number; ref: string | null; project: string | null; title: string; body: string; source: string; state: string;
@@ -271,15 +271,14 @@ export class Scheduler {
 
   /**
    * Where a task that has no machine yet would go (nodes.ts): a node, when the task can run there (a task worker's
-   * task of a project the node lists, opened as `remote-ok`, with no label that keeps it here) and the node has a free
-   * slot; else here.
+   * task of a project the node lists, with no label that keeps it here) and the node has a free slot; else here.
    * A task with a machine stays on it: its worktree and session are there.
    */
   placeFor(t: TaskRow, nodeFree: Map<string, number>): string {
     if (t.machine) return t.machine;
     if (!this.nodes || t.worktree || t.started_at != null || !t.project) return LOCAL;
     const labels = JSON.parse(t.labels || '[]') as string[];
-    if (!labels.includes(REMOTE_OK) || labels.some((l) => LOCAL_LABELS.includes(l))) return LOCAL;
+    if (labels.some((l) => LOCAL_LABELS.includes(l))) return LOCAL;
     // A task handed to a standing worker (or to a lead) runs where that identity runs: here.
     if (t.identity && getIdentity(this.store, t.identity)?.team_kind !== 'task') return LOCAL;
     const best = this.nodes.list.filter((n) => n.def.projects.includes(t.project!) && this.store.toggle(nodeToggle(n.def.name))
@@ -349,6 +348,9 @@ export class Scheduler {
   retrying(identity: string): boolean {
     // A standing worker is more than its task: a message to it wakes it as always.
     if (getIdentity(this.store, identity)?.team_kind !== 'task') return false;
+    // Moving to the main server (moveLocal, fallbackLocal): its start here brings it up, not a wake there.
+    const last = this.store.db.prepare('SELECT id FROM tasks WHERE identity = ? ORDER BY id DESC LIMIT 1').get(identity) as { id: number } | undefined;
+    if (last && (this.movingLocal.has(last.id) || this.fallingBack.has(last.id)) && !this.shifts.current(identity)) return true;
     const t = this.store.db.prepare(`SELECT id FROM tasks WHERE identity = ? AND state IN ('queued','open','interrupted') ORDER BY id DESC LIMIT 1`)
       .get(identity) as { id: number } | undefined;
     return !!t && this.briefFails.has(t.id) && !this.shifts.current(identity);
@@ -653,7 +655,7 @@ export class Scheduler {
     if (t.worktree) {
       const { c } = this.checkoutOf(t);
       if (!(await ws.ensure(t.worktree, c?.path, ch ?? undefined))) throw new WorktreeGone(`task ${t.id}: worktree ${t.worktree} is gone and its branch too`);
-      return { path: t.worktree, note: worktreeNote(t.worktree, ch) + this.charterNote(t) };
+      return { path: t.worktree, note: worktreeNote(t.worktree, ch) + nodeNote(t.machine) + this.charterNote(t) };
     }
     // Started before hq made worktrees: its session and work live where it ran (hq's default cwd and
     // a worktree the worker made itself). Moving it would orphan both.
@@ -665,7 +667,7 @@ export class Scheduler {
     const w = await ws.create(ch, c, `company-t${t.id}`);
     this.store.db.prepare('UPDATE tasks SET worktree = ?, updated_at = ? WHERE id = ?').run(w.path, this.store.now(), t.id);
     this.store.emit('task.worktree', null, { id: t.id, path: w.path, branch: w.branch, base: w.base });
-    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) + this.charterNote(t) + movedNote(t) };
+    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) + nodeNote(t.machine) + this.charterNote(t) + movedNote(t) };
   }
 
   /**
@@ -792,7 +794,7 @@ export class Scheduler {
       if (t.identity) this.mailbox.dropTaskPrompts(t.identity, taskId, `not taken on ${t.machine}: the task runs here`);
       const cur = t.identity ? this.shifts.current(t.identity) : undefined;
       if (cur && cur.kind !== 'foreign') await this.shifts.stop(cur.id, NODE_FALLBACK, cur.started_at).catch(() => {});
-      const labels = [...new Set([...(JSON.parse(t.labels || '[]') as string[]), 'needs-local'])];
+      const labels = [...new Set([...(JSON.parse(t.labels || '[]') as string[]), NEEDS_LOCAL])];
       db.prepare(`UPDATE tasks SET machine = NULL, worktree = NULL, state = 'queued', shift_id = NULL, started_at = NULL, labels = ?, updated_at = ?
         WHERE id = ? AND state != 'done'`).run(JSON.stringify(labels), this.store.now(), taskId);
       this.lastStartAt.delete(taskId);
@@ -805,6 +807,42 @@ export class Scheduler {
     this.store.bg(this.fill(), 'scheduler.fill');
     return true;
   }
+
+  /**
+   * A worker on a node that took its task and found it needs what exists only here (status state `needs-local`):
+   * after its turn, its shift there ends, the task goes back to the queue with `needs-local`, and the next start here
+   * gets the work from there (unpin: the branch and the preserved ref are fetched back, and the brief says where).
+   */
+  async moveLocal(taskId: number, why: string): Promise<boolean> {
+    const t = this.task(taskId);
+    if (!t || !t.machine || t.machine === LOCAL || t.state === 'done' || this.fallingBack.has(taskId) || this.movingLocal.has(taskId)) return false;
+    this.movingLocal.add(taskId);
+    let moved = false;
+    try {
+      const cur = t.identity ? this.shifts.current(t.identity) : undefined;
+      if (cur && cur.kind !== 'foreign') await this.shifts.waitTurnEnd(cur.id, this.cfg.timers.turnEndWaitMs).catch(() => {});
+      // Whatever shift it has there now (a crash may have brought up another run while the turn ended).
+      const now = t.identity ? this.shifts.current(t.identity) : undefined;
+      if (now && now.kind !== 'foreign') await this.shifts.stop(now.id, NODE_FALLBACK, now.started_at).catch(() => {});
+      if (t.identity && this.shifts.current(t.identity)) return false;
+      const fresh = this.task(taskId);
+      if (!fresh || fresh.machine !== t.machine || fresh.state === 'done') return false;
+      const labels = [...new Set([...(JSON.parse(fresh.labels || '[]') as string[]), NEEDS_LOCAL])];
+      const r = this.store.db.prepare(`UPDATE tasks SET labels = ?, state = 'queued', updated_at = ? WHERE id = ? AND machine = ? AND state != 'done'`)
+        .run(JSON.stringify(labels), this.store.now(), taskId, t.machine);
+      if (!r.changes) return false;
+      moved = !!(await this.unpin(this.task(taskId)!, `needs-local: ${why}`));
+      // Not moved (it raced with something): back as it was, so it does not sit queued on the node.
+      if (!moved) this.store.db.prepare(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ? AND machine = ? AND state = 'queued'`)
+        .run(fresh.state, this.store.now(), taskId, t.machine);
+      return moved;
+    } finally {
+      this.movingLocal.delete(taskId);
+      this.store.emit('task.move_local', t.identity, { id: taskId, machine: t.machine, why, moved });
+    }
+  }
+
+  private movingLocal = new Set<number>();
 
   /**
    * The worktree a task had on a node closes like any: uncommitted work preserved, and the preserved ref and a branch
@@ -861,12 +899,13 @@ export class Scheduler {
     return this.task(t.id);
   }
 
-  /** A task in the queue that could start on node `name` (pinned there, or a remote-ok task of a project it lists). */
+  /** A task in the queue that could start on node `name` (pinned there, or a task of a project it lists that may leave here). */
   private couldGoTo(t: TaskRow, name: string): boolean {
     if (t.machine) return t.machine === name;
     const n = this.nodes?.get(name);
     return !!n && !t.worktree && t.started_at == null && t.project != null && n.def.projects.includes(t.project)
-      && (JSON.parse(t.labels || '[]') as string[]).includes(REMOTE_OK);
+      && !(JSON.parse(t.labels || '[]') as string[]).some((l) => LOCAL_LABELS.includes(l))
+      && !(t.identity && getIdentity(this.store, t.identity)?.team_kind !== 'task');
   }
 
   /** Nodes being read right now (refreshNodes): their read is shared, and its end fills again. */
@@ -1052,7 +1091,7 @@ export class Scheduler {
     return t;
   }
 
-  /** Adds and removes labels (PATCH /api/tasks/:id): a lead marks a queued task `remote-ok` with no DB edit. */
+  /** Adds and removes labels (PATCH /api/tasks/:id): a lead keeps a queued task here (`needs-local`) with no DB edit. */
   setTaskLabels(id: number, add: string[], remove: string[]): TaskRow | undefined {
     const cur = this.task(id);
     if (!cur) return undefined;
@@ -1144,6 +1183,13 @@ function worktreeNote(path: string, ch: ReturnType<typeof readCharter>, branch?:
     cmds ? `**פקודות מהאמנה:** ${cmds}` : '',
     ch?.ciCheck ? `**CI:** ממזגים רק כשהבדיקה \`${ch.ciCheck}\` ירוקה ב-PR.` : '',
   ].filter(Boolean).join('\n');
+}
+
+/** A task on a node: what is not there, and how it moves to the main server when it needs that (moveLocal). */
+function nodeNote(machine?: string | null): string {
+  if (!machine || machine === LOCAL) return '';
+  return `\n**רץ בשרת השני (\`${machine}\`).** יש בו את ה-checkouts וה-toolchains, אבל אין בו מפתחות ssh, \`.env\`, kubectl, סודות של hq-host, דפדפן או סימולטור. `
+    + 'כשהמשימה צריכה אחד מהם: קודם `commit` למה שיש (גם WIP), ואז `status` עם `state: "needs-local"` ו-`note` שאומר מה חסר. המשמרת כאן נגמרת, והמשימה ממשיכה בשרת הראשי מהענף שלך.';
 }
 
 /** A task that started on a node and came back (unpin): where its work from there is now (fetched back on close). */

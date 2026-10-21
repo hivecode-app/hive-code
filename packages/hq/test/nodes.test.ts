@@ -51,7 +51,7 @@ test('nodes: a task worker\'s task goes to the node, its worktree is made and cl
     assert.equal(hq.nodes.list[0]!.status?.up, true, `polled at start: ${hq.nodes.list[0]!.status?.error}`);
     assert.deepEqual(hq.scheduler.nodeSlots().map((n) => [n.name, n.total, n.free]), [['n2', 2, 2]]);
 
-    const t = hq.scheduler.addTask({ title: 'על השרת השני', project: 'proj', labels: ['remote-ok'] });
+    const t = hq.scheduler.addTask({ title: 'על השרת השני', project: 'proj' });
     await until(() => hq.scheduler.task(t.id)!.state === 'running', 8000, 'running');
     const wt = join(r.checkout, '.worktrees', `company-t${t.id}`);
     assert.equal(hq.scheduler.task(t.id)!.machine, 'n2');
@@ -77,26 +77,29 @@ test('nodes: a task worker\'s task goes to the node, its worktree is made and cl
     await hq.shifts.request(`proj-t${t.id}`, { reason: 'message' });
     assert.equal(launcher.launches.at(-1)!.machine, 'n2');
 
-    // A task that needs the browser stays here; so does everything while the switch is off.
-    // Without remote-ok (the default): here.
+    // The default (22/10): any task may go there; this one takes the node's second slot.
     const plain = hq.scheduler.addTask({ title: 'רגילה', project: 'proj' });
     await until(() => hq.scheduler.task(plain.id)!.state === 'running', 8000, 'plain running');
-    assert.equal(launcher.launches.at(-1)!.machine, 'local');
-    // Marked remote-ok while it waits (PATCH /api/tasks/:id, task-235): it goes there.
+    assert.equal(hq.scheduler.task(plain.id)!.machine, 'n2');
+    await hq.scheduler.completeTask(plain.id);
+    await until(() => hq.scheduler.nodeSlots()[0]!.running === 1, 8000, 'its slot there is free again');
+    // Marked needs-local while it waits (PATCH /api/tasks/:id): here, though the node has room.
     hq.store.setToggle('scheduler', false);
-    const marked = hq.scheduler.addTask({ title: 'סומנה אחר כך', project: 'proj' });
-    hq.scheduler.setTaskLabels(marked.id, ['remote-ok'], []);
+    const marked = hq.scheduler.addTask({ title: 'צריכה kubectl', project: 'proj' });
+    hq.scheduler.setTaskLabels(marked.id, ['needs-local'], []);
     hq.store.setToggle('scheduler', true);
     await hq.scheduler.fill();
     await until(() => hq.scheduler.task(marked.id)!.state === 'running', 8000, 'marked running');
-    assert.equal(hq.scheduler.task(marked.id)!.machine, 'n2');
-    const local = hq.scheduler.addTask({ title: 'עם דפדפן', project: 'proj', labels: ['remote-ok', 'needs-browser'] });
+    assert.equal(hq.scheduler.task(marked.id)!.machine, null);
+    assert.equal(launcher.launches.at(-1)!.machine, 'local');
+    // A task that needs the browser stays here; so does everything while the switch is off.
+    const local = hq.scheduler.addTask({ title: 'עם דפדפן', project: 'proj', labels: ['needs-browser'] });
     await until(() => hq.scheduler.task(local.id)!.state === 'running', 8000, 'local running');
     assert.equal(launcher.launches.at(-1)!.machine, 'local');
     assert.equal(hq.scheduler.task(local.id)!.machine, null);
     hq.store.setToggle(nodeToggle('n2'), false);
     assert.equal(hq.scheduler.nodeSlots()[0]!.enabled, false, 'off: no new task goes there (one already there keeps its slot)');
-    const off = hq.scheduler.addTask({ title: 'כשהמתג כבוי', project: 'proj', labels: ['remote-ok'] });
+    const off = hq.scheduler.addTask({ title: 'כשהמתג כבוי', project: 'proj' });
     await until(() => hq.scheduler.task(off.id)!.state === 'running', 8000, 'off running');
     assert.equal(launcher.launches.at(-1)!.machine, 'local');
 
@@ -192,7 +195,7 @@ test('nodes: a worker there that never takes its task: the task runs here, and h
     (hq.scheduler.workspacesFor('n2') as RemoteWorkspaces).fetch = async () => {};
     await hq.start({ listen: false, timers: false });
     launcher.mode = 'mute'; // the CLI there never accepts the prompt
-    const t = hq.scheduler.addTask({ title: 'לא נלקחה שם', project: 'proj', labels: ['remote-ok'] });
+    const t = hq.scheduler.addTask({ title: 'לא נלקחה שם', project: 'proj' });
     await until(() => hq.scheduler.task(t.id)!.state === 'running', 8000, 'running on the node');
     assert.equal(hq.scheduler.task(t.id)!.machine, 'n2');
     const prompt = hq.mailbox.list(`proj-t${t.id}`).find((m) => m.to_identity === `proj-t${t.id}`)!;
@@ -219,6 +222,46 @@ test('nodes: a worker there that never takes its task: the task runs here, and h
   } finally { await env.cleanup(); r.cleanup(); }
 });
 
+test('nodes: a worker there that finds it needs the main server (status needs-local): the task moves here with its work (task-235)', async () => {
+  const r = repo();
+  const calls: string[][] = [];
+  const env = await makeEnv({ projects: { proj: charter(r.checkout) }, cfg: { nodes: [NODE] }, deps: { ssh: fakeSsh(calls) }, noStart: true });
+  try {
+    const { hq, launcher } = env;
+    git(env.dir, 'init', '--quiet', '--initial-branch=main');
+    git(env.dir, 'add', 'company');
+    git(env.dir, 'commit', '--quiet', '-m', 'company');
+    hq.nodes.list[0]!.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    (hq.scheduler.workspacesFor('n2') as RemoteWorkspaces).fetch = async () => {};
+    await hq.start({ listen: false, timers: false });
+    const t = hq.scheduler.addTask({ title: 'צריכה .env', project: 'proj' });
+    await until(() => hq.scheduler.task(t.id)!.state === 'running', 8000, 'running on the node');
+    assert.equal(hq.scheduler.task(t.id)!.machine, 'n2');
+    const there = hq.scheduler.task(t.id)!.worktree!;
+    const brief = hq.mailbox.list(`proj-t${t.id}`).find((m) => m.to_identity === `proj-t${t.id}`)!;
+    assert.match(brief.body, /רץ בשרת השני \(`n2`\)/, 'the brief says where it runs and how to move');
+    await until(() => hq.mailbox.get(brief.id)!.state !== 'queued', 3000, 'taken there');
+
+    const before = launcher.launches.length;
+    const moving = hq.scheduler.moveLocal(t.id, 'אין .env');
+    assert.equal(await hq.scheduler.moveLocal(t.id, 'פעמיים'), false, 'one move at a time');
+    // A message while it moves does not wake it there: the start here delivers it.
+    hq.mailbox.tell({ msg_id: 'while-moving', from: 'eli', to: `proj-t${t.id}`, body: 'עוד פרט' });
+    assert.equal(await moving, true);
+    await until(() => hq.scheduler.task(t.id)!.state === 'running' && hq.scheduler.task(t.id)!.machine === null, 8000, 'running here');
+    assert.deepEqual(launcher.launches.slice(before).map((l) => l.machine), ['local'], 'one launch, here');
+    await until(() => hq.mailbox.get('while-moving')!.state !== 'queued', 3000, 'delivered by the start here');
+    const labels = JSON.parse(hq.scheduler.task(t.id)!.labels) as string[];
+    assert.ok(labels.includes('needs-local'), 'stays here');
+    assert.ok(labels.includes(`moved-from:n2:${there}`), 'the brief here says where the work from there is');
+    const again = hq.mailbox.list(`proj-t${t.id}`).filter((m) => m.to_identity === `proj-t${t.id}` && m.id !== brief.id && m.id !== 'while-moving').at(-1)!;
+    assert.match(again.body, /התחילה ב-`n2` וחזרה לכאן/);
+    assert.doesNotMatch(again.body, /רץ בשרת השני/);
+    assert.ok(hq.store.eventsAfter(0, 5000).some((e) => e.type === 'task.move_local'));
+    assert.equal(await hq.scheduler.moveLocal(t.id, 'שוב'), false, 'here already');
+  } finally { await env.cleanup(); r.cleanup(); }
+});
+
 test('#224: memory and load there are read again right before a start: a node that choked since the last poll gets no task', async () => {
   const r = repo();
   const calls: string[][] = [];
@@ -235,7 +278,7 @@ test('#224: memory and load there are read again right before a start: a node th
     health.load1 = 52;
     health.availableMb = 1000;
     clock.advance(20_000);
-    const t = hq.scheduler.addTask({ title: 'כשהשני נחנק', project: 'proj', labels: ['remote-ok'] });
+    const t = hq.scheduler.addTask({ title: 'כשהשני נחנק', project: 'proj' });
     await until(() => hq.scheduler.task(t.id)!.state === 'running', 8000, 'running');
     assert.equal(hq.scheduler.task(t.id)!.machine, null, 'here, not on the choked node');
     assert.equal(launcher.launches.at(-1)!.machine, 'local');
@@ -259,7 +302,7 @@ test('#224: a task placed on a node that is switched off, or whose worktree ther
 
     // Switched off: a task pinned there (interrupted, its worktree there) is not started there again.
     hq.store.setToggle('scheduler', false);
-    const off = hq.scheduler.addTask({ title: 'על שרת כבוי', project: 'proj', labels: ['remote-ok'] });
+    const off = hq.scheduler.addTask({ title: 'על שרת כבוי', project: 'proj' });
     const gone = join(r.checkout, '.worktrees', `company-t${off.id}-there`);
     hq.store.db.prepare(`UPDATE tasks SET machine = 'n2', worktree = ?, state = 'interrupted', started_at = 1 WHERE id = ?`).run(gone, off.id);
     hq.store.setToggle(nodeToggle('n2'), false);
@@ -282,7 +325,7 @@ test('#224: a task placed on a node that is switched off, or whose worktree ther
     const realClose = ws2.close.bind(ws2);
     ws2.close = async () => { throw new Error('ssh: connection timed out'); };
     hq.store.setToggle('scheduler', false);
-    const stuck = hq.scheduler.addTask({ title: 'סגירה שנכשלה', project: 'proj', labels: ['remote-ok'] });
+    const stuck = hq.scheduler.addTask({ title: 'סגירה שנכשלה', project: 'proj' });
     const there = join(r.checkout, '.worktrees', `company-t${stuck.id}-there`);
     hq.store.db.prepare(`UPDATE tasks SET machine = 'n2', worktree = ?, state = 'interrupted', started_at = 1 WHERE id = ?`).run(there, stuck.id);
     hq.store.setToggle('scheduler', true);
@@ -298,7 +341,7 @@ test('#224: a task placed on a node that is switched off, or whose worktree ther
     // needs-decision). Unplaced, it may go to a node again: with a new worktree, from the start.
     hq.store.setToggle(nodeToggle('n2'), true);
     hq.store.setToggle('scheduler', false);
-    const lost = hq.scheduler.addTask({ title: 'בלי worktree שם', project: 'proj', labels: ['remote-ok'] });
+    const lost = hq.scheduler.addTask({ title: 'בלי worktree שם', project: 'proj' });
     const nothing = join(r.checkout, '.worktrees', 'company-t999-nothing');
     hq.store.db.prepare(`UPDATE tasks SET machine = 'n2', worktree = ?, state = 'interrupted', started_at = 1 WHERE id = ?`).run(nothing, lost.id);
     hq.store.setToggle('scheduler', true);
@@ -327,8 +370,8 @@ test('#224: a fill never waits on a node\'s ssh: tasks for here start now, a tas
     hq.scheduler.pollNode = (n) => { reads++; return new Promise<void>((res) => { release = () => { n.status = { ...n.status!, at: clock.now() }; res(); }; }); };
     clock.advance(20_000);
     hq.store.setToggle('scheduler', false);
-    const remote = hq.scheduler.addTask({ title: 'יכולה לצאת', project: 'proj', labels: ['remote-ok'] });
-    const here = hq.scheduler.addTask({ title: 'רק כאן', project: 'proj' });
+    const remote = hq.scheduler.addTask({ title: 'יכולה לצאת', project: 'proj' });
+    const here = hq.scheduler.addTask({ title: 'רק כאן', project: 'proj', labels: ['needs-local'] });
     hq.store.setToggle('scheduler', true);
     await hq.scheduler.fill();
     await until(() => hq.scheduler.task(here.id)!.state === 'running', 8000, 'the task for here runs while the node is read');
