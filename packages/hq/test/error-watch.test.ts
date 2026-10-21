@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeEnv, type TestEnv } from './helpers.ts';
 import { CLIENT_ERRORS_MAX } from '../src/api.ts';
-import { FIRST_WAIT_MS, HANDLE, MUTE_MS, NOT_NOW, STORM, WINDOW_MS, normalize, normalizePath, signature, known } from '../src/error-watch.ts';
+import { wantsHandling, FIRST_WAIT_MS, HANDLE, MUTE_MS, NOT_NOW, STORM, WINDOW_MS, normalize, normalizePath, signature, known } from '../src/error-watch.ts';
 
 const MIN = 60_000;
 
@@ -255,6 +255,25 @@ test('the times in his line are of the occurrences it counts', async () => {
     e.clock.advance(FIRST_WAIT_MS);
     await e.hq.errorWatch.sweep();
     assert.match(items(e)[0]!.body, /2 פעמים, מ-09:00 עד 09:03/);
+  } finally { await e.cleanup(); }
+});
+
+test('his no is a no: "אל תטפל", "לא", "לא עכשיו" never open a task', async () => {
+  for (const no of ['אל תטפל', 'אל תטפל בזה', 'לא', 'לא עכשיו', 'לא צריך לטפל', 'אין צורך לטפל', 'בלי לטפל', 'סיימתי', 'תתעלם',
+    'ולא לטפל', 'ואל תטפל', 'שלא תטפל', 'עדיף שלא לטפל', 'לא לתקן', 'כנראה לא', 'כן, אבל לא עכשיו', 'כן, אבל אל תטפל', 'כן ראיתי, לא צריך', 'לא, אני אתקן לבד',
+    'אני אתקן בעצמי', 'אני אטפל בזה']) assert.equal(wantsHandling(no), false, no);
+  for (const yes of ['לטפל', 'כן לטפל', 'תטפל בזה', 'לטפל, לא דחוף', 'אין בעיה, תטפל', 'לא יודע מה זה, תטפל', 'בלי קשר, תטפל',
+    'כן', 'כן.', 'תתקן', 'טפל בזה', 'כן, לטפל',
+    'אני רוצה שתטפל', 'שתטפל בזה', 'שתתקן', 'תתקנו', 'כן בבקשה', 'כן כן']) assert.equal(wantsHandling(yes), true, yes);
+  const e = await env();
+  try {
+    undelivered(e);
+    e.clock.advance(FIRST_WAIT_MS);
+    await e.hq.errorWatch.sweep();
+    e.hq.mailbox.reply(items(e)[0]!.id, 'אל תטפל');
+    await new Promise((r) => setImmediate(r));
+    assert.equal(sigs(e)[0]!.state, 'muted');
+    assert.equal((e.hq.store.db.prepare('SELECT COUNT(*) n FROM tasks').get() as { n: number }).n, 0);
   } finally { await e.cleanup(); }
 });
 

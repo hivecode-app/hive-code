@@ -271,8 +271,8 @@ export class ErrorWatch {
       WHERE s.state = 'asked' AND a.state IN ('answered','cancelled')`).all() as (SigRow & { ask_state: string; ask_answer: string | null })[];
     for (const r of rows) {
       const answer = (r.ask_answer ?? '').trim();
-      // Only "לטפל" (or his words that say so) opens a task. "לא עכשיו", "סיימתי" on the card, "תתעלם", closing it: muted.
-      if (r.ask_state === 'cancelled' || !/טפל/.test(answer) || /^לא/.test(answer)) { this.mute(r.sig, r.ask_state === 'cancelled' ? 'closed' : 'not_now'); continue; }
+      // Only "לטפל" (or his words that say so) opens a task. "לא עכשיו", "אל תטפל", "סיימתי" on the card, "תתעלם", closing it: muted.
+      if (r.ask_state === 'cancelled' || !wantsHandling(answer)) { this.mute(r.sig, r.ask_state === 'cancelled' ? 'closed' : 'not_now'); continue; }
       this.handle(r, answer === HANDLE ? '' : answer);
     }
   }
@@ -352,6 +352,19 @@ export class ErrorWatch {
       .all(ex.seq, ...args, AROUND) as { seq: number; ts: number; type: string; data: string }[];
     return [...before.reverse(), ...after];
   }
+}
+
+/** His answer says to handle it: a word "טפל" / "לטפל" / "תטפל" / "לתקן" / "תתקן" (not "אטפל", "אתקן": he does it himself),
+ *  "שתטפל", "תתקנו", or "כן" as the whole answer ("כן בבקשה"), with no "לא" / "אל" / "אין" / "בלי" / "אסור" (with ו/ש in front: "ולא", "שלא") before it in the
+ *  same clause ("אל תטפל", "עדיף שלא לטפל"). A no in an earlier clause ("אין בעיה, תטפל") or after it ("לטפל, לא דחוף") is
+ *  about something else. */
+export function wantsHandling(answer: string): boolean {
+  const a = answer.trim();
+  if (/^כן([\s,.!]*(כן|בבקשה|תודה))*[\s.!]*$/u.test(a)) return true;
+  const m = /(^|[^\p{L}])[וש]?[לת]?(טפל|תק[ןנ])/u.exec(a);
+  if (!m) return false;
+  const clause = a.slice(0, m.index + m[1]!.length).split(/[,.;:!?\n]/).at(-1) ?? '';
+  return !/(^|[^\p{L}])[וש]?(לא|אל|אין|בלי|אסור)(?!\p{L})/u.test(clause);
 }
 
 function threshold(type: string): number { return INTERNAL.has(type) ? INTERNAL_MIN : 1; }
