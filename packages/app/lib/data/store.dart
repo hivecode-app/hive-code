@@ -95,10 +95,13 @@ class AppStore extends ChangeNotifier {
   /// The bar's error went to hq ("נשלח לטיפול" under it); not so for a [notice].
   bool errorReported = false;
 
-  /// A command hq refused: on the bar, and sent. One that did not reach hq (no link, hq restarting) is
+  /// A command hq refused: on the bar, and sent. One that did not reach hq (no link, hq restarting) or found the item already handled is
   /// shown only: a phone without signal is not a fault, and hq being down is the monitoring's.
+  @visibleForTesting
+  void noteFailed(CommandResult r) => _failed(r);
+
   void _failed(CommandResult r) {
-    if (r.transient) {
+    if (r.transient || r.gone) {
       notice(r.error ?? '');
     } else {
       error = r.error;

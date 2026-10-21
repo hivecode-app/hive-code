@@ -129,7 +129,7 @@ class HqBackend extends Backend {
         _refused();
         return const CommandResult.fail('המכשיר הזה נותק מהחברה. צריך להיכנס שוב.');
       }
-      if (r.statusCode == 404 || r.statusCode == 409) return const CommandResult.fail('הפריט כבר טופל או שאינו קיים יותר.');
+      if (r.statusCode == 404 || r.statusCode == 409) return const CommandResult.fail('הפריט כבר טופל או שאינו קיים יותר.', gone: true);
       // 502-504: the proxy is up and hq is not (a restart). The request never reached it.
       if (r.statusCode >= 502 && r.statusCode <= 504) return const CommandResult.fail(_noLink, transient: true);
       return const CommandResult.fail('השרת לא קיבל את הפעולה. אפשר לנסות שוב.');

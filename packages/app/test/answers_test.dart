@@ -75,6 +75,14 @@ void main() {
     expect(store.error, 'הפריט כבר טופל, ולכן התשובה לא נשלחה.');
   });
 
+  test('an item already handled by someone else is shown, not sent as an error', () async {
+    final store = AppStore(Recording());
+    await store.start();
+    store.noteFailed(const CommandResult.fail('הפריט כבר טופל או שאינו קיים יותר.', gone: true));
+    expect(store.error, 'הפריט כבר טופל או שאינו קיים יותר.');
+    expect(store.errorReported, isFalse);
+  });
+
   test('what was written offline is sent when the link comes back', () async {
     final b = Recording()..link = LinkState.offline;
     final store = AppStore(b);

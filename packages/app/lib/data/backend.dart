@@ -143,14 +143,18 @@ typedef RecentLine = ({String id, String text, DateTime at, bool mine});
 
 /// Result of a command that reaches the server. Failure text is one plain sentence (design-taste §7).
 class CommandResult {
-  const CommandResult.ok() : ok = true, error = null, transient = false;
-  const CommandResult.fail(this.error, {this.transient = false}) : ok = false;
+  const CommandResult.ok() : ok = true, error = null, transient = false, gone = false;
+  const CommandResult.fail(this.error, {this.transient = false, this.gone = false}) : ok = false;
   final bool ok;
   final String? error;
 
   /// It never got an answer from hq (no link, a timeout, the proxy while hq restarts): the same
   /// request may go again later. A refusal (4xx) is not transient.
   final bool transient;
+
+  /// hq answered that the item is already handled or gone (404/409): a race with another device or a
+  /// worker, not a fault. Shown, not sent as an error.
+  final bool gone;
 }
 
 /// One Claude account as the switch button in settings shows it (B.7).
