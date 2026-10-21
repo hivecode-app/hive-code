@@ -5,7 +5,8 @@
 // Pure: no IO. Feeding the same event twice is a no-op (dedupe by seq), so replay after a
 // reconnect (`/ws?after=<seq>`) never duplicates a line (chat.md §7).
 // The conversation model (chat.md §2.3א): a turn that reached the owner through `tell`/`ask`/`request_go`
-// shows that item, not its own text: the text of such a turn is dropped when the turn ends.
+// shows that item, not its own narration of it: the text written after that call is dropped when the turn ends.
+// Text he saw before the call stays (hq stores it as the reply and the stored message replaces those bubbles).
 import '../model/company_time.dart';
 import '../model/models.dart';
 
@@ -26,7 +27,7 @@ class EngineModel {
   int? _shiftNo;
   String? _runShift; // the shift of the last engine event that names one (deltas, live-only, don't)
   final _turnTexts = <TextMsg>[];
-  bool _turnToldOwner = false;
+  int? _toldAt; // how many of [_turnTexts] existed when the turn first reached the owner through a tool
 
   /// Applies one hq event `{seq, ts, type, identity, data}`.
   void apply(Map<String, dynamic> e) {
@@ -44,7 +45,7 @@ class EngineModel {
       // the run whose events we are showing is not that (its first frames can come before it).
       if (data['state'] != 'live' || id != _runShift) {
         _turnTexts.clear();
-        _turnToldOwner = false;
+        _toldAt = null;
         for (final s in _streams.values) {
           s.streaming = false;
         }
@@ -99,7 +100,7 @@ class EngineModel {
       case 'tool_use':
         if (ev['parentToolUseId'] != null) return; // subagent internals: only the Task line shows
         final name = ev['name'] as String? ?? '?';
-        if (reachesOwner(name, ev['input'])) _turnToldOwner = true;
+        if (reachesOwner(name, ev['input'])) _toldAt ??= _turnTexts.length;
         final id = ev['toolUseId'] as String? ?? '$seq';
         final input = (ev['input'] as Map?)?.cast<String, dynamic>() ?? const {};
         // A message to the owner, a question or a GO request shows as its own item, and tool
@@ -148,12 +149,13 @@ class EngineModel {
         final cut = ev['interrupted'] == true;
         final failed = ev['isError'] == true && !cut;
         _closeGroup(cut ? Outcome.interrupted : failed ? Outcome.error : Outcome.ok);
-        if (_turnToldOwner) {
-          final drop = _turnTexts.toSet();
+        final toldAt = _toldAt;
+        if (toldAt != null) {
+          final drop = _turnTexts.skip(toldAt).toSet();
           items.removeWhere(drop.contains);
         }
         _turnTexts.clear();
-        _turnToldOwner = false;
+        _toldAt = null;
         if (failed) {
           items.add(ErrorLine(id: 'r:$seq', ts: ts, text: 'הסבב נגמר בשגיאה. ${gender == Gender.f ? 'היא תנסה' : 'הוא ינסה'} שוב בהודעה הבאה.', seq: seq));
         }

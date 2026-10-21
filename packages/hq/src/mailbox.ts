@@ -314,7 +314,9 @@ export class Mailbox {
       .all(row.identity) as Ev[]).find((r) => shiftOf(r.data) === row.id && (JSON.parse(r.data) as { state?: string }).state === 'starting');
     const window = (db.prepare(`SELECT seq, type, data FROM events WHERE identity = ? AND seq > ? AND seq < ? ORDER BY seq`)
       .all(row.identity, start?.seq ?? 0, cur.seq) as { seq: number; type: string; data: string }[])
-      .map((r) => ({ type: r.type, data: JSON.parse(r.data) as Record<string, any> }));
+      .map((r) => ({ seq: r.seq, type: r.type, data: JSON.parse(r.data) as Record<string, any> }));
+    // Text of work that began before his message arrived mid-turn is not part of the reply to it.
+    const firstTriggerSeq = window.find((e) => e.type === 'message.state' && e.data.state === 'seen' && e.data.from === OWNER)?.seq ?? 0;
     const triggers = window
       .filter((e) => e.type === 'message.state' && e.data.state === 'seen' && e.data.from === OWNER)
       .map((e) => this.get(String(e.data.id)))
@@ -324,7 +326,8 @@ export class Mailbox {
     // (its op may be ingested after the result).
     const stored = db.prepare(`SELECT 1 FROM messages WHERE from_identity = ? AND to_identity = ? AND created_at >= ? LIMIT 1`)
       .get(row.identity, OWNER, Math.min(...triggers.map((t) => t.seen_at ?? t.created_at)));
-    const told = !!stored || window.some((e) => {
+    // The first tool call of the turn that reached him; the turn's text before it he already saw.
+    const reached = window.find((e) => {
       if (e.type !== 'engine.tool_use' || e.data.shift !== row.id || e.data.ev?.parentToolUseId) return false;
       const { name, input } = e.data.ev as { name?: string; input?: { to?: unknown } };
       if (OWNER_FACING_TOOLS.has(name ?? '')) return true;
@@ -333,14 +336,20 @@ export class Mailbox {
       const to = typeof input?.to === 'string' ? input.to : '';
       return to === OWNER || (to !== 'hq' && !getIdentity(this.store, to));
     });
+    const told = !!stored || !!reached;
     let answered = told;
-    if (!told && !ev.isError) {
-      const last = window.filter((e) => e.type === 'engine.text' && e.data.shift === row.id).at(-1)?.data.ev as
-        { text: string; messageId?: string } | undefined;
-      const body = (ev.text ?? last?.text ?? '').trim();
+    if (!ev.isError && (!told || reached)) {
+      // All the text the worker wrote to him in the turn, in order, never only the block after the last tool. In a turn
+      // that reached him through a tool, the text before that call (already on his screen) is the reply; what follows
+      // it narrates the send and is not stored.
+      const blocks = window
+        .filter((e) => e.type === 'engine.text' && e.data.shift === row.id && e.seq > firstTriggerSeq && (!reached || e.seq < reached.seq))
+        .map((e) => e.data.ev as { text?: string; messageId?: string })
+        .filter((b) => (b.text ?? '').trim());
+      const body = blocks.length ? blocks.map((b) => b.text!.trim()).join('\n\n') : told ? '' : (ev.text ?? '').trim();
       if (body) {
         const to = triggers.at(-1)!;
-        this.tell({ msg_id: `${to.id}-reply`, from: row.identity, to: OWNER, body, ref: to.id, text_ref: last?.messageId });
+        this.tell({ msg_id: `${to.id}-reply`, from: row.identity, to: OWNER, body, ref: to.id, text_ref: blocks.at(-1)?.messageId });
         answered = true;
       }
     }

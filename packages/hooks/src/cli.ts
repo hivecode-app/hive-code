@@ -7,6 +7,7 @@ import { ENV, englishLines, hebrewReason, shiftDir, statePaths } from '@company/
 import { writeCompactHandoff } from './compact.ts';
 import { checkToolUse } from './guard.ts';
 import { checkMerge, detectMerges } from './merge.ts';
+import { turnTexts } from './turn-text.ts';
 import { appendSpool, mkdirp, UNKNOWN_SHIFT } from './spool.ts';
 
 // Last-resort guard: a hook must never hold up the turn.
@@ -96,9 +97,11 @@ async function main(): Promise<void> {
     // Hebrew everywhere (dir-0002, #51): the owner's ~/.claude hebrew-reply-guard does not load in
     // shifts (--setting-sources project,local), so the same rule rides on this Stop hook. One retry:
     // a second block on the rewrite would loop.
-    const st = payload as { stop_hook_active?: unknown; last_assistant_message?: unknown } | null;
+    // The whole turn's text, not only the last block: the earlier blocks already streamed to the owner.
+    const st = payload as { stop_hook_active?: unknown; last_assistant_message?: unknown; transcript_path?: unknown } | null;
     if (st?.stop_hook_active === true || typeof st?.last_assistant_message !== 'string') return;
-    const bad = englishLines(st.last_assistant_message);
+    const texts = turnTexts(st.transcript_path);
+    const bad = englishLines([...texts, ...(texts.includes(st.last_assistant_message) ? [] : [st.last_assistant_message])].join('\n'));
     if (bad.length) process.stdout.write(JSON.stringify({ decision: 'block', reason: hebrewReason('הטקסט שלך', bad) }));
     return;
   }

@@ -132,6 +132,29 @@ void main() {
     expect(items.whereType<TextMsg>().map((t) => t.text), ['בטח.']);
   });
 
+  // 21/10, shachar: the answer he watched stream vanished when the worker called tools after it.
+  test('text he saw before a tool that reached him stays; only the narration after it is dropped', () {
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.m);
+    m.apply(ev(1, 'text', {'text': 'התשובה הארוכה.', 'messageId': 'a'}));
+    m.apply(ev(2, 'tool_use', {'toolUseId': 't1', 'name': 'mcp__company__request_go', 'input': {}}));
+    m.apply(ev(3, 'text', {'text': 'ביקשתי GO.', 'messageId': 'b'}));
+    m.apply(ev(4, 'result', {'subtype': 'success', 'isError': false, 'text': ''}));
+    expect(items.whereType<TextMsg>().map((t) => t.text), ['התשובה הארוכה.']);
+  });
+
+  test('the stored reply of a multi-block turn moves nothing: the streamed bubbles stay where he read them', () {
+    final a = TextMsg(id: 't:msg_a', ts: DateTime(2026), text: 'רגע, בודק');
+    final tools = ToolGroup(id: 'g:1', ts: DateTime(2026), summary: '', tools: [], outcome: Outcome.ok, seq: 1);
+    final b = TextMsg(id: 't:msg_b', ts: DateTime(2026), text: 'התשובה.');
+    final items = <ChatItem>[a, tools, b];
+    final s = streamedAs(items, {'text_ref': 'msg_b', 'body': 'רגע, בודק\n\nהתשובה.'});
+    expect(identical(s, b), isTrue, reason: 'the stored message is not a second bubble');
+    expect(items, [a, tools, b]);
+    expect(a.text, 'רגע, בודק');
+    expect(b.text, 'התשובה.');
+  });
+
   // QA-LOG item 5: every reply from Yoav had a "השתמש בכלים ✓" row above it, for the tell itself.
   test('a message to the owner leaves no tool row; other company tools say what they did', () {
     final items = <ChatItem>[];

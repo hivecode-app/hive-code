@@ -169,6 +169,20 @@ test('CLI latency (spool only)', async () => {
   assert.ok(median(ss) < budget, `SessionStart median ${median(ss).toFixed(0)}ms, budget ${budget.toFixed(0)}ms`);
 });
 
+test('Stop: English in an earlier text block of the turn is blocked too, not only the last block', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'hk-'));
+  const tp = join(root, 't.jsonl');
+  const a = (content: unknown[]) => JSON.stringify({ type: 'assistant', message: { content } });
+  writeFileSync(tp, [
+    JSON.stringify({ type: 'user', message: { content: 'היי' } }),
+    a([{ type: 'text', text: 'Good — the check is built in. Deploying the new version now.' }, { type: 'tool_use', id: 't', name: 'Bash', input: {} }]),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }] } }),
+    a([{ type: 'text', text: 'סיימתי, הכול עלה.' }]),
+  ].join('\n'));
+  const r = await runCli(['hook', 'Stop'], JSON.stringify({ hook_event_name: 'Stop', transcript_path: tp, last_assistant_message: 'סיימתי, הכול עלה.' }), { COMPANY_STATE_DIR: root });
+  assert.equal(JSON.parse(r.stdout).decision, 'block');
+});
+
 test('Stop: an English reply is blocked once, Hebrew and code pass (#51)', async () => {
   const root = tmpState();
   const env = { COMPANY_STATE_DIR: root, COMPANY_SHIFT: 'dana-1' };

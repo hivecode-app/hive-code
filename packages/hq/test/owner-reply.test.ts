@@ -30,7 +30,7 @@ test('owner-triggered turn: the final assistant text becomes exactly one stored 
     assert.equal(r!.id, 'm-hi-reply');
     assert.equal(r!.ref, 'm-hi');
     assert.equal(r!.text_ref, 'msg_b', 'the app merges the streamed bubble and this message by text_ref');
-    assert.equal(r!.body, 'היי רן. PR #17 מוזג. לפתוח צוות ל-CI?');
+    assert.equal(r!.body, 'רגע, בודק\n\nהיי רן. PR #17 מוזג. לפתוח צוות ל-CI?', 'every text block of the turn, in order');
     assert.equal(env.hq.mailbox.get('m-hi')!.state, 'handled');
     assert.ok(env.hq.store.eventsAfter(0, 5000).some((e) => e.type === 'message.new' && (e.data as { id: string }).id === 'm-hi-reply'),
       'message.new → conversation list, inbox badge, notifications');
@@ -54,6 +54,25 @@ test('owner-triggered turn that answered with tell(owner): the tell is the reply
     await new Promise((r) => setTimeout(r, 100));
     assert.deepEqual(toOwner(env).map((m) => m.id), ['eli-1:tell'], 'one owner-visible message, not two');
     assert.equal(env.hq.mailbox.get('m-hi2')!.state, 'handled');
+  } finally { await env.cleanup(); }
+});
+
+test('text, then tools (request_go among them), then a round with no text: the text he saw is the stored reply', async () => {
+  const env = await makeEnv();
+  try {
+    const host = await ownerTurn(env, 'm-long', 'מה המצב?');
+    host.event({ kind: 'text', text: 'התשובה הארוכה על 4% ועצירות.', messageId: 'msg_l1' });
+    host.event({ kind: 'tool_use', toolUseId: 't1', name: 'mcp__company__open_team', input: {} });
+    host.event({ kind: 'text', text: 'Good — deploying.', messageId: 'msg_l2' });
+    host.event({ kind: 'tool_use', toolUseId: 't2', name: 'mcp__company__request_go', input: {} });
+    host.event({ kind: 'text', text: 'ביקשתי GO.', messageId: 'msg_l3' });
+    host.event({ kind: 'tool_use', toolUseId: 't3', name: 'mcp__company__remember', input: {} });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: '' });
+    await until(() => toOwner(env).length === 1, 3000, 'reply stored');
+    const [r] = toOwner(env);
+    assert.equal(r!.body, 'התשובה הארוכה על 4% ועצירות.\n\nGood — deploying.', 'text before the owner-facing call; the narration after it is not stored');
+    assert.equal(r!.text_ref, 'msg_l2');
+    assert.equal(env.hq.mailbox.get('m-long')!.state, 'handled');
   } finally { await env.cleanup(); }
 });
 

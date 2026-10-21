@@ -1408,6 +1408,9 @@ Delivery mapDelivery(String? s) => switch (s) {
 bool streamedAlready(List<ChatItem> items, Map<String, dynamic> m) => streamedAs(items, m) != null;
 
 /// That streamed bubble, or null.
+/// The stored reply holds every text block of the turn, but the streamed bubbles stay as they are, each where
+/// the owner read it relative to the tool rows: they are the truth on screen and nothing moves or merges.
+/// The stored message only marks the bubble of its last block (`text_ref`) as saved.
 TextMsg? streamedAs(List<ChatItem> items, Map<String, dynamic> m) {
   final ref = m['text_ref'] as String?;
   return ref == null ? null : items.whereType<TextMsg>().where((i) => i.id == 't:$ref').firstOrNull;
