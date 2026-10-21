@@ -38,7 +38,7 @@ void main() {
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/chat_ido_open.png'));
   });
 
-  testWidgets('send while busy: queued after the current step, then retracted to the composer', (tester) async {
+  testWidgets('a plain tap while busy stops her and delivers now: no "בתור" on the bubble', (tester) async {
     final store = await pumpApp(tester, size: const Size(342, 1500), home: const ChatScreen(identityId: 'dana'));
     final chat = store.data!.chats['dana']!;
     // With her GO open the text would answer it (the next test): close it first, as after a GO.
@@ -47,12 +47,39 @@ void main() {
     }
     store.touch();
     await tester.pump();
-    // The composer already holds the draft from the mockup.
+    // The mockup already has one message queued after the step.
+    expect(find.text('בתור · אחרי הצעד הנוכחי · '), findsOneWidget);
     expect(find.text('ושגם ה-web יקבל את התיקון'), findsOneWidget);
     await tester.tap(find.bySemanticsLabel('שליחה'));
     await tester.pump();
     final sent = chat.items.whereType<UserMsg>().last;
     expect(sent.text, 'ושגם ה-web יקבל את התיקון');
+    expect(sent.priority, Priority.now);
+    expect(sent.delivery, Delivery.delivered);
+    expect(chat.live.label, 'נעצרה וקוראת');
+    expect(find.text('בתור · אחרי הצעד הנוכחי · '), findsOneWidget);
+    // The second until hq hands it to her CLI: still no "בתור" line under it.
+    sent.delivery = Delivery.queued;
+    store.touch();
+    await tester.pump();
+    expect(find.textContaining('בתור'), findsOneWidget);
+  });
+
+  testWidgets('after the current step stays a choice on long press: queued, then retracted to the composer', (tester) async {
+    final store = await pumpApp(tester, size: const Size(342, 1500), home: const ChatScreen(identityId: 'dana'));
+    final chat = store.data!.chats['dana']!;
+    for (final c in chat.items.whereType<AskCard>()) {
+      c.state = AskState.answered;
+    }
+    store.touch();
+    await tester.pump();
+    await tester.longPress(find.bySemanticsLabel('שליחה'));
+    await tester.pump();
+    await tester.tap(find.text('אחרי הצעד הנוכחי'));
+    await tester.pump();
+    final sent = chat.items.whereType<UserMsg>().last;
+    expect(sent.text, 'ושגם ה-web יקבל את התיקון');
+    expect(sent.priority, Priority.next);
     expect(sent.delivery, Delivery.queued);
     expect(find.text('בתור · אחרי הצעד הנוכחי · '), findsNWidgets(2));
     await tester.tap(find.text('משיכה חזרה').first);

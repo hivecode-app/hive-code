@@ -282,7 +282,7 @@ class _ComposerState extends State<Composer> {
                       )
                     : CallbackShortcuts(
                         bindings: {
-                          const SingleActivator(LogicalKeyboardKey.enter): () => _send(Priority.next),
+                          const SingleActivator(LogicalKeyboardKey.enter): () => _send(Priority.now),
                           const SingleActivator(LogicalKeyboardKey.enter, control: true): () => _send(Priority.now),
                         },
                         // Web and desktop: one direction for the whole field, from its first line.
@@ -322,7 +322,7 @@ class _ComposerState extends State<Composer> {
           shape: const CircleBorder(),
           child: InkWell(
             customBorder: const CircleBorder(),
-            onTap: hasText ? () => _send(busy ? Priority.next : Priority.next) : _toggleRecording,
+            onTap: hasText ? () => _send(Priority.now) : _toggleRecording,
             child: SizedBox(
               width: 46,
               height: 46,
@@ -495,8 +495,8 @@ class _PriorityMenu extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
           child: Text('$name באמצע עבודה. מתי למסור?', style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: p.text2)),
         ),
-        opt(Priority.now, 'עכשיו', 'עוצר ${female ? 'אותה' : 'אותו'} באמצע הצעד'),
-        opt(Priority.next, 'אחרי הצעד הנוכחי', 'ברירת המחדל, בנגיעה רגילה', sel: true),
+        opt(Priority.now, 'עכשיו', 'עוצר ${female ? 'אותה' : 'אותו'} באמצע הצעד. זה מה שקורה בנגיעה רגילה.', sel: true),
+        opt(Priority.next, 'אחרי הצעד הנוכחי', '${female ? 'היא מסיימת' : 'הוא מסיים'} את הצעד, ואז קורא${female ? 'ת' : ''}'),
         opt(Priority.later, 'בסוף התור', 'אחרי כל מה שכבר מחכה ${female ? 'אצלה' : 'אצלו'}'),
       ]),
     );

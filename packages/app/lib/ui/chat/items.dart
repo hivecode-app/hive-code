@@ -121,6 +121,8 @@ class UserBubble extends StatelessWidget {
       child: _WithMeta(meta: Meta(time: hm(msg.ts), delivery: msg.delivery), end: markdownEndDirection(msg.text), child: images.isEmpty ? body : IntrinsicWidth(child: body)), // as wide as the image (or the text), WhatsApp
     );
     final under = switch (msg.delivery) {
+      // His default `now` is on its way this second (hq stops the worker for it): no "בתור" line.
+      Delivery.queued when msg.priority == Priority.now => null,
       Delivery.queued => _QLine(
           text: 'בתור · ${msg.priority == Priority.later ? 'בסוף התור' : 'אחרי הצעד הנוכחי'} · ',
           link: 'משיכה חזרה',

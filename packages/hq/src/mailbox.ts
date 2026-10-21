@@ -204,6 +204,13 @@ export class Mailbox {
     if (shift && conn?.isLive) {
       try {
         this.store.db.prepare('UPDATE messages SET shift_id = ? WHERE id = ?').run(shift.id, id);
+        // His `now` stops the worker mid-step: on its own the CLI holds a `now` line until the running tool ends
+        // (measured on 2.1.289: 31s behind a 40s tool, ~1s with the interrupt first). Only his: hq's own `now` notes
+        // never cut a worker's tool, and neither do the answers hq writes in his name (GO, ask, inbox reply): a worker
+        // that went on working after asking is not stopped by the answer. An interrupt that fails still delivers.
+        if (m.from_identity === OWNER && m.kind === 'tell' && m.priority === 'now' && shift.in_turn === 1 && !retry) {
+          await conn.interrupt().catch((e) => console.error(`mailbox: interrupt before ${id} failed: ${(e as Error).message}`));
+        }
         // Idempotent on msgId in the host: a resend after an hq crash returns the current state instead.
         let r = await conn.send(id, this.envelope(m), m.priority, retry);
         // The host remembers this msgId as never accepted (e.g. its claude restarted): write it again.
