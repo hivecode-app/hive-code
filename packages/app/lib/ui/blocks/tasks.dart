@@ -15,6 +15,7 @@ import '../../theme/tokens.dart';
 import '../common.dart';
 import '../entity_link.dart';
 import '../nav.dart';
+import 'estimate.dart';
 import 'parts.dart';
 
 const kOpenTaskIcon = {
@@ -60,17 +61,26 @@ String stateWord(OpenTask t) => switch (t.state) {
       OpenTaskState.blocked => 'חסומה',
     };
 
-/// The second line of a task: its state, who is on it or why it waits, who opened it, since when.
-String openTaskMeta(CompanyData? d, OpenTask t, {required DateTime now, bool opener = true}) {
+/// The second line of a task, in two parts around its estimate: [head] the state word, [tail] who is on it or why it
+/// waits, who opened it, since when.
+({List<String> head, List<String> tail}) openTaskMetaParts(CompanyData? d, OpenTask t, {required DateTime now, bool opener = true}) {
   String name(String id) => d == null ? id : d.who(id).name;
   String opened(String id) => d?.who(id).gender == Gender.f ? 'פתחה' : 'פתח';
   final since = t.since == null ? null : (daysAgo(t.since!, now) <= 0 ? 'מ-${hm(t.since!)}' : 'מ-${dm(t.since!)}');
-  return [
-    stateWord(t),
-    if (t.worker != null) name(t.worker!) else if (t.reason != null && t.reason!.isNotEmpty) t.reason!,
-    if (opener && t.openedBy != null) '${opened(t.openedBy!)} ${name(t.openedBy!)}',
-    ?since,
-  ].join(' · ');
+  return (
+    head: [stateWord(t)],
+    tail: [
+      if (t.worker != null) name(t.worker!) else if (t.reason != null && t.reason!.isNotEmpty) t.reason!,
+      if (opener && t.openedBy != null) '${opened(t.openedBy!)} ${name(t.openedBy!)}',
+      ?since,
+    ],
+  );
+}
+
+/// The second line of a task: its state, who is on it or why it waits, who opened it, since when.
+String openTaskMeta(CompanyData? d, OpenTask t, {required DateTime now, bool opener = true}) {
+  final m = openTaskMetaParts(d, t, now: now, opener: opener);
+  return [...m.head, ...m.tail].join(' · ');
 }
 
 class TasksBlock extends StatelessWidget {
@@ -115,12 +125,16 @@ class OpenTaskRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
     final d = StoreScope.of(context).data;
-    final meta = openTaskMeta(d, t, now: now, opener: opener);
+    final parts = openTaskMetaParts(d, t, now: now, opener: opener);
+    final meta = [...parts.head, ...parts.tail].join(' · ');
+    final est = d?.estimates[t.id];
+    final tap = estimateTap(context, d, est, open);
     return EntityLink(
-      identity: d == null ? null : chatTargetOf(d, worker: t.worker, openedBy: t.openedBy),
-      label: '${t.title}. $meta',
+      identity: (d == null ? null : chatTargetOf(d, worker: t.worker, openedBy: t.openedBy)) ?? tap.identity,
+      // With an estimate its line speaks for itself (it moves every minute), so the label is left to the lines.
+      label: est == null ? '${t.title}. $meta' : null,
       minHeight: kLinkRow,
-      open: open,
+      open: tap.open,
       child: Padding(
         padding: const EdgeInsetsDirectional.fromSTEB(16, 10, 16, 10),
         child: Row(children: [
@@ -143,6 +157,7 @@ class OpenTaskRow extends StatelessWidget {
                 ])
               else
                 Text(meta, maxLines: 2, overflow: TextOverflow.ellipsis, style: T.small.copyWith(color: p.text2)),
+              EstimateLine(estimate: est, style: T.small.copyWith(color: p.text2)),
             ]),
           ),
         ]),

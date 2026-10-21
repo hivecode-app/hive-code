@@ -6,6 +6,7 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../blocks/estimate.dart';
 import '../entity_link.dart';
 import '../nav.dart';
 import '../status/status_screen.dart';
@@ -160,8 +161,11 @@ class _TaskRow extends StatelessWidget {
       icon = statusLoud(t.status) ? statusIcon(t.status) : 'play_arrow';
       state = [statusWord(t.status, who?.gender ?? Gender.m), if (t.startedAt != null) 'מ-${hm(t.startedAt!)}'].join(' ');
     }
+    final est = d.estimates[int.tryParse(t.number.replaceFirst(RegExp(r'^\D+'), '')) ?? -1];
+    final tap = estimateTap(context, d, est, null);
     return EntityLink(
-      identity: chatTargetOfTicket(d, t),
+      identity: chatTargetOfTicket(d, t) ?? tap.identity,
+      open: tap.open,
       minHeight: kLinkRow,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
@@ -182,6 +186,7 @@ class _TaskRow extends StatelessWidget {
                   ),
                 ]),
               ),
+              EstimateLine(estimate: est, style: T.small.copyWith(color: p.text2)),
             ]),
           ),
         ]),

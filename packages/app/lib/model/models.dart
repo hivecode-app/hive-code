@@ -782,6 +782,63 @@ enum AskedState { open, answered }
 /// its turn · waitingForYou: its worker waits for him · blocked: waits for a decision.
 enum OpenTaskState { running, queued, waitingForYou, blocked }
 
+/// What a worker promised for a task (hq `GET /api/estimates`, one row): the app shows it next to the task.
+class Estimate {
+  const Estimate({required this.task, required this.identity, required this.createdAt, required this.dueAt, required this.estimatedMin, this.messageId, this.closedAt, this.actualMin, this.overdueSwept = false});
+  final int task;
+
+  /// The worker who promised.
+  final String identity;
+
+  /// The message it was promised in; a tap on an overdue one opens the conversation there.
+  final String? messageId;
+  final DateTime createdAt, dueAt;
+  final int estimatedMin;
+
+  /// Closed with "בוצע": when, and the minutes it really took.
+  final DateTime? closedAt;
+  final int? actualMin;
+
+  /// hq already swept it as past due while open.
+  final bool overdueSwept;
+
+  /// One row of `/api/estimates`; null for a row the app shows nothing for: no task, a cancelled one (the task
+  /// ended or a newer estimate replaced it), or one closed other than by "בוצע".
+  static Estimate? fromHq(Map<String, dynamic> j) {
+    final task = j['task'], state = j['state'], created = j['created_at'], due = j['due_at'];
+    if (task is! num || created is! num || due is! num) return null;
+    final closed = j['closed_at'];
+    if (state == 'cancelled' || (state == 'missed' && closed != null)) return null;
+    if (state != 'open' && state != 'missed' && state != 'done') return null;
+    DateTime t(num ms) => DateTime.fromMillisecondsSinceEpoch(ms.toInt());
+    return Estimate(
+      task: task.toInt(),
+      identity: j['identity'] as String? ?? '',
+      messageId: j['message_id'] as String?,
+      createdAt: t(created),
+      dueAt: t(due),
+      estimatedMin: (j['estimated_min'] as num?)?.round() ?? ((due - created) / 60000).round(),
+      closedAt: closed is num && state == 'done' ? t(closed) : null,
+      actualMin: state == 'done' ? (j['actual_min'] as num?)?.round() : null,
+      overdueSwept: state == 'missed',
+    );
+  }
+
+  /// The estimate each task shows, from hq's rows (newest first): the newest of a task decides, so a cancelled
+  /// newest leaves it without one.
+  static Map<int, Estimate> byTask(Iterable<Map<String, dynamic>> rows) {
+    final out = <int, Estimate>{};
+    final seen = <int>{};
+    for (final r in rows) {
+      final task = r['task'];
+      if (task is! num || !seen.add(task.toInt())) continue;
+      final e = fromHq(r);
+      if (e != null) out[e.task] = e;
+    }
+    return out;
+  }
+}
+
 class OpenTask {
   const OpenTask({required this.id, required this.title, required this.state, this.project = '', this.openedBy, this.worker, this.position, this.reason, this.since});
   final int id;

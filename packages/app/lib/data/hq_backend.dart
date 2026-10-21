@@ -256,6 +256,8 @@ class HqBackend extends Backend {
     _snapshotRaw = {'board': results[0], 'inbox': results[1], 'asks': results[2], 'toggles': results[3]};
     // The head keeps the recipe it had until the fresh one is in: no flash of the default on every reload.
     _data!.home = prev?.home;
+    _data!.estimates = _estimates;
+    unawaited(_loadEstimates());
     unawaited(_loadHome());
     _fromCache = null;
     if (!_fresh.isCompleted) _fresh.complete();
@@ -271,6 +273,29 @@ class HqBackend extends Backend {
     }
     unawaited(_loadLastLines());
     unawaited(_loadSeen());
+  }
+
+  /// The week's estimates by task (`GET /api/estimates`); empty from an hq without it.
+  Map<int, Estimate> _estimates = {};
+  String? _estimatesSig;
+
+  Future<void> _loadEstimates() async {
+    try {
+      final since = DateTime.now().subtract(const Duration(days: 7)).millisecondsSinceEpoch;
+      final res = (await _get('/api/estimates?since=$since&limit=1000')) as Map<String, dynamic>;
+      final rows = res['estimates'];
+      if (rows is! List) return;
+      final sig = jsonEncode(rows);
+      final next = Estimate.byTask(rows.whereType<Map<String, dynamic>>());
+      _estimates = next;
+      _data?.estimates = next;
+      if (sig != _estimatesSig) {
+        _estimatesSig = sig;
+        notifyListeners();
+      }
+    } catch (_) {
+      // An older hq (404) or a blip: the last copy stands.
+    }
   }
 
   /// When he last left each screen, from hq (`GET /api/seen`); empty from an hq without it.

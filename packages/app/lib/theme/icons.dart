@@ -117,4 +117,6 @@ const Map<String, IconData> kIcons = {
   'smartphone': Symbols.smartphone_rounded,
   'animation': Symbols.animation_rounded,
   'done': Symbols.done_rounded,
+  'hourglass_bottom': Symbols.hourglass_bottom_rounded,
+  'running_with_errors': Symbols.running_with_errors_rounded,
 };

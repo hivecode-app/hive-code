@@ -77,6 +77,9 @@ class CompanyData {
 
   set openTasks(List<OpenTask> v) => _openTasks = v;
 
+  /// What each task was promised to take (`GET /api/estimates`), by task id; empty from an hq without it.
+  Map<int, Estimate> estimates = {};
+
   /// hq's list; null from an hq before it (and the mockup): derived from the tickets as they are now.
   List<OpenTask>? _openTasks;
 
