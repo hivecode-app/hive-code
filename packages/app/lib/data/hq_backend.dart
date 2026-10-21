@@ -1829,6 +1829,7 @@ ChatItem? answerItem(Map<String, dynamic> m, AskCard card, String author, List<C
   final (text, closed) = answerText(m['body'] as String);
   card.state = AskState.answered;
   card.answer = text;
+  if (m['created_at'] is int) card.answeredAt = DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int);
   final tapped = closed || text == 'GO' || text == 'סיימתי' || card.options.any((o) => o.label == text);
   // Sent from this device: its own bubble is already here.
   final mine = existing.whereType<UserMsg>().any((u) => u.replyTo?.askId != null && u.replyTo!.askId == card.askId);

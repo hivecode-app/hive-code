@@ -13,8 +13,12 @@ import 'backend.dart';
 
 /// One answer waiting out its 3 seconds. The UI renders [label] in place of the buttons.
 class PendingAnswer {
-  PendingAnswer(this.key, this.to, this.isGo, this.secondsLeft, this.fire, [this.text]);
+  PendingAnswer(this.key, this.to, this.isGo, this.secondsLeft, this.fire, [this.text, this.line]) : at = company_time.CompanyTime.now();
   final String key;
+
+  /// A decision's folded line while it can still be taken back ("אישרת"), and when he tapped (#258).
+  final String? line;
+  final DateTime at;
   final String to;
   final bool isGo;
   int secondsLeft;
@@ -31,7 +35,7 @@ class PendingAnswer {
 enum ConvSort { recent, working, waiting, name }
 
 class AppStore extends ChangeNotifier {
-  AppStore(this.backend, {this.undoSeconds = 3, SharedPreferences? prefs}) : _prefs = prefs { // ignore: prefer_initializing_formals
+  AppStore(this.backend, {this.undoSeconds = 3, this.decisionUndoSeconds = 5, SharedPreferences? prefs}) : _prefs = prefs { // ignore: prefer_initializing_formals
     backend.addListener(_onBackend);
   }
 
@@ -51,6 +55,9 @@ class AppStore extends ChangeNotifier {
 
   final Backend backend;
   final int undoSeconds;
+
+  /// A GO or a question decided in one tap: the card folds at once, with "ביטול" this long (#258).
+  final int decisionUndoSeconds;
   SharedPreferences? _prefs;
 
   CompanyData? get data => backend.data;
@@ -107,12 +114,12 @@ class AppStore extends ChangeNotifier {
 
   // ── 3s undo ──────────────────────────────────────────────────────────────
 
-  void startUndo(String key, String to, Future<CommandResult> Function() action, {bool isGo = false, String Function(int)? text}) {
+  void startUndo(String key, String to, Future<CommandResult> Function() action, {bool isGo = false, String Function(int)? text, String? line, int? seconds}) {
     cancelUndo(key, notify: false);
-    final p = PendingAnswer(key, to, isGo, undoSeconds, () async {
+    final p = PendingAnswer(key, to, isGo, seconds ?? undoSeconds, () async {
       final r = await action();
       if (!r.ok) error = r.error;
-    }, text);
+    }, text, line);
     _pending[key] = p;
     p.timer = Timer.periodic(const Duration(seconds: 1), (t) {
       p.secondsLeft--;
@@ -133,49 +140,74 @@ class AppStore extends ChangeNotifier {
 
   String nameOf(String id) => data?.who(id).name ?? id;
 
+  /// One undo per decision, wherever he tapped it ("מחכה לך" or the card in the conversation): the
+  /// same question shows the same folded line and the same "ביטול" in both (#258).
+  static String decisionKey(String? askId, String id) => 'decide:${askId ?? id}';
+
+  /// The decision on its way for this question, if any (within its 5 seconds).
+  PendingAnswer? decision(String? askId, String id) => _pending[decisionKey(askId, id)];
+
+  /// The folded line of a decision: "אישרת" for a GO, "ענית: X" for an answer.
+  static String decidedLine(AskOption option) => option.id == 'go' ? 'אישרת' : 'ענית: ${option.label}';
+
   void answerWait(WaitItem item, AskOption option) {
     final to = nameOf(item.from);
+    final key = decisionKey(item.askId, item.id);
+    final card = _cardOf(item.from, item.askId);
+    final at = company_time.CompanyTime.now();
     if (item.kind == WaitKind.awaiting) {
+      // A finished task (#219): "בוצע" or "נכשל" folds like any decision, with the same 5 seconds.
       final done = option.id == 'done';
-      startUndo(item.id, to, () async {
+      startUndo(key, to, () async {
         item.failed = !done;
         final r = await backend.awaitingOutcome(item, done);
         item.answerLine = done ? 'בוצע' : 'נכשל';
         return r;
-      }, text: (s) => "יסומן ${done ? 'בוצע' : 'נכשל'} בעוד $s שנ'");
+      }, line: done ? 'בוצע' : 'נכשל', seconds: decisionUndoSeconds);
     } else if (option.id == 'go') {
-      startUndo(item.id, to, () async {
+      startUndo(key, to, () async {
         final r = await backend.go(item);
         item.answerLine = item.doneLine ?? 'GO נשלח';
+        _closeCard(card, 'GO', at);
         return r;
-      }, isGo: true);
+      }, isGo: true, line: decidedLine(option), seconds: decisionUndoSeconds);
     } else {
-      startUndo(item.id, to, () async {
+      startUndo(key, to, () async {
         final r = await backend.answerAsk(item.askId ?? item.id, option, from: item.from);
         item.answerLine = 'ענית: ${option.label} · $to ממשיך';
+        _closeCard(card, option.label, at);
         return r;
-      });
+      }, line: decidedLine(option), seconds: decisionUndoSeconds);
     }
   }
 
   void answerCard(AskCard card, AskOption option) {
     final to = nameOf(card.from);
-    final key = 'card:${card.id}';
+    final key = decisionKey(card.askId, card.id);
+    final at = company_time.CompanyTime.now();
     if (option.id == 'go') {
       startUndo(key, to, () async {
         final w = data?.waiting.where((w) => w.askId == card.askId).firstOrNull;
-        card.state = AskState.answered;
-        card.answer = 'GO';
+        _closeCard(card, 'GO', at);
         if (w != null) return backend.go(w);
         return backend.answerAsk(card.askId ?? card.id, option);
-      }, isGo: true);
+      }, isGo: true, line: decidedLine(option), seconds: decisionUndoSeconds);
     } else {
       startUndo(key, to, () async {
-        card.state = AskState.answered;
-        card.answer = option.label;
+        _closeCard(card, option.label, at);
         return backend.answerAsk(card.askId ?? card.id, option, from: card.from);
-      });
+      }, line: decidedLine(option), seconds: decisionUndoSeconds);
     }
+  }
+
+  AskCard? _cardOf(String from, String? askId) =>
+      askId == null ? null : data?.chats[from]?.items.whereType<AskCard>().where((c) => c.askId == askId).lastOrNull;
+
+  static void _closeCard(AskCard? card, String answer, DateTime at) {
+    if (card == null) return;
+    card.state = AskState.answered;
+    card.answer = answer;
+    card.answeredAt = at;
   }
 
   Future<void> notNow(WaitItem item) async => _check(await backend.notNow(item));

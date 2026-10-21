@@ -8,6 +8,7 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../decision.dart';
 import '../chat/chat_screen.dart';
 import '../nav.dart';
 
@@ -29,8 +30,9 @@ class _WaitingListState extends State<WaitingList> {
     final d = StoreScope.of(context).data;
     if (d == null) return const SizedBox.shrink();
     _order ??= ([...d.waiting]..sort((a, b) => _rank(a).compareTo(_rank(b)))).map((w) => w.id).toList();
-    final byId = {for (final w in d.waiting) w.id: w};
-    final items = [for (final id in _order!) if (byId[id] != null) byId[id]!, for (final w in d.waiting) if (!_order!.contains(w.id)) w];
+    // A GO with a newer one from the same worker is not his to decide any more (#258).
+    final byId = {for (final w in d.waiting) if (!d.superseded(w)) w.id: w};
+    final items = [for (final id in _order!) if (byId[id] != null) byId[id]!, for (final w in d.waiting) if (!_order!.contains(w.id) && byId.containsKey(w.id)) w];
     return ListView(padding: EdgeInsets.zero, children: [
       Section('מחכה לך', count: d.waitingCount > 0 ? '${d.waitingCount}' : null),
       ListBlock(children: [for (final w in items) WaitRow(key: ValueKey(w.id), item: w)]),
@@ -49,13 +51,20 @@ class WaitRow extends StatelessWidget {
     final p = context.p;
     final who = d.who(item.from);
     final urgent = item.kind == WaitKind.urgentProd;
-    final pending = store.pending(item.id);
+    final decided = store.decision(item.askId, item.id);
+    final pending = decided ?? store.pending(item.id);
 
     Widget tail;
     if (item.state == WaitState.answered) {
       tail = DoneLine(item.answerLine ?? item.doneLine ?? 'טופל · ${hm(CompanyTime.now())}', top: 8, icon: item.failed ? 'close' : 'check');
+    } else if (decided != null) {
+      // Decided in one tap: folded at once, "ביטול" for 5 seconds (#258).
+      tail = Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: DecisionLine(icon: pendingIcon(decided), text: pendingLine(decided), onUndo: () => store.cancelUndo(AppStore.decisionKey(item.askId, item.id))),
+      );
     } else if (pending != null) {
-      tail = UndoLine(label: pending.label, onCancel: () => store.cancelUndo(item.id));
+      tail = UndoLine(label: pending.label, onCancel: () => store.cancelUndo(pending.key));
     } else if (item.state == WaitState.notNow) {
       tail = Padding(
         padding: const EdgeInsets.only(top: 8),
@@ -172,10 +181,10 @@ class WaitRow extends StatelessWidget {
           Btn('פתיחה', onTap: open),
         ];
       case WaitKind.go:
+        // A tap on the row opens the conversation at the card (#258): the buttons are only the decision.
         return [
-          Btn('GO', kind: BtnKind.primary, onTap: () => store.answerWait(item, item.options.first)),
-          Btn('לא עכשיו', onTap: () => store.notNow(item)),
-          Btn('פתיחה', onTap: open),
+          Btn('אישור', kind: BtnKind.primary, height: 48, onTap: () => store.answerWait(item, item.options.first)),
+          Btn('לא עכשיו', height: 48, onTap: () => store.notNow(item)),
         ];
       case WaitKind.login:
         return [
@@ -190,7 +199,7 @@ class WaitRow extends StatelessWidget {
       case WaitKind.awaiting:
         // A finished task (#219): one tap each, "נכשל" asks for nothing; the details, if any, go in the conversation.
         return [
-          for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.tonal, onTap: () => store.answerWait(item, o)),
+          for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.tonal, height: 48, onTap: () => store.answerWait(item, o)),
         ];
       case WaitKind.blockingAsk:
       case WaitKind.softAsk:
@@ -304,8 +313,8 @@ class _AnswerFieldState extends State<AnswerField> {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
       if (item.options.isNotEmpty || !open)
         Wrap(spacing: 8, runSpacing: 8, children: [
-          for (final o in item.options) Btn(o.label, kind: BtnKind.tonal, onTap: () => store.answerWait(item, o)),
-          if (!open) Btn('תשובה אחרת', onTap: () => setState(() => open = true)),
+          for (final o in item.options) Btn(o.label, kind: BtnKind.tonal, height: 48, onTap: () => store.answerWait(item, o)),
+          if (!open) Btn('תשובה אחרת', height: 48, onTap: () => setState(() => open = true)),
         ]),
       if (open) ...[
         if (item.options.isNotEmpty) const SizedBox(height: 8),

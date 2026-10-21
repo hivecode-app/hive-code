@@ -13,6 +13,8 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../decision.dart';
+import '../chat/chat_screen.dart';
 import '../home/home_screen.dart';
 import '../blocks/blocks.dart';
 import '../nav.dart';
@@ -78,6 +80,7 @@ class HeadData {
     final waiting = <HeadLine>[];
     for (final w in d.waiting) {
       if (w.state != WaitState.open && w.state != WaitState.pending) continue;
+      if (d.superseded(w)) continue;
       (hot(w) ? burning : waiting).add(lineOf(w));
     }
     for (final who in d.identities.values) {
@@ -253,7 +256,7 @@ class WaitingBlock extends StatelessWidget {
   Widget build(BuildContext context) => _Lines(
         lines: [
           for (final w in items)
-            if (w.state == WaitState.open || w.state == WaitState.pending) HeadData.lineOf(w),
+            if ((w.state == WaitState.open || w.state == WaitState.pending) && !(StoreScope.of(context).data?.superseded(w) ?? false)) HeadData.lineOf(w),
         ],
         now: now ?? CompanyTime.now(),
       );
@@ -454,7 +457,9 @@ class _LineRow extends StatelessWidget {
 
     final spoken = [l.hot ? 'בוער' : 'מחכה לך', l.word, name, HeadData.agoSpoken(l.at, now)].where((s) => s.isNotEmpty).join(', ');
     final item = l.item;
-    final canSnooze = item != null && item.inboxId != null;
+    final pending = item == null ? null : store.decision(item.askId, item.id);
+    final keys = item == null || pending != null ? null : decisionKeysOf(context, item);
+    final canSnooze = item != null && item.inboxId != null && pending == null;
     Widget row = Semantics(
       button: true,
       label: '$spoken. ${l.text}',
@@ -489,6 +494,19 @@ class _LineRow extends StatelessWidget {
         ),
       ),
     );
+    // A decision is taken right here (#258): its buttons under the row, or its folded line with "ביטול".
+    // The row itself still opens the conversation at the card.
+    if (pending != null || keys != null) {
+      row = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        if (pending == null) row,
+        Padding(
+          padding: EdgeInsetsDirectional.fromSTEB(pending == null ? 68 : 16, pending == null ? 0 : 6, 16, pending == null ? 12 : 6),
+          child: pending != null
+              ? DecisionLine(icon: pendingIcon(pending), text: pendingLine(pending), subject: l.text, onUndo: () => store.cancelUndo(AppStore.decisionKey(item!.askId, item.id)))
+              : DecisionKeys(keys: keys!),
+        ),
+      ]);
+    }
     if (!canSnooze) return row;
     // A swipe either way is "לא עכשיו": the item stays open, below the rest, in "סטטוס" and in the chat (#74).
     return Dismissible(
@@ -523,5 +541,29 @@ class _SwipeLabel extends StatelessWidget {
         Text('לא עכשיו', style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w500)),
       ]),
     );
+  }
+}
+
+/// The one-tap answers of a waiting item, or null when it is not a decision (a login, a failure, a note).
+/// GO: "אישור" and "לא עכשיו". A question: its options and "תשובה אחרת", which opens the conversation at
+/// the card with the answer started (#258).
+List<DecisionButton>? decisionKeysOf(BuildContext context, WaitItem item) {
+  final store = StoreScope.read(context);
+  switch (item.kind) {
+    case WaitKind.go:
+      return DecisionKeys.go(onGo: () => store.answerWait(item, item.options.first), onNotNow: () => store.notNow(item));
+    case WaitKind.blockingAsk:
+    case WaitKind.softAsk:
+      if (item.askId == null) return null;
+      return DecisionKeys.ask(item.options, onPick: (o) => store.answerWait(item, o), onOther: () {
+        if (!(store.data?.canChat(item.from) ?? false)) return Nav.waitItem(context, item);
+        ChatScreen.pendingTarget[item.from] = item.askId!;
+        Nav.chat(context, item.from, quote: Quote(author: store.nameOf(item.from), text: (item.headline ?? item.body).split('\n').first, askId: item.askId), focus: true);
+      });
+    case WaitKind.awaiting:
+      // A finished task to check (#219): "בוצע" or "נכשל", one tap each.
+      return [for (final o in item.options) DecisionButton(o.label, primary: o.primary, onTap: () => store.answerWait(item, o))];
+    default:
+      return null;
   }
 }

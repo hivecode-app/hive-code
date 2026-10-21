@@ -14,16 +14,16 @@ void main() {
     expect(find.text('GO לחזרה'), findsOneWidget);
   });
 
-  testWidgets('one-tap answer waits 3s with an in-place undo, then collapses', (tester) async {
+  testWidgets('one tap decides: folded at once with "ביטול" for 5s, then collapses (#258)', (tester) async {
     final store = await pumpApp(tester, home: list);
     expect(find.text('מחכה לך'), findsWidgets);
     await tester.tap(find.text('ניסיון נוסף אחרי 24 שעות').first);
     await tester.pump();
-    expect(find.text("יישלח לעידו בעוד 3 שנ'"), findsOneWidget);
-    expect(find.text('ניסיון נוסף אחרי 24 שעות'), findsNothing);
+    expect(findShown('ענית: ניסיון נוסף אחרי 24 שעות · 14:06'), findsOneWidget);
+    expect(find.text('ביטול'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+    expect(find.text('ביטול'), findsOneWidget);
     await tester.pump(const Duration(seconds: 1));
-    expect(find.text("יישלח לעידו בעוד 2 שנ'"), findsOneWidget);
-    await tester.pump(const Duration(seconds: 2));
     await tester.pump();
     expect(find.textContaining('ענית: ניסיון נוסף אחרי 24 שעות'), findsOneWidget);
     final ido = store.data!.waiting.firstWhere((w) => w.from == 'ido');
@@ -33,12 +33,12 @@ void main() {
 
   testWidgets('undo cancels the answer and brings the buttons back', (tester) async {
     final store = await pumpApp(tester, home: list);
-    await tester.tap(find.text('GO').first);
+    await tester.tap(find.text('אישור').first);
     await tester.pump();
-    expect(find.text("GO יישלח לדנה בעוד 3 שנ'"), findsOneWidget);
+    expect(findShown('אישרת · 14:06'), findsOneWidget);
     await tester.tap(find.text('ביטול'));
-    await tester.pump(const Duration(seconds: 4));
-    expect(find.text('GO'), findsWidgets);
+    await tester.pump(const Duration(seconds: 6));
+    expect(find.text('אישור'), findsWidgets);
     expect(store.data!.waiting.firstWhere((w) => w.from == 'dana').state, WaitState.open);
   });
 
@@ -46,7 +46,7 @@ void main() {
     await pumpApp(tester, home: list);
     final before = tester.getTopLeft(find.text('עמית').first);
     await tester.tap(find.text('GO לחזרה'));
-    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(seconds: 6));
     await tester.pump();
     final after = tester.getTopLeft(find.text('עמית').first);
     // The answered row collapses (buttons -> one line), rows below may move up but never reorder.

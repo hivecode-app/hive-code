@@ -77,7 +77,8 @@ class HomeV2 extends StatelessWidget {
     final p = context.p;
     final d = data;
     final blocks = recipe == null ? null : liveBlocks(recipe!, d);
-    bool open(WaitItem w) => w.state == WaitState.open || w.state == WaitState.pending;
+    // A GO with a newer one from the same worker is not his to decide any more (#258).
+    bool open(WaitItem w) => (w.state == WaitState.open || w.state == WaitState.pending) && !d.superseded(w);
 
     // 2. What waits: every open item, live, the same list the project rows and the desktop's home row count,
     // so no part of the screen says otherwise (audit #1). The recipe only orders it: the ones it names first.

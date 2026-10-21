@@ -188,43 +188,41 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('answering in the chat: 3s undo, then the card collapses and the pin goes', (tester) async {
+  testWidgets('answering in the chat: the card folds at once with "ביטול" for 5s, and the pin goes', (tester) async {
     final store = await pumpApp(tester, size: const Size(342, 2300), home: const ChatScreen(identityId: 'ido'));
     expect(find.text('לשאלה'), findsOneWidget);
     await tester.tap(find.text('ביטול המנוי מיד'));
     await tester.pump();
-    expect(find.text("יישלח לעידו בעוד 3 שנ'"), findsOneWidget);
-    await tester.pump(const Duration(seconds: 3));
+    expect(findShown('ענית: ביטול המנוי מיד · 14:06'), findsOneWidget);
+    expect(find.text('לשאלה'), findsNothing);
+    await tester.pump(const Duration(seconds: 5));
     await tester.pump();
-    expect(find.textContaining('ענית: ביטול המנוי מיד'), findsOneWidget);
+    expect(findShown('ענית ב-14:06: ביטול המנוי מיד'), findsOneWidget);
     expect(find.text('לשאלה'), findsNothing);
     expect(store.data!.waiting.firstWhere((w) => w.from == 'ido').state, WaitState.answered);
   });
 
-  testWidgets('an open GO: the headline first, details folded, buttons under it, and what he types answers it', (tester) async {
+  testWidgets('an open GO: the headline first, details folded, buttons in it; typing is a message, not an answer (#258)', (tester) async {
     final store = await pumpApp(tester, size: const Size(342, 1500), home: const ChatScreen(identityId: 'dana'));
     final chat = store.data!.chats['dana']!;
     final go = chat.items.whereType<GoCard>().single;
     expect(find.text('עדכון ללומו: הטקסט בטלפון מתוקן'), findsWidgets);
-    // Details are folded until asked for.
+    expect(find.text('אישור'), findsOneWidget);
+    expect(find.text('לא עכשיו'), findsOneWidget);
+    // Details are folded until asked for; a tap on the card opens them.
     expect(find.textContaining('deploy.sh rollback'), findsNothing);
-    await tester.tap(find.text('פרטים'));
+    await tester.tap(find.text('עדכון ללומו: הטקסט בטלפון מתוקן').last);
     await tester.pumpAndSettle();
     expect(find.textContaining('deploy.sh rollback'), findsOneWidget);
-    // The composer says what the text will do: answer her request.
-    expect(find.text('תשובה לבקשת GO של דנה'), findsOneWidget);
+    // Nothing tags what he writes as an answer to it.
+    expect(find.text('תשובה לבקשת GO של דנה'), findsNothing);
+    expect(find.descendant(of: find.byType(Composer), matching: find.byType(QuoteStrip)), findsNothing);
     await tester.tap(find.bySemanticsLabel('שליחה'));
     await tester.pump();
     final sent = chat.items.whereType<UserMsg>().last;
     expect(sent.text, 'ושגם ה-web יקבל את התיקון');
-    expect(sent.replyTo?.askId, go.askId);
-    expect(sent.delivery, Delivery.delivered, reason: 'an answer goes now, never queued behind her work');
-    expect(go.state, AskState.answered);
-    expect(go.answer, 'ושגם ה-web יקבל את התיקון');
-    await tester.pump();
-    expect(find.textContaining('ענית:', findRichText: true), findsOneWidget);
-    expect(find.text('לא עכשיו'), findsNothing, reason: 'the buttons go with the answer');
-    // His message carries the quote of her request; the composer no longer does: the next text is a message.
-    expect(find.descendant(of: find.byType(Composer), matching: find.byType(QuoteStrip)), findsNothing);
+    expect(sent.replyTo, isNull);
+    expect(go.state, AskState.open);
+    expect(find.text('אישור'), findsOneWidget);
   });
 }

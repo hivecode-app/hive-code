@@ -575,6 +575,9 @@ class AskCard extends ChatItem {
   final String? escalation;
   AskState state;
   String? answer;
+
+  /// When it was answered, for its folded line ("אישרת ב-01:58"); null when the app didn't see it (#258).
+  DateTime? answeredAt;
   final String? askId;
 }
 

@@ -23,7 +23,7 @@ class WaitItemScreen extends StatelessWidget {
     if (d == null) return const SizedBox.shrink();
     final who = d.who(item.from);
     final isAsk = (item.kind == WaitKind.blockingAsk || item.kind == WaitKind.softAsk) && item.askId != null;
-    final pending = store.pending(item.id);
+    final pending = store.decision(item.askId, item.id) ?? store.pending(item.id);
     return Scaffold(
       backgroundColor: p.bg,
       body: SafeArea(
@@ -55,7 +55,7 @@ class WaitItemScreen extends StatelessWidget {
               if (item.state == WaitState.answered)
                 DoneLine(item.answerLine ?? item.doneLine ?? 'טופל', icon: item.failed ? 'close' : 'check')
               else if (pending != null)
-                UndoLine(label: pending.label, onCancel: () => store.cancelUndo(item.id))
+                UndoLine(label: pending.label, onCancel: () => store.cancelUndo(pending.key))
               else ...[
                 if (isAsk) AnswerField(item: item, autofocus: item.options.isEmpty),
                 if (isAsk) const SizedBox(height: 12),

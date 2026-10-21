@@ -89,7 +89,22 @@ class CompanyData {
   /// His latest messages both ways (hq: the last 200), newest first: what v2's search reads for content.
   List<RecentLine> recent = [];
 
-  int get waitingCount => waiting.where((w) => w.state == WaitState.open || w.state == WaitState.pending).length;
+  int get waitingCount => waiting.where((w) => (w.state == WaitState.open || w.state == WaitState.pending) && !superseded(w)).length;
+
+  /// A GO request with a newer one open from the same worker (#258): only the newest asks him; the older
+  /// ones fold to "הוחלפה בבקשה חדשה" and leave "מחכה לך".
+  bool superseded(WaitItem w) {
+    if (w.kind != WaitKind.go) return false;
+    bool open(WaitItem x) => x.state == WaitState.open || x.state == WaitState.pending || x.state == WaitState.notNow;
+    return waiting.any((x) => !identical(x, w) && x.kind == WaitKind.go && x.from == w.from && open(x) && _newer(x, w));
+  }
+
+  /// Raised after: by hq's time, else by its inbox id, else by its place in the list.
+  bool _newer(WaitItem a, WaitItem b) {
+    if (a.createdAt != null && b.createdAt != null && a.createdAt != b.createdAt) return a.createdAt!.isAfter(b.createdAt!);
+    if (a.inboxId != null && b.inboxId != null) return a.inboxId! > b.inboxId!;
+    return waiting.indexOf(a) > waiting.indexOf(b);
+  }
 
   /// The number on "שיחות" and the app icon: unread messages, muted conversations left out (as in WhatsApp).
   int get unreadCount => conversations.fold(0, (n, c) => c.muted ? n : n + c.unread);

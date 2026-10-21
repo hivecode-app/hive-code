@@ -9,9 +9,9 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../decision.dart';
 import '../nav.dart';
 import 'markdown.dart';
-import '../convs/kbd.dart';
 
 const _fold = Duration(milliseconds: 150);
 
@@ -992,13 +992,21 @@ class PrCardView extends StatelessWidget {
   }
 }
 
-/// Ask and GO (chat.md §2.8): a message from whoever asked, in their conversation, with the answers as
-/// buttons right under it (Telegram's inline keyboard). The first line is the headline in his words;
-/// the technical details fold under it. The same object as on home and in the notification.
+/// Ask and GO (chat.md §2.8, #258): a message from whoever asked, in their conversation. Open, its answers are
+/// buttons inside it, always there; a tap on the card itself opens or closes the details, and never starts an
+/// answer (quoting is a swipe or a long press). One tap decides: the card folds at once to one line,
+/// "אישרת · 02:14" with "ביטול" for 5 seconds. A closed one stays that one line; a GO with a newer one from the
+/// same worker folds to "הוחלפה בבקשה חדשה". The same object as on home and in the notification.
 class AskCardView extends StatefulWidget {
-  const AskCardView({super.key, required this.card, required this.onOther});
+  const AskCardView({super.key, required this.card, required this.onOther, this.superseded = false, this.flash = false});
   final AskCard card;
   final VoidCallback onOther;
+
+  /// A GO with a newer one open from the same worker.
+  final bool superseded;
+
+  /// Lit for a moment: "לבקשה" in the banner just brought it here.
+  final bool flash;
 
   @override
   State<AskCardView> createState() => _AskCardViewState();
@@ -1014,9 +1022,45 @@ class _AskCardViewState extends State<AskCardView> {
     final p = context.p;
     final from = store.nameOf(card.from);
     final go = card is GoCard;
-    final pending = store.pending('card:${card.id}');
-    final answered = card.state == AskState.answered || card.state == AskState.decidedByManager;
-    final desktop = MediaQuery.sizeOf(context).width >= 800;
+    final pending = store.decision(card.askId, card.id);
+    final wait = store.data?.waiting.where((w) => w.askId != null && w.askId == card.askId).firstOrNull;
+    final notNow = go && wait?.state == WaitState.notNow && card.state == AskState.open;
+    final closed = widget.superseded || notNow || (card.state != AskState.open && card.state != AskState.pending);
+    final label = go ? 'בקשת GO מ$from' : 'שאלה מ$from';
+
+    if (pending != null || closed) {
+      final (:icon, :text) = pending != null ? (icon: 'check_circle', text: pendingLine(pending)) : closedLine(card, superseded: widget.superseded, notNow: notNow);
+      final VoidCallback? undo = pending != null
+          ? () => store.cancelUndo(AppStore.decisionKey(card.askId, card.id))
+          : notNow
+              ? () => store.resume(wait!)
+              : null;
+      return Semantics(
+        container: true,
+        label: label,
+        child: Bubble(
+          out: false,
+          wide: true,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+            DecisionLine(icon: icon, text: text, subject: card.headline ?? card.question.split('\n').first, onUndo: undo, onTap: () => setState(() => details = !details)),
+            AnimatedSize(
+              duration: _fold,
+              alignment: Alignment.topCenter,
+              child: details
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 2),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        if (card.headline != null) Rich(card.headline!, style: TextStyle(fontFamily: kFont, fontSize: 15, height: 1.45, fontWeight: FontWeight.w700, color: p.text)),
+                        Markdown(card.question),
+                        Align(alignment: AlignmentDirectional.centerEnd, child: Meta(time: hm(card.ts))),
+                      ]),
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
+          ]),
+        ),
+      );
+    }
 
     final kicker = Text.rich(
       TextSpan(children: [
@@ -1026,151 +1070,61 @@ class _AskCardViewState extends State<AskCardView> {
         ),
         TextSpan(text: go ? 'בקשת ${ltr('GO')}' : (card.blocking ? 'שאלה · חוסמת את העבודה' : 'שאלה · יכולה לחכות')),
         if (!go && card.escalation != null) TextSpan(text: ' · ${card.escalation!.replaceAll(' ', '\u00A0')}'),
+        TextSpan(text: ' · ${hm(card.ts)}'),
       ]),
       style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.5, color: p.text2),
     );
 
     final headline = card.headline;
-    final bubble = Bubble(
-      out: false,
-      wide: true,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        kicker,
-        const SizedBox(height: 2),
-        if (headline != null) ...[
-          Rich(headline, style: TextStyle(fontFamily: kFont, fontSize: 15.5, height: 1.45, fontWeight: FontWeight.w700, color: p.text)),
-          // The technical part folds under the headline, like a long message (chat.md §2.3).
-          Semantics(
-            button: true,
-            child: InkWell(
-              onTap: () => setState(() => details = !details),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text(details ? 'הסתרת הפרטים' : 'פרטים', style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
-                  AnimatedRotation(turns: details ? 0.5 : 0, duration: _fold, child: Ic('expand_more', size: 18, color: p.accent)),
-                ]),
-              ),
-            ),
-          ),
-          AnimatedSize(
-            duration: _fold,
-            alignment: Alignment.topCenter,
-            child: details ? Padding(padding: const EdgeInsets.only(bottom: 4), child: Markdown(card.question)) : const SizedBox(width: double.infinity),
-          ),
-        ] else
-          Markdown(card.question),
-        if (answered) ...[
-          const SizedBox(height: 4),
-          DoneLine(_doneLine(card, from, go), top: 2),
-        ],
-        Align(alignment: AlignmentDirectional.centerEnd, child: Meta(time: hm(card.ts))),
-      ]),
-    );
+    final keys = go
+        ? DecisionKeys.go(onGo: () => store.answerCard(card, card.options.first), onNotNow: wait == null ? null : () => store.notNow(wait))
+        : DecisionKeys.ask(card.options, onPick: (o) => store.answerCard(card, o), onOther: widget.onOther, keys: MediaQuery.sizeOf(context).width >= 800 && identical(shortcutAsk(store.data?.chats[card.from]), card));
 
-    Widget? keyboard;
-    if (answered) {
-      keyboard = null;
-    } else if (pending != null) {
-      keyboard = Padding(
-        padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
-        child: UndoLine(label: pending.label, onCancel: () => store.cancelUndo('card:${card.id}'), top: 2),
-      );
-    } else {
-      final opts = card.options.where((o) => o.id != 'q' && o.id != 'not_now').toList();
-      final rows = <List<Widget>>[];
-      if (go) {
-        rows.add([
-          _KeyButton('GO', primary: true, onTap: () => store.answerCard(card, card.options.first)),
-          _KeyButton('לא עכשיו', onTap: () {
-            final w = store.data?.waiting.where((w) => w.askId == card.askId).firstOrNull;
-            if (w != null) store.notNow(w);
-          }),
-        ]);
-      } else {
-        for (final (i, o) in opts.indexed) {
-          rows.add([_KeyButton(o.label, primary: o.primary, hint: desktop ? '${i + 1}' : null, onTap: () => store.answerCard(card, o))]);
-        }
-      }
-      rows.add([_KeyButton('תשובה אחרת', hint: desktop && !go ? '${opts.length + 1}' : null, onTap: widget.onOther)]);
-      keyboard = LayoutBuilder(builder: (context, c) {
-        return Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: Container(
-            width: c.maxWidth * 0.92,
-            margin: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              for (final r in rows)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Row(children: [
-                    for (final (i, b) in r.indexed) ...[if (i > 0) const SizedBox(width: 4), Expanded(child: b)],
-                  ]),
-                ),
-            ]),
-          ),
-        );
-      });
-    }
+    // The whole card is the details' toggle; the buttons are its only answers.
+    final top = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+      kicker,
+      const SizedBox(height: 2),
+      if (headline != null) ...[
+        Rich(headline, style: TextStyle(fontFamily: kFont, fontSize: 15.5, height: 1.45, fontWeight: FontWeight.w700, color: p.text)),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(details ? 'הסתרת הפרטים' : 'פרטים', style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+            AnimatedRotation(turns: details ? 0.5 : 0, duration: _fold, child: Ic('expand_more', size: 18, color: p.accent)),
+          ]),
+        ),
+        AnimatedSize(
+          duration: _fold,
+          alignment: Alignment.topCenter,
+          child: details ? Padding(padding: const EdgeInsets.only(bottom: 4), child: Markdown(card.question)) : const SizedBox(width: double.infinity),
+        ),
+      ] else
+        Markdown(card.question),
+    ]);
 
     return Semantics(
       container: true,
-      label: go ? 'בקשת GO מ$from' : 'שאלה מ$from',
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        bubble,
-        AnimatedSize(duration: _fold, alignment: Alignment.topCenter, child: keyboard ?? const SizedBox(width: double.infinity)),
-      ]),
-    );
-  }
-
-  static String _doneLine(AskCard card, String from, bool go) {
-    if (card.state == AskState.decidedByManager) {
-      final n = companyNames;
-      return '${n.manager} ${n.m('החליט', 'החליטה')} במקומך: ${card.answer}';
-    }
-    final a = card.answer;
-    if (a == null) return go ? 'הבקשה נסגרה' : 'השאלה נסגרה';
-    if (go && a == 'GO') return '${ltr('GO')} נשלח ל$from';
-    return 'ענית: $a';
-  }
-}
-
-/// One button of the inline keyboard under a question (Telegram): a quiet chip in the bubble's colour,
-/// the full answer in it. GO is the one primary action, in the brand colour (design-taste §1.2).
-class _KeyButton extends StatelessWidget {
-  const _KeyButton(this.label, {required this.onTap, this.primary = false, this.hint});
-  final String label;
-  final VoidCallback onTap;
-  final bool primary;
-  final String? hint;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.p;
-    return Semantics(
-      button: true,
-      child: DecoratedBox(
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), boxShadow: primary ? null : p.hairShadow),
-        child: Material(
-          color: primary ? p.accent : p.bubbleIn,
-          borderRadius: BorderRadius.circular(8),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onTap,
-            child: Container(
-              constraints: const BoxConstraints(minHeight: 40),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              alignment: Alignment.center,
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                if (hint != null) ...[Kbd(hint!), const SizedBox(width: 6)],
-                Flexible(
-                  child: Rich(label,
-                      align: TextAlign.center,
-                      style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.35, fontWeight: FontWeight.w700, color: primary ? p.onAccent : p.accent)),
-                ),
-              ]),
-            ),
-          ),
+      label: label,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 400),
+        color: widget.flash ? p.accentSoft : Colors.transparent,
+        child: Bubble(
+          out: false,
+          wide: true,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+            if (headline != null)
+              Semantics(
+                button: true,
+                expanded: details,
+                hint: details ? 'הסתרת הפרטים' : 'פרטים',
+                child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => setState(() => details = !details), child: top),
+              )
+            else
+              top,
+            const SizedBox(height: 8),
+            DecisionKeys(keys: keys),
+            const SizedBox(height: 4),
+          ]),
         ),
       ),
     );
@@ -1402,3 +1356,9 @@ class _DotsState extends State<_Dots> with SingleTickerProviderStateMixin {
         ]),
       );
 }
+
+/// The question the desktop's number keys answer in a conversation: the newest open one that isn't a GO.
+AskCard? shortcutAsk(Conversation? chat) => chat?.items.whereType<AskCard>().where((a) => a.state == AskState.open && a is! GoCard).lastOrNull;
+
+/// Its options, in the order of the keys: what its buttons show.
+List<AskOption> shortcutOptions(AskCard ask) => ask.options.where((o) => o.id != 'q' && o.id != 'not_now').toList();

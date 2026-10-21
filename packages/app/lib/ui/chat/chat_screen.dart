@@ -41,7 +41,6 @@ class _ChatScreenState extends State<ChatScreen> {
   final controller = TextEditingController();
   final focus = FocusNode();
   final scroll = ScrollController();
-  final askKey = GlobalKey();
   Quote? quote;
   String? selected;
   bool searching = false;
@@ -108,7 +107,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (t == null) return null;
     final start = _targetText == null ? null : _snippet(_targetText!);
     bool hit(ChatItem i) => switch (i) {
-          AskCard() => i.askId == t,
+          AskCard() => i.askId == t || i.id == t,
           UserMsg() || TextMsg() => i.id == t || i.id == 'msg:$t',
           _ => false,
         };
@@ -130,8 +129,19 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!mounted || _target == null) return;
     final c = targetKey.currentContext;
     if (c != null) {
-      setState(() => _target = null);
+      final lit = _flashNext ? _targetId : null;
+      setState(() {
+        _target = null;
+        _flashNext = false;
+        if (lit != null) _flash = lit;
+      });
       Scrollable.ensureVisible(c, duration: const Duration(milliseconds: 250), alignment: 0.2);
+      // Lit for a moment, so the eye finds the card it was brought to (#258).
+      if (lit != null) {
+        Future.delayed(const Duration(milliseconds: 1200), () {
+          if (mounted && _flash == lit) setState(() => _flash = null);
+        });
+      }
       return;
     }
     if (++_targetTries > 40) {
@@ -177,10 +187,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _toBottom() => scroll.animateTo(0, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
 
-  void _toAsk() {
-    final c = askKey.currentContext;
-    if (c != null) Scrollable.ensureVisible(c, duration: const Duration(milliseconds: 250), alignment: 0.1);
+  /// The card the banner names, wherever it is in the history: the list is lazy, so a card far up is not
+  /// built yet and has no context to scroll to. Seek it like a target from "מחכה לך", and light it (#258).
+  void _toAsk(AskCard card) {
+    setState(() {
+      _target = card.id;
+      _targetText = null;
+      _targetTries = 0;
+      _flashNext = true;
+    });
   }
+
+  /// The card lit for a moment after the banner brought it into view.
+  String? _flash;
+  bool _flashNext = false;
 
   Future<void> _stop(Conversation chat, Identity who) async {
     final store = StoreScope.read(context);
@@ -259,13 +279,13 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     final who = d.who(widget.identityId);
     final presence = d.presence[widget.identityId] ?? const Presence(status: WorkerStatus.free);
-    final openAsk = chat.items.whereType<AskCard>().where((a) => a.state == AskState.open && (a.blocking || a is GoCard)).lastOrNull;
-    // While a question or GO is open here, what he writes is the answer to it (the latest one), shown
-    // as a reply to it above the composer.
-    final answering = chat.items.whereType<AskCard>().where((a) => a.state == AskState.open && a.askId != null).lastOrNull;
-    final autoQuote = answering == null
-        ? null
-        : Quote(author: d.who(answering.from).name, text: (answering.headline ?? answering.question).split('\n').first, itemId: answering.id, askId: answering.askId, go: answering is GoCard);
+    // What is still his to decide here, oldest first (#258): open questions and the newest open GO. Writing in
+    // the composer is a message, never an answer by itself: answering is a button, or a quote he chose.
+    final superseded = supersededGos(chat.items);
+    final open = [
+      for (final a in chat.items.whereType<AskCard>())
+        if (a.state == AskState.open && !superseded.contains(a.id) && store.decision(a.askId, a.id) == null && !_notNow(d, a)) a,
+    ];
     _targetId = _targetItem(chat);
     if (_targetId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _seekTarget());
@@ -280,7 +300,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // Rows are built lazily: only what is on screen. With thousands of items, building every row
     // on each store change (every streaming token) was the main cost of a frame.
     final rows = _entries(chat);
-    _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, openAsk, openAllTools, _targetId]);
+    _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, openAllTools, _targetId]);
     final selectedItem = selected == null ? null : chat.items.where((i) => i.id == selected).firstOrNull;
 
     final header = selectedItem != null
@@ -338,7 +358,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final body = Column(children: [
       header,
-      if (openAsk != null && selectedItem == null) _PinBar(ask: openAsk, onTap: _toAsk),
+      if (open.isNotEmpty && selectedItem == null) _PinBar(open: open, onTap: () => _toAsk(open.first)),
       Expanded(
         child: Container(
           color: p.chatBg,
@@ -356,7 +376,7 @@ class _ChatScreenState extends State<ChatScreen> {
               // Desktop keeps lines readable: messages in a 780px column (mockup `.dmain .msgs`).
               itemBuilder: (context, i) {
                 final e = rows[rows.length - 1 - i];
-                final row = _row(context, e, chat, d, openAsk, hitId);
+                final row = _row(context, e, chat, d, superseded, hitId);
                 return KeyedSubtree(
                   key: ValueKey(e.key),
                   // Desktop: text selects with the mouse like a page (APP-SPEC §3, #55). The phone
@@ -382,8 +402,7 @@ class _ChatScreenState extends State<ChatScreen> {
         identityId: widget.identityId,
         controller: controller,
         focus: focus,
-        quote: quote ?? autoQuote,
-        // The answer strip of an open question stays: it is what his text is about to do.
+        quote: quote,
         onClearQuote: quote == null ? null : () => setState(() => quote = null),
         onSent: () {
           seenCount = chat.items.length;
@@ -449,7 +468,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _ => null,
       };
 
-  Widget _row(BuildContext context, _Entry e, Conversation chat, CompanyData d, AskCard? openAsk, String? hitId) {
+  Widget _row(BuildContext context, _Entry e, Conversation chat, CompanyData d, Set<String> superseded, String? hitId) {
     final p = context.p;
     final it0 = e.item;
     final sig = it0 == null ? null : _rowSig(it0, hitId);
@@ -457,14 +476,14 @@ class _ChatScreenState extends State<ChatScreen> {
       final hit = _rowCache[e.key];
       if (hit != null && hit.$1 == sig) return hit.$2;
       if (_rowCache.length > 400) _rowCache.clear();
-      final w = _buildRow(context, e, chat, d, openAsk, hitId, p);
+      final w = _buildRow(context, e, chat, d, superseded, hitId, p);
       _rowCache[e.key] = (sig, w);
       return w;
     }
-    return _buildRow(context, e, chat, d, openAsk, hitId, p);
+    return _buildRow(context, e, chat, d, superseded, hitId, p);
   }
 
-  Widget _buildRow(BuildContext context, _Entry e, Conversation chat, CompanyData d, AskCard? openAsk, String? hitId, Palette p) {
+  Widget _buildRow(BuildContext context, _Entry e, Conversation chat, CompanyData d, Set<String> superseded, String? hitId, Palette p) {
     if (e.key == '\u0000empty') {
       final who = d.who(widget.identityId);
       return ServiceLine(text: '${who.name} · ${who.title}');
@@ -475,8 +494,9 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     if (e.day != null) return ServiceLine(text: _dayLabel(e.day!));
     final it = e.item!;
-    Widget w = _item(context, it, chat, d, openAsk);
-    if (it is UserMsg || it is TextMsg) {
+    Widget w = _item(context, it, chat, d, superseded);
+    // A card quotes the same way as a message: a long press or a swipe, never a tap (#258).
+    if (it is UserMsg || it is TextMsg || it is AskCard) {
       w = _Selectable(
         selected: selected == it.id,
         onLongPress: () => setState(() => selected = it.id),
@@ -515,7 +535,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _item(BuildContext context, ChatItem it, Conversation chat, CompanyData d, AskCard? openAsk) {
+  Widget _item(BuildContext context, ChatItem it, Conversation chat, CompanyData d, Set<String> superseded) {
     final store = StoreScope.read(context);
     return switch (it) {
       UserMsg() => UserBubble(
@@ -537,15 +557,14 @@ class _ChatScreenState extends State<ChatScreen> {
       TestResultCard() => TestCardView(card: it),
       TerminalCard() => TerminalCardView(card: it),
       PrCard() => PrCardView(card: it),
-      AskCard() => KeyedSubtree(
-          key: identical(it, openAsk) ? askKey : null,
-          child: AskCardView(
-            card: it,
-            onOther: () {
-              setState(() => quote = Quote(author: d.who(it.from).name, text: (it.headline ?? it.question).split('\n').first, itemId: it.id, askId: it.askId, go: it is GoCard));
-              focus.requestFocus();
-            },
-          ),
+      AskCard() => AskCardView(
+          card: it,
+          superseded: superseded.contains(it.id),
+          flash: _flash == it.id,
+          onOther: () {
+            setState(() => quote = Quote(author: d.who(it.from).name, text: (it.headline ?? it.question).split('\n').first, itemId: it.id, askId: it.askId, go: it is GoCard));
+            focus.requestFocus();
+          },
         ),
       DecidedCard() => DecidedCardView(card: it),
       PermissionCard() => PermissionCardView(card: it),
@@ -560,6 +579,10 @@ class _ChatScreenState extends State<ChatScreen> {
       UnknownItem() => ServiceLine(text: 'אירוע: ${it.kind}'),
     };
   }
+
+  /// A GO he put off ("לא עכשיו") is not open here until he takes it back.
+  static bool _notNow(CompanyData d, AskCard a) =>
+      a is GoCard && d.waiting.any((w) => w.askId != null && w.askId == a.askId && w.state == WaitState.notNow);
 
   static String _dayLabel(DateTime d) {
     final ago = daysAgo(d, CompanyTime.now());
@@ -722,34 +745,62 @@ class _ChatBar extends StatelessWidget {
   }
 }
 
-/// "מחכה לך" strip: an open question or GO from this worker can never scroll away unseen.
+/// The ids of GO cards with a newer one open from the same worker: only the newest asks him (#258).
+Set<String> supersededGos(List<ChatItem> items) {
+  final open = items.whereType<GoCard>().where((g) => g.state == AskState.open).toList();
+  final newest = <String, GoCard>{};
+  for (final g in open) {
+    if (!(newest[g.from]?.ts.isAfter(g.ts) ?? false)) newest[g.from] = g;
+  }
+  return {for (final g in open) if (!identical(newest[g.from], g)) g.id};
+}
+
+/// "מחכה לך" strip: what is open for him here can never scroll away unseen. A tap anywhere on it brings the
+/// card into view and lights it; with more than one, the first. With nothing open, there is no strip (#258).
 class _PinBar extends StatelessWidget {
-  const _PinBar({required this.ask, required this.onTap});
-  final AskCard ask;
+  const _PinBar({required this.open, required this.onTap});
+  final List<AskCard> open;
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    return Container(
-      decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(children: [
-        Ic('front_hand', size: 18, fill: true, color: p.text),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text.rich(
-            TextSpan(children: [
-              TextSpan(text: ask is GoCard ? 'בקשת ${ltr('GO')}' : (ask.blocking ? 'שאלה חוסמת' : 'שאלה'), style: const TextStyle(fontWeight: FontWeight.w700)),
-              TextSpan(text: ' · ${hm(ask.ts)}'),
+    final ask = open.first;
+    final many = open.length > 1;
+    final (what, link) = many
+        ? ('${open.length} החלטות פתוחות', 'לראשונה')
+        : ask is GoCard
+            ? ('בקשת ${ltr('GO')}', 'לבקשה')
+            : (ask.blocking ? 'שאלה חוסמת' : 'שאלה', 'לשאלה');
+    return Semantics(
+      button: true,
+      label: many ? what : '$what מ-${hm(ask.ts)}',
+      hint: link,
+      excludeSemantics: true,
+      child: Material(
+        color: p.surface,
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 48),
+            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(children: [
+              Ic('front_hand', size: 18, fill: true, color: p.text),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(children: [
+                    TextSpan(text: what, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    if (!many) TextSpan(text: ' · ${hm(ask.ts)}'),
+                  ]),
+                  style: TextStyle(fontFamily: kFont, fontSize: 13.5, height: 1.4, color: p.text),
+                ),
+              ),
+              Text(link, style: TextStyle(fontFamily: kFont, fontSize: 13.5, fontWeight: FontWeight.w700, color: p.accent)),
             ]),
-            style: TextStyle(fontFamily: kFont, fontSize: 13.5, height: 1.4, color: p.text),
           ),
         ),
-        GestureDetector(
-          onTap: onTap,
-          child: Text(ask is GoCard ? 'לבקשה' : 'לשאלה', style: TextStyle(fontFamily: kFont, fontSize: 13.5, fontWeight: FontWeight.w700, color: p.accent)),
-        ),
-      ]),
+      ),
     );
   }
 }

@@ -7,6 +7,7 @@ import '../data/store.dart';
 import '../model/models.dart';
 import '../theme/tokens.dart';
 import 'chat/chat_screen.dart';
+import 'chat/items.dart' show shortcutAsk, shortcutOptions;
 import 'common.dart';
 import 'convs/conversations_screen.dart';
 import 'home/home_screen.dart';
@@ -92,8 +93,8 @@ class _DesktopFrameState extends State<DesktopFrame> {
     final di = digits.indexOf(k);
     if (di >= 0) {
       final chat = store.data?.chats[store.currentConversation];
-      final ask = chat?.items.whereType<AskCard>().where((a) => a.state == AskState.open && a is! GoCard).lastOrNull;
-      final opts = ask?.options.where((o) => o.id != 'q').toList() ?? [];
+      final ask = shortcutAsk(chat);
+      final opts = ask == null ? const <AskOption>[] : shortcutOptions(ask);
       if (ask != null && di < opts.length) store.answerCard(ask, opts[di]);
       return KeyEventResult.handled;
     }
