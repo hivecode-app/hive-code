@@ -259,7 +259,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
     'improve': Team(id: 'improve', name: 'מחלקת השיפור', symbol: 'build', leadId: 'noga', tone: 'slate'),
     'lumo': Team(id: 'lumo', name: 'לומו', symbol: 'local_shipping', leadId: 'dana', permanent: false, tone: 'teal'),
     'tikibot': Team(id: 'tikibot', name: 'טיקיבוט', symbol: 'smart_toy', permanent: false, tone: 'clay'),
-    'voice': Team(id: 'voice', name: 'voice-bot', symbol: 'graphic_eq', permanent: false, tone: 'sky'),
+    'voice': Team(id: 'voice', name: 'הבוט הקולי', symbol: 'graphic_eq', permanent: false, tone: 'sky'),
   };
   const ids = {
     'yoav': Identity(id: 'yoav', name: 'יואב', title: 'מנהל החברה', teamId: 'mgmt'),
@@ -476,7 +476,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
   const tickets = [
     Ticket(number: '#3711', title: 'תשלומים נכשלים בחידוש מנוי', project: 'lumo', projectName: 'לומו', group: TicketGroup.waiting, assignee: 'עידו', sub: null, status: WorkerStatus.waiting, endLine: '14:02'),
     Ticket(number: '#3698', title: 'טקסט שבור בטלפון מאז 1.1.5', project: 'lumo', projectName: 'לומו', group: TicketGroup.waiting, assignee: 'דנה', sub: 'GO לפרודקשן', status: WorkerStatus.waiting, endLine: '13:41'),
-    Ticket(number: '#88', title: 'מחירי נסיעות לפי שעה', project: 'voice', projectName: 'voice-bot', group: TicketGroup.attention, assignee: 'מאיה', sub: 'מחכה לגישה ל-k8s', status: WorkerStatus.blocked, endLine: '13:30'),
+    Ticket(number: '#88', title: 'מחירי נסיעות לפי שעה', project: 'voice', projectName: 'הבוט הקולי', group: TicketGroup.attention, assignee: 'מאיה', sub: 'מחכה לגישה ל-k8s', status: WorkerStatus.blocked, endLine: '13:30'),
     Ticket(number: '#209', title: 'פרסור "בעוד שבועיים"', project: 'easy', projectName: 'טיקיבוט', group: TicketGroup.attention, assignee: 'איתי', sub: "בדיקה נכשלת 20 דק'", status: WorkerStatus.stuck, endLine: '13:44'),
     Ticket(number: '#3720', title: 'הודעות קוליות לא מתנגנות ב-web', project: 'lumo', projectName: 'לומו', group: TicketGroup.working, assignee: 'נועה', sub: 'מריצה בדיקות', status: WorkerStatus.working, diffStat: '+31 −6'),
     Ticket(number: '#215', title: 'סינון קבוצות כפולות', project: 'easy', projectName: 'טיקיבוט', group: TicketGroup.working, assignee: 'גיל', status: WorkerStatus.working, endLine: "לפני 4 דק'"),
@@ -529,14 +529,14 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
     digest: const [
       'בלומו מוזגו 4 שינויים. 1.1.20 מחכה ל-GO.',
       'בטיקיבוט תוקן הפרסור של "ביום ה-שני" (#211).',
-      'ב-voice-bot עלו מחירי הנסיעות ל-`live-v5`, כשלא הייתה שיחה פעילה.',
+      'בבוט הקולי עלו מחירי הנסיעות ל-`live-v5`, כשלא הייתה שיחה פעילה.',
     ],
     digestSince: '09:12',
     activity: const [
       TeamActivity(symbol: 'local_shipping', team: 'לומו', line: '3 עובדים · נועה מריצה בדיקות'),
       TeamActivity(symbol: 'smart_toy', team: 'טיקיבוט', line: '2 עובדים · איתי תקוע על בדיקה'),
       TeamActivity(symbol: 'build', team: 'החברה', line: 'נגה כותבת את הדוח השבועי'),
-      TeamActivity(symbol: 'graphic_eq', team: 'voice-bot', line: 'רדום · הניטור ממשיך', dormant: true),
+      TeamActivity(symbol: 'graphic_eq', team: 'הבוט הקולי', line: 'רדום · הניטור ממשיך', dormant: true),
     ],
     conversations: [...convs],
     chats: chats,

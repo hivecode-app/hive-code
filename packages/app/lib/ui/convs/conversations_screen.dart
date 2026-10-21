@@ -8,7 +8,6 @@ import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import '../nav.dart';
-import '../blocks/tasks.dart';
 import 'convs_v2.dart';
 import 'home_v2.dart';
 import 'kbd.dart';
@@ -53,11 +52,11 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     final d = store.data;
     final p = context.p;
     if (d == null) return const SizedBox.shrink();
+    final now = CompanyTime.now();
     final ordered = sortConversations(d, d.conversations, store.convSort).where((c) => _match(d, c));
     // Finished task workers go below every live conversation, whatever order the list came in (#40):
     // the order above is the data's, and this split is the last step, so any sort keeps them at the end.
     final list = [...ordered.where((c) => !d.isDone(c.identityId)), ...ordered.where((c) => d.isDone(c.identityId))];
-    final opened = openedTasks(d);
     return Container(
       color: p.surface,
       child: Column(children: [
@@ -68,8 +67,9 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
             // The home is the first row; it opens in the main column (desktop.dart).
             if (q.isEmpty) ...[HomeEntryRow(selected: store.homeOpen), Container(height: 1, color: p.line)],
             for (final (i, c) in list.indexed) ...[
-              if (i > 0) Padding(padding: const EdgeInsetsDirectional.only(start: 62), child: Container(height: 1, color: p.line)),
-              ConversationRow(c: c, compact: true, selected: !store.homeOpen && store.currentConversation == c.identityId, opened: opened[c.identityId] ?? const []),
+              if (i > 0) Padding(padding: const EdgeInsetsDirectional.only(start: 72), child: Container(height: 1, color: p.line)),
+              // The phone's row (convs_v2.dart): the same two lines, the same ticks, the same spacing.
+              ConversationRowV2(c: c, now: now, pinned: c.identityId == d.managerId, selected: !store.homeOpen && store.currentConversation == c.identityId),
             ],
           ]),
         ),
@@ -261,140 +261,6 @@ class Fab extends StatelessWidget {
         ),
       ),
     ),
-    );
-  }
-}
-
-class ConversationRow extends StatelessWidget {
-  const ConversationRow({super.key, required this.c, this.compact = false, this.selected = false, this.pinned = false, this.quiet = false, this.opened = const []});
-  final ConversationSummary c;
-
-  /// The open tasks this one opened (#128): a line under the row ("3 משימות · 2 רצות · 1 בתור") that opens the list.
-  final List<OpenTask> opened;
-  final bool compact;
-  final bool selected;
-
-  /// Pinned at the top of the main screen (Yoav): a pin before the time, as in WhatsApp.
-  final bool pinned;
-
-  /// Two lines, as in WhatsApp (the main screen, #53): the status line only when it needs him
-  /// (מחכה לך, חסום, תקוע). "פנוי" and "נח" under every name said nothing.
-  final bool quiet;
-
-  @override
-  Widget build(BuildContext context) {
-    final store = StoreScope.of(context);
-    final d = store.data!;
-    final p = context.p;
-    final who = d.who(c.identityId);
-    final pr = d.presence[c.identityId] ?? const Presence(status: WorkerStatus.free);
-    final title = d.roleLine(c.identityId, short: compact);
-    // A finished task worker: the task it did is the second line, under "הושלם" (#40).
-    final done = d.isDone(c.identityId);
-    final task = done ? pr.activity : null;
-    final statusLine = Row(children: [
-      Flexible(child: StatusWord.of(pr, who.gender, withActivity: pr.status == WorkerStatus.working && !compact)),
-      if (c.diffStat != null) ...[const SizedBox(width: 6), DiffStat(c.diffStat!)],
-      if (c.extra != null && !compact) ...[const SizedBox(width: 6), Text(c.extra!, style: T.small.copyWith(color: p.text2))],
-    ]);
-    final draft = (d.chats[c.identityId]?.draft ?? '').trim();
-    final unread = c.unread > 0;
-    final pill = unread ? UnreadPill(c.unread, muted: c.muted) : null;
-    // The pill sits at the end of the last line, as in WhatsApp; rows without one carry it on the status line.
-    final lineShown = !compact && (task == null || task.isEmpty) && draft.isEmpty && c.lastLine.isNotEmpty;
-    final status = Row(children: [
-      Expanded(child: statusLine),
-      if (pill != null && !lineShown) ...[const SizedBox(width: 6), pill],
-    ]);
-    return Semantics(
-      button: true,
-      label: [
-        who.name, title, statusWord(pr.status, who.gender),
-        if (unread) c.unread == 1 ? 'הודעה אחת שלא נקראה' : '${c.unread} הודעות שלא נקראו',
-        if (c.muted) 'מושתקת',
-      ].join(', '),
-      child: Material(
-        color: selected ? p.surface2 : p.surface,
-        child: InkWell(
-          onTap: () => Nav.chat(context, c.identityId),
-          onLongPress: () => pickMute(context, c.identityId),
-          child: Padding(
-            padding: compact ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10) : const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Monogram.of(d, c.identityId, size: compact ? AvSize.sm : AvSize.md),
-              SizedBox(width: compact ? 12 : 12),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-                    Text(who.name, style: T.name.copyWith(color: p.text)),
-                    if (c.muted) ...[const SizedBox(width: 4), Ic('notifications_off', size: 16, color: p.text3, semantic: 'מושתקת')],
-                    const SizedBox(width: 6),
-                    Expanded(child: Rich(title, maxLines: 1, style: T.secondary.copyWith(color: p.text2))),
-                    const SizedBox(width: 6),
-                    if (pinned) ...[Ic('push_pin', size: 15, color: p.text3, semantic: 'מוצמד'), const SizedBox(width: 4)],
-                    Text(c.time, style: T.meta.copyWith(color: unread && !c.muted ? p.text : p.text3, fontWeight: unread && !c.muted ? FontWeight.w700 : null)),
-                  ]),
-                  // v2 desktop column: two lines, as on the phone (audit #27): what needs him, else the last
-                  // line, else the status. The open-tasks count lives in the project screen.
-                  if (compact && kDesignV2)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: !statusLoud(pr.status) && c.lastLine.isNotEmpty
-                          ? Row(children: [
-                              Expanded(child: Rich(c.lastLine, auto: true, maxLines: 1, style: T.small.copyWith(fontWeight: unread ? FontWeight.w500 : null, color: c.lastIsMine || unread ? p.text : p.text2))),
-                              if (pill != null) ...[const SizedBox(width: 8), pill],
-                            ])
-                          : status,
-                    )
-                  // A draft left in the chat shows instead of the last line, as in WhatsApp.
-                  else if (!compact && task != null && task.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Rich(task, auto: true, maxLines: 1, style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text2)),
-                    )
-                  else if (!compact && draft.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text.rich(
-                        TextSpan(children: [
-                          TextSpan(text: 'טיוטה: ', style: TextStyle(color: p.accent, fontWeight: FontWeight.w700)),
-                          // Isolated, so an English draft keeps its own punctuation where it belongs.
-                          const TextSpan(text: kFSI),
-                          ...Rich.spans(context, draft.split('\n').first, TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text2), links: false),
-                          const TextSpan(text: kPDI),
-                        ]),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text2),
-                      ),
-                    )
-                  else if (!compact && c.lastLine.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Row(children: [
-                        Expanded(
-                          child: Rich(c.lastLine,
-                              auto: true,
-                              maxLines: 1,
-                              // Unread: the line stands out, the way WhatsApp makes the row bold.
-                              style: TextStyle(
-                                  fontFamily: kFont,
-                                  fontSize: 14.5,
-                                  height: 1.45,
-                                  fontWeight: unread ? FontWeight.w500 : null,
-                                  color: c.lastIsMine || unread ? p.text : p.text2)),
-                        ),
-                        if (pill != null) ...[const SizedBox(width: 8), pill],
-                      ]),
-                    ),
-                  if (opened.isNotEmpty && !(compact && kDesignV2)) Padding(padding: const EdgeInsets.only(top: 2), child: OpenTasksLine(identityId: c.identityId, tasks: opened)),
-                  if (!(compact && kDesignV2) && (!quiet || statusLoud(pr.status) || (pill != null && !lineShown))) Padding(padding: const EdgeInsets.only(top: 4), child: status),
-                ]),
-              ),
-            ]),
-          ),
-        ),
-      ),
     );
   }
 }

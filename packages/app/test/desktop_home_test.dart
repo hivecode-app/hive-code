@@ -5,6 +5,7 @@ import 'package:agent_company/model/home_recipe.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/blocks/blocks.dart';
 import 'package:agent_company/ui/chat/items.dart' show shortcutAsk;
+import 'package:agent_company/ui/common.dart' show Ic;
 import 'package:agent_company/ui/convs/conversations_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -33,11 +34,28 @@ void _quiet(AppStore store) {
   store.touch();
 }
 
+/// What he wrote last, with each delivery state the row has a tick for: sent, delivered, read (the demo's rows carry none).
+void _mine(AppStore store) {
+  const ticks = {'rotem': Delivery.queued, 'amit': Delivery.delivered, 'ido': Delivery.read};
+  final d = store.data!;
+  final next = [
+    for (final c in d.conversations)
+      ticks.containsKey(c.identityId)
+          ? ConversationSummary(identityId: c.identityId, lastLine: c.lastLine, text: c.lastLine, time: c.time, lastIsMine: true, unread: c.unread, delivery: ticks[c.identityId])
+          : c,
+  ];
+  d.conversations
+    ..clear()
+    ..addAll(next);
+  store.touch();
+}
+
 void main() {
   for (final dark in [false, true]) {
     final t = dark ? 'dark' : 'light';
     testWidgets('desktop: the app opens on the home, something waits ($t)', (tester) async {
       final store = await pumpApp(tester, dark: dark, size: _desktop);
+      _mine(store);
       await tester.pumpAndSettle();
       expect(store.homeOpen, isTrue);
       expect(find.byType(HomeV2Page), findsOneWidget);
@@ -49,6 +67,7 @@ void main() {
 
     testWidgets('desktop: the home when nothing waits, with "שקט גם ב:" ($t)', (tester) async {
       final store = await pumpApp(tester, dark: dark, size: _desktop);
+      _mine(store);
       _quiet(store);
       await tester.pumpAndSettle();
       expect(find.byType(WaitingBlock), findsNothing);
@@ -60,10 +79,23 @@ void main() {
     });
   }
 
+  testWidgets('desktop: the list is 360 wide and its rows are the phone\'s (his own last line with the ticks, "· team")', (tester) async {
+    final store = await pumpApp(tester, size: _desktop);
+    await tester.pumpAndSettle();
+    _mine(store);
+    await tester.pumpAndSettle();
+    final row = find.byWidgetPredicate((w) => w is ConversationRowV2 && w.c.identityId == 'amit');
+    expect(row, findsOneWidget);
+    expect(tester.getSize(find.ancestor(of: row, matching: find.byType(ListView)).first).width, closeTo(360, 1), reason: '360 with its 1px edge');
+    expect(find.descendant(of: row, matching: find.textContaining('אתה: ', findRichText: true)), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.byWidgetPredicate((w) => w is Ic && const ['schedule', 'done', 'done_all'].contains(w.name))), findsOneWidget);
+    expect(find.byType(ConversationRowV2), findsWidgets);
+  });
+
   testWidgets('desktop: a conversation closes the home, and its row opens it again', (tester) async {
     final store = await pumpApp(tester, size: _desktop);
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(ConversationRow).first);
+    await tester.tap(find.byType(ConversationRowV2).first);
     await tester.pumpAndSettle();
     expect(store.homeOpen, isFalse);
     expect(find.byType(HomeV2Page), findsNothing);

@@ -1,4 +1,4 @@
-// Desktop (APP-SPEC §8, mockup screen 10): rail 72 · list 300 · main · context 330 (from 1280px),
+// Desktop (APP-SPEC §8, mockup screen 10): rail 72 · list 360 · main · context 330 (from 1280px),
 // a hint bar of shortcuts, and the keyboard map of §8.2 on physical keys (works with a Hebrew layout).
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -259,8 +259,8 @@ class _DesktopFrameState extends State<DesktopFrame> {
               ]),
             ),
             Container(
-              // v2: the chats column holds the home over two-line rows, and takes the projects column's width.
-              width: nav.tab == AppTab.chats && !kDesignV2 ? 300 : 380,
+              // The chats column holds the home over the phone's two-line rows (convs_v2.dart), 360 wide.
+              width: nav.tab == AppTab.chats ? 360 : 380,
               decoration: BoxDecoration(color: p.bg, border: BorderDirectional(end: BorderSide(color: p.line))),
               child: list,
             ),

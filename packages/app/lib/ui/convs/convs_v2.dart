@@ -323,10 +323,13 @@ class HomeBarV2 extends StatelessWidget {
 /// time; then the last line, his own as "אתה: " after the ticks. A third line only when the state says
 /// something (מחכה לך, עובד, חסום, תקוע). Name and time are never cut (T1); the rest only between words (T2).
 class ConversationRowV2 extends StatelessWidget {
-  const ConversationRowV2({super.key, required this.c, required this.now, this.pinned = false});
+  const ConversationRowV2({super.key, required this.c, required this.now, this.pinned = false, this.selected = false});
   final ConversationSummary c;
   final DateTime now;
   final bool pinned;
+
+  /// The conversation open beside the list (the desktop): one step darker, as the home's row is.
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -343,7 +346,7 @@ class ConversationRowV2 extends StatelessWidget {
     final line = plainLine(draft.isNotEmpty ? draft.split('\n').first : (c.text ?? c.lastLine));
     final mine = draft.isEmpty && c.delivery != null;
     final working = pr.status == WorkerStatus.working;
-    final showStatus = statusLoud(pr.status) || working;
+    final showStatus = statusLoud(pr.status) || working || d.isDone(c.identityId);
     final lineStyle = T.row2.copyWith(color: unread ? p.text : p.text2, fontWeight: unread ? FontWeight.w500 : null);
     final (String tick, Color tickColor, String tickWord) = switch (c.delivery) {
       Delivery.read || Delivery.handled => ('done_all', p.read, 'נקרא'),
@@ -365,8 +368,9 @@ class ConversationRowV2 extends StatelessWidget {
         if (pinned) 'מוצמדת',
       ].join(', '),
       excludeSemantics: true,
+      selected: selected,
       child: Material(
-        color: p.surface,
+        color: selected ? p.surface2 : p.surface,
         child: InkWell(
           onTap: () => Nav.chat(context, c.identityId),
           onLongPress: () => pickMute(context, c.identityId),

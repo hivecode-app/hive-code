@@ -29,7 +29,7 @@ void main() {
     for (final live in ['יואב', 'רותם', 'דנה']) {
       expect(rowY(tester, 'עידו'), greaterThan(rowY(tester, live)), reason: live);
     }
-    final row = find.ancestor(of: find.text('עידו'), matching: find.byType(ConversationRow));
+    final row = find.ancestor(of: find.text('עידו'), matching: find.byType(ConversationRowV2));
     expect(find.descendant(of: row, matching: find.text('הושלם')), findsOneWidget);
     // The icon is check_circle (company.md: הושלם), never a colour.
     final icons = find.descendant(of: row, matching: find.byType(Ic)).evaluate().map((e) => (e.widget as Ic).name).toList();
@@ -56,8 +56,9 @@ void main() {
 
   testWidgets('every row says the team: a task worker shows its project, not its task id', (tester) async {
     await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen(compact: true)));
-    expect(findShown('מפתח · לומו'), findsWidgets);
-    expect(findShown('מנהל החברה · הנהלה'), findsOneWidget);
+    // The phone's row (task 290): the name, then "· team".
+    expect(findShown('· לומו'), findsWidgets);
+    expect(findShown('· הנהלה'), findsOneWidget);
     expect(findShown('t3711'), findsNothing);
   });
 }

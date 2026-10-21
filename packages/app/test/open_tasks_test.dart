@@ -4,6 +4,7 @@
 import 'dart:convert';
 
 import 'package:agent_company/data/hq_backend.dart' show mapSnapshot;
+import 'package:agent_company/data/store.dart';
 import 'package:agent_company/model/home_recipe.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/blocks/blocks.dart';
@@ -88,15 +89,18 @@ void main() {
     expect(Lane.fromJson(jsonDecode(jsonEncode(lane.toJson())) as Map<String, dynamic>).queued, ['דוח שבועי']);
   });
 
-  // The phone's rows have no such line since task 205 (נועה, 21/10); the wide screen's list keeps it.
-  testWidgets('wide screen: the line under Yoav opens what he opened; a tap on a running one opens its worker', (tester) async {
-    final store = await pumpApp(tester, home: const Scaffold(body: ConversationsScreen(compact: true)), size: const Size(342, 1100));
+  // No chats list has this line since the desktop's rows became the phone's (task 290); the line and its sheet stay as a block.
+  testWidgets('the line under Yoav opens what he opened; a tap on a running one opens its worker', (tester) async {
+    final store = await pumpApp(tester, home: Scaffold(body: Builder(builder: (context) {
+      final d = StoreScope.of(context).data!;
+      final opened = openedTasks(d);
+      return Column(children: [for (final id in ['yoav', 'dana']) OpenTasksLine(identityId: id, tasks: opened[id] ?? const [])]);
+    })), size: const Size(342, 1100));
     store.data!.openTasks = _tasks();
     store.touch();
     await tester.pumpAndSettle();
     final lines = {for (final w in tester.widgetList<OpenTasksLine>(find.byType(OpenTasksLine))) w.identityId: openTasksLine(w.tasks)};
     expect(lines, {'yoav': '3 משימות · אחת רצה · אחת מחכה לך · 1 בתור', 'dana': 'חסומה: החלטה על מחירים'});
-    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/blocks/open-tasks-chats.png'));
 
     await tester.tap(find.byWidgetPredicate((w) => w is OpenTasksLine && w.identityId == 'yoav'));
     await tester.pumpAndSettle();
@@ -112,14 +116,6 @@ void main() {
     expect(tester.widget<ChatScreen>(find.byType(ChatScreen)).identityId, 'noa');
   });
 
-  testWidgets('wide screen: the compact list has the line too', (tester) async {
-    final store = await pumpApp(tester, home: const Scaffold(body: ConversationsScreen(compact: true)), size: const Size(342, 1100));
-    store.data!.openTasks = _tasks();
-    store.touch();
-    await tester.pumpAndSettle();
-    expect({for (final w in tester.widgetList<OpenTasksLine>(find.byType(OpenTasksLine))) w.identityId}, containsAll(['yoav', 'dana']));
-  });
-
   testWidgets('a task a task worker opened (open_team) goes under the one who opened that worker\'s task', (tester) async {
     final store = await pumpApp(tester, home: const Scaffold(body: ConversationsScreen(compact: true)), size: const Size(342, 1100));
     final d = store.data!;
@@ -130,8 +126,7 @@ void main() {
     ];
     store.touch();
     await tester.pumpAndSettle();
-    final lines = {for (final w in tester.widgetList<OpenTasksLine>(find.byType(OpenTasksLine))) w.identityId: w.tasks.map((t) => t.id).toList()};
-    expect(lines, {'yoav': [1, 2]});
+    expect({for (final e in openedTasks(d).entries) e.key: e.value.map((t) => t.id).toList()}, {'yoav': [1, 2]});
   });
 
   testWidgets('"סטטוס": "בעבודה ובתור" at the top, every open task with who opened it', (tester) async {
