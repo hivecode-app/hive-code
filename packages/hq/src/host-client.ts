@@ -29,7 +29,7 @@ export interface HostConnection extends EventEmitter<HostClientEvents> {
   readonly connected: boolean;
   readonly isLive: boolean;
   info: HostInfo | null;
-  send(msgId: string, text: string, priority: Priority, retry?: boolean): Promise<SendReply | null>;
+  send(msgId: string, text: string, priority: Priority, retry?: boolean, opts?: { stopIfSafe?: boolean }): Promise<SendReply | null>;
   interrupt(): Promise<void>;
   stop(reason: string, graceMs?: number): Promise<void>;
   ping(timeoutMs?: number): Promise<boolean>;
@@ -131,8 +131,10 @@ export class HostClient extends EventEmitter<HostClientEvents> implements HostCo
     return r.t === 'reply' ? r.data : r;
   }
 
-  async send(msgId: string, text: string, priority: Priority, retry = false): Promise<SendReply | null> {
-    const data = await this.ok({ t: 'send', msgId, text, priority, ...(retry ? { retry: true } : {}) });
+  async send(msgId: string, text: string, priority: Priority, retry = false, opts: { stopIfSafe?: boolean } = {}): Promise<SendReply | null> {
+    // A stop waits on claude's interrupt (up to 10s in the adapter) before the line is written.
+    const data = await this.ok({ t: 'send', msgId, text, priority, ...(retry ? { retry: true } : {}), ...(opts.stopIfSafe ? { stopIfSafe: true } : {}) },
+      opts.stopIfSafe ? 15_000 : undefined);
     return data && typeof data === 'object' && 'state' in data ? (data as SendReply) : null;
   }
   async interrupt(): Promise<void> { await this.ok({ t: 'interrupt' }); }

@@ -495,7 +495,7 @@ class _PriorityMenu extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
           child: Text('$name באמצע עבודה. מתי למסור?', style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: p.text2)),
         ),
-        opt(Priority.now, 'עכשיו', 'עוצר ${female ? 'אותה' : 'אותו'} באמצע הצעד. זה מה שקורה בנגיעה רגילה.', sel: true),
+        opt(Priority.now, 'עכשיו', 'עוצר ${female ? 'אותה' : 'אותו'} באמצע הצעד, אם בטוח לעצור. זה מה שקורה בנגיעה רגילה.', sel: true),
         opt(Priority.next, 'אחרי הצעד הנוכחי', '${female ? 'היא מסיימת' : 'הוא מסיים'} את הצעד, ואז קורא${female ? 'ת' : ''}'),
         opt(Priority.later, 'בסוף התור', 'אחרי כל מה שכבר מחכה ${female ? 'אצלה' : 'אצלו'}'),
       ]),

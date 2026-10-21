@@ -38,7 +38,7 @@ void main() {
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/chat_ido_open.png'));
   });
 
-  testWidgets('a plain tap while busy stops her and delivers now: no "בתור" on the bubble', (tester) async {
+  testWidgets('a plain tap while busy sends now: no "בתור" on the bubble', (tester) async {
     final store = await pumpApp(tester, size: const Size(342, 1500), home: const ChatScreen(identityId: 'dana'));
     final chat = store.data!.chats['dana']!;
     // With her GO open the text would answer it (the next test): close it first, as after a GO.
@@ -86,6 +86,78 @@ void main() {
     await tester.pump();
     expect(chat.items.contains(sent), isFalse);
     expect(find.text('ושגם ה-web יקבל את התיקון'), findsOneWidget);
+  });
+
+  testWidgets('his message waiting on a tool says on what, never "בתור"; after 3 minutes, how long and "עצירה עכשיו"', (tester) async {
+    final store = await pumpApp(tester, size: const Size(342, 1500), home: const ChatScreen(identityId: 'noa'));
+    final chat = store.data!.chats['noa']!;
+    final msg = UserMsg(id: 'w1', ts: kDemoNow, text: 'תעצרי רגע', priority: Priority.now, delivery: Delivery.delivered,
+        waitingOn: WaitingOn(tool: 'Bash', command: 'cd packages/app && npm run build', since: kDemoNow.subtract(const Duration(minutes: 1))));
+    chat.items.add(msg);
+    store.touch();
+    await tester.pump();
+    expect(find.textContaining('נכנסת כשהפקודה', findRichText: true), findsOneWidget);
+    expect(find.textContaining('npm run build', findRichText: true), findsOneWidget);
+    expect(find.textContaining('בתור', findRichText: true), findsNothing);
+    expect(find.text('עצירה עכשיו'), findsNothing);
+
+    // Long on one tool: how long it has run, and the chat's stop (with its confirm mid-command).
+    chat.live = const LiveState(phase: LivePhase.tool, label: 'מריצה פריסה', runningCommand: 'bash deploy/hq.sh');
+    msg.waitingOn = WaitingOn(tool: 'Bash', command: 'bash deploy/hq.sh', since: kDemoNow.subtract(const Duration(minutes: 4)));
+    store.touch();
+    await tester.pump();
+    expect(find.textContaining('נכנסת כשהפריסה תסתיים · כבר 4 דק׳', findRichText: true), findsOneWidget);
+    expect(find.textContaining('כבר 4 דק׳ ·', findRichText: true), findsNothing, reason: 'no dot left hanging before the link');
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/chat_noa_waiting.png'));
+    await tester.tap(find.text('עצירה עכשיו'));
+    await tester.pump();
+    expect(find.textContaining('לעצור באמצע', findRichText: true), findsOneWidget);
+    await tester.tap(find.text('המשך'));
+    await tester.pump();
+
+    // Read: the line goes.
+    msg.delivery = Delivery.read;
+    store.touch();
+    await tester.pump();
+    expect(find.textContaining('נכנסת כש', findRichText: true), findsNothing);
+  });
+
+  testWidgets('the waiting line at text scale 1.3 with a long command still fits the phone', (tester) async {
+    final store = await pumpApp(tester, size: const Size(342, 900), textScale: 1.3, home: const ChatScreen(identityId: 'noa'));
+    final chat = store.data!.chats['noa']!;
+    chat.live = const LiveState(phase: LivePhase.tool, label: 'מריצה מיגרציה', runningCommand: 'node scripts/migrate-attachments-to-uploads.mjs --all');
+    chat.items.add(UserMsg(id: 'w2', ts: kDemoNow, text: 'תעצרי רגע', priority: Priority.now, delivery: Delivery.delivered,
+        waitingOn: WaitingOn(tool: 'Bash', command: 'node scripts/migrate-attachments-to-uploads.mjs --all', since: kDemoNow.subtract(const Duration(minutes: 5)))));
+    store.touch();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.text('עצירה עכשיו'), findsOneWidget);
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/chat_noa_waiting_long.png'));
+  });
+
+  testWidgets('a tool that ran past a minute shows m:ss, not 0:240', (tester) async {
+    final store = await pumpApp(tester, home: const ChatScreen(identityId: 'noa'));
+    store.data!.chats['noa']!.live = const LiveState(phase: LivePhase.tool, label: 'מריצה בדיקות', seconds: 240);
+    store.touch();
+    await tester.pump();
+    expect(find.textContaining('מריצה בדיקות · 4:00', findRichText: true), findsOneWidget);
+  });
+
+  test('what a message waits for, in his words', () {
+    WaitingOn w(String tool, [String? cmd]) => WaitingOn(tool: tool, command: cmd, since: kDemoNow);
+    expect(waitingWhat(w('Bash', 'npm test 2>&1 | tail')), ('הפקודה `npm test`', true));
+    expect(waitingWhat(w('Bash', 'kubectl apply -f x.yaml')), ('הפריסה', true));
+    expect(waitingWhat(w('Bash', 'git push origin HEAD --force-with-lease --no-verify')).$1, 'הפקודה `git push origin HEAD --…`');
+    expect(waitingWhat(w('Edit')), ('העריכה', true));
+    expect(waitingWhat(w('Agent')), ('סוכן המשנה', false));
+    expect(waitingWhat(w('mcp__company__tell')), ('הכלי `tell`', false));
+  });
+
+  test('waiting_on from hq', () {
+    final p = WaitingOn.parse({'tool': 'Bash', 'command': 'npm test', 'since': '2026-10-21T06:00:00.000Z'})!;
+    expect((p.tool, p.command, p.since.toUtc().hour), ('Bash', 'npm test', 6));
+    expect(WaitingOn.parse(null), isNull);
+    expect(WaitingOn.parse({'tool': 'Bash'}), isNull);
   });
 
   testWidgets('long press on send offers when to deliver', (tester) async {

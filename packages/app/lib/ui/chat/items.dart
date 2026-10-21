@@ -1,5 +1,7 @@
 // Every chat item kind (chat.md §2), one widget each, matching the mockup's chat classes:
 // .b (bubbles), .tool, .card (diff, tests, terminal, PR, ask, GO), .svc (service lines).
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -95,11 +97,14 @@ class _WithMeta extends StatelessWidget {
 // ───────────────────────────── user / text ─────────────────────────────
 
 class UserBubble extends StatelessWidget {
-  const UserBubble({super.key, required this.msg, required this.identityId, this.onRetract, this.onRetry});
+  const UserBubble({super.key, required this.msg, required this.identityId, this.onRetract, this.onRetry, this.onStopNow});
   final UserMsg msg;
   final String identityId;
   final VoidCallback? onRetract;
   final VoidCallback? onRetry;
+
+  /// "עצירה עכשיו" under a message that has waited on one tool for long (the chat's stop, with its confirm).
+  final VoidCallback? onStopNow;
 
   @override
   Widget build(BuildContext context) {
@@ -120,8 +125,11 @@ class UserBubble extends StatelessWidget {
       queued: msg.delivery == Delivery.queued,
       child: _WithMeta(meta: Meta(time: hm(msg.ts), delivery: msg.delivery), end: markdownEndDirection(msg.text), child: images.isEmpty ? body : IntrinsicWidth(child: body)), // as wide as the image (or the text), WhatsApp
     );
+    final waiting = msg.waitingOn;
     final under = switch (msg.delivery) {
-      // His default `now` is on its way this second (hq stops the worker for it): no "בתור" line.
+      // His `now` waits for one running tool only: the line says which, never "בתור".
+      Delivery.queued || Delivery.delivered when waiting != null => WaitLine(waiting: waiting, onStop: onStopNow),
+      // Otherwise his `now` is on its way this second: no line.
       Delivery.queued when msg.priority == Priority.now => null,
       Delivery.queued => _QLine(
           text: 'בתור · ${msg.priority == Priority.later ? 'בסוף התור' : 'אחרי הצעד הנוכחי'} · ',
@@ -280,6 +288,86 @@ class _ImageViewerState extends State<ImageViewer> {
           ]),
         ),
       );
+}
+
+/// What the tool a message waits for is called in the line under it: (the noun, is it feminine).
+(String, bool) waitingWhat(WaitingOn w) {
+  final cmd = w.command;
+  if (w.tool == 'Bash' && cmd != null) {
+    if (RegExp(r'\b(deploy|kubectl\s+apply|helm\s+(upgrade|install))\b').hasMatch(cmd)) return ('הפריסה', true);
+    var first = cmd.trim().split(RegExp(r'&&|\|\||[;|\n]')).map((s) => s.trim()).firstWhere((s) => s.isNotEmpty && !s.startsWith('cd '), orElse: () => cmd.trim())
+        .replaceAll(RegExp(r'\s*(\d?>&\d|\d?>\s*/dev/null)'), '');
+    if (first.length > 24) first = '${first.substring(0, 23)}…';
+    return ('הפקודה `$first`', true);
+  }
+  if (w.tool == 'Bash') return ('הפקודה', true);
+  if (w.tool == 'Edit' || w.tool == 'Write' || w.tool == 'NotebookEdit') return ('העריכה', true);
+  if (w.tool == 'Agent' || w.tool == 'Task') return ('סוכן המשנה', false);
+  final name = w.tool.startsWith('mcp__') ? w.tool.split('__').last : w.tool;
+  return ('הכלי `$name`', false);
+}
+
+/// After this long on one tool the line shows how long, and offers to stop it.
+const kLongWait = Duration(minutes: 3);
+
+/// The line under his message while it waits for the running tool: "נכנסת כשהפקודה `npm test` תסתיים".
+class WaitLine extends StatefulWidget {
+  const WaitLine({super.key, required this.waiting, this.onStop});
+  final WaitingOn waiting;
+  final VoidCallback? onStop;
+  @override
+  State<WaitLine> createState() => _WaitLineState();
+}
+
+class _WaitLineState extends State<WaitLine> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 20), (_) => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final (what, f) = waitingWhat(widget.waiting);
+    final ran = CompanyTime.now().difference(widget.waiting.since);
+    final long = ran >= kLongWait;
+    final style = TextStyle(fontFamily: kFont, fontSize: 12, height: 1.5, color: p.text2);
+    return Align(
+      alignment: AlignmentDirectional.centerEnd,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
+        // No "·" before the link: when the link wraps to its own line, a dot would be left hanging (design review).
+        child: Wrap(alignment: WrapAlignment.end, crossAxisAlignment: WrapCrossAlignment.center, spacing: 10, children: [
+          Rich('נכנסת כש$what ${f ? 'תסתיים' : 'יסתיים'}${long ? ' · כבר ${ran.inMinutes} דק׳' : ''}', style: style),
+          if (long && widget.onStop != null)
+            Semantics(
+              button: true,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: widget.onStop,
+                // A 48px target around a 12px link (design review, #168).
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+                  child: Center(
+                    widthFactor: 1,
+                    child: Text('עצירה עכשיו', style: style.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
 }
 
 class _QLine extends StatelessWidget {
@@ -1250,7 +1338,7 @@ class LiveIndicator extends StatelessWidget {
       LivePhase.idle || LivePhase.writing => (null, null, false),
       LivePhase.starting => ('check', live.label ?? 'נמסר · $name ${f ? 'מתחילה' : 'מתחיל'}…', false),
       LivePhase.thinking => (null, "${f ? 'חושבת' : 'חושב'}${live.seconds != null ? " · ${live.seconds} שנ'" : ''}", false),
-      LivePhase.tool => ('progress_activity', '${live.label ?? (f ? 'עובדת' : 'עובד')}${live.seconds != null ? ' · 0:${live.seconds.toString().padLeft(2, '0')}' : ''}', true),
+      LivePhase.tool => ('progress_activity', '${live.label ?? (f ? 'עובדת' : 'עובד')}${live.seconds != null ? ' · ${live.seconds! ~/ 60}:${(live.seconds! % 60).toString().padLeft(2, '0')}' : ''}', true),
       LivePhase.compacting => ('progress_activity', 'מסדר את הזיכרון', true),
       LivePhase.stopped => ('stop_circle', '${f ? 'נעצרה' : 'נעצר'} · ${live.stoppedAt ?? ''}', false),
     };

@@ -2,6 +2,8 @@
 // Minimal stand-in for `claude -p --input-format stream-json ...` (wire shapes
 // as observed on 2.1.303). Replies "ECHO:<text>" to each user line, one turn at
 // a time, honoring the queue. FAKE_CLAUDE_TURN_MS slows a turn down.
+// `TOOL {"name":"Bash","input":{...},"ms":N}` runs one tool for N ms first. As measured on 2.1.289, a `now`
+// line queued meanwhile ends the turn right after the tool (before the next step), and an interrupt cuts it.
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 
@@ -34,6 +36,18 @@ function runNext() {
   const text = 'ECHO:' + (typeof m.message.content === 'string' ? m.message.content : '');
   out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } });
   if (dieMidTurn) { setTimeout(() => process.exit(3), 30); return; }
+  const content = typeof m.message.content === 'string' ? m.message.content : '';
+  if (content.startsWith('TOOL ')) {
+    const tool = JSON.parse(content.slice(5));
+    const id = 'toolu_' + m.uuid.slice(0, 8);
+    out({ type: 'assistant', message: { id: 'msg_t' + m.uuid.slice(0, 8), role: 'assistant', content: [{ type: 'tool_use', id, name: tool.name, input: tool.input }] } });
+    m.timer = setTimeout(() => {
+      out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok', is_error: false }] }, parent_tool_use_id: null });
+      if (queue[0]?.priority === 'now') return endTurn(m, '');
+      m.timer = setTimeout(() => endTurn(m, text), turnMs);
+    }, tool.ms ?? 50);
+    return;
+  }
   m.timer = setTimeout(() => {
     out({ type: 'assistant', message: { id: 'msg_' + m.uuid.slice(0, 8), role: 'assistant', content: [{ type: 'text', text }] } });
     out({ type: 'result', subtype: 'success', is_error: false, result: text, num_turns: 1, total_cost_usd: 0,
@@ -42,6 +56,15 @@ function runNext() {
     busy = false; current = null;
     runNext();
   }, turnMs);
+}
+
+function endTurn(m, text) {
+  if (text) out({ type: 'assistant', message: { id: 'msg_' + m.uuid.slice(0, 8), role: 'assistant', content: [{ type: 'text', text }] } });
+  out({ type: 'result', subtype: 'success', is_error: false, result: text, num_turns: 2, total_cost_usd: 0,
+    modelUsage: { 'fake-haiku': { contextWindow: 200000 } } });
+  out({ type: 'command_lifecycle', command_uuid: m.uuid, state: 'completed', uuid: randomUUID() });
+  busy = false; current = null;
+  runNext();
 }
 
 const rl = createInterface({ input: process.stdin });
@@ -63,6 +86,7 @@ rl.on('line', (line) => {
         clearTimeout(current.timer);
         out({ type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 1 });
         busy = false; current = null;
+        setImmediate(runNext);
       }
     }
     out({ type: 'control_response', response: { subtype: 'success', request_id: o.request_id, response } });

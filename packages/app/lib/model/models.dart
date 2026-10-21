@@ -308,6 +308,7 @@ class UserMsg extends ChatItem {
     this.priority = Priority.next,
     this.replyTo,
     this.attachments = const [],
+    this.waitingOn,
     super.seq,
   });
   String text;
@@ -315,8 +316,30 @@ class UserMsg extends ChatItem {
   Priority priority;
   final Quote? replyTo;
 
+  /// His `now` waits for this running tool (one that is not safe to stop), until the worker reads it.
+  WaitingOn? waitingOn;
+
   /// Images sent with the message. Replaced by the uploaded ones (with hq ids) once they are up.
   List<Attachment> attachments;
+}
+
+/// The tool a message waits for (hq `waiting_on`): the bubble says what, and for how long.
+class WaitingOn {
+  const WaitingOn({required this.tool, this.command, required this.since});
+  final String tool;
+
+  /// Bash: the command line.
+  final String? command;
+  final DateTime since;
+
+  static WaitingOn? parse(Object? o) {
+    if (o is! Map) return null;
+    final since = DateTime.tryParse('${o['since']}');
+    final tool = o['tool'];
+    if (since == null || tool is! String) return null;
+    final cmd = o['command'];
+    return WaitingOn(tool: tool, command: cmd is String ? cmd : null, since: since);
+  }
 }
 
 class Quote {

@@ -142,9 +142,19 @@ export interface ContextReply {
   maxTokens: number | null;
   raw: unknown;
 }
+/** The tool a `now` waits for: it was not safe to stop (shift-host safe-tools.ts), so the line goes in when it ends. */
+export interface WaitingOn {
+  tool: string;
+  /** Bash: the command line. */
+  command?: string;
+  /** When the tool started (ISO). */
+  since: string;
+}
 export interface SendReply {
   uuid: string;
   state: DeliveryState;
+  /** Set when the send asked to stop the worker and a running tool was not safe to stop. */
+  waitingOn?: WaitingOn;
 }
 
 /** written: on stdin. delivered: CLI accepted it (command_lifecycle queued).
@@ -156,7 +166,9 @@ export type DeliveryState = 'written' | 'delivered' | 'started' | 'completed' | 
 
 export type HqToHost =
   | { t: 'hello'; v: number; client: string; logId: string | null; since: number }
-  | { t: 'send'; id: string; msgId: string; text: string; priority: Priority; retry?: boolean }
+  /** stopIfSafe (with `now`): stop the running turn first when every running tool is safe to cut; else the
+   *  reply says which tool the line waits for. A host that predates it ignores it: no stop, never a wrong one. */
+  | { t: 'send'; id: string; msgId: string; text: string; priority: Priority; retry?: boolean; stopIfSafe?: boolean }
   | { t: 'interrupt'; id: string }
   | { t: 'usage'; id: string }           // control_request get_usage
   | { t: 'context'; id: string }         // control_request get_context_usage

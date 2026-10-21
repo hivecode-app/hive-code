@@ -39,7 +39,9 @@ export class ShiftDisk {
  */
 export class FakeHost {
   server: Server;
-  sent: { msgId: string; text: string; priority: string; retry: boolean }[] = [];
+  sent: { msgId: string; text: string; priority: string; retry: boolean; stopIfSafe: boolean }[] = [];
+  /** What a real host would say the next `stopIfSafe` send waits for (an unsafe tool running). */
+  waitingOn: Record<string, unknown> | null = null;
   received: HqToHost[] = [];
   clients = new Set<Socket>();
   sockets = new Set<Socket>();
@@ -122,10 +124,10 @@ export class FakeHost {
             break;
           }
           const uuid = randomUUID();
-          this.sent.push({ msgId: f.msgId, text: f.text, priority: f.priority, retry: f.retry === true });
+          this.sent.push({ msgId: f.msgId, text: f.text, priority: f.priority, retry: f.retry === true, stopIfSafe: f.stopIfSafe === true });
           this.disk.delivered.set(f.msgId, { uuid, state: 'written' });
           this.push({ t: 'delivery', ts: this.iso(), msgId: f.msgId, uuid, state: 'written' } as Omit<LoggedFrame, 'seq'>);
-          write({ t: 'reply', re: f.id, ok: true, data: { uuid, state: 'written' } });
+          write({ t: 'reply', re: f.id, ok: true, data: { uuid, state: 'written', ...(f.stopIfSafe && this.waitingOn ? { waitingOn: this.waitingOn } : {}) } });
           if (this.mode === 'echo') {
             this.disk.delivered.set(f.msgId, { uuid, state: 'delivered' });
             this.push({ t: 'delivery', ts: this.iso(), msgId: f.msgId, uuid, state: 'delivered' } as Omit<LoggedFrame, 'seq'>);

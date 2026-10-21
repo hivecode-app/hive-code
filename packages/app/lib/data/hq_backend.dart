@@ -663,6 +663,7 @@ class HqBackend extends Backend {
       final m = chat?.items.whereType<UserMsg>().where((m) => m.id == data['id']).firstOrNull;
       if (m != null) {
         m.delivery = mapDelivery(data['state'] as String?);
+        m.waitingOn = WaitingOn.parse(data['waiting_on']) ?? m.waitingOn;
         notifyListeners();
       }
     }
@@ -716,6 +717,7 @@ class HqBackend extends Backend {
         delivery: mapDelivery(m['state'] as String?),
         priority: Priority.values.byName((m['priority'] as String?) ?? 'next'),
         attachments: attachmentsOf(m),
+        waitingOn: WaitingOn.parse(m['waiting_on']),
       );
     }
     if (m['to_identity'] == 'owner') {

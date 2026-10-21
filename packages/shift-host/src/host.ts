@@ -7,11 +7,12 @@ import {
   SHIFT_PROTOCOL_VERSION, LineSplitter, ProtocolError, decodeHqFrame, encodeFrame,
   shiftDir, shiftLogPath, shiftSocketPath, statePaths,
   type DeliveryState, type EngineEvent, type HostInfo, type HostState, type HostToHq, type HqToHost,
-  type LoggedFrame, type ErrorCode,
+  type LoggedFrame, type ErrorCode, type SendReply,
 } from '@company/shared';
 import { ClaudeProcess, consumeSegments, pendingQueued, procStartOf, readTranscript, toContextReply, toUsageReply, type ShiftSpec } from '@company/adapter';
 import { DurableLog, type FrameInput } from './log.ts';
 import { SpoolReader } from './spool.ts';
+import { safeToInterrupt } from './safe-tools.ts';
 
 export interface HostOptions {
   spec: ShiftSpec;
@@ -47,7 +48,7 @@ export class ShiftHost {
   private client: Client | null = null;
   private readonly deliveries = new Map<string, Delivery>();   // msgId -> delivery
   private readonly byUuid = new Map<string, string>();         // uuid -> msgId
-  private readonly activeTools = new Map<string, { name: string; preview: string }>();
+  private readonly activeTools = new Map<string, { name: string; preview: string; input: unknown; since: string }>();
   /** msgId -> text of deliveries the CLI re-injected on resume (matched by content). */
   private readonly reinjected = new Map<string, string>();
   private lastEventAt: string | null = null;
@@ -106,7 +107,7 @@ export class ShiftHost {
     if (ev.kind === 'text_delta' || ev.kind === 'thinking_delta') { this.sendLive({ t: 'delta', ev }); return; }
     switch (ev.kind) {
       case 'init': this.claudeVersion = ev.version ?? this.claudeVersion; this.setState('busy'); this.turnOpen = true; break;
-      case 'tool_use': this.activeTools.set(ev.toolUseId, { name: ev.name, preview: JSON.stringify(ev.input ?? '').slice(0, 300) }); break;
+      case 'tool_use': this.activeTools.set(ev.toolUseId, { name: ev.name, preview: JSON.stringify(ev.input ?? '').slice(0, 300), input: ev.input, since: this.lastEventAt! }); break;
       case 'tool_result': this.activeTools.delete(ev.toolUseId); break;
       case 'user_echo': {
         const msgId = this.byUuid.get(ev.uuid);
@@ -166,7 +167,7 @@ export class ShiftHost {
     }
     // A turn that ends without a `result` is a failure, never an empty success (bet 1).
     const error = this.claude?.failureReason ?? (this.turnOpen ? 'no_result' : (code !== 0 && !this.closing ? 'crashed' : undefined));
-    const interruptedTools = [...this.activeTools.values()].map((t) => ({ ...t, sideEffect: SIDE_EFFECT.test(`${t.name} ${t.preview}`) }));
+    const interruptedTools = [...this.activeTools.values()].map(({ name, preview }) => ({ name, preview, sideEffect: SIDE_EFFECT.test(`${name} ${preview}`) }));
     this.state = 'exited';
     this.record({ t: 'lifecycle', state: 'exited', exitCode: code, signal, ...(error ? { error } : {}),
       ...(interruptedTools.length ? { interruptedTools } : {}),
@@ -226,6 +227,33 @@ export class ShiftHost {
       d.state = 'failed';
       this.log.append({ t: 'delivery', msgId, uuid: d.uuid, state: 'failed', error: 'host restarted' }, true);
     }
+  }
+
+  /**
+   * His `now` (stopIfSafe): mid-tool, stop the turn first when every running tool is safe to cut (safe-tools.ts), so
+   * the line is read within a second. With no tool running nothing is cut (it would cut his worker's answer). A tool that is not safe runs to its end; the CLI takes a `now` line right after
+   * the running tool, before the next step, and the reply says which tool that is, for the bubble.
+   */
+  private async sendNow(msgId: string, text: string, retry: boolean): Promise<SendReply> {
+    const known = this.deliveries.get(msgId);
+    if (!this.turnOpen || retry || known) return this.send(msgId, text, 'now', retry);
+    const running = [...this.activeTools.values()];
+    // No tool running (the model is writing): nothing to stop for; the CLI takes the line at the end of this step.
+    if (!running.length) return this.send(msgId, text, 'now', retry);
+    const blocking = running.filter((t) => !safeToInterrupt(t));
+    if (!blocking.length) {
+      try {
+        await this.need().interrupt();
+      } catch (e) {
+        // The line still goes in, after the running step: late, never lost (journal: the unit's stderr).
+        process.stderr.write(`shift-host: interrupt before ${msgId} failed: ${(e as Error).message}\n`);
+      }
+      return this.send(msgId, text, 'now', retry);
+    }
+    const first = blocking.reduce((a, b) => (a.since <= b.since ? a : b));
+    const command = first.name === 'Bash' ? (first.input as { command?: unknown } | undefined)?.command : undefined;
+    return { ...this.send(msgId, text, 'now', retry),
+      waitingOn: { tool: first.name, ...(typeof command === 'string' ? { command } : {}), since: first.since } };
   }
 
   private send(msgId: string, text: string, priority: 'now' | 'next' | 'later', retry: boolean): { uuid: string; state: DeliveryState } {
@@ -366,7 +394,9 @@ export class ShiftHost {
   private async handle(c: Client, f: Exclude<HqToHost, { t: 'hello' }>): Promise<void> {
     try {
       switch (f.t) {
-        case 'send': this.reply(c, f.id, this.send(f.msgId, f.text, f.priority, f.retry === true)); return;
+        case 'send': this.reply(c, f.id, f.stopIfSafe === true && f.priority === 'now'
+          ? await this.sendNow(f.msgId, f.text, f.retry === true)
+          : this.send(f.msgId, f.text, f.priority, f.retry === true)); return;
         case 'interrupt': this.reply(c, f.id, await this.need().interrupt()); return;
         case 'usage': this.reply(c, f.id, toUsageReply(await this.need().usage())); return;
         case 'context': this.reply(c, f.id, toContextReply(await this.need().contextUsage())); return;

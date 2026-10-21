@@ -406,6 +406,8 @@ const MIGRATIONS: string[] = [
   ALTER TABLE memory_file_ops ADD COLUMN sha TEXT;        -- the commit on main; NULL when nothing was committed
   ALTER TABLE memory_file_ops ADD COLUMN outcome TEXT;    -- committed | unchanged | conflict | invalid; NULL = the rolling PR
   `,
+  // v17: the tool his `now` waits for (shift-host safe-tools.ts): {tool, command?, since}. The bubble says it.
+  `ALTER TABLE messages ADD COLUMN waiting_on TEXT;`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

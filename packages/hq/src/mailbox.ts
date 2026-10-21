@@ -4,7 +4,7 @@
 // No `delivered` in 60s → one retry with resurrection → visible failure in the sender's inbox and the owner's.
 // msg_id is the idempotency key end to end (API, host `send`, retries after crash).
 import { randomUUID } from 'node:crypto';
-import { g, loadNames, OWNER, pre, type CompanyNames, type AskDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency } from '@company/shared';
+import { g, loadNames, OWNER, pre, type CompanyNames, type AskDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency, type WaitingOn } from '@company/shared';
 import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
 import type { Inbox } from './inbox.ts';
@@ -21,10 +21,13 @@ export interface MessageRow {
   text_ref: string | null;
   /** Images the owner attached (uploads.ts). Stored as JSON; get() and list() return the array. */
   attachments: AttachmentDTO[] | null;
+  /** His `now` waits for this running tool (not safe to stop); the bubble says so until the worker reads it. */
+  waiting_on: WaitingOn | null;
 }
 
-type StoredRow = Omit<MessageRow, 'attachments'> & { attachments: string | null };
-const hydrate = (r: StoredRow): MessageRow => ({ ...r, attachments: r.attachments ? JSON.parse(r.attachments) as AttachmentDTO[] : null });
+type StoredRow = Omit<MessageRow, 'attachments' | 'waiting_on'> & { attachments: string | null; waiting_on: string | null };
+const hydrate = (r: StoredRow): MessageRow => ({ ...r, attachments: r.attachments ? JSON.parse(r.attachments) as AttachmentDTO[] : null,
+  waiting_on: r.waiting_on ? JSON.parse(r.waiting_on) as WaitingOn : null });
 
 /** Tools whose output the owner already sees as its own item: a turn that used one has no text reply (chat.md §2.3א). */
 const OWNER_FACING_TOOLS = new Set(['mcp__company__ask', 'mcp__company__request_go']);
@@ -111,6 +114,13 @@ export class Mailbox {
     this.store.db.prepare(`UPDATE messages SET ${sets.join(', ')} WHERE id = @id`).run({ id, state, now: this.store.now(), ...extra });
     const m = this.get(id)!;
     this.store.emit('message.state', m.to_identity, { id, state, from: m.from_identity, to: m.to_identity });
+  }
+
+  /** What his message waits for, to the app on the same `message.state` stream (the state itself is unchanged). */
+  private setWaiting(id: string, w: WaitingOn): void {
+    this.store.db.prepare('UPDATE messages SET waiting_on = ? WHERE id = ?').run(JSON.stringify(w), id);
+    const m = this.get(id)!;
+    this.store.emit('message.state', m.to_identity, { id, state: m.state, from: m.from_identity, to: m.to_identity, waiting_on: w });
   }
 
   /** Store then deliver. Idempotent by msg_id: a retried request returns the existing message. */
@@ -204,10 +214,15 @@ export class Mailbox {
     if (shift && conn?.isLive) {
       try {
         this.store.db.prepare('UPDATE messages SET shift_id = ? WHERE id = ?').run(shift.id, id);
+        // His own `now` stops the worker, but only out of a tool that is safe to cut (shift-host safe-tools.ts, adi
+        // 21/10/2026); otherwise it goes in right after the running tool. hq's notes and the answers it writes in his
+        // name (GO, ask, inbox: kind `answer`) never stop anyone.
+        const stop = m.from_identity === OWNER && m.kind === 'tell' && m.priority === 'now' ? { stopIfSafe: true } : undefined;
         // Idempotent on msgId in the host: a resend after an hq crash returns the current state instead.
-        let r = await conn.send(id, this.envelope(m), m.priority, retry);
+        let r = await conn.send(id, this.envelope(m), m.priority, retry, stop);
         // The host remembers this msgId as never accepted (e.g. its claude restarted): write it again.
         if (r?.state === 'failed' && !retry) r = await conn.send(id, this.envelope(m), m.priority, true);
+        if (r?.waitingOn) this.setWaiting(id, r.waitingOn);
         if (r) this.onDelivery(shift, id, r.state);
       } catch (e) {
         this.store.db.prepare('UPDATE messages SET error = ? WHERE id = ?').run((e as Error).message, id);

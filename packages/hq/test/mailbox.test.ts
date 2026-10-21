@@ -184,3 +184,31 @@ test('heldByCli messages are never re-sent on resume, and are re-sent to a new s
     assert.equal(launcher.hosts.get('eli-2')!.sent[0]!.msgId, 'h-1');
   } finally { await env.cleanup(); }
 });
+
+test('his `now` asks the host to stop the worker if safe; what it waits for reaches the app; answers and hq notes never ask', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    await hq.shifts.request('eli', { reason: 'message' });
+    await until(() => hq.shifts.current('eli')?.state === 'live', 3000, 'live');
+    const host = launcher.hosts.get('eli-1')!;
+    const events: any[] = [];
+    hq.store.onEvent((e) => { if (e.type === 'message.state') events.push(e.data); });
+
+    host.waitingOn = { tool: 'Bash', command: 'bash deploy/hq.sh', since: '2026-10-21T06:00:00.000Z' };
+    hq.mailbox.tell({ msg_id: 'n-1', to: 'eli', body: 'תעצור', priority: 'now' });
+    await until(() => hq.mailbox.get('n-1')!.state === 'delivered', 3000, 'delivered');
+    assert.equal(host.sent.at(-1)!.stopIfSafe, true);
+    assert.deepEqual(hq.mailbox.get('n-1')!.waiting_on, host.waitingOn);
+    assert.ok(events.some((e) => e.id === 'n-1' && e.waiting_on?.command === 'bash deploy/hq.sh'), 'the app hears it');
+
+    hq.mailbox.tell({ msg_id: 'n-2', to: 'eli', body: 'אחרי הצעד', priority: 'next' });
+    hq.mailbox.tell({ msg_id: 'n-3', from: 'hq', to: 'eli', kind: 'system', body: 'תזכורת', priority: 'now' });
+    hq.mailbox.tell({ msg_id: 'n-4', to: 'eli', kind: 'answer', body: 'כן', priority: 'now' });
+    await until(() => ['n-2', 'n-3', 'n-4'].every((id) => hq.mailbox.get(id)!.state === 'delivered'), 3000, 'delivered');
+    for (const id of ['n-2', 'n-3', 'n-4']) {
+      assert.equal(host.sent.find((s) => s.msgId === id)!.stopIfSafe, false, id);
+      assert.equal(hq.mailbox.get(id)!.waiting_on, null, id);
+    }
+  } finally { await env.cleanup(); }
+});
