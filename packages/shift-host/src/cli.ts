@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { shiftCompanyHome, shiftDir, statePaths } from '@company/shared';
-import { buildMcpConfig, buildSettings, shiftSessionId, type ShiftSpec } from '@company/adapter';
+import { buildMcpConfig, buildSettings, ownerMcpServers, shiftSessionId, type ShiftSpec } from '@company/adapter';
 import { ShiftHost } from './host.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -89,7 +89,8 @@ if (!settingsFile) {
 let mcpConfigFile = v['mcp-config'];
 if (!mcpConfigFile) {
   mcpConfigFile = join(dir, 'mcp.json');
-  const others = v['browser-mcp'] ? { browser: JSON.parse(v['browser-mcp']) } : {};
+  // The owner's global servers (browser, ...) ride along: --strict-mcp-config would otherwise drop them.
+  const others = { ...ownerMcpServers(undefined, (m) => process.stderr.write(`company-shift-host: warning: ${m}\n`)), ...(v['browser-mcp'] ? { browser: JSON.parse(v['browser-mcp']) } : {}) };
   writeFileSync(mcpConfigFile, JSON.stringify(buildMcpConfig([node, join(repoRoot, 'packages/mcp-company/src/server.ts')], others), null, 2));
 }
 

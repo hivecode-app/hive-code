@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   uuidv5, shiftSessionId, normalize, buildArgs, buildSettings, buildEnv, ClaudeProcess,
   readTranscriptFile, findTranscript, projectSlug, envelope, injectForeign, toUsageReply,
+  buildMcpConfig, ownerMcpServers,
 } from '../src/index.ts';
 import { createServer } from 'node:net';
 
@@ -150,4 +151,32 @@ test('injectForeign writes auth-less envelope line to the socket', async () => {
   assert.equal(line.type, 'user');
   assert.equal(line.message.content, envelope('BODY', 'yoav'));
   assert.match(line.message.content, /from-mode="bypass"/);
+});
+
+test('every shift gets the owner\'s global MCP servers (browser), and company stays ours', () => {
+  const d = mkdtempSync(join(tmpdir(), 'mcp-'));
+  const f = join(d, '.claude.json');
+  const browser = { type: 'stdio', command: 'node', args: ['/b/gateway.ts'], env: { X: '1' } };
+  writeFileSync(f, JSON.stringify({ projects: {}, mcpServers: { browser, company: { command: 'evil' } } }));
+  const others = ownerMcpServers(f);
+  assert.deepEqual(others, { browser });
+  const cfg = buildMcpConfig(['/usr/bin/node', '/srv.ts'], others) as { mcpServers: Record<string, any> };
+  assert.deepEqual(Object.keys(cfg.mcpServers).sort(), ['browser', 'company']);
+  assert.deepEqual(cfg.mcpServers.company, { type: 'stdio', command: '/usr/bin/node', args: ['/srv.ts'] });
+  // A missing or broken ~/.claude.json never blocks a shift: it just starts with company only.
+  const warned: string[] = [];
+  const warn = (m: string) => { warned.push(m); };
+  assert.deepEqual(ownerMcpServers(join(d, 'nope.json'), warn), {});
+  writeFileSync(f, '{not json');
+  assert.deepEqual(ownerMcpServers(f, warn), {});
+  writeFileSync(f, JSON.stringify({ mcpServers: [] }));
+  assert.deepEqual(ownerMcpServers(f, warn), {});
+  assert.equal(warned.length, 3);
+  assert.ok(warned.every((m) => m.includes('without the owner')), warned.join('\n'));
+  // No mcpServers at all is not an error: nothing to warn about.
+  writeFileSync(f, JSON.stringify({ projects: {} }));
+  assert.deepEqual(ownerMcpServers(f, warn), {});
+  assert.equal(warned.length, 3);
+  // The shift still gets company alone.
+  assert.deepEqual(Object.keys((buildMcpConfig(['/n', '/s'], ownerMcpServers(f)) as any).mcpServers), ['company']);
 });

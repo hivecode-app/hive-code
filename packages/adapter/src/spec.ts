@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { IdentityId, ShiftId } from '@company/shared';
@@ -124,8 +125,35 @@ export function buildEnv(spec: ShiftSpec, base: NodeJS.ProcessEnv = process.env)
   return env;
 }
 
-/** --mcp-config content for the per-shift company server (+ optional others). */
+/** --mcp-config content for the per-shift company server (+ optional others; `company` is always ours). */
 export function buildMcpConfig(companyCommand: string[], others: Record<string, unknown> = {}): Record<string, unknown> {
   const [command, ...args] = companyCommand;
-  return { mcpServers: { company: { type: 'stdio', command, args }, ...others } };
+  return { mcpServers: { ...others, company: { type: 'stdio', command, args } } };
+}
+
+/**
+ * The owner's user-scope MCP servers (`mcpServers` in ~/.claude.json, e.g. `browser`). Shifts run with
+ * --strict-mcp-config and a managed CLAUDE_CONFIG_DIR, so the CLI never reads them by itself: without
+ * this, no worker has a browser (principle 10). Read only, never written (dir-0016). Missing or broken
+ * file: no extra servers, and the shift still starts with `company`.
+ */
+export function ownerMcpServers(
+  claudeJson = join(homedir(), '.claude.json'), warn: (msg: string) => void = () => {},
+): Record<string, unknown> {
+  let parsed: unknown;
+  try { parsed = JSON.parse(readFileSync(claudeJson, 'utf8')); } catch (e) {
+    warn(`${claudeJson}: ${(e as Error).message}; the shift starts without the owner's MCP servers (no browser)`);
+    return {};
+  }
+  const servers = (parsed as { mcpServers?: unknown } | null)?.mcpServers;
+  if (servers === undefined) return {};
+  if (!servers || typeof servers !== 'object' || Array.isArray(servers)) {
+    warn(`${claudeJson}: mcpServers is not an object; the shift starts without the owner's MCP servers`);
+    return {};
+  }
+  const out: Record<string, unknown> = {};
+  for (const [name, cfg] of Object.entries(servers)) {
+    if (name !== 'company' && cfg && typeof cfg === 'object') out[name] = cfg;
+  }
+  return out;
 }
