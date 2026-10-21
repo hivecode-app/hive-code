@@ -245,4 +245,15 @@ void main() {
     expect(firstSentence('GO לגרסה 2.6.10 מחכה לך'), 'GO לגרסה 2.6.10 מחכה לך');
     expect(firstSentence('מה עם הקנרי? הוא רץ מהבוקר.'), 'מה עם הקנרי?');
   });
+
+  // noa 22/10: "דנה · GO לפרודקשן" in the waiting card read "דנה לפרודקשן GO ·", the isolate turned LTR by its first letter.
+  testWidgets('WordFit: a Hebrew label that starts with a Latin word keeps the Hebrew order', (t) async {
+    Future<String> shown(String text) async {
+      await t.pumpWidget(MaterialApp(home: Material(child: Directionality(textDirection: TextDirection.rtl, child: Center(child: SizedBox(width: 600, child: WordFit(lead: 'דנה ', text: text, style: const TextStyle())))))));
+      return t.widget<Text>(find.byType(Text)).textSpan!.toPlainText();
+    }
+
+    expect(await shown('· GO לפרודקשן'), 'דנה $kRLI· GO לפרודקשן$kPDI');
+    expect(await shown('· git push failed'), 'דנה $kLRI· git push failed$kPDI');
+  });
 }

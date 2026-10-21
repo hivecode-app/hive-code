@@ -507,7 +507,7 @@ class _MessageHit extends StatelessWidget {
 
 /// [lead] then [text] in [maxLines] lines at most, cut only between words with "…" (T2): Flutter's own
 /// ellipsis cuts inside a word ([fitWords]). With [mark], the first match is bold, and a match too far in starts the
-/// text a few words before it, after "…". The text is isolated (FSI), so a Latin line keeps its order.
+/// text a few words before it, after "…". The text is isolated in its own direction ([paragraphDirection]), so a Latin line keeps its order.
 class WordFit extends StatelessWidget {
   const WordFit({super.key, required this.text, required this.style, this.lead, this.leadStyle, this.mark, this.markStyle, this.maxLines = 1});
   final String text;
@@ -522,7 +522,8 @@ class WordFit extends StatelessWidget {
     final m = mark == null ? -1 : wordStart(t, mark!);
     return TextSpan(children: [
       if (lead != null) TextSpan(text: lead, style: leadStyle),
-      const TextSpan(text: kFSI),
+      // The direction of the whole text, not of its first letter: "GO לפרודקשן" is Hebrew.
+      TextSpan(text: paragraphDirection(text) == TextDirection.rtl ? kRLI : kLRI),
       if (m < 0)
         TextSpan(text: t)
       else ...[
