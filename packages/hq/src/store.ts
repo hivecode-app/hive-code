@@ -419,6 +419,27 @@ const MIGRATIONS: string[] = [
   `,
   // v20: the machine a task's worktree and shifts are on (nodes.ts): NULL = not placed yet (here, until it gets a worktree).
   `ALTER TABLE tasks ADD COLUMN machine TEXT;`,
+  // v21: the live register of time estimates (estimates.ts): what a worker promised, when, and how it ended.
+  `
+  CREATE TABLE estimates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    identity TEXT NOT NULL,
+    shift TEXT,
+    task INTEGER,                            -- the worker's open task when it promised; NULL = none (a standing worker between tasks)
+    project TEXT,
+    kind TEXT NOT NULL,                      -- small-fix | feature | investigation | report | build | deploy | release
+    what TEXT NOT NULL,                      -- what will be ready, one line
+    message_id TEXT,                         -- the tell that carried it; NULL = given in a status
+    created_at INTEGER NOT NULL,
+    due_at INTEGER NOT NULL,
+    closed_at INTEGER,                       -- the real time it ended; kept when a missed one closes late
+    outcome TEXT,                            -- NULL (open) | missed (past due, still open) | done | cancelled
+    superseded_by INTEGER                    -- a newer estimate of the same worker on the same what; this one is kept as given
+  );
+  CREATE INDEX estimates_open ON estimates(identity) WHERE closed_at IS NULL;
+  CREATE INDEX estimates_task ON estimates(task) WHERE task IS NOT NULL;
+  CREATE INDEX estimates_kind ON estimates(project, kind, outcome);
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

@@ -4,6 +4,7 @@
 // api-token (stays on the server) or a device token. The app uses this through Caddy; mcp-company and
 // hooks use it for writes (idempotent by msg_id). POST /api/dictate/transcribe streams to dictate-server (dictate.ts).
 // GET /api/app/latest and /api/app/apk/:code: the in-app update of the Android app (app-release.ts).
+import { ETA_KINDS } from './estimates.ts';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import { createReadStream, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -264,6 +265,28 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   route('POST', '/api/shifts/:id/interrupt', async ({ params }) => {
     await hq.shifts.interrupt(decodeURIComponent(params[0]!));
     return { ok: true };
+  });
+
+  // Time estimates (estimates.ts): what workers promised and how it ended. Filters: project, identity, state
+  // (open|missed|done|cancelled), kind, message_id, task, since/until (created_at, ms or ISO), limit.
+  route('GET', '/api/estimates', ({ url }) => {
+    const q = (k: string) => url.searchParams.get(k) || undefined;
+    const when = (k: string): number | undefined => {
+      const v = q(k);
+      if (v === undefined) return undefined;
+      const t = /^\d+$/.test(v) ? Number(v) : Date.parse(v);
+      if (!Number.isFinite(t)) throw new HttpError(400, `${k} must be ms or an ISO date`);
+      return t;
+    };
+    const count = (k: string): number | undefined => {
+      const v = q(k);
+      if (v === undefined) return undefined;
+      if (!/^\d+$/.test(v)) throw new HttpError(400, `${k} must be a number`);
+      return Number(v);
+    };
+    const kind = oneOf(q('kind'), ETA_KINDS, 'kind');
+    return { estimates: hq.estimates.list({ project: q('project'), identity: q('identity'), kind, message_id: q('message_id'), task: count('task'),
+      state: oneOf(q('state'), ['open', 'missed', 'done', 'cancelled'] as const, 'state'), since: when('since'), until: when('until'), limit: count('limit') }) };
   });
 
   route('GET', '/api/tasks', () => ({ tasks: hq.scheduler.tasks(), queue: hq.scheduler.queue().map((t) => ({ id: t.id, bucket: t.bucket })) }));

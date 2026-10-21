@@ -33,12 +33,25 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
     pr: s('ה-PR שמוזג, מספר או קישור. פריסה שמדווחת עליו מנקה את deploy / the merged PR, number or url; a deploy that reports it clears deploy'),
   };
 
+  // הערכות זמן (estimates.ts): a promise of "X יהיה מוכן תוך Y" goes in these fields, not only in the text. hq keeps the register,
+  // answers with the company's calibration in a message, and closes it with the real time.
+  const etaArgs: Record<string, Schema> = {
+    eta_min: { type: 'number', description: 'הערכה: בעוד כמה דקות יהיה מוכן מה שב-eta_what. או eta_at / estimate: minutes until eta_what is ready (or eta_at)' },
+    eta_at: s('הערכה: באיזו שעה יהיה מוכן, HH:MM או תאריך ושעה מלאים. או eta_min / estimate: the time it will be ready, HH:MM or full ISO (or eta_min)'),
+    eta_kind: oneOf(['small-fix', 'feature', 'investigation', 'report', 'build', 'deploy', 'release'],
+      'סוג העבודה של ההערכה. release = שחרור לחנויות או שרשרת release, deploy = rollout לשרת, build = build או CI / kind of work; release = store release chain, deploy = server rollout'),
+    eta_what: s('מה יהיה מוכן, בשורה אחת בעברית, e.g. "ה-PR מוכן לסקירה" / what will be ready, one line'),
+    eta_done: { type: 'boolean', description: 'מה שהובטח ב-eta_what מוכן: סוגר את ההערכה הפתוחה עם הזמן האמיתי (בלי eta_what: האחרונה) / what was promised is ready: closes the open estimate with the real time' },
+  };
+
   return [
-    tool('tell', 'שליחת הודעה לעובד לפי identity. Send a message to a teammate by identity.', {
+    tool('tell', 'שליחת הודעה לעובד לפי identity. כשההודעה מבטיחה זמן ("יהיה מוכן בעוד שעה"), רושמים אותו בשדות eta_min או eta_at, eta_kind ו-eta_what, לא רק בטקסט; '
+      + 'hq מחזיר הצעה לפי איך שהערכות כאלה יוצאות בפועל. כשזה מוכן: eta_done. Send a message to a teammate by identity. A message that promises a time goes in the eta_* fields, not only in the text.', {
       to: s('identity של הנמען / recipient identity, e.g. "dana"'),
       body: s('תוכן ההודעה / message text'),
       urgency: oneOf(['now', 'next', 'later'], 'now מפריע, next ברירת מחדל, later לסוף התור / delivery priority'),
       ref: s('מזהה הודעה שעליה עונים, e.g. m-8812 / message id being answered'),
+      ...etaArgs,
     }, ['to', 'body']),
     tool('ask', 'שאלה ' + pre('ל', O) + ' או למנהל. מופיעה ' + G('אצלו', 'אצלה') + ' כהודעה בשיחה איתך: קודם headline, מתחתיה כפתורים מ-options, '
       + 'והפרטים (question) מקופלים. מה ' + G('שהוא כותב', 'שהיא כותבת') + ' בשיחה כשהשאלה פתוחה הוא התשובה. '
@@ -96,12 +109,15 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'The task closes when the turn ends, and only if every message ' + G('he', 'she') + ' sent you was answered; else hq tells you so and it stays open. '
       + 'Update your working status. With state "done" the task closes; always give summary: it is the line ' + G('he sees', 'she sees') + ' under "since you were here" '
       + 'and "what finished"; without it ' + G('he sees', 'she sees') + ' only the task title. '
-      + 'If it still waits on something (a deploy, or something ' + G('he', 'she') + ' must check), add awaiting and awaiting_note: it shows under "what to check".', {
+      + 'If it still waits on something (a deploy, or something ' + G('he', 'she') + ' must check), add awaiting and awaiting_note: it shows under "what to check". '
+      + 'הערכת זמן ("יהיה מוכן בעוד 40 דקות") נרשמת בשדות eta_min או eta_at, eta_kind ו-eta_what; אחרי done או eta_done היא נסגרת עם הזמן האמיתי. '
+      + 'A time estimate goes in the eta_* fields; done or eta_done closes it with the real time.', {
       state: s('מצב, e.g. working | blocked | idle | done / state'),
       note: s('הערה קצרה / short note'),
       summary: s('ב-done: שורה אחת במילים ' + G('שלו', 'שלה') + ', מה השתנה ' + G('אצלו', 'אצלה') + ', בלי מספרי PR ובלי מונחים טכניים, e.g. "התמונות בצ\'אט עולות גם מהטלפון" '
         + '/ with done: one line in ' + G('his', 'her') + ' words on what changed for ' + G('him', 'her') + ', no PR numbers or jargon'),
       ...awaitingArgs,
+      ...etaArgs,
     }, ['state']),
     tool('open_team', 'פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. עם assignee המשימה הולכת לעובד הקבוע שהתחום שלו: '
       + 'worktree משלה ו-session נקי, ואם הוא באמצע משימה אחרת היא מחכה בתור שלו. אם hq דוחה (למשל פרויקט רדום או assignee לא חוקי), הדחייה והסיבה חוזרות כשגיאה. '
@@ -213,7 +229,7 @@ const HEBREW_TEXT: Partial<Record<ToolDef['name'], string[]>> = {
 };
 const HEBREW_TITLE: Partial<Record<ToolDef['name'], string[]>> = {
   open_team: ['name'], open_ticket: ['title'], ask: ['headline'], request_go: ['headline'],
-  status: ['awaiting_note'], close_team: ['awaiting_note'],
+  tell: ['eta_what'], status: ['awaiting_note', 'eta_what'], close_team: ['awaiting_note'],
 };
 /** compose_home: every text a block shows him (headline, note, caption, since items) is Hebrew too. */
 const BLOCK_TEXT = ['text', 'note', 'caption'];

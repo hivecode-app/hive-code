@@ -23,6 +23,7 @@ import { waitingLine } from './mailbox.ts';
 import { FILE_MODES, memoryFilePath } from './memory-files.ts';
 import { blobSha, MAX_TEXT_BYTES, secretIn } from './memory-registry.ts';
 import { guarded, requestUrl } from './http-guard.ts';
+import { EstimateError, parseEta } from './estimates.ts';
 
 const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home']);
 
@@ -107,7 +108,8 @@ export class Ingest {
             `ההודעה ל-"${to}" לא נשלחה: אין identity כזה. שלח שוב עם ה-id (מה שבסוגריים בכותרת ההודעה), למשל ${n.manager.id}, או ${OWNER} ${pre('ל', n.owner.name)}.`);
         }
         const m = mailbox.tell({ msg_id: e.id, from: e.identity, to, body: need('body'), priority: pr, urgency, ref: s(a.ref) });
-        return { ok: true, id: e.id, ref: m.id };
+        const estimate = this.estimate(e, a, s(a.body)?.split('\n').map((x) => x.trim()).find(Boolean)?.slice(0, 200) ?? null, false);
+        return { ok: true, id: e.id, ref: m.id, ...(estimate ? { result: { estimate } } : {}) };
       }
       case 'ask': {
         const ask = mailbox.ask({ msg_id: e.id, from: e.identity, question: need('question'), headline: s(a.headline),
@@ -126,15 +128,18 @@ export class Ingest {
         return { ok: true, id: e.id, result: { queued: true } };
       case 'status': {
         // status{state: done} from a task worker closes its task (ends the shift with task_done).
-        if (a.state === 'done' || a.state === 'task_done') {
+        const done = a.state === 'done' || a.state === 'task_done';
+        const estimate = this.estimate(e, a, s(a.note) ?? null, done);
+        if (done) {
           const t = this.hq.store.db.prepare(`SELECT id FROM tasks WHERE identity = ? AND state IN ('running','resting') ORDER BY updated_at DESC LIMIT 1`)
             .get(e.identity) as { id: number } | undefined;
           if (t && taskSummary(a.summary)) this.hq.store.db.prepare('UPDATE tasks SET summary = ? WHERE id = ?').run(taskSummary(a.summary), t.id);
           // After its turn ends, and only if he isn't waiting for an answer from it (#118): else it stays open and hears why.
-          if (t) this.hq.store.bg(this.hq.scheduler.finishByWorker(t.id, e.identity, e.id, () => this.hq.awaiting.mark(t.id, a, e.identity)), 'task.complete');
-          return { ok: true, id: e.id, result: { stored: true, task_done: t?.id ?? null } };
+          if (t) this.hq.store.bg(this.hq.scheduler.finishByWorker(t.id, e.identity, e.id, () => { this.hq.awaiting.mark(t.id, a, e.identity); this.hq.estimates.close(e.identity, { all: true }); }), 'task.complete');
+          if (!t) this.hq.estimates.close(e.identity, { all: true });
+          return { ok: true, id: e.id, result: { stored: true, task_done: t?.id ?? null, ...(estimate ? { estimate } : {}) } };
         }
-        return { ok: true, id: e.id, result: { stored: true } };
+        return { ok: true, id: e.id, result: { stored: true, ...(estimate ? { estimate } : {}) } };
       }
       case 'open_team': {
         // Phase 1: a team opened by a worker is a task team = a task in the scheduler queue (B.16). The
@@ -285,6 +290,42 @@ export class Ingest {
         // consumed by memory consolidation, prime.json (handoff) and the board.
         return { ok: true, id: e.id, result: { stored: true } };
     }
+  }
+
+  /**
+   * The `eta_*` fields of a tell or status (estimates.ts). `eta_done` and status done close the worker's open estimate with the real
+   * time; eta_min|eta_at + eta_kind (+ eta_what) record a new one. The op itself is never rejected for them: a bad
+   * estimate is answered from hq in the worker's mailbox, and so is the calibration (the MCP ack is local, long before this).
+   */
+  private estimate(e: WalEntry, a: Record<string, unknown>, fallbackWhat: string | null, taskDone: boolean): Record<string, unknown> | undefined {
+    const { estimates, mailbox, store } = this.hq;
+    const say = (suffix: string, body: string) => mailbox.tell({ msg_id: `${e.id}-${suffix}`, from: 'hq', to: e.identity, kind: 'system', priority: 'next', ref: e.id, body });
+    const out: Record<string, unknown> = {};
+    const what = typeof a.eta_what === 'string' ? a.eta_what.split('\n').map((x) => x.trim()).find(Boolean) : undefined;
+    // status done closes them when the task really closes (finishByWorker, after the owner's questions are answered), not here.
+    if (a.eta_done === true) {
+      const closed = estimates.close(e.identity, { what });
+      if (closed.length) out.closed = closed.map((x) => estimates.view(x));
+    }
+    if (taskDone) return out.closed ? out : undefined; // no new estimate with done
+    let eta;
+    try { eta = parseEta(a, store.now(), this.hq.timeZone(), fallbackWhat); }
+    catch (err) {
+      if (!(err instanceof EstimateError)) throw err;
+      say('estimate-rejected', err.he);
+      return { error: err.message };
+    }
+    if (eta) {
+      const t = store.db.prepare(`SELECT id, project FROM tasks WHERE identity = ? AND state IN ('running','resting') ORDER BY updated_at DESC LIMIT 1`)
+        .get(e.identity) as { id: number; project: string | null } | undefined;
+      const own = (store.db.prepare('SELECT project FROM identities WHERE id = ?').get(e.identity) as { project: string | null } | undefined)?.project;
+      const r = estimates.register({ identity: e.identity, shift: e.shift ?? null, task: t?.id ?? null, project: t?.project ?? own ?? null,
+        messageId: e.op === 'tell' ? e.id : null, ...eta });
+      // A suggestion that equals what the worker wrote is not worth a message.
+      if (r.suggestion.minutes !== r.estimate.estimated_min) say('estimate', r.suggestion.line);
+      out.id = r.estimate.id; out.suggestion = r.suggestion; out.updated = r.updated;
+    }
+    return Object.keys(out).length ? out : undefined;
   }
 
   /**

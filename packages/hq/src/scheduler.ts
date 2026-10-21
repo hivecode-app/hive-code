@@ -165,9 +165,13 @@ export class Scheduler {
     return this.store.db.prepare(`SELECT * FROM tasks ORDER BY CASE WHEN state IN ('done') THEN 1 ELSE 0 END, updated_at DESC LIMIT 500`).all() as TaskRow[];
   }
 
+  /** A task that ends (any way) cancels the estimates still open on it; the ones its worker closed with status done are already closed. */
+  onTaskDone?: (id: number) => void;
+
   setTaskState(id: number, state: string): void {
     this.store.db.prepare('UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?').run(state, this.store.now(), id);
     this.store.emit('task.state', null, { id, state });
+    if (state === 'done' || state === 'closed') this.onTaskDone?.(id);
   }
 
   queue(): (TaskRow & { bucket: number })[] {
@@ -617,7 +621,7 @@ export class Scheduler {
     const next = reason === 'task_done' ? 'done' : reason === 'rest' ? 'resting' : t.worktree ? 'interrupted' : 'queued';
     this.store.db.prepare('UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?').run(next, this.store.now(), taskId);
     this.store.emit('task.state', t.identity, { id: taskId, state: next, reason });
-    if (next === 'done') this.closeWorktree(taskId);
+    if (next === 'done') { this.closeWorktree(taskId); this.onTaskDone?.(taskId); }
   }
 
   /** No message to the task's worker was ever accepted by its CLI: it never started on the task. */

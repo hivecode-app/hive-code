@@ -10,6 +10,7 @@ import { syncOrg, getIdentity, listIdentities, listProjects, renameTaskWorkers }
 import { Inbox } from './inbox.ts';
 import { Conversations } from './conversations.ts';
 import { AwaitingBoard } from './awaiting.ts';
+import { Estimates } from './estimates.ts';
 import { ShiftManager, TemplateLauncher, type Launcher, type ConnectionFactory } from './shifts.ts';
 import { Mailbox, noForeignInjector, type ForeignInjector } from './mailbox.ts';
 import { Uploads } from './uploads.ts';
@@ -79,6 +80,7 @@ export class Hq {
   readonly inbox: Inbox;
   readonly conversations: Conversations;
   readonly awaiting: AwaitingBoard;
+  readonly estimates: Estimates;
   readonly shifts: ShiftManager;
   readonly mailbox: Mailbox;
   readonly uploads: Uploads;
@@ -134,6 +136,8 @@ export class Hq {
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
     this.awaiting = new AwaitingBoard(this.store);
+    this.estimates = new Estimates(this.store);
+    this.scheduler.onTaskDone = (id) => this.estimates.cancelForTask(id);
     this.conversations = new Conversations(this.store, (id) => this.conversationTitle(id));
     this.conversations.setAlert((m) => this.store.bg(this.pusher.notifyMessage(m), 'push.message'));
     this.pusher.titleOf = (id) => this.conversationTitle(id);
