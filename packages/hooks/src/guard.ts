@@ -38,6 +38,16 @@ export const COMPANY_GUARD_REASON = (what: string, root: string): string =>
   + 'ו-hq מכניס אותו בעצמו. שינוי אחר בחוזה: PR מ-worktree משלך ב-repo של החברה (`git worktree add -b <ענף> .worktrees/<שם>` מתוכו), '
   + 'ועורכים רק בתוך `.worktrees/<שם>`.';
 
+/** git subcommands that move HEAD or rewrite the working tree. In the main checkout only a deploy may do that (22/10:
+ *  a `git pull` there put undeployed code into every new shift). Reading (`log`, `show`, `fetch`, `worktree add`) passes. */
+export const GIT_HEAD_MOVES = new Set(['pull', 'checkout', 'switch', 'reset', 'merge', 'rebase', 'restore']);
+
+export const GIT_MOVE_REASON = (what: string, root: string, company: boolean): string =>
+  `${what} נחסם: \`${root}\` הוא ה-checkout הראשי ${company ? 'של החברה, שממנו hq קורא את החוזה והזיכרון' : 'של agent-company, שממנו hq ו-shift-host רצים'}, `
+  + 'והוא זז רק בפריסה (`scripts/deploy.sh`). קוד שמוזג ועוד לא נפרס לא נכנס אליו. '
+  + 'לקרוא קובץ כמו שהוא ב-main: `git fetch origin` ואז `git -C <checkout> show origin/main:<נתיב>`. '
+  + 'לעבוד על הקוד: worktree משלך (`git worktree add -b <ענף> .worktrees/<שם> origin/main` מתוך ה-repo), ושם מותר כל `git`.';
+
 /** The protected root, or null when there is none (a dev worktree set as COMPANY_REPO protects nothing). */
 export function protectedRoot(env: GuardEnv): string | null {
   const home = env.home ?? homedir();
@@ -93,13 +103,16 @@ function checkRoot(input: GuardInput, env: GuardEnv, root: string, reason: (what
   }
   if (tool === 'Bash' && typeof ti.command === 'string') {
     const hit = bashWrite(ti.command, cwd, root, home, deployer);
-    return hit ? reason(`\`Bash\` (${hit})`, root) : null;
+    if (!hit) return null;
+    const move = /^`git (\w+)`/.exec(hit);
+    return move && GIT_HEAD_MOVES.has(move[1]!) ? GIT_MOVE_REASON(hit, root, reason === COMPANY_GUARD_REASON) : reason(`\`Bash\` (${hit})`, root);
   }
   return null;
 }
 
 /**
- * Simple detection, not a shell: `>`/`>>` redirections, `tee`, `sed -i`, `cp`/`mv`/`install` and `git commit`, with `cd`
+ * Simple detection, not a shell: `>`/`>>` redirections, `tee`, `sed -i`, `cp`/`mv`/`install`, `git commit` and the
+ * `GIT_HEAD_MOVES` subcommands, with `cd`
  * tracked across `&&`/`;` (and undone when a subshell ends). Quotes, heredoc bodies, `$(…)`, `((…))` and `[[…]]` are not
  * commands, and a target hidden in a variable is not guessed at. `deployer`: the command that runs `scripts/deploy.sh`
  * passes (only that one, not the rest of the line). Returns what wrote into the main checkout, or null.
@@ -153,7 +166,8 @@ export function bashWrite(command: string, cwd0: string, root: string, home: str
         else if (args[i] === '-c' && args[i + 1]) i += 2;
         else i += 1;
       }
-      if (args[i] === 'commit' && inMainCheckout(dir, root)) return `\`git commit\` ב-\`${dir}\``;
+      const sub = args[i];
+      if (sub && (sub === 'commit' || GIT_HEAD_MOVES.has(sub)) && inMainCheckout(dir, root)) return `\`git ${sub}\` ב-\`${dir}\``;
     }
     return null;
   };

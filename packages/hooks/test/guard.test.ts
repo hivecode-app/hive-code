@@ -118,6 +118,32 @@ test('adi may run scripts/deploy.sh from the main checkout; only that command, a
   assert.ok(checkToolUse({ tool_name: 'Write', tool_input: { file_path: `${ROOT}/a.md` } }, adi));
 });
 
+test('git that moves HEAD in the main checkout is blocked with what to do instead; worktrees and reads pass', () => {
+  const CO = `${HOME}/company`;
+  const e = { home: HOME, identity: 'ron', company: '~/company' };
+  for (const sub of ['pull -q', 'checkout main', 'checkout -- README.md', 'switch -c x', 'reset --hard origin/main', 'merge origin/main',
+    'rebase origin/main', 'restore .']) {
+    const r = bash(`git ${sub}`, ROOT, e);
+    assert.ok(r, `should block: git ${sub} in ${ROOT}`);
+    assert.match(r!, /show origin\/main:/);
+    assert.match(r!, /worktree/);
+    assert.match(r!, /shift-host/);
+    assert.ok(bash(`git -C ~/projects/agent-company ${sub}`, '/tmp', e), `should block: git -C ${ROOT} ${sub}`);
+    assert.match(bash(`git -C ${CO} ${sub}`, WT, e)!, /של החברה/, `should block: git -C ${CO} ${sub}`);
+    assert.equal(bash(`git ${sub}`, WT, e), null, `should pass in a worktree: git ${sub}`);
+    assert.equal(bash(`git -C ${CO}/.worktrees/t1 ${sub}`, ROOT, e), null);
+  }
+  assert.ok(bash('git pull', `${ROOT}/packages/hq`, e), 'a subdirectory of the checkout');
+  assert.ok(bash(`cd ${ROOT} && git fetch -q && git pull -q`, WT, e));
+  assert.ok(bash('git -c pull.rebase=true --no-pager pull', ROOT, e));
+  assert.ok(bash('git pull', ROOT, { home: HOME, identity: 'adi' }), 'adi too: only deploy.sh moves it');
+  for (const c of [`git -C ${ROOT} log --oneline -3`, `git -C ${ROOT} show origin/main:package.json`, 'git fetch origin', 'git status',
+    'git diff origin/main', 'git log --grep pull', `git worktree add -b t .worktrees/t origin/main`, 'git branch -a', 'git stash list']) {
+    assert.equal(bash(c, ROOT, e), null, `should pass: ${c}`);
+  }
+  assert.equal(bash('scripts/deploy.sh all', ROOT, { home: HOME, identity: 'adi' }), null, 'the deploy itself still runs');
+});
+
 test('bashWrite reports what it saw', () => {
   assert.match(bashWrite('git commit -m x', ROOT, ROOT, HOME)!, /git commit/);
   assert.match(bashWrite('echo > a', ROOT, ROOT, HOME)!, new RegExp(`${ROOT}/a`));
