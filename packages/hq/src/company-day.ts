@@ -106,10 +106,12 @@ export function companyDay(store: Store, companyDir: string, tz: string, date: s
     }
   }
 
-  // Tasks open at the end of the day: opened before it and not done by then.
+  // Tasks open at the end of the day: opened before it and not done by then. The done times are read in one pass:
+  // a subquery per task scanned every event once per task (32 seconds on hq with 300k events, the whole server frozen).
   const openAtEnd = Object.fromEntries(q<{ project: string; n: number }>(
-    `SELECT project, COUNT(*) n FROM tasks WHERE project IS NOT NULL AND created_at < ? AND (state NOT IN ('done', 'closed') OR COALESCE((SELECT MIN(e.ts) FROM events e WHERE e.type = 'task.state'
-       AND json_extract(e.data, '$.id') = tasks.id AND json_extract(e.data, '$.state') IN ('done', 'closed')), ?) >= ?) GROUP BY project`, end, end, end).map((r) => [r.project, r.n]));
+    `WITH d AS (SELECT json_extract(data, '$.id') id, MIN(ts) ts FROM events WHERE type = 'task.state' AND json_extract(data, '$.state') IN ('done', 'closed') GROUP BY 1)
+     SELECT project, COUNT(*) n FROM tasks LEFT JOIN d ON d.id = tasks.id WHERE project IS NOT NULL AND created_at < ?
+       AND (state NOT IN ('done', 'closed') OR COALESCE(d.ts, ?) >= ?) GROUP BY project`, end, end, end).map((r) => [r.project, r.n]));
   const projects = [...new Set(teams.map((t) => t.project).filter((x): x is string => !!x))]
     .map((project) => ({ project, opened: opened[project] ?? 0, done: done[project] ?? 0, open: openAtEnd[project] ?? 0 }));
 
