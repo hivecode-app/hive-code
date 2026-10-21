@@ -184,6 +184,8 @@ export class AccountManager {
   private async follow(row: ShiftRow): Promise<void> {
     const pin = this.pinned();
     if (!pin || row.kind === 'foreign' || (row.account ?? this.primary) === pin || row.state !== 'live') return;
+    // A node's shift runs on that node's own login (nodes.ts): "everyone to X" does not move it here.
+    if ((row.machine ?? 'local') !== 'local') return;
     const r = this.get(pin);
     if (!r || !this.usable(r) || this.blocked(r)) return;
     const o = this.mailbox.names.owner;

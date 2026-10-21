@@ -417,6 +417,8 @@ const MIGRATIONS: string[] = [
   ALTER TABLE conversations ADD COLUMN telegram_owed TEXT;
   ALTER TABLE conversations ADD COLUMN telegram_at INTEGER;
   `,
+  // v20: the machine a task's worktree and shifts are on (nodes.ts): NULL = not placed yet (here, until it gets a worktree).
+  `ALTER TABLE tasks ADD COLUMN machine TEXT;`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */
@@ -522,6 +524,12 @@ export class Store {
       ON CONFLICT(key) DO UPDATE SET enabled = excluded.enabled, manual = excluded.manual, updated_at = excluded.updated_at`)
       .run(key, enabled ? 1 : 0, manual ? 1 : 0, this.now());
     this.emit('toggle.changed', null, { key, enabled, manual });
+  }
+
+  /** A switch that exists only with its config (a node, nodes.ts): created once, then his to flip. */
+  ensureToggle(key: string, enabled: boolean, description: string): void {
+    this.db.prepare('INSERT OR IGNORE INTO toggles (key, enabled, description, updated_at) VALUES (?, ?, ?, ?)')
+      .run(key, enabled ? 1 : 0, description, this.now());
   }
 
   toggles(): { key: string; enabled: boolean; manual: boolean; description: string; updated_at: number }[] {

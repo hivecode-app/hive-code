@@ -33,6 +33,7 @@ import { TabHandoffs } from './tab/handoffs.ts';
 import { CdpTabBrowser, type TabBrowser } from './tab/browser.ts';
 import { startTabServer, type TabServer } from './tab/server.ts';
 import { clockOf, readTimeZone } from './timezone.ts';
+import { Nodes, RoutingLauncher, nodeToggle, type SshRun } from './nodes.ts';
 
 /** The phone view's own diagnostics go to the journal, not the event log (frames and taps are not events). */
 const tabLog = (msg: string, data?: unknown) => console.log(`tab: ${msg}${data === undefined ? '' : ` ${JSON.stringify(data)}`}`);
@@ -51,6 +52,8 @@ export interface HqDeps {
   memoryRun?: Run;
   /** The open-*.md of a project, for stall-watch.ts (default: the company repo). */
   openFiles?: OpenFilesReader;
+  /** ssh for the nodes (nodes.ts). */
+  ssh?: SshRun;
   now?: () => number;
 }
 
@@ -91,6 +94,7 @@ export class Hq {
   readonly home: Home;
   readonly memoryFiles: MemoryFiles;
   readonly stallWatch: StallWatch;
+  readonly nodes: Nodes;
   private tabServer: TabServer | null = null;
   private ingestServer: Server | null = null;
   private timers: NodeJS.Timeout[] = [];
@@ -103,11 +107,18 @@ export class Hq {
     this.store = new Store(cfg.dbPath, { now: deps.now, managerName: loadNames(cfg.companyDir, cfg.managerId).manager.name });
     this.inbox = new Inbox(this.store);
     this.auth = new Auth(this.store, cfg.auth);
-    this.shifts = new ShiftManager(this.store, cfg, deps.launcher ?? lazyTemplateLauncher(cfg), deps.connect);
+    this.nodes = new Nodes(cfg.nodes, cfg.stateDir, deps.ssh);
+    // A node's switch, on by default: off, nothing new starts there (what runs there finishes there).
+    for (const n of cfg.nodes) this.store.ensureToggle(nodeToggle(n.name), true, `משמרות משימה רצות גם על ${n.name}`);
+    // A launcher given by the caller (tests) launches on every machine itself.
+    const launcher = deps.launcher ?? (cfg.nodes.length ? new RoutingLauncher(lazyTemplateLauncher(cfg), this.nodes, cfg.stateDir) : lazyTemplateLauncher(cfg));
+    this.shifts = new ShiftManager(this.store, cfg, launcher, deps.connect);
+    this.shifts.nodes = this.nodes;
     this.uploads = new Uploads(this.store, cfg.stateDir);
     this.appReleases = new AppReleases(cfg.appReleaseDir);
     this.mailbox = new Mailbox(this.store, cfg, this.shifts, this.inbox, deps.foreign ?? noForeignInjector, this.uploads);
     this.scheduler = new Scheduler(this.store, cfg, this.shifts, this.mailbox);
+    this.scheduler.nodes = this.nodes;
     this.night = new Night(this.store, cfg, this.scheduler, this.mailbox, this.inbox, deps.issues);
     this.accounts = new AccountManager(this.store, cfg, this.shifts, this.mailbox, this.inbox, deps.accounts);
     this.watchdog = new Watchdog(this.store, cfg, this.shifts, this.mailbox, this.inbox);
@@ -203,6 +214,8 @@ export class Hq {
     this.accounts.sync();
     // The identity check runs once at start for every account (no inference; profile + cached oauthAccount).
     for (const a of this.accounts.rows()) this.store.bg(this.accounts.verify(a.name), 'accounts.verify');
+    // The nodes' health first: the first fill already knows what room they have, and their shifts can be reattached.
+    await this.pollNodes();
     await this.shifts.reattachAll();
     await this.shifts.restoreLost(this.watchdog.procCheck);
     this.store.bg(this.ingest.drainPendingTickets(), 'open_ticket.drain');
@@ -211,6 +224,7 @@ export class Hq {
     if (opts.timers !== false) {
       const T = this.cfg.timers;
       this.every(5_000, 'mailbox', () => this.mailbox.sweep());
+      if (this.nodes.list.length) this.every(30_000, 'nodes', () => this.pollNodes());
       this.every(5_000, 'spool', () => this.shifts.collectSpools());
       this.every(T.watchdogMs, 'watchdog', async () => { await this.watchdog.sweep(); await this.shifts.releaseEnded(); });
       this.every(T.livenessMs, 'liveness', () => this.shifts.pingAll());
@@ -255,6 +269,28 @@ export class Hq {
     }
   }
 
+  /**
+   * Memory and load of every node whose switch is on or that still runs shifts. A node that stops answering (or comes
+   * back) is an event, and the manager hears of it once while shifts or the switch depend on it (no false quiet).
+   */
+  async pollNodes(): Promise<void> {
+    await Promise.all(this.nodes.list.map(async (n) => {
+      const name = n.def.name;
+      const running = (this.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND machine = ?`).get(name) as { n: number }).n;
+      // Switched off, and nothing of ours left there (no shift, no open task with its worktree there): leave it alone.
+      const placed = this.store.db.prepare(`SELECT 1 FROM tasks WHERE machine = ? AND (state != 'done' OR worktree IS NOT NULL) LIMIT 1`).get(name);
+      if (!this.store.toggle(nodeToggle(name)) && !running && !placed) { if (n.connected) n.close(); n.status = null; return; }
+      const was = n.status?.up;
+      const st = await n.poll(this.store.now());
+      if (was === st.up || (was === undefined && st.up)) return;
+      this.store.emit(st.up ? 'node.up' : 'node.down', null, { node: name, error: st.error, running });
+      if (!st.up) {
+        this.mailbox.tell({ msg_id: `node-down-${name}-${this.store.now()}`, from: 'hq', to: this.cfg.managerId, priority: 'next',
+          body: `השרת ${name} לא עונה (${st.error ?? 'בלי פרטים'}). ${running ? `${running} משמרות רצות שם, וה-watchdog יסמן אותן כמתות. ` : ''}משימות חדשות לא יוצאות אליו עד שיחזור. כיבוי: המתג \`${nodeToggle(name)}\` באוטומציות.` });
+      }
+    }));
+  }
+
   get port(): number | null { return this.api?.port ?? null; }
   get tabPort(): number | null { return this.tabServer?.port ?? null; }
 
@@ -284,6 +320,7 @@ export class Hq {
     // Shift-hosts are separate units and keep running across hq restarts (B.5): only drop our sockets.
     await this.shifts.drain();
     this.shifts.closeAll();
+    this.nodes.close();
     this.store.close();
   }
 }

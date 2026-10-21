@@ -101,8 +101,12 @@ class Presence {
     this.contextPct,
     this.currentTask,
     this.queued = 0,
+    this.machine,
   });
   final WorkerStatus status;
+
+  /// The machine its shift runs on (hq `shift.machine`): hq-host, or another server that takes task shifts.
+  final String? machine;
 
   /// The task it is on now (hq `current_task`), for a standing worker on the org tab; null between tasks.
   final String? currentTask;
@@ -126,6 +130,7 @@ class Presence {
         contextPct: contextPct,
         currentTask: currentTask,
         queued: queued,
+        machine: machine,
       );
 }
 

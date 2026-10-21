@@ -112,7 +112,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   route('GET', '/api/board', () => {
     const identities = hq.board();
     return { identities, tasks: hq.scheduler.tasks(), open_tasks: hq.openTasks(identities), awaiting: hq.awaiting.list(), asked: hq.home.asked(),
-      projects: hq.projects(), slots: hq.scheduler.slots(), probes: hq.probes.summary(), timezone: hq.clock(), manager: hq.cfg.managerId,
+      projects: hq.projects(), slots: { ...hq.scheduler.slots(), nodes: hq.scheduler.nodeSlots() }, probes: hq.probes.summary(), timezone: hq.clock(), manager: hq.cfg.managerId,
       names: hq.mailbox.names };
   });
 

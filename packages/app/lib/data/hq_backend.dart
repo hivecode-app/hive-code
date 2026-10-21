@@ -1375,6 +1375,7 @@ CompanyData mapSnapshot({
       activity: ((b['current_task'] ?? b['task']) as Map?)?['title'] as String?,
       currentTask: (b['current_task'] as Map?)?['title'] as String?,
       queued: b['queued'] is int ? b['queued'] as int : 0,
+      machine: shift?['machine'] as String?,
     );
   }
 

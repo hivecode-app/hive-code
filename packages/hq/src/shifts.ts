@@ -16,6 +16,12 @@ import { noWorkers, readCharter, Workspaces } from './workspace.ts';
 
 export type ShiftKind = 'work' | 'resident' | 'foreign';
 
+/** shifts.machine of this machine (nodes.ts LOCAL; not imported, nodes.ts imports this file). */
+const LOCAL = 'local';
+
+/** The account a node's shift is recorded on: its own login there, none of the accounts here. */
+export const nodeAccount = (machine: string) => `node:${machine}`;
+
 export interface ShiftRow {
   id: string; identity: string; shift_no: number; session_id: string | null; state: string; kind: ShiftKind;
   host_pid: number | null; pid: number | null; proc_start: string | null; host_seq: number; host_log_id: string | null; spool_cursor: string | null;
@@ -38,16 +44,22 @@ export interface LaunchSpec {
   /** Account the shift runs on (B.7); configDir absent = the CLI's own ~/.claude login. */
   account?: string | null;
   configDir?: string | null;
+  /** Where it runs: 'local' (this machine) or a node's name (nodes.ts). */
+  machine?: string;
 }
 
 /** Starts a shift-host process. Default: systemd-run --user (B.5); tests inject a fake. */
 export interface Launcher {
   launch(spec: LaunchSpec): Promise<{ unit?: string }>;
-  /** Stop a host we can't reach over its socket (still booting, or wedged). */
-  kill(shiftId: string, unit: string | null): Promise<void>;
+  /** Stop a host we can't reach over its socket (still booting, or wedged). machine: where it runs (default here). */
+  kill(shiftId: string, unit: string | null, machine?: string | null): Promise<void>;
 }
 
-export type ConnectionFactory = (shiftId: string, socketPath: string) => HostConnection & { open(since: number, logId: string | null, timeoutMs?: number): Promise<void> };
+/** remote: the socket is an ssh forward to a node (nodes.ts), connected only once the host answers. */
+export type ConnectionFactory = (shiftId: string, socketPath: string, opts?: { remote?: boolean }) => HostConnection & { open(since: number, logId: string | null, timeoutMs?: number): Promise<void> };
+
+/** What ShiftManager needs of the nodes (nodes.ts Nodes): the forward to a shift's socket there. */
+export interface NodeLinks { forward(machine: string, socketPath: string): Promise<void> }
 
 export interface RequestOpts {
   kind?: ShiftKind;
@@ -165,7 +177,8 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
   private cfg: HqConfig;
   private launcher: Launcher;
   private factory: ConnectionFactory;
-  constructor(store: Store, cfg: HqConfig, launcher: Launcher, factory: ConnectionFactory = (id, path) => new HostClient(id, path)) {
+  constructor(store: Store, cfg: HqConfig, launcher: Launcher,
+    factory: ConnectionFactory = (id, path, o) => new HostClient(id, path, { awaitHello: o?.remote })) {
     super();
     this.store = store;
     this.cfg = cfg;
@@ -251,9 +264,11 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     const wouldResume = !!last && !neverRan && !opts.forceNew && !NEW_SHIFT_REASONS.has(last.end_reason ?? '')
       && !this.pastTask(identity, last.task_id) && (!ownTask || last.task_id === ownTask.id);
     const cwd = opts.cwd ?? this.taskCwd(opts.taskId ?? ownTask?.id ?? (wouldResume ? last!.task_id : null), identity) ?? this.projectCwd(identity) ?? this.cfg.defaultCwd;
-    // The session lives where it ran (Claude Code keeps sessions per cwd): elsewhere, a new shift. Rows from
-    // before v7 have no cwd and resume as before (on hq-host defaultCwd is the agent-company checkout itself).
-    const moved = !!last?.cwd && last.cwd !== cwd;
+    // A task placed on a node (nodes.ts) runs there, every run; everything else runs here.
+    const machine = this.taskMachine(opts.taskId ?? ownTask?.id ?? (wouldResume ? last!.task_id : null), identity);
+    // The session lives where it ran (Claude Code keeps sessions per cwd, per machine): elsewhere, a new shift. Rows
+    // from before v7 have no cwd and resume as before (on hq-host defaultCwd is the agent-company checkout itself).
+    const moved = (!!last?.cwd && last.cwd !== cwd) || (!!last && (last.machine ?? LOCAL) !== machine);
     const resume = wouldResume && !moved;
     const shiftNo = resume || (neverRan && !opts.forceNew) ? last!.shift_no : (last?.shift_no ?? 0) + 1;
     const shiftId = `${identity}-${shiftNo}`;
@@ -262,15 +277,16 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     const now = this.store.now();
     const kind: ShiftKind = opts.kind ?? last?.kind ?? (this.cfg.capacity.residents.includes(identity) ? 'resident' : 'work');
     const taskId = opts.taskId ?? ownTask?.id ?? (resume ? last!.task_id : null);
-    this.store.db.prepare(`INSERT INTO shifts (id, identity, shift_no, session_id, state, kind, socket_path, task_id, started_at, last_event_at, cwd)
-        VALUES (?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?)
+    this.store.db.prepare(`INSERT INTO shifts (id, identity, shift_no, session_id, state, kind, socket_path, task_id, started_at, last_event_at, cwd, machine)
+        VALUES (?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET state='starting', kind=excluded.kind, started_at=excluded.started_at, ended_at=NULL,
         end_reason=NULL, last_event_at=excluded.last_event_at, in_turn=0, long_tool=0, stuck_since=NULL, nudged_at=NULL,
         interrupted_at=NULL, dead_signals=0, pid=NULL, host_pid=NULL, proc_start=NULL, last_ping_ok_at=NULL,
-        unit_released_at=NULL, run_start_seq=NULL, bg_tasks='[]', task_id=excluded.task_id, cwd=excluded.cwd`)
-      .run(shiftId, identity, shiftNo, sessionId, kind, socketPath, taskId, now, now, cwd);
+        unit_released_at=NULL, run_start_seq=NULL, bg_tasks='[]', task_id=excluded.task_id, cwd=excluded.cwd, machine=excluded.machine`)
+      .run(shiftId, identity, shiftNo, sessionId, kind, socketPath, taskId, now, now, cwd, machine);
     const row = this.get(shiftId)!;
-    this.store.emit('shift.state', identity, { shift: shiftId, state: 'starting', resume, reason: opts.reason, ...(moved && wouldResume ? { moved_from: last!.cwd, cwd } : {}) });
+    this.store.emit('shift.state', identity, { shift: shiftId, state: 'starting', resume, reason: opts.reason,
+      ...(machine !== LOCAL ? { machine } : {}), ...(moved && wouldResume ? { moved_from: last!.cwd, cwd } : {}) });
     const unit = shiftUnit(shiftId);
     this.patch(shiftId, { unit });
     this.heldExits.delete(shiftId); // held exits belong to a previous connection/run
@@ -278,7 +294,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     try {
       // The previous run's host may still be up (it lingers 10 min after claude exits, and answers `stop`
       // before it is gone). Stop it and wait, so two hosts never serve one shift.
-      if (last?.unit) await this.launcher.kill(last.id, last.unit);
+      if (last?.unit) await this.launcher.kill(last.id, last.unit, last.machine);
       stage = 'launch_failed';
       // A new shift (not a resume) won't see what the old CLI still held in its own queue: send it again.
       if (!resume) {
@@ -287,11 +303,12 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       }
       this.writePrime(shiftId, identity);
       const systemPromptFile = this.writeSystem(shiftId, identity);
-      const acct = this.chooseAccount?.(identity, opts.account) ?? null;
+      // A node runs on its own login (nodes.ts): not one of the accounts here, and never moved between them.
+      const acct = machine === LOCAL ? this.chooseAccount?.(identity, opts.account) ?? null : { name: nodeAccount(machine), configDir: null };
       this.patch(shiftId, { account: acct?.name ?? null });
       await this.launcher.launch({
         shiftId, identity, shiftNo, sessionId, resume, kind, socketPath, taskId, unit,
-        cwd, systemPromptFile, account: acct?.name ?? null, configDir: acct?.configDir ?? null,
+        cwd, systemPromptFile, account: acct?.name ?? null, configDir: acct?.configDir ?? null, machine,
       });
     } catch (e) {
       this.markEnded(shiftId, 'dead', stage);
@@ -338,6 +355,16 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     return r?.worktree ?? undefined;
   }
 
+  /** The machine a task's shifts run on: the task's (nodes.ts), else here. Found like taskCwd. */
+  private taskMachine(taskId: number | null, identity: string): string {
+    const r = (taskId != null
+      ? this.store.db.prepare('SELECT machine FROM tasks WHERE id = ?').get(taskId)
+      : this.store.db.prepare(`SELECT t.machine FROM tasks t JOIN identities i ON i.id = t.identity
+          WHERE t.identity = ? AND i.team_kind = 'task' AND t.state != 'done' ORDER BY t.updated_at DESC LIMIT 1`).get(identity)
+    ) as { machine: string | null } | undefined;
+    return r?.machine ?? LOCAL;
+  }
+
   /**
    * A standing identity of a project (its CEO…) runs in the project's first checkout (B.5), so the project's
    * own CLAUDE.md, hooks, skills and agents load. Task workers are not standing: they run in their worktree.
@@ -359,6 +386,9 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
   /** Checkout lookup for standing identities (the machine check uses this host's name). */
   workspaces = new Workspaces();
 
+  /** The nodes (hq.ts); null = none, every shift is here. */
+  nodes: NodeLinks | null = null;
+
   /** Connect (with retries while the host boots) and keep the connection. Safe to call repeatedly. */
   async attach(row: ShiftRow, tries = 20, delayMs = 250): Promise<boolean> {
     if (this.conns.get(row.id)?.connected || this.connecting.has(row.id)) return true;
@@ -367,9 +397,16 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       for (let i = 0; i < tries && !this.closed; i++) {
         const fresh = this.get(row.id);
         if (!fresh || (fresh.state !== 'starting' && fresh.state !== 'live')) return false;
-        const c = this.factory(row.id, fresh.socket_path ?? shiftSocketPath(this.paths, row.id));
+        const path = fresh.socket_path ?? shiftSocketPath(this.paths, row.id);
+        const remote = (fresh.machine ?? LOCAL) !== LOCAL;
+        const c = this.factory(row.id, path, remote ? { remote } : undefined);
         this.wire(c);
         try {
+          // A node's shift: its socket there, forwarded to the same path here (again after an hq restart).
+          if (remote) {
+            if (!this.nodes) throw new Error(`shift ${row.id} runs on ${fresh.machine}, and no nodes are configured`);
+            await this.nodes.forward(fresh.machine, path);
+          }
           await c.open(fresh.host_seq, fresh.host_log_id);
           const now = this.get(row.id);
           // Raced with markEnded/a relaunch while connecting: drop this socket, it belongs to a dead host.
@@ -570,7 +607,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       try { await c.stop(reason); stopped = true; } catch { /* host may already be gone */ }
     }
     // Not reachable over the socket (still booting, wedged): stop the unit so no orphan keeps running.
-    if (!stopped && row.kind !== 'foreign') await this.launcher.kill(id, row.unit).catch(() => {});
+    if (!stopped && row.kind !== 'foreign') await this.launcher.kill(id, row.unit, row.machine).catch(() => {});
     this.markEnded(id, 'ended', reason, row.started_at);
   }
 
@@ -715,12 +752,13 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
         await this.locked(r.identity, async () => {
           const now = this.get(r.id);
           if (!now || (now.state !== 'ended' && now.state !== 'dead') || now.started_at !== r.started_at) return;
-          await this.launcher.kill(r.id, r.unit);
+          await this.launcher.kill(r.id, r.unit, r.machine);
           this.patch(r.id, { unit_released_at: this.store.now() });
         });
       } catch (e) {
-        // A wedged unit is retried next sweep; it never blocks releasing the others.
-        this.store.emit('shift.release_failed', r.identity, { shift: r.id, error: (e as Error).message });
+        // A wedged unit is retried next sweep; it never blocks releasing the others. A node that is down is not news
+        // every 15 seconds: its own state says so (nodes.ts), and the release waits for it.
+        if ((e as Error).name !== 'NodeUnreachable') this.store.emit('shift.release_failed', r.identity, { shift: r.id, error: (e as Error).message });
       }
     }
   }

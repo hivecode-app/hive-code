@@ -333,7 +333,7 @@ class _ContextColumn extends StatelessWidget {
         if (ticket != null) kv('טיקט', '${ticket.number} ${ticket.title.split(' ').take(2).join(' ')}'),
         if (presence?.shift != null) kv('משמרת', '${presence!.shift}${presence.shiftSince != null ? ' · מ-${presence.shiftSince}' : ''}'),
         if (presence?.contextPct != null) kv('הקשר', '${presence!.contextPct}%'),
-        kv('מחשב', '`hq-host`'),
+        if (presence?.machine != null) kv('מחשב', '`${presence!.machine}`'),
       ]),
       if (pr != null) ...[
         h('PR #${pr.number}'),

@@ -3,7 +3,7 @@
 //  - counts a lead idle with no task outside the work slots, and rests it when a task waits for a slot (#128);
 //  - escalates unanswered blocking asks to the manager (A.4: 10 min by day, immediately at night);
 //  - lets night.ts (B.16) scope the queue, add the night note and measure empty slots after every fill.
-import { g, pre } from '@company/shared';
+import { ENGINE_ROOT as ENGINE, g, pre } from '@company/shared';
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import { waitingLine, type Mailbox } from './mailbox.ts';
@@ -13,6 +13,7 @@ import { HELPER_TEAM, taskSteps } from './system-prompt.ts';
 import { memInfoMb } from './proc.ts';
 import { dirname, join } from 'node:path';
 import { noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
+import { LOCAL, LOCAL_LABELS, NodeUnreachable, nodeToggle, RemoteWorkspaces, type Nodes, type RemoteNode } from './nodes.ts';
 
 export interface TaskRow {
   id: number; ref: string | null; project: string | null; title: string; body: string; source: string; state: string;
@@ -22,6 +23,8 @@ export interface TaskRow {
   summary?: string | null;
   /** "מה לבדוק" (awaiting.ts): deploy | check, with one line in his words; null = nothing waits. */
   awaiting?: string | null; awaiting_note?: string | null; awaiting_at?: number | null; pr?: string | null;
+  /** Where its worktree and shifts are (nodes.ts): 'local' or a node's name; null = not placed yet. */
+  machine?: string | null;
 }
 
 export interface NewTask {
@@ -86,6 +89,22 @@ export class Scheduler {
   afterFill: () => void = () => {};
   /** Worktrees per task in the project's checkout (B.5). Tests swap in one over a temp repo. */
   workspaces = new Workspaces();
+  /** Other machines that take task shifts (nodes.ts, set by hq); null = none. */
+  nodes: Nodes | null = null;
+  private remoteWs = new Map<string, Pick<Workspaces, 'checkout' | 'create' | 'ensure' | 'close'>>();
+
+  /** The worktrees of a machine: here, or a node's (the same Workspaces, run there). */
+  workspacesFor(machine: string | null | undefined): Pick<Workspaces, 'checkout' | 'create' | 'ensure' | 'close'> {
+    if (!machine || machine === LOCAL) return this.workspaces;
+    let w = this.remoteWs.get(machine);
+    if (!w) {
+      const n = this.nodes?.get(machine);
+      if (!n) throw new Error(`task runs on ${machine}, which is not in hq.config.json nodes`);
+      w = new RemoteWorkspaces(n, this.cfg.companyHome, ENGINE);
+      this.remoteWs.set(machine, w);
+    }
+    return w;
+  }
 
   private store: Store;
   private cfg: HqConfig;
@@ -148,7 +167,7 @@ export class Scheduler {
   }
 
   /**
-   * Slots (B.5, #128). `running` is what holds a work slot: task shifts, starts under way, and a standing shift (a lead,
+   * Slots here (B.5, #128); a node's are nodeSlots(). `running` is what holds a work slot: task shifts, starts under way, and a standing shift (a lead,
    * a standing worker between tasks) while it is in a turn. A standing shift that is up and idle with no task holds no
    * slot: it is counted like a resident (RSS_idle off the total), and rests when a task waits (restOnPressure).
    * `tasks` / `leads` say what is behind the numbers, for the board.
@@ -156,13 +175,13 @@ export class Scheduler {
   slots() {
     const db = this.store.db;
     const live = db.prepare(`SELECT s.task_id, s.in_turn, s.state, ${STANDING_SHIFT} AS standing FROM shifts s
-      LEFT JOIN identities i ON i.id = s.identity WHERE s.state IN ('starting','live') AND s.kind = 'work'`)
+      LEFT JOIN identities i ON i.id = s.identity WHERE s.state IN ('starting','live') AND s.kind = 'work' AND s.machine = 'local'`)
       .all({ mgr: this.cfg.managerId }) as { task_id: number | null; in_turn: number; state: string; standing: number }[];
     const leadShifts = live.filter((s) => s.standing && s.task_id == null);
     const idle = leadShifts.filter((s) => s.state === 'live' && !s.in_turn).length;
     const active = leadShifts.length - idle;
     // A task still in its worktree setup has no shift row yet, but its slot is taken.
-    const tasks = live.length - leadShifts.length + this.starting.size;
+    const tasks = live.length - leadShifts.length + [...this.starting.values()].filter((m) => m === LOCAL).length;
     const residents = (db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND kind = 'resident'`).get() as { n: number }).n;
     // Standing identities that ran before and are down now: rested (idle, pressure) or stopped by hand. A message wakes them.
     const resting = (db.prepare(`SELECT COUNT(*) n FROM identities i WHERE i.source = 'org' AND i.active = 1
@@ -172,6 +191,51 @@ export class Scheduler {
       .get({ mgr: this.cfg.managerId }) as { n: number }).n;
     const c = capacity(this.cfg, this.memInfo(), tasks + active, Math.max(residents, this.cfg.capacity.residents.length) + idle);
     return { ...c, tasks, leads: { active, idle, resting } };
+  }
+
+  /**
+   * Task slots on each node (nodes.ts): the same memory formula as here (B.5, no residents there), capped by the
+   * node's maxSlots, and none while its load per CPU is over maxLoad or it is down. The switch (`enabled`) stops new
+   * tasks going there (placeFor); a task already there keeps its slots, its worktree and session are there.
+   */
+  nodeSlots(): { name: string; enabled: boolean; up: boolean; error: string | null; load: number | null; total: number; running: number; free: number }[] {
+    return (this.nodes?.list ?? []).map((n) => {
+      const name = n.def.name;
+      const running = (this.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND machine = ?`).get(name) as { n: number }).n
+        + [...this.starting.values()].filter((m) => m === name).length;
+      const st = n.status;
+      const enabled = this.store.toggle(nodeToggle(name));
+      const load = st?.up && st.cpus ? Math.round((st.load1 / st.cpus) * 100) / 100 : null;
+      if (!st?.up) return { name, enabled, up: false, error: st?.error ?? null, load, total: 0, running, free: 0 };
+      const c = capacity({ ...this.cfg, capacity: { ...this.cfg.capacity, maxSlots: n.def.maxSlots } }, st, running, 0);
+      const free = load != null && load <= n.def.maxLoad ? c.free : 0;
+      return { name, enabled, up: true, error: null, load, total: c.total, running, free };
+    });
+  }
+
+  /**
+   * Where a task that has no machine yet would go (nodes.ts): a node, when the task can run there (a task worker's
+   * task of a project the node lists, with no label that keeps it here) and the node has a free slot; else here.
+   * A task with a machine stays on it: its worktree and session are there.
+   */
+  placeFor(t: TaskRow, nodeFree: Map<string, number>): string {
+    if (t.machine) return t.machine;
+    if (!this.nodes || t.worktree || t.started_at != null || !t.project) return LOCAL;
+    const labels = JSON.parse(t.labels || '[]') as string[];
+    if (labels.some((l) => LOCAL_LABELS.includes(l))) return LOCAL;
+    // A task handed to a standing worker (or to a lead) runs where that identity runs: here.
+    if (t.identity && getIdentity(this.store, t.identity)?.team_kind !== 'task') return LOCAL;
+    const best = this.nodes.list.filter((n) => n.def.projects.includes(t.project!) && this.store.toggle(nodeToggle(n.def.name))
+      && (nodeFree.get(n.def.name) ?? 0) > 0)
+      .sort((a, b) => (nodeFree.get(b.def.name) ?? 0) - (nodeFree.get(a.def.name) ?? 0))[0];
+    return best?.def.name ?? LOCAL;
+  }
+
+  /** A node the task could run on, whether or not it has room now (waitReason). */
+  private nodeCandidate(t: TaskRow): RemoteNode | undefined {
+    if (t.machine) return this.nodes?.get(t.machine);
+    const free = new Map((this.nodes?.list ?? []).map((n) => [n.def.name, 1]));
+    return this.nodes?.get(this.placeFor(t, free));
   }
 
   /**
@@ -219,7 +283,7 @@ export class Scheduler {
    * slot is taken (slots()), so a slow setup (`flutter pub get`) holds only its own task, not the queue. It
    * overlaps the new shift row briefly: never too many, and the pass after the starts settle fills what it hid.
    */
-  private starting = new Set<number>();
+  private starting = new Map<number, string>(); // task → the machine it starts on
 
   /** A queued task whose start is under way (the night's empty-slot metric does not count it as waiting). */
   isStarting(id: number): boolean { return this.starting.has(id); }
@@ -239,11 +303,14 @@ export class Scheduler {
       do {
         this.refill = false;
         let free = this.slots().free;
+        const nodeFree = new Map(this.nodeSlots().map((n) => [n.name, n.free]));
         // A standing worker takes one task at a time: one starting in this fill holds it too.
-        const busy = new Set([...this.starting].map((id) => this.task(id)?.identity).filter((x): x is string => !!x));
+        const busy = new Set([...this.starting.keys()].map((id) => this.task(id)?.identity).filter((x): x is string => !!x));
         for (const t of this.queue()) {
-          if (free <= 0) break;
+          if (free <= 0 && ![...nodeFree.values()].some((n) => n > 0)) break;
           if (this.starting.has(t.id)) continue;
+          const machine = this.placeFor(t, nodeFree);
+          if ((machine === LOCAL ? free : nodeFree.get(machine) ?? 0) <= 0) continue;
           try {
             // Its next task waits in its own queue; the slot goes on to the next task in line.
             if (t.identity && this.standing(t.identity)) {
@@ -259,9 +326,9 @@ export class Scheduler {
             continue;
           }
           this.lastStartAt.set(t.id, this.store.now());
-          this.starting.add(t.id);
-          free--;
-          starts.push(this.start(t).then((ok) => {
+          this.starting.set(t.id, machine);
+          if (machine === LOCAL) free--; else nodeFree.set(machine, nodeFree.get(machine)! - 1);
+          starts.push(this.start(t, machine).then((ok) => {
             if (ok) started.push(t.id); else failed = true; // closed during setup: its slot is free again
             this.lastStartError = null;
           }, (e: Error) => {
@@ -300,7 +367,13 @@ export class Scheduler {
       return `מחכה ${pre('ש', getIdentity(this.store, t.identity)?.name ?? t.identity)} יתפנה`;
     }
     if (this.inBackoff(t.id)) return 'ניסיון חוזר בעוד רגע';
-    return free > 0 ? 'מתחילה עכשיו' : 'מחכה למשבצת';
+    const node = this.nodeCandidate(t);
+    const there = node ? this.nodeSlots().find((n) => n.name === node.def.name) : undefined;
+    if (t.machine && t.machine !== LOCAL) {
+      if (!there?.up) return `מחכה ל-${t.machine}, שלא עונה`;
+      return there.free > 0 ? 'מתחילה עכשיו' : `מחכה למשבצת ב-${t.machine}`;
+    }
+    return free > 0 || (there?.free ?? 0) > 0 ? 'מתחילה עכשיו' : 'מחכה למשבצת';
   }
 
   private standing(identity: string): boolean {
@@ -323,7 +396,7 @@ export class Scheduler {
    * Open a task worker under the project CEO (B.16) and hand it the task as its first prompt. False when the
    * task was closed while its worktree was being set up (no worker then).
    */
-  private async start(t: TaskRow): Promise<boolean> {
+  private async start(t: TaskRow, machine: string = LOCAL): Promise<boolean> {
     const lead = t.project ? projectLead(this.store, t.project) : undefined;
     const OPENED_BY = 'opened-by:';
     const openedBy = (JSON.parse(t.labels || '[]') as string[]).find((l) => l.startsWith(OPENED_BY))?.slice(OPENED_BY.length);
@@ -340,9 +413,20 @@ export class Scheduler {
     const taskIdentity = !t.identity || assigned || (getIdentity(this.store, identity)?.team_kind === 'task');
     let ws: { path: string; note: string } | null = null;
     if (taskIdentity) {
+      // Placed now, before the worktree: the worktree and every shift of the task follow it (shifts.taskMachine).
+      if (!t.machine && machine !== LOCAL) {
+        this.store.db.prepare('UPDATE tasks SET machine = ? WHERE id = ? AND machine IS NULL').run(machine, t.id);
+        t = { ...t, machine };
+      }
       try {
         ws = await this.prepareWorktree(t);
       } catch (e) {
+        // The node could not be reached: not a fault of the task. It goes back unplaced, and tries again (here, or
+        // on a node that answers) after the backoff.
+        if (e instanceof NodeUnreachable) {
+          if (!t.worktree) this.store.db.prepare('UPDATE tasks SET machine = NULL WHERE id = ? AND worktree IS NULL').run(t.id);
+          throw e;
+        }
         // Wrong machine, no repository, worktree and branch gone: retrying will not help. Out of the
         // queue (needs-decision) and the opener hears why.
         const labels = [...new Set([...(JSON.parse(t.labels || '[]') as string[]), 'needs-decision'])];
@@ -415,11 +499,12 @@ export class Scheduler {
    * The task's worktree (B.5): created on first start in the charter's checkout, reused (or brought back
    * on its branch) on a resume. A project without a checkout in its charter runs in hq's default cwd.
    */
-  async prepareWorktree(t: Pick<TaskRow, 'id' | 'project' | 'worktree' | 'labels' | 'started_at'> & { identity?: string | null }): Promise<{ path: string; note: string } | null> {
+  async prepareWorktree(t: Pick<TaskRow, 'id' | 'project' | 'worktree' | 'labels' | 'started_at'> & { identity?: string | null; machine?: string | null }): Promise<{ path: string; note: string } | null> {
     const ch = t.project ? readCharter(this.cfg.companyDir, t.project) : null;
+    const ws = this.workspacesFor(t.machine);
     if (t.worktree) {
       const { c } = this.checkoutOf(t);
-      if (!(await this.workspaces.ensure(t.worktree, c?.path, ch ?? undefined))) throw new Error(`task ${t.id}: worktree ${t.worktree} is gone and its branch too`);
+      if (!(await ws.ensure(t.worktree, c?.path, ch ?? undefined))) throw new Error(`task ${t.id}: worktree ${t.worktree} is gone and its branch too`);
       return { path: t.worktree, note: worktreeNote(t.worktree, ch) + this.charterNote(t) };
     }
     // Started before hq made worktrees: its session and work live where it ran (hq's default cwd and
@@ -427,9 +512,9 @@ export class Scheduler {
     if (t.started_at != null) return null;
     if (!ch) return null;
     const repoLabel = (JSON.parse(t.labels || '[]') as string[]).find((l) => l.startsWith('repo:'))?.slice(5);
-    const c = this.workspaces.checkout(ch, repoLabel);
+    const c = ws.checkout(ch, repoLabel);
     if (!c) return null;
-    const w = await this.workspaces.create(ch, c, `company-t${t.id}`);
+    const w = await ws.create(ch, c, `company-t${t.id}`);
     this.store.db.prepare('UPDATE tasks SET worktree = ?, updated_at = ? WHERE id = ?').run(w.path, this.store.now(), t.id);
     this.store.emit('task.worktree', null, { id: t.id, path: w.path, branch: w.branch, base: w.base });
     return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) + this.charterNote(t) };
@@ -486,7 +571,7 @@ export class Scheduler {
       // The worker may still be exiting: let its unit go first.
       const live = t.identity ? this.shifts.current(t.identity) : undefined;
       if (live && live.task_id === id) return;
-      const r: CloseResult = await this.workspaces.close(t.worktree!, c.defaultBranch);
+      const r: CloseResult = await this.workspacesFor(t.machine).close(t.worktree!, c.defaultBranch);
       if (r.removed || r.error === 'missing') {
         this.store.db.prepare('UPDATE tasks SET worktree = NULL WHERE id = ? AND worktree = ?').run(id, t.worktree);
         this.closeAttemptAt.delete(id);

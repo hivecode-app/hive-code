@@ -279,9 +279,9 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
   final presence = <String, Presence>{
     'yoav': const Presence(status: WorkerStatus.free),
     'rotem': const Presence(status: WorkerStatus.waiting),
-    'ido': const Presence(status: WorkerStatus.waiting, shift: 2, shiftSince: '12:40', contextPct: 62),
-    'dana': const Presence(status: WorkerStatus.working, activity: 'כותבת', shift: 7),
-    'noa': const Presence(status: WorkerStatus.working, shift: 1),
+    'ido': const Presence(status: WorkerStatus.waiting, shift: 2, shiftSince: '12:40', contextPct: 62, machine: 'hq-host'),
+    'dana': const Presence(status: WorkerStatus.working, activity: 'כותבת', shift: 7, machine: 'hq-host'),
+    'noa': const Presence(status: WorkerStatus.working, shift: 1, machine: 'hq-host'),
     'itai': const Presence(status: WorkerStatus.stuck),
     'amit': const Presence(status: WorkerStatus.waiting),
     'noga': const Presence(status: WorkerStatus.working),

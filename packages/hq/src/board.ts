@@ -1,5 +1,6 @@
 // Derived status (B.11): never stored, computed at read time from facts — live shift, last event,
 // open ask, rate limit, task state. Precedence follows what he needs to see first.
+import { hostname } from 'node:os';
 import { STATUS_SYMBOL, type DerivedStatus } from '@company/shared';
 import type { Store } from './store.ts';
 import type { IdentityRow } from './org.ts';
@@ -11,7 +12,8 @@ export interface BoardEntry {
   id: string; name: string; title: string; symbol: string; team: string | null; team_kind: string | null; project: string | null;
   reports_to: string | null; lifecycle: string;
   status: DerivedStatus; status_symbol: string; blocked_on: string | null; live: boolean;
-  shift: { id: string; state: string; started_at: number; last_event_at: number | null; in_turn: boolean } | null;
+  /** machine: where it runs, this machine's hostname or a node's name (nodes.ts). */
+  shift: { id: string; state: string; started_at: number; last_event_at: number | null; in_turn: boolean; machine: string } | null;
   task: { id: number; ref: string | null; title: string; state: string } | null;
   /** The task it is on now (running, resting on a message, interrupted mid-way); null between tasks. */
   current_task: { id: number; ref: string | null; title: string; state: string } | null;
@@ -69,7 +71,7 @@ export function board(store: Store, unresponsiveAfterMs?: number, tz?: string): 
       id: i.id, name: i.name, title: i.title, symbol: i.symbol, team: i.team, team_kind: i.team_kind, project: i.project,
       reports_to: i.reports_to, lifecycle: i.lifecycle, status: d.status, status_symbol: STATUS_SYMBOL[d.status], blocked_on: d.blocked_on,
       live: !!live,
-      shift: latest ? { id: latest.id, state: latest.state, started_at: latest.started_at, last_event_at: latest.last_event_at, in_turn: latest.in_turn === 1 } : null,
+      shift: latest ? { id: latest.id, state: latest.state, started_at: latest.started_at, last_event_at: latest.last_event_at, in_turn: latest.in_turn === 1, machine: !latest.machine || latest.machine === 'local' ? hostname() : latest.machine } : null,
       task: task ?? null, current_task: (currentQ.get(i.id) as BoardEntry['current_task'] | undefined) ?? null,
       queued: (queuedQ.get(i.id) as { n: number }).n, open_asks: openAsks, queued_messages: (msgQ.get(i.id) as { n: number }).n,
       derived_at: now, last_seen_at: latest ? Math.max(latest.last_ping_ok_at ?? 0, latest.last_event_at ?? 0) || null : null,

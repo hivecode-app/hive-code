@@ -234,6 +234,14 @@ deploy_hq() {
     say "השלבים המקומיים של החברה ($hook): $(tail -1 <<<"$out")"
   fi
 
+  # Nodes (hq.config.json `nodes`, packages/hq/src/nodes.ts): the engine there to this commit, so the shifts there run
+  # the same code. A node that fails is said here, not a failed deploy (one that does not answer gets no task from hq).
+  local n nout
+  for n in $(node -e 'for (const x of JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).nodes || []) console.log(x.name)' "$STATE/hq.config.json"); do
+    if nout="$(timeout 600 bash "$repo/scripts/node-install.sh" "$n" --update 2>&1)"; then say "$(tail -1 <<<"$nout")"
+    else say "השרת $n לא עודכן (המשמרות שם רצות על הגרסה הקודמת; כיבוי: המתג node:$n): $(tail -1 <<<"$nout")"; fi
+  done
+
   # Safe restart: shifts are their own units (company-shift@), outside hq's cgroup (scripts/lib/hq-restart.sh).
   hq_restarted=1
   hq_safe_restart || fail "$HQ_RESTART_MSG"

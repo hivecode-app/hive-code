@@ -5,6 +5,7 @@
 //   dead        — needs TWO signals ("failed probes are not proof of death"): process gone AND host unreachable,
 //                 or the same single signal on two consecutive sweeps. Then: resurrect (resume) if it has work.
 // Also: rest an idle non-resident shift after 20 min (B.2), unless background work of its own still runs (#175).
+// A shift on a node (nodes.ts) has no process here to look at: its host socket, through the ssh forward, is the signal.
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import type { Mailbox } from './mailbox.ts';
@@ -33,7 +34,7 @@ export class Watchdog {
   async sweep(): Promise<Record<string, Health>> {
     const out: Record<string, Health> = {};
     for (const s of this.shifts.active()) {
-      if (s.kind === 'foreign' || s.machine !== 'local') continue;
+      if (s.kind === 'foreign') continue;
       out[s.id] = await this.check(s);
     }
     return out;
@@ -42,8 +43,9 @@ export class Watchdog {
   private async check(s: ShiftRow): Promise<Health> {
     const now = this.store.now();
     // Signal 1: the process.
-    let procOk: boolean | null = null; // null = not known yet (still starting)
-    if (s.pid) {
+    let procOk: boolean | null = null; // null = not known yet (still starting), or on a node (its pid is there, not here)
+    const remote = (s.machine ?? 'local') !== 'local';
+    if (s.pid && !remote) {
       const st = this.procCheck(s.pid);
       procOk = st != null && (s.proc_start == null || st === s.proc_start);
     }

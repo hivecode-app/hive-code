@@ -175,7 +175,9 @@ export class Ingest {
         const taken = !open && db.prepare('SELECT 1 FROM tasks WHERE ref = ?').get(base);
         const ref = open?.ref ?? (taken ? `${base} · ${e.id}` : base);
         const task = this.hq.scheduler.addTask({
-          title: need('name'), body: need('purpose'), project, ref, labels: [`opened-by:${e.identity}`, ...(s(a.repo) ? [`repo:${s(a.repo)}`] : [])],
+          title: need('name'), body: need('purpose'), project, ref, labels: [`opened-by:${e.identity}`, ...(s(a.repo) ? [`repo:${s(a.repo)}`] : []),
+            // A browser, a simulator: only here (nodes.ts LOCAL_LABELS).
+            ...(a.local === true ? ['needs-local'] : [])],
           identity: worker?.id,
         });
         return { ok: true, id: e.id, ref: `task-${task.id}`, result: { task: task.id, state: task.state } };

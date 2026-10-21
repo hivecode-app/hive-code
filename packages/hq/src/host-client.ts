@@ -49,24 +49,32 @@ export class HostClient extends EventEmitter<HostClientEvents> implements HostCo
   connected = false;
   isLive = false;
 
-  constructor(shiftId: string, socketPath: string) {
+  private readonly awaitHello: boolean;
+  private onHello: (() => void) | null = null;
+
+  /**
+   * awaitHello: connected only once the host answered hello. Through an ssh forward (a shift on a node, nodes.ts) the
+   * socket opens even when no host is listening there yet; only its hello proves one is.
+   */
+  constructor(shiftId: string, socketPath: string, opts: { awaitHello?: boolean } = {}) {
     super();
     this.shiftId = shiftId;
     this.socketPath = socketPath;
+    this.awaitHello = opts.awaitHello === true;
   }
 
-  /** Connect and send hello. Resolves once the socket is open; `live` fires after the replay. */
+  /** Connect and send hello. Resolves once the socket is open (awaitHello: once hello came back); `live` fires after the replay. */
   open(since: number, logId: string | null = null, timeoutMs = 3000): Promise<void> {
     return new Promise((resolve, reject) => {
       const sock = connect(this.socketPath);
       const t = setTimeout(() => { sock.destroy(); reject(new Error(`connect timeout ${this.socketPath}`)); }, timeoutMs);
       const split = new LineSplitter((line) => this.onLine(line), undefined, () => { /* oversized frame dropped */ });
+      const up = () => { clearTimeout(t); this.connected = true; resolve(); };
       sock.on('connect', () => {
-        clearTimeout(t);
         this.sock = sock;
-        this.connected = true;
-        this.write({ t: 'hello', v: SHIFT_PROTOCOL_VERSION, client: 'hq', logId, since });
-        resolve();
+        if (this.awaitHello) this.onHello = () => { this.onHello = null; up(); };
+        try { this.write({ t: 'hello', v: SHIFT_PROTOCOL_VERSION, client: 'hq', logId, since }); } catch { /* close follows */ }
+        if (!this.awaitHello) up();
       });
       sock.on('data', (d) => {
         try { split.push(d); } catch { /* a bad line never kills the connection */ }
@@ -76,6 +84,7 @@ export class HostClient extends EventEmitter<HostClientEvents> implements HostCo
         if (!this.connected) reject(e);
       });
       sock.on('close', () => {
+        if (this.onHello) { this.onHello = null; clearTimeout(t); reject(new Error(`host closed before hello ${this.socketPath}`)); }
         const wasConnected = this.connected;
         this.connected = false;
         this.isLive = false;
@@ -92,7 +101,7 @@ export class HostClient extends EventEmitter<HostClientEvents> implements HostCo
     try { f = decodeHostFrame(line); } catch { return; }
     if (!f) return;
     switch (f.t) {
-      case 'hello': this.info = f.info; this.emit('hello', f.info); break;
+      case 'hello': this.info = f.info; this.onHello?.(); this.emit('hello', f.info); break;
       case 'live': this.isLive = true; this.emit('live', f.lastSeq); break;
       case 'delta': this.emit('delta', f.ev); break;
       case 'spool_ready': this.emit('spoolReady'); break;

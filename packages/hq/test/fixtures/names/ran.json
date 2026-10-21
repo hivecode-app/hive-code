@@ -333,6 +333,10 @@
        "type": "string"
       },
       "description": "identities של חברי הצוות / member identities"
+     },
+     "local": {
+      "type": "boolean",
+      "description": "המשימה צריכה דפדפן (MCP browser), סימולטור או אמולטור: היא רצה רק על השרת הראשי. בלי: hq יכול להריץ אותה גם על שרת אחר / needs the browser, a simulator or an emulator: runs only on the main server; default: may run on another node"
      }
     },
     "required": [

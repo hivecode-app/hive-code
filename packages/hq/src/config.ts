@@ -10,6 +10,7 @@ import { parse } from 'yaml';
 import { COMPANY_HOME_ENV, ENGINE_ROOT, companyDirOf, expandHome } from '@company/shared';
 import type { TabConfig } from './tab/handoffs.ts';
 import type { DictateConfig } from './dictate.ts';
+import type { NodeDef } from './nodes.ts';
 
 export interface HqConfig {
   stateDir: string;
@@ -88,6 +89,8 @@ export interface HqConfig {
   tab: TabConfig;
   /** The live app release dir (scripts/deploy.sh app): its app-release.json and APK feed the in-app update. null = none. */
   appReleaseDir: string | null;
+  /** Other machines that take task shifts over ssh (nodes.ts). None = everything runs here. */
+  nodes: NodeDef[];
 }
 
 export interface AccountDef {
@@ -203,6 +206,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     apiUrl: null,
     pushContact: 'mailto:owner@localhost',
     memoryImport: [],
+    nodes: [],
   };
   const cfg: HqConfig = {
     ...base, ...fromFile, ...overrides,
@@ -212,6 +216,8 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     tab: { ...base.tab, ...fromFile.tab, ...overrides.tab },
     dictate: { ...base.dictate, ...fromFile.dictate, ...overrides.dictate },
   };
+  cfg.nodes = (cfg.nodes ?? []).map((n) => ({ ...n, projects: n.projects ?? [], maxSlots: n.maxSlots ?? 8, maxLoad: n.maxLoad ?? 0.85,
+    identityFile: n.identityFile ? expandHome(n.identityFile) : null }));
   cfg.companyHome = companyHome;
   cfg.companyDir = companyDir;
   if (!cfg.auth.origins.includes(APK_ORIGIN)) cfg.auth.origins = [...cfg.auth.origins, APK_ORIGIN];

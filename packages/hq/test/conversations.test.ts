@@ -169,6 +169,7 @@ test('migration: what was there before counts as read', () => {
     s.db.exec('DROP TABLE memory_file_ops'); // v15
     s.db.exec('ALTER TABLE messages DROP COLUMN waiting_on'); // v17
     s.db.exec('ALTER TABLE shifts DROP COLUMN bg_tasks'); // v18
+    s.db.exec('ALTER TABLE tasks DROP COLUMN machine'); // v20
     s.db.pragma('user_version = 10');
     s.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, body, created_at) VALUES ('a', 'eli', 'owner', 'ישן', 100), ('b', 'eli', 'owner', 'ישן יותר', 50)`).run();
     (s as unknown as { migrate(): void }).migrate();

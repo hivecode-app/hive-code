@@ -682,7 +682,7 @@ class _ChatBar extends StatelessWidget {
       if (who.taskRef != null) ('משימה', '`${who.taskRef}`'),
       if (pr.shift != null) ('משמרת', '${pr.shift}${pr.shiftSince != null ? ' · מ-${pr.shiftSince}' : ''}'),
       if (pr.contextPct != null) ('הקשר', '${pr.contextPct}%'),
-      ('מחשב', '`hq-host`'),
+      if (pr.machine != null) ('מחשב', '`${pr.machine}`'),
     ];
     showModalBottomSheet(
       context: context,
