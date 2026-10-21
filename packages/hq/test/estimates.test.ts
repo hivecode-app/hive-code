@@ -221,3 +221,76 @@ test('GET /api/estimates filters by project, worker, state, date and message_id'
     assert.equal((await get('?since=x')).status, 400);
   } finally { await env.cleanup(); }
 });
+
+import { accuracyLine, yesterdayRange, type EstimateView } from '../src/estimates.ts';
+
+const view = (id: number, o: Partial<EstimateView> & { est?: number; act?: number }): EstimateView => {
+  const est = o.est ?? 30;
+  const created_at = id * 1000;
+  const closed = o.act != null ? created_at + o.act * MIN : null;
+  return { id, identity: 'dana', shift: null, task: null, project: 'agent-company', kind: 'feature', what: `משהו ${id}`, message_id: null, created_at,
+    due_at: created_at + est * MIN, closed_at: closed, outcome: closed ? 'done' : null, superseded_by: null, state: closed ? 'done' : 'open',
+    estimated_min: est, actual_min: o.act ?? null, late: closed != null && o.act! > est, ...o };
+};
+
+test('accuracyLine: nothing yesterday, no line; cancelled ones do not count', () => {
+  assert.equal(accuracyLine([]), null);
+  assert.equal(accuracyLine([view(1, { state: 'cancelled', outcome: 'cancelled' })]), null);
+});
+
+test('accuracyLine: all on time is one short line, no names, no per-kind breakdown', () => {
+  const line = accuracyLine([view(1, { act: 10 }), view(2, { act: 30, kind: 'report' }), view(3, { act: 5, kind: 'build' })]);
+  assert.equal(line, 'הערכות אתמול: 3, מתוכן 3 בזמן');
+});
+
+test('accuracyLine: late and unclosed are named with the worker and their words, in creation order; a kind only when it was off', () => {
+  const line = accuracyLine([
+    view(5, { identity: 'dana', what: 'תוכנית ל-TestFlight', est: 60, state: 'missed', kind: 'release' }),
+    view(2, { identity: 'eli', what: 'שחרור 1.2.3', est: 50, act: 120, kind: 'release' }),
+    view(1, { act: 10 }), view(3, { act: 20, kind: 'report' }), view(4, { act: 15, kind: 'build' }),
+  ]);
+  assert.equal(line, 'הערכות אתמול: 5, מתוכן 3 בזמן ו-1 באיחור (eli, "שחרור 1.2.3", פי 2.4) ו-1 שלא נסגרה (dana, "תוכנית ל-TestFlight")'
+    + ' · חריגים לפי סוג: שחרורים 2 מתוך 2');
+  assert.ok(!/%/.test(line));
+});
+
+test('yesterdayRange: the local calendar day before the one the summary is made in', () => {
+  const end = Date.UTC(2026, 9, 21, 4, 30); // 07:30 in Jerusalem (UTC+3), 21 Oct
+  const { since, until } = yesterdayRange(end, 'Asia/Jerusalem');
+  assert.equal(new Date(until).toISOString(), '2026-10-20T21:00:00.000Z');
+  assert.equal(new Date(since).toISOString(), '2026-10-19T21:00:00.000Z');
+});
+
+test('the morning summary carries the line, and has none when there were no estimates yesterday', async () => {
+  const env = await makeEnv({ org: `${(await import('./helpers.ts')).ORG_YAML}timezone: UTC\n` });
+  try {
+    const { hq } = env;
+    const ins = (what: string, created: number, due: number, closed: number | null, outcome: string | null) =>
+      hq.store.db.prepare(`INSERT INTO estimates (identity, kind, what, created_at, due_at, closed_at, outcome) VALUES ('dana', 'feature', ?, ?, ?, ?, ?)`)
+        .run(what, created, due, closed, outcome);
+    const now = hq.store.now();
+    const noon = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate() - 1, 12);
+    await hq.night.start();
+    hq.store.db.prepare('UPDATE nights SET started_at = ? WHERE ended_at IS NULL').run(now - 2 * 60 * MIN);
+    assert.equal(hq.night.summary(hq.night.last()!.id).estimates_line, null);
+    assert.ok(!hq.night.summary(hq.night.last()!.id).text.includes('הערכות אתמול'));
+    ins('א', noon, noon + 10 * MIN, noon + 5 * MIN, 'done');
+    ins('ב', noon, noon + 10 * MIN, noon + 25 * MIN, 'done');
+    const s = hq.night.summary(hq.night.last()!.id);
+    assert.equal(s.estimates_line, 'הערכות אתמול: 2, מתוכן 1 בזמן ו-1 באיחור (dana, "ב", פי 2.5)');
+    assert.equal(s.text.split('\n')[1], s.estimates_line, 'right under the header');
+  } finally { await env.cleanup(); }
+});
+
+test('accuracyLine: several late and several unclosed come in creation order, kinds in the fixed kind order; an open one not yet due is left out', () => {
+  // The register lists newest first, as the API does.
+  const line = accuracyLine([
+    view(9, { what: 'עוד פתוח', state: 'open' }),
+    view(8, { identity: 'noa', what: 'ח', est: 10, state: 'missed', kind: 'release' }),
+    view(7, { identity: 'eli', what: 'ז', est: 10, state: 'missed', kind: 'build' }),
+    view(6, { identity: 'dana', what: 'ו', est: 10, act: 20, kind: 'release' }),
+    view(5, { identity: 'eli', what: 'ה', est: 10, act: 30, kind: 'build' }),
+  ]);
+  assert.equal(line, 'הערכות אתמול: 4, מתוכן 0 בזמן ו-2 באיחור (eli, "ה", פי 3; dana, "ו", פי 2) ו-2 שלא נסגרה (eli, "ז"; noa, "ח")'
+    + ' · חריגים לפי סוג: בילדים 2 מתוך 2, שחרורים 2 מתוך 2');
+});

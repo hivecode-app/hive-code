@@ -7,7 +7,7 @@
 // A new estimate of the same worker on the same `what` is an update: the old row stays as given, closed as cancelled
 // with superseded_by pointing at the new one.
 import type { Store } from './store.ts';
-import { nextLocal } from './timezone.ts';
+import { nextLocal, tzOffsetMs } from './timezone.ts';
 
 export const ETA_KINDS = ['small-fix', 'feature', 'investigation', 'report', 'build', 'deploy', 'release'] as const;
 export type EtaKind = (typeof ETA_KINDS)[number];
@@ -211,4 +211,44 @@ export class Estimates {
       .all(...args, limit) as EstimateRow[];
     return rows.map((r) => this.view(r));
   }
+}
+
+/** [start, end) of the local calendar day before the one `ts` falls in, in `tz`. */
+export function yesterdayRange(ts: number, tz: string): { since: number; until: number } {
+  const at = (days: number): number => {
+    const l = new Date(ts + tzOffsetMs(ts, tz));
+    const guess = Date.UTC(l.getUTCFullYear(), l.getUTCMonth(), l.getUTCDate() + days);
+    return guess - tzOffsetMs(guess - tzOffsetMs(guess, tz), tz);
+  };
+  return { since: at(-1), until: at(0) };
+}
+
+/**
+ * One line for the morning summary: how yesterday's estimates ended. On time = closed done by its due time; late = closed
+ * done after it (with the factor actual / estimated); unclosed = past due and still open (an open one not yet due is not known
+ * yet, and is left out). Cancelled ones are
+ * not counted (replaced by a newer estimate, or the task ended without its worker saying done). Null when there were none.
+ * Names of what was late or unclosed come with the worker; a per-kind count only for a kind that had something off,
+ * and only when more than one kind was given.
+ */
+export function accuracyLine(rows: EstimateView[]): string | null {
+  const all = rows.filter((r) => r.state !== 'cancelled' && r.state !== 'open');
+  if (!all.length) return null;
+  const order = (a: EstimateView, b: EstimateView) => a.created_at - b.created_at || a.id - b.id;
+  const late = all.filter((r) => r.late).sort(order);
+  const unclosed = all.filter((r) => r.state === 'missed').sort(order);
+  const onTime = all.length - late.length - unclosed.length;
+  const parts = [`${all.length}`, `${onTime} בזמן`];
+  if (late.length) parts.push(`${late.length} באיחור (${late.map((r) => `${r.identity}, "${r.what}", פי ${num(r.actual_min! / Math.max(1, r.estimated_min))}`).join('; ')})`);
+  if (unclosed.length) parts.push(`${unclosed.length} שלא נסגרה (${unclosed.map((r) => `${r.identity}, "${r.what}"`).join('; ')})`);
+  const head = `הערכות אתמול: ${parts[0]}, מתוכן ${parts.slice(1).join(' ו-')}`;
+  let line = head;
+  const kinds = new Map<EtaKind, EstimateView[]>();
+  for (const k of ETA_KINDS) { const rs = all.filter((r) => r.kind === k); if (rs.length) kinds.set(k, rs); }
+  if (kinds.size > 1) {
+    const off = [...kinds].filter(([, rs]) => rs.some((r) => r.late || r.state === 'missed'))
+      .map(([k, rs]) => `${PLURAL[k]} ${rs.filter((r) => r.late || r.state === 'missed').length} מתוך ${rs.length}`);
+    if (off.length) line += ` · חריגים לפי סוג: ${off.join(', ')}`;
+  }
+  return line;
 }

@@ -137,6 +137,7 @@ export class Hq {
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
     this.awaiting = new AwaitingBoard(this.store);
     this.estimates = new Estimates(this.store);
+    this.night.estimates = this.estimates;
     this.scheduler.onTaskDone = (id) => this.estimates.cancelForTask(id);
     this.conversations = new Conversations(this.store, (id) => this.conversationTitle(id));
     this.conversations.setAlert((m) => this.store.bg(this.pusher.notifyMessage(m), 'push.message'));

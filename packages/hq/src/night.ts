@@ -16,6 +16,7 @@ import type { Scheduler, TaskRow } from './scheduler.ts';
 import type { Mailbox, MessageRow } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
 import { hhmm as localHHMM, nextLocal, readTimeZone } from './timezone.ts';
+import { accuracyLine, yesterdayRange, type Estimates } from './estimates.ts';
 
 export interface Issue { number: number; title: string; body: string; labels: string[]; createdAt: string }
 /** Open issues of a repo. Injected in tests; default is the gh CLI. */
@@ -115,11 +116,15 @@ export interface NightSummary {
   waiting: { id: number; kind: string; title: string; from: string | null; blocking: boolean }[];
   skipped: { id: number; ref: string | null; title: string; why: string }[];
   empty: { minutes: number; pct: number; reasons: { reason: string; minutes: number }[] };
+  /** How yesterday's time estimates ended (estimates.ts accuracyLine); null when there were none. */
+  estimates_line: string | null;
   text: string;
 }
 
 export class Night {
   issues: IssueSource;
+  /** Set by hq once the estimates register exists; the morning summary reads yesterday's from it. */
+  estimates: Estimates | null = null;
   /** How often GitHub is re-read during the night (new issues, labels changed by the CEOs). */
   refreshMs = 10 * 60_000;
   private lastRefreshAt = 0;
@@ -341,6 +346,13 @@ export class Night {
     return summary;
   }
 
+  private estimatesLine(end: number): string | null {
+    if (!this.estimates) return null;
+    const { since, until } = yesterdayRange(end, this.timeZone());
+    // 1000 is the most list() returns; a day with more estimates than that is not a day this company has.
+    return accuracyLine(this.estimates.list({ since, until, limit: 1000 }));
+  }
+
   /** The morning summary, computed only from the store (night.md: "מתוך ה-store, לא מהזיכרון שלו"). */
   summary(nightId: number): NightSummary {
     const night = this.get(nightId);
@@ -406,7 +418,7 @@ export class Night {
       reasons: [...reasons].sort((a, b) => b[1] - a[1]).map(([reason, ms]) => ({ reason, minutes: min(ms) })) };
 
     const out: Omit<NightSummary, 'text'> = { night: nightId, started_at: night.started_at, ended_at: end, minutes: min(end - night.started_at),
-      done, waiting, skipped, empty };
+      done, waiting, skipped, empty, estimates_line: this.estimatesLine(end) };
     return { ...out, text: summaryText(out, night, this.timeZone()) };
   }
 }
@@ -418,6 +430,7 @@ function summaryText(s: Omit<NightSummary, 'text'>, night: NightRow, tz: string)
   const lines: string[] = [];
   const scope = night.scope ? ` · רק ${(JSON.parse(night.scope) as string[]).join(', ')}` : '';
   lines.push(`לילה ${hhmm(s.started_at)} עד ${hhmm(s.ended_at)} (${Math.round(s.minutes)} דקות)${scope}`);
+  if (s.estimates_line) lines.push(s.estimates_line);
   const doneCount = s.done.reduce((n, p) => n + p.tasks.length, 0);
   lines.push('', `מה נעשה (${doneCount}):`);
   if (!doneCount) lines.push('- כלום לא נסגר');
