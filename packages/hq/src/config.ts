@@ -91,6 +91,8 @@ export interface HqConfig {
   appReleaseDir: string | null;
   /** Other machines that take task shifts over ssh (nodes.ts). None = everything runs here. */
   nodes: NodeDef[];
+  /** A second vantage point for probes (probes.ts): ssh target that runs curl. null = no second check. */
+  probeWitness: { ssh: string; identityFile: string | null } | null;
 }
 
 export interface AccountDef {
@@ -207,6 +209,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     pushContact: 'mailto:owner@localhost',
     memoryImport: [],
     nodes: [],
+    probeWitness: { ssh: 'root@203.0.113.11', identityFile: '~/.ssh/ci2_ed25519' },
   };
   const cfg: HqConfig = {
     ...base, ...fromFile, ...overrides,
@@ -218,6 +221,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
   };
   cfg.nodes = (cfg.nodes ?? []).map((n) => ({ ...n, projects: n.projects ?? [], maxSlots: n.maxSlots ?? 8, maxLoad: n.maxLoad ?? 0.85,
     identityFile: n.identityFile ? expandHome(n.identityFile) : null }));
+  if (cfg.probeWitness) cfg.probeWitness = { ssh: cfg.probeWitness.ssh, identityFile: cfg.probeWitness.identityFile ? expandHome(cfg.probeWitness.identityFile) : null };
   cfg.companyHome = companyHome;
   cfg.companyDir = companyDir;
   if (!cfg.auth.origins.includes(APK_ORIGIN)) cfg.auth.origins = [...cfg.auth.origins, APK_ORIGIN];

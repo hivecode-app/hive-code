@@ -6,6 +6,9 @@
 import { pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { loadavg, cpus } from 'node:os';
+import { memInfoMb } from './proc.ts';
+import { runSsh, q, type SshRun } from './nodes.ts';
 import { parse } from 'yaml';
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
@@ -99,11 +102,47 @@ export async function runHttpProbe(p: ProbeSpec): Promise<ProbeOutcome> {
   }
 }
 
+/** What the second vantage point saw for one probe; `unavailable` = it could not be asked (then it proves nothing). */
+export type WitnessOutcome = ProbeOutcome | { unavailable: string };
+
+export type Witness = (p: ProbeSpec) => Promise<WitnessOutcome>;
+
+/** The same check, run by curl on the witness machine (ci-host). Same expectations as the probe: status and latency budget. */
+export function sshWitness(w: { ssh: string; identityFile: string | null }, run: SshRun = runSsh): Witness {
+  return async (p) => {
+    const secs = Math.ceil(p.timeoutMs / 1000);
+    const cmd = `curl -s -o /dev/null -X ${p.method} --max-time ${secs} -w '%{http_code} %{time_total}' -- ${q(p.url!)}; true`;
+    const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(w.identityFile ? ['-i', w.identityFile] : []), w.ssh, cmd];
+    let out: string;
+    try { out = await run(args, undefined, (secs + 15) * 1000); } catch (e) { return { unavailable: (e as Error).message }; }
+    const m = /^(\d{3}) (\d+(?:\.\d+)?)$/.exec(out.trim());
+    if (!m) return { unavailable: `תשובה לא מובנת מ-curl: ${out.trim().slice(0, 80)}` };
+    const status = Number(m[1]);
+    const latencyMs = Math.round(Number(m[2]) * 1000);
+    if (status === 0) return { ok: false, status: null, latencyMs, error: 'curl לא קיבל תשובה' };
+    const statusOk = p.expect.includes(status);
+    const slow = p.maxLatencyMs != null && latencyMs > p.maxLatencyMs;
+    return { ok: statusOk && !slow, status, latencyMs,
+      error: !statusOk ? `status ${status}, expected ${p.expect.join('|')}` : slow ? `latency ${latencyMs}ms > ${p.maxLatencyMs}ms` : null };
+  };
+}
+
+/** The measuring machine's own state, for the record when the fault turns out to be the measurer's. */
+export function hostLoad(): { load1: number; cpus: number; freeMb: number } {
+  let freeMb = -1;
+  try { freeMb = Math.round(memInfoMb().availableMb); } catch { /* not linux */ }
+  return { load1: Math.round(loadavg()[0]! * 100) / 100, cpus: cpus().length, freeMb };
+}
+
 interface ProbeStateRow { probe_id: string; consecutive_failures: number; anomaly_open: number; last_run_at: number | null; last_ok_at: number | null }
 
 export class ProbeRunner {
   probes: ProbeSpec[] = [];
   run: (p: ProbeSpec) => Promise<ProbeOutcome> = runHttpProbe;
+  /** Second vantage point, asked before an anomaly wakes רותם. null = none configured. */
+  witness: Witness | null;
+  host: () => { load1: number; cpus: number; freeMb: number } = hostLoad;
+  private measurerEpisode = false;
   private inflight = new Set<string>();
 
   private store: Store;
@@ -113,6 +152,7 @@ export class ProbeRunner {
     this.store = store;
     this.cfg = cfg;
     this.mailbox = mailbox;
+    this.witness = cfg.probeWitness ? sshWitness(cfg.probeWitness) : null;
   }
 
   get toggleKey(): string { return `${this.cfg.monitoringLeadId}/prod-probes`; }
@@ -135,13 +175,63 @@ export class ProbeRunner {
     const now = this.store.now();
     const due = this.probes.filter((p) => p.kind === 'http' && !this.inflight.has(p.key))
       .filter((p) => { const s = this.state(p.key); return !s?.last_run_at || now - s.last_run_at >= p.everyMs; });
+    const crossed: ProbeSpec[] = [];
     await Promise.all(due.map(async (p) => {
       this.inflight.add(p.key);
-      try { this.record(p, await this.run(p)); } finally { this.inflight.delete(p.key); }
+      try { if (this.record(p, await this.run(p), true) === 'crossed') crossed.push(p); } finally { this.inflight.delete(p.key); }
     }));
+    if (crossed.length) await this.confirm(crossed);
+    else if (!this.probes.some((p) => (this.state(p.key)?.consecutive_failures ?? 0) > 0)) this.measurerEpisode = false;
   }
 
-  record(p: ProbeSpec, o: ProbeOutcome): void {
+  /** More than half of the http probes failing at once points at the measurer, not at the projects. */
+  private majorityFailing(): boolean {
+    const http = this.probes.filter((p) => p.kind === 'http');
+    const failing = http.filter((p) => (this.state(p.key)?.consecutive_failures ?? 0) > 0).length;
+    return http.length >= 2 && failing * 2 > http.length;
+  }
+
+  /** Probes that reached fail_after: ask the second vantage point before waking anyone. */
+  private async confirm(crossed: ProbeSpec[]): Promise<void> {
+    const majority = this.majorityFailing();
+    const verdicts = await Promise.all(crossed.map(async (p) => ({ p, w: this.witness ? await this.witness(p) : { unavailable: 'לא הוגדרה נקודה שנייה' } as WitnessOutcome })));
+    const measurer: typeof verdicts = [];
+    for (const { p, w } of verdicts) {
+      if ('unavailable' in w) {
+        // Can't verify. Most probes failing together: assume the measurer and look again next round (up to twice fail_after);
+        // otherwise alert with the note that nothing confirmed it.
+        const fails = this.state(p.key)?.consecutive_failures ?? 0;
+        if (majority && fails < p.failAfter * 2) continue;
+        this.openAnomaly(p, `לא אומת מנקודה שנייה: ${w.unavailable}${majority ? ' (רוב ה-probes נכשלים יחד, ייתכן שהבעיה במודד)' : ''}`);
+      } else if (w.ok) {
+        // Fine from there, failing here for a long time: a broken path from hq-host only. Not silent forever (unless most probes fail: that is the host, already recorded).
+        const fails = this.state(p.key)?.consecutive_failures ?? 0;
+        if (!majority && fails >= p.failAfter * 2) this.openAnomaly(p, `תקין מנקודה שנייה (status=${w.status} ${w.latencyMs}ms) אבל נכשל מ-hq-host ${fails} פעמים ברצף: ייתכן נתיב שבור רק משם`);
+        else measurer.push({ p, w });
+      } else this.openAnomaly(p, `אומת גם מנקודה שנייה: status=${w.status ?? '—'} latency=${w.latencyMs ?? '—'}ms ${w.error ?? ''}`.trim());
+    }
+    if (!measurer.length) this.measurerEpisode = false;
+    else this.measurerFault(measurer.map(({ p, w }) => ({ p, w: w as ProbeOutcome })), majority);
+  }
+
+  /** The probe failed here and passed there: an incident on the measuring host, not a production anomaly. */
+  private measurerFault(items: { p: ProbeSpec; w: ProbeOutcome }[], majority: boolean): void {
+    const host = this.host();
+    this.store.emit('probe.measurer_fault', this.cfg.monitoringLeadId, {
+      machine: 'hq-host', probes: items.map(({ p, w }) => ({ probe: p.key, witness_status: w.status, witness_latency_ms: w.latencyMs })), majority, ...host });
+    if (this.measurerEpisode) return;
+    this.measurerEpisode = true;
+    this.mailbox.tell({ msg_id: `probe-measurer-${this.store.now()}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system', priority: 'next',
+      body: [
+        `אירוע על hq-host, לא תקלה בפרודקשן: ${items.map(({ p }) => p.key).join(', ')} נכשלו אצלנו אבל תקינים מנקודה שנייה (ci-host).`,
+        ...items.map(({ p, w }) => `- ${p.key}: ci-host status=${w.status} ${w.latencyMs}ms`),
+        `המכונה: load ${host.load1} על ${host.cpus} ליבות, ${host.freeMb >= 0 ? `${host.freeMb}MB RAM פנויים` : 'RAM לא ידוע'}.${majority ? ' יותר ממחצית ה-probes נכשלו יחד.' : ''}`,
+        'לא נפתחה חריגה ולא הערתי אותך כתקלה. אם זה חוזר, זה עומס על hq-host.',
+      ].join('\n') });
+  }
+
+  /** Returns 'crossed' when `defer` is set and this failure reached fail_after: the caller confirms it first. */
+  record(p: ProbeSpec, o: ProbeOutcome, defer = false): 'crossed' | undefined {
     const now = this.store.now();
     const prev = this.state(p.key);
     const fails = o.ok ? 0 : (prev?.consecutive_failures ?? 0) + 1;
@@ -156,25 +246,35 @@ export class ProbeRunner {
 
     const open = prev?.anomaly_open === 1;
     if (!o.ok && fails >= p.failAfter && !open) {
-      this.store.db.prepare('UPDATE probe_state SET anomaly_open = 1 WHERE probe_id = ?').run(p.key);
-      const recent = this.store.db.prepare('SELECT ok, status, latency_ms, error, ts FROM probe_results WHERE probe_id = ? ORDER BY id DESC LIMIT ?')
-        .all(p.key, p.failAfter) as { status: number | null; latency_ms: number | null; error: string | null; ts: number }[];
-      const lastOk = prev?.last_ok_at ? new Date(prev.last_ok_at).toISOString() : 'אף פעם (מאז שהתחלנו לבדוק)';
-      this.mailbox.tell({ msg_id: `probe-${p.key}-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'probe_anomaly',
-        urgency: 'urgent', priority: 'now', body: [
-          `חריגה בפרודקשן: ${p.key} (${p.method} ${p.url})`,
-          `${fails} כישלונות ברצף (fail_after=${p.failAfter}). תקין לאחרונה: ${lastOk}.`,
-          'ראיות:',
-          ...recent.map((r) => `- ${new Date(r.ts).toISOString()} status=${r.status ?? '—'} latency=${r.latency_ms ?? '—'}ms ${r.error ?? ''}`.trim()),
-          `שלב 1: observe-only. חקרי, ושלחי ${pre('ל', this.mailbox.names.owner.name)} ask דחוף עם השערה והצעה. פעולה על הפרודקשן רק עם grant באמנה.`,
-        ].join('\n') });
-      this.store.emit('probe.anomaly', this.cfg.monitoringLeadId, { probe: p.key, fails });
+      if (defer) return 'crossed';
+      this.openAnomaly(p);
     } else if (o.ok && open) {
       this.store.db.prepare('UPDATE probe_state SET anomaly_open = 0 WHERE probe_id = ?').run(p.key);
       this.mailbox.tell({ msg_id: `probe-${p.key}-recovered-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system',
         priority: 'next', body: `${p.key} חזר לתקין (status=${o.status}, ${o.latencyMs}ms).` });
       this.store.emit('probe.recovered', this.cfg.monitoringLeadId, { probe: p.key });
     }
+    return undefined;
+  }
+
+  private openAnomaly(p: ProbeSpec, verification?: string): void {
+    const now = this.store.now();
+    const st = this.state(p.key);
+    const fails = st?.consecutive_failures ?? 0;
+    this.store.db.prepare('UPDATE probe_state SET anomaly_open = 1 WHERE probe_id = ?').run(p.key);
+    const recent = this.store.db.prepare('SELECT ok, status, latency_ms, error, ts FROM probe_results WHERE probe_id = ? ORDER BY id DESC LIMIT ?')
+      .all(p.key, p.failAfter) as { status: number | null; latency_ms: number | null; error: string | null; ts: number }[];
+    const lastOk = st?.last_ok_at ? new Date(st.last_ok_at).toISOString() : 'אף פעם (מאז שהתחלנו לבדוק)';
+    this.mailbox.tell({ msg_id: `probe-${p.key}-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'probe_anomaly',
+      urgency: 'urgent', priority: 'now', body: [
+        `חריגה בפרודקשן: ${p.key} (${p.method} ${p.url})`,
+        `${fails} כישלונות ברצף (fail_after=${p.failAfter}). תקין לאחרונה: ${lastOk}.`,
+        ...(verification ? [verification] : []),
+        'ראיות:',
+        ...recent.map((r) => `- ${new Date(r.ts).toISOString()} status=${r.status ?? '—'} latency=${r.latency_ms ?? '—'}ms ${r.error ?? ''}`.trim()),
+        `שלב 1: observe-only. חקרי, ושלחי ${pre('ל', this.mailbox.names.owner.name)} ask דחוף עם השערה והצעה. פעולה על הפרודקשן רק עם grant באמנה.`,
+      ].join('\n') });
+    this.store.emit('probe.anomaly', this.cfg.monitoringLeadId, { probe: p.key, fails });
   }
 
   summary() {

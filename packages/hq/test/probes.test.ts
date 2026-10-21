@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { makeEnv, until } from './helpers.ts';
-import { loadProbes, parseCharterProbes, parseDuration, runHttpProbe } from '../src/probes.ts';
+import { loadProbes, parseCharterProbes, parseDuration, runHttpProbe, sshWitness } from '../src/probes.ts';
 
 // The example company (fixtures/README.md): its charters declare probes the way a real company's do.
 const COMPANY = join(import.meta.dirname, '..', '..', '..', 'fixtures', 'company-home', 'company');
@@ -138,5 +138,92 @@ test('#26: a simulated outage on a charter\'s probe wakes the monitoring lead wi
     assert.equal(anomaly[0]!.body.match(/status=502 latency=41ms/g)!.length, 3, 'three lines of evidence');
     await until(() => hq.mailbox.get(anomaly[0]!.id)!.state === 'delivered', 3000, 'רותם woken and the anomaly delivered');
     assert.ok(launcher.launches.some((l) => l.shiftId.startsWith('rotem-')));
+  } finally { await env.cleanup(); }
+});
+
+const FIVE = `# prod
+
+\`\`\`yaml
+probes:
+${['north-depot', 'south-depot', 'east-depot', 'lumo', 'graph'].map((id) => `  - {id: ${id}, http: https://${id}.test/h, every: 1m, max_latency_ms: 2000, fail_after: 3}`).join('\n')}
+\`\`\`
+`;
+
+test('witness: all five slow here, fine from ci-host → an event on hq-host, no anomaly', async () => {
+  const env = await makeEnv({ projects: { prod: FIVE } });
+  try {
+    const { hq, clock } = env;
+    hq.probes.run = async () => ({ ok: false, status: 200, latencyMs: 7000, error: 'latency 7000ms > 2000ms' });
+    const asked: string[] = [];
+    hq.probes.witness = async (p) => { asked.push(p.key); return { ok: true, status: 200, latencyMs: 300, error: null }; };
+    hq.probes.host = () => ({ load1: 52, cpus: 8, freeMb: 0 });
+    for (let i = 0; i < 3; i++) { await hq.probes.tick(); clock.advance(61_000); }
+    assert.equal(asked.length, 5, 'asked only once they reached fail_after');
+    const msgs = hq.store.db.prepare(`SELECT kind, priority, body FROM messages WHERE to_identity = 'rotem'`).all() as { kind: string; priority: string; body: string }[];
+    assert.equal(msgs.filter((m) => m.kind === 'probe_anomaly').length, 0);
+    assert.equal(msgs.length, 1, 'one note for the episode');
+    assert.equal(msgs[0]!.priority, 'next');
+    assert.match(msgs[0]!.body, /hq-host/);
+    assert.match(msgs[0]!.body, /load 52/);
+    assert.match(msgs[0]!.body, /0MB RAM/);
+    const ev = hq.store.db.prepare(`SELECT COUNT(*) n FROM events WHERE type = 'probe.measurer_fault'`).get() as { n: number };
+    assert.ok(ev.n >= 1);
+  } finally { await env.cleanup(); }
+});
+
+test('witness: a real outage that ci-host sees too still wakes רותם, with the confirmation in the evidence', async () => {
+  const env = await makeEnv({ projects: { prod: FIVE } });
+  try {
+    const { hq, clock } = env;
+    hq.probes.run = async (p) => p.id === 'east-depot' ? { ok: false, status: 503, latencyMs: 40, error: 'status 503, expected 200' } : { ok: true, status: 200, latencyMs: 40, error: null };
+    hq.probes.witness = async () => ({ ok: false, status: 503, latencyMs: 55, error: 'status 503, expected 200' });
+    for (let i = 0; i < 3; i++) { await hq.probes.tick(); clock.advance(61_000); }
+    const a = hq.store.db.prepare(`SELECT body FROM messages WHERE to_identity = 'rotem' AND kind = 'probe_anomaly'`).all() as { body: string }[];
+    assert.equal(a.length, 1);
+    assert.match(a[0]!.body, /prod\/east-depot/);
+    assert.match(a[0]!.body, /אומת גם מנקודה שנייה: status=503/);
+  } finally { await env.cleanup(); }
+});
+
+test('witness: majority failing and ci-host unreachable → hold, then alert with a note after 2×fail_after', async () => {
+  const env = await makeEnv({ projects: { prod: FIVE } });
+  try {
+    const { hq, clock } = env;
+    hq.probes.run = async () => ({ ok: false, status: null, latencyMs: 10_000, error: 'timeout' });
+    hq.probes.witness = async () => ({ unavailable: 'ssh timeout' });
+    const anomalies = () => (hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'probe_anomaly'`).all() as { body: string }[]);
+    for (let i = 0; i < 5; i++) { await hq.probes.tick(); clock.advance(61_000); }
+    assert.equal(anomalies().length, 0, 'held while the measurer is the likelier culprit');
+    await hq.probes.tick();
+    assert.equal(anomalies().length, 5);
+    assert.match(anomalies()[0]!.body, /לא אומת מנקודה שנייה: ssh timeout/);
+  } finally { await env.cleanup(); }
+});
+
+test('sshWitness: curl over ssh, same expectations as the probe', async () => {
+  const [p] = parseCharterProbes('prod', FIVE);
+  const calls: string[][] = [];
+  const mk = (out: string | Error) => sshWitness({ ssh: 'root@ci-host', identityFile: '/k' }, async (args) => { calls.push(args); if (out instanceof Error) throw out; return out; });
+  assert.deepEqual(await mk('200 0.250')(p!), { ok: true, status: 200, latencyMs: 250, error: null });
+  assert.match(calls[0]!.join(' '), /-i \/k root@ci-host curl .*https:\/\/north-depot\.test\/h/);
+  assert.equal(((await mk('200 3.100')(p!)) as { ok: boolean }).ok, false, 'latency budget applies');
+  assert.equal(((await mk('000 5.000')(p!)) as { ok: boolean }).ok, false);
+  assert.match(calls[0]!.join(' '), /-- 'https:\/\/north-depot\.test\/h'; true$/, 'curl exit code must not look like an ssh failure');
+  assert.ok('unavailable' in (await mk(new Error('ssh exit 255'))(p!)));
+  assert.ok('unavailable' in (await mk('garbage')(p!)));
+});
+
+test('witness: fine from ci-host but failing here for 2×fail_after → alert, a broken path only from hq-host', async () => {
+  const env = await makeEnv({ projects: { prod: FIVE } });
+  try {
+    const { hq, clock } = env;
+    hq.probes.run = async (p) => p.id === 'east-depot' ? { ok: false, status: null, latencyMs: 10_000, error: 'timeout' } : { ok: true, status: 200, latencyMs: 40, error: null };
+    hq.probes.witness = async () => ({ ok: true, status: 200, latencyMs: 90, error: null });
+    const a = () => hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'probe_anomaly'`).all() as { body: string }[];
+    for (let i = 0; i < 5; i++) { await hq.probes.tick(); clock.advance(61_000); }
+    assert.equal(a().length, 0);
+    await hq.probes.tick();
+    assert.equal(a().length, 1);
+    assert.match(a()[0]!.body, /נתיב שבור רק משם/);
   } finally { await env.cleanup(); }
 });

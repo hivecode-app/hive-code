@@ -297,7 +297,7 @@ export async function makeEnv(opts: { cfg?: Partial<HqConfig>; deps?: HqDeps; pr
   writeFileSync(join(company, 'org.yaml'), opts.org ?? ORG_YAML);
   for (const [p, md] of Object.entries(opts.projects ?? {})) writeFileSync(join(company, 'projects', `${p}.md`), md);
   // claudeHome: never the real ~/.claude (its token would go to /api/oauth/profile from a test).
-  const cfg = loadConfig({ stateDir: join(dir, 'state'), companyDir: company, port: 0, claudeHome: join(dir, 'claude-home'), appReleaseDir: join(dir, 'app-release'), ...opts.cfg });
+  const cfg = loadConfig({ stateDir: join(dir, 'state'), companyDir: company, port: 0, claudeHome: join(dir, 'claude-home'), appReleaseDir: join(dir, 'app-release'), probeWitness: null, ...opts.cfg });
   // The phone listener stays off unless a test asks for it (it would collide on 7422 across test files).
   cfg.tab.listen = opts.cfg?.tab?.listen ?? null;
   const clock = new Clock();
