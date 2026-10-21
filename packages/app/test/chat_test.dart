@@ -149,7 +149,7 @@ void main() {
     expect(waitingWhat(w('Bash', 'kubectl apply -f x.yaml')), ('הפריסה', true));
     expect(waitingWhat(w('Bash', 'git push origin HEAD --force-with-lease --no-verify')).$1, 'הפקודה `git push origin HEAD --…`');
     expect(waitingWhat(w('Edit')), ('העריכה', true));
-    expect(waitingWhat(w('Agent')), ('סוכן המשנה', false));
+    expect(waitingWhat(w('Agent')), ('העוזר', false));
     expect(waitingWhat(w('mcp__company__tell')), ('הכלי `tell`', false));
   });
 

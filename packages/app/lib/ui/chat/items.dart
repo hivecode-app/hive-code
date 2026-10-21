@@ -302,7 +302,7 @@ class _ImageViewerState extends State<ImageViewer> {
   }
   if (w.tool == 'Bash') return ('הפקודה', true);
   if (w.tool == 'Edit' || w.tool == 'Write' || w.tool == 'NotebookEdit') return ('העריכה', true);
-  if (w.tool == 'Agent' || w.tool == 'Task') return ('סוכן המשנה', false);
+  if (w.tool == 'Agent' || w.tool == 'Task') return ('העוזר', false);
   final name = w.tool.startsWith('mcp__') ? w.tool.split('__').last : w.tool;
   return ('הכלי `$name`', false);
 }
