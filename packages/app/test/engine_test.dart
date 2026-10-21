@@ -49,6 +49,15 @@ void main() {
     expect((items.single as TextMsg).streaming, isFalse);
   });
 
+  test('an English Bash description is not shown; a Hebrew one is', () {
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.m);
+    m.apply(ev(1, 'tool_use', {'toolUseId': 'b', 'name': 'Bash', 'input': {'command': 'ls', 'description': 'Stop k3s, back up its DB'}}));
+    expect((items.single as ToolGroup).liveLabel, 'מריץ פקודה');
+    m.apply(ev(2, 'tool_use', {'toolUseId': 'c', 'name': 'Bash', 'input': {'command': 'ls', 'description': 'מגבה את הבסיס'}}));
+    expect((items.single as ToolGroup).liveLabel, 'מגבה את הבסיס');
+  });
+
   test('a running Bash test command is "מריצה בדיקות" and stop must ask', () {
     final items = <ChatItem>[];
     LiveState? live;

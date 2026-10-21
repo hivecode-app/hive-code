@@ -163,6 +163,7 @@ test('system prompt (L0+L1): dossier, how to reply, Authority, charter; task wor
     project: 'engine', reports_to: 'ron', lifecycle: 'ephemeral', source: 'runtime' }, 'gal');
   assert.match(worker, /# אתה דנה, מפתחת, בצוות משימה \(`engine-t7`\)/);
   // #51: Hebrew to everyone, titles included, even when the message came in English.
+  assert.match(worker, /ה-`description` של כל כלי/);
   assert.match(worker, /\*\*עברית בכל הודעה\*\*: לשירה, לגל ולכל עובד, גם כשכתבו לך באנגלית/);
   assert.match(worker, /`open_team`\) וטיקטים \(`open_ticket`\) בעברית/);
   assert.match(worker, /gh pr merge --squash/);

@@ -208,12 +208,15 @@ String toolDetail(String name, Map<String, dynamic> input) {
     'Grep' => '"${s('pattern')}"${input['path'] != null ? ' in ${s('path')}' : ''}',
     'Glob' => s('pattern'),
     'Bash' => s('command'),
-    'Task' || 'Agent' => s('description'),
+    'Task' || 'Agent' => hebrewOrEmpty(s('description')).isNotEmpty ? s('description') : 'עוזר',
     'WebFetch' => s('url'),
     'WebSearch' => s('query'),
     _ => name,
   };
 }
+
+/// A tool's own description is shown only when it has Hebrew (dir-0002); otherwise the caller falls back to a generic Hebrew line.
+String hebrewOrEmpty(String d) => RegExp(r'[֐-׿]').hasMatch(d) ? d : '';
 
 /// What the live tool row says while it runs: "מריץ בדיקות".
 String liveLabel(String name, Map<String, dynamic> input, Gender g) {
@@ -221,7 +224,7 @@ String liveLabel(String name, Map<String, dynamic> input, Gender g) {
   if (name == 'Bash') {
     final cmd = (input['command'] ?? '').toString();
     if (_isTest(cmd)) return f ? 'מריצה בדיקות' : 'מריץ בדיקות';
-    final d = (input['description'] ?? '').toString();
+    final d = hebrewOrEmpty((input['description'] ?? '').toString());
     return d.isNotEmpty ? d : (f ? 'מריצה פקודה' : 'מריץ פקודה');
   }
   return switch (name) {
