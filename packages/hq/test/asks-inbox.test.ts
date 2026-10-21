@@ -87,7 +87,7 @@ test('owner "done" on a tab handoff tells the requester now and closes the item 
   } finally { await env.cleanup(); }
 });
 
-test('push only when blocked on him; focus lets only urgent incidents through; no subscription → Telegram', async () => {
+test('push only when blocked on him; focus lets only urgent incidents through; Telegram only when the app is not connected', async () => {
   assert.equal(pushWorthy({ kind: 'ask', blocking: true, urgency: 'normal' }, false), true);
   assert.equal(pushWorthy({ kind: 'ask', blocking: false, urgency: 'urgent' }, false), false);
   assert.equal(pushWorthy({ kind: 'delivery_failure', blocking: false, urgency: 'normal' }, false), false);
@@ -98,13 +98,16 @@ test('push only when blocked on him; focus lets only urgent incidents through; n
   const env = await makeEnv();
   try {
     const { hq, clock } = env;
+    // No device at all: the app is not connected, a GO goes to Telegram at once.
     hq.inbox.add({ kind: 'go', from_identity: 'ac-ceo', title: 'GO לפרודקשן', blocking: true });
-    await until(() => env.telegrams.length === 1, 2000, 'telegram fallback');
+    await until(() => env.telegrams.length === 1, 2000, 'telegram when offline');
     assert.match(env.telegrams[0]!, /GO לפרודקשן/);
 
-    // With a subscription: pushed. Only an urgent push not acked in 5 min falls back to Telegram (B.8).
+    // The app connected, with a push subscription: pushed, and Telegram only for an urgent item he hasn't taken in
+    // 5 minutes, or a GO / login in 15 (#204).
+    hq.auth.link('phone', 1);
     hq.pusher.subscribe({ endpoint: 'https://push.example/2', keys: { p256dh: 'p', auth: 'a' } });
-    hq.inbox.add({ kind: 'login', from_identity: 'eli', title: 'קוד ל-Mercury', blocking: true });
+    const login = hq.inbox.add({ kind: 'login', from_identity: 'eli', title: 'קוד ל-Mercury', blocking: true });
     const urgent = hq.inbox.add({ kind: 'ask', from_identity: 'rotem', title: 'prod למטה', blocking: true, urgency: 'urgent' });
     await until(() => env.webPushes.length === 2 && hq.inbox.get(urgent.id)!.pushed_at != null, 2000, 'pushes');
     clock.advance(4 * 60_000);
@@ -116,14 +119,18 @@ test('push only when blocked on him; focus lets only urgent incidents through; n
     assert.match(env.telegrams[1]!, /prod למטה/);
     await hq.pusher.sweepUnacked();
     assert.equal(env.telegrams.length, 2, 'once');
+    clock.advance(10 * 60_000);
+    await hq.pusher.sweepUnacked();
+    assert.equal(env.telegrams.length, 3, 'the login after 15 minutes untaken');
+    assert.match(env.telegrams[2]!, /קוד ל-Mercury[\s\S]*לא נענה תוך 15 דקות/);
+    assert.ok(login.id);
 
     const acked = hq.inbox.add({ kind: 'ask', from_identity: 'rotem', title: 'שני', blocking: true, urgency: 'urgent' });
     await until(() => env.webPushes.length === 3, 2000, 'push 3');
     hq.inbox.ack(acked.id);
-    clock.advance(6 * 60_000);
+    clock.advance(20 * 60_000);
     await hq.pusher.sweepUnacked();
-    assert.equal(env.telegrams.length, 2, 'acked items do not fall back');
-    assert.ok(urgent.id);
+    assert.equal(env.telegrams.length, 3, 'acked items do not fall back');
   } finally { await env.cleanup(); }
 });
 

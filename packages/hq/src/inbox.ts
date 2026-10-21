@@ -103,19 +103,29 @@ export class Inbox {
     this.store.db.prepare('UPDATE inbox SET pushed_at = ?, push_error = ? WHERE id = ?').run(this.store.now(), error, id);
   }
 
-  markTelegram(id: number, error: string | null): void {
-    if (error) this.store.db.prepare('UPDATE inbox SET telegram_failures = telegram_failures + 1, push_error = ? WHERE id = ?').run(error, id);
-    else this.store.db.prepare('UPDATE inbox SET telegram_at = ? WHERE id = ?').run(this.store.now(), id);
+  /** Takes the item's one Telegram before sending, so two sweeps never both send it. False = already taken. */
+  claimTelegram(id: number): boolean {
+    return this.store.db.prepare('UPDATE inbox SET telegram_at = ? WHERE id = ? AND telegram_at IS NULL').run(this.store.now(), id).changes > 0;
+  }
+
+  /** The send failed: the claim is released, to be retried (owedTelegram counts the attempts). */
+  markTelegramFailed(id: number, error: string): void {
+    this.store.db.prepare('UPDATE inbox SET telegram_at = NULL, telegram_failures = telegram_failures + 1, push_error = ? WHERE id = ?').run(error, id);
   }
 
   /**
-   * Telegram is still owed for: an urgent push not acknowledged within `ms` (B.8), or any push-worthy item
-   * whose push or Telegram send failed (retried, up to 5 attempts).
+   * Telegram is owed (#204) for a GO, a login or anything urgent that he hasn't taken (answered, tapped, put
+   * off): at once when the app is not connected, else once it has waited `urgentMs` (urgent) or `ms` (the rest).
+   * A blocking ask is not here: it goes to the manager after 10 minutes anyway. Once per item; a failed send is
+   * retried, up to 5 attempts. `id`: only that item.
    */
-  owedTelegram(ms: number): InboxItemDTO[] {
+  owedTelegram(o: { offline: boolean; urgentMs: number; ms: number; id?: number }): InboxItemDTO[] {
+    const now = this.store.now();
     const rows = this.store.db.prepare(`SELECT * FROM inbox WHERE state = 'open' AND pushed_at IS NOT NULL AND telegram_at IS NULL
-      AND telegram_failures < 5 AND acked_at IS NULL
-      AND ((urgency = 'urgent' AND pushed_at <= ?) OR push_error IS NOT NULL)`).all(this.store.now() - ms) as InboxRow[];
+      AND telegram_failures < 5 AND acked_at IS NULL AND (@id IS NULL OR id = @id)
+      AND (kind IN ('go', 'login') OR urgency = 'urgent')
+      AND (@offline = 1 OR created_at <= CASE urgency WHEN 'urgent' THEN @urgent ELSE @rest END)
+      ORDER BY id`).all({ id: o.id ?? null, offline: o.offline ? 1 : 0, urgent: now - o.urgentMs, rest: now - o.ms }) as InboxRow[];
     return rows.map(toDTO);
   }
 }

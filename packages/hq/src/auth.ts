@@ -62,6 +62,8 @@ export class Auth {
   private seen = new Map<string, number>();
   private badCodes = new Map<string, number[]>();
   private revokeListeners = new Set<(deviceIds: string[]) => void>();
+  /** Live app links (/ws) per device. In memory: a restart drops every socket anyway. */
+  private links = new Map<string, number>();
   private readonly store: Store;
   private readonly cfg: HqConfig['auth'];
 
@@ -83,6 +85,25 @@ export class Auth {
       this.store.db.prepare('UPDATE devices SET last_seen_at = ? WHERE id = ?').run(now, row.id);
     }
     return { kind: 'device', id: row.id };
+  }
+
+  /** A device opened (+1) or closed (-1) its live link. Closing counts as seen, so "seen lately" starts from there. */
+  link(deviceId: string, delta: 1 | -1): void {
+    const n = (this.links.get(deviceId) ?? 0) + delta;
+    if (n > 0) this.links.set(deviceId, n);
+    else {
+      this.links.delete(deviceId);
+      this.store.db.prepare('UPDATE devices SET last_seen_at = ? WHERE id = ?').run(this.now(), deviceId);
+    }
+  }
+
+  /** A live app link is open now (the app gets every event as it happens). */
+  linked(): boolean { return this.links.size > 0; }
+
+  /** Is he reachable in the app: a live link open now, or a device seen within `seenMs` (push.ts: Telegram only when not). */
+  appOnline(seenMs: number): boolean {
+    if (this.linked()) return true;
+    return this.store.db.prepare('SELECT 1 FROM devices WHERE revoked_at IS NULL AND last_seen_at >= ? LIMIT 1').get(this.now() - seenMs) != null;
   }
 
   /** Called with the device ids whose tokens just stopped working (the API closes their sockets). */

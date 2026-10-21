@@ -7,7 +7,7 @@ import { MUTE_FOREVER, OWNER, type ConversationStateDTO } from '@company/shared'
 import type { Store } from './store.ts';
 
 interface ConvRow { identity: string; read_at: number; muted_until: number | null; alert_at: number | null }
-interface MessageLike { id: string; from_identity: string; to_identity: string; kind: string; body: string; created_at: number }
+interface MessageLike { id: string; from_identity: string; to_identity: string; kind: string; body: string; created_at: number; priority?: string }
 
 export type MuteFor = '8h' | 'week' | 'always' | 'off';
 export const MUTE_FOR: readonly MuteFor[] = ['8h', 'week', 'always', 'off'];
@@ -22,7 +22,7 @@ const NOT_A_CONVERSATION = new Set([OWNER, 'hq']);
 const counts = (m: Pick<MessageLike, 'from_identity' | 'to_identity' | 'kind'>) =>
   m.to_identity === OWNER && !NOT_A_CONVERSATION.has(m.from_identity) && m.kind !== 'system';
 
-export type MessageAlert = (a: { identity: string; title: string; body: string; message: string }) => void;
+export type MessageAlert = (a: { identity: string; title: string; body: string; message: string; priority?: string }) => void;
 
 export class Conversations {
   private store: Store;
@@ -100,7 +100,7 @@ export class Conversations {
     const title = this.titleOf(who);
     const body = m.body.slice(0, 300);
     this.store.emit('conv.alert', who, { identity: who, message: m.id, title, body, created_at: m.created_at });
-    this.alert({ identity: who, title, body, message: m.id });
+    this.alert({ identity: who, title, body, message: m.id, priority: m.priority });
   }
 
   /** Every conversation he has, newest first. */

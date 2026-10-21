@@ -411,6 +411,12 @@ const MIGRATIONS: string[] = [
   // v18: background work of the current run (Bash/Agent run_in_background): JSON [task_id]. Its end notifies only a
   // live process, so the watchdog does not rest a shift while it is not empty (#175).
   `ALTER TABLE shifts ADD COLUMN bg_tasks TEXT NOT NULL DEFAULT '[]';`,
+  // v19: Telegram for a worker's `now` message while the app is not connected (push.ts, #204): the message still
+  // owed one, and when the last one went (one per conversation until he reads it).
+  `
+  ALTER TABLE conversations ADD COLUMN telegram_owed TEXT;
+  ALTER TABLE conversations ADD COLUMN telegram_at INTEGER;
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

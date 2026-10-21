@@ -35,7 +35,9 @@ export interface HqConfig {
     schedulerMs: number;         // B.16: sweep every minute (also runs on slot-free)
     stuckAfterMs: number;        // B.5: 10 min without an event during a turn
     escalateBlockingAskMs: number; // A.4: 10 min
-    pushAckTimeoutMs: number;    // B.8: urgent push not acked in 5 min → Telegram too
+    pushAckTimeoutMs: number;    // B.8: an urgent item he hasn't taken in 5 min → Telegram, even with the app connected
+    telegramAfterMs: number;     // #204: a GO / login he hasn't taken in 15 min → Telegram, even with the app connected
+    appSeenMs: number;           // #204: no live link and no device seen in 10 min = the app is not connected
     backupMs: number;            // B.11: hourly
     restAfterMs: number;         // B.2: 20 min idle → rest
     restBgMaxMs: number;         // #175: background work keeps a shift up, but not past this long without an event
@@ -167,6 +169,8 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       stuckAfterMs: 10 * 60_000,
       escalateBlockingAskMs: 10 * 60_000,
       pushAckTimeoutMs: 5 * 60_000,
+      telegramAfterMs: 15 * 60_000,
+      appSeenMs: 10 * 60_000,
       backupMs: 60 * 60_000,
       restAfterMs: 20 * 60_000,
       restBgMaxMs: 3 * 60 * 60_000,

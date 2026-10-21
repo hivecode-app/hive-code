@@ -514,7 +514,8 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
         if (c.kind === 'device') {
           const set = deviceSockets.get(c.id) ?? new Set<WebSocket>();
           deviceSockets.set(c.id, set.add(ws));
-          ws.on('close', () => { set.delete(ws); if (!set.size) deviceSockets.delete(c.id); });
+          hq.auth.link(c.id, 1);
+          ws.on('close', () => { set.delete(ws); if (!set.size) deviceSockets.delete(c.id); hq.auth.link(c.id, -1); });
         }
         streamEvents(hq, ws, url);
       } catch (e) {
@@ -564,7 +565,17 @@ function streamEvents(hq: Hq, ws: WebSocket, url: URL): void {
   });
   // A word every 20 s even when nothing happens: a phone whose socket died in its sleep (no close, no
   // error) has nothing to tell it so otherwise; the app replaces a link that stays silent (hq_backend.dart).
-  const ping = setInterval(() => { if (ws.readyState === ws.OPEN) ws.send(PING); }, wsPing.ms);
+  // A protocol ping too: a socket that missed the last pong is dead, and is closed here, so a phone that went
+  // away does not keep counting as "the app is connected" (push.ts sends Telegram only when it is not).
+  let alive = true;
+  ws.on('pong', () => { alive = true; });
+  const ping = setInterval(() => {
+    if (ws.readyState !== ws.OPEN) return;
+    if (!alive) { ws.terminate(); return; }
+    alive = false;
+    ws.ping();
+    ws.send(PING);
+  }, wsPing.ms);
   ping.unref?.();
   const stop = (): void => { off(); clearInterval(ping); };
   ws.on('close', stop);

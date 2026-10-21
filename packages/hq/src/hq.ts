@@ -112,7 +112,7 @@ export class Hq {
     this.accounts = new AccountManager(this.store, cfg, this.shifts, this.mailbox, this.inbox, deps.accounts);
     this.watchdog = new Watchdog(this.store, cfg, this.shifts, this.mailbox, this.inbox);
     this.probes = new ProbeRunner(this.store, cfg, this.mailbox);
-    this.pusher = new Pusher(this.store, this.inbox, cfg, loadOrCreateVapid(cfg.stateDir, cfg.pushContact),
+    this.pusher = new Pusher(this.store, this.inbox, this.auth, cfg, loadOrCreateVapid(cfg.stateDir, cfg.pushContact),
       deps.telegram ?? telegramVia(cfg.telegramCmd, cfg.telegramChat), deps.webPush);
     // The CDP connection is opened on first use, so an hq with no handoff never touches Chrome.
     this.tab = new TabHandoffs(this.store, this.inbox, this.mailbox, cfg.tab, deps.tabBrowser ?? new CdpTabBrowser(cfg.tab.cdpUrl, tabLog));
@@ -125,6 +125,7 @@ export class Hq {
     this.awaiting = new AwaitingBoard(this.store);
     this.conversations = new Conversations(this.store, (id) => this.conversationTitle(id));
     this.conversations.setAlert((m) => this.store.bg(this.pusher.notifyMessage(m), 'push.message'));
+    this.pusher.titleOf = (id) => this.conversationTitle(id);
     this.shifts.on('delta', (row, ev) => this.store.publish('engine.delta', row.identity, { shift: row.id, ...ev }));
     this.shifts.on('launchFailed', (identity, shiftId, err) => {
       this.store.emit('shift.launch_failed', identity, { shift: shiftId, error: err.message });
