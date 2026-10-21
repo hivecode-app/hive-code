@@ -177,17 +177,43 @@ test('a written answer on an open item: a question is answered with it, a GO clo
     assert.match(r1.message!.body, /לא, בלי הבוטים/);
 
     const go = hq.inbox.add({ kind: 'go', from_identity: 'eli', title: 'GO: פריסה', headline: 'עדכון לאפליקציה: תמונות בצ\'אט', body: 'פריסה', blocking: true, ref: 'op-1' });
-    const r2 = hq.mailbox.reply(go.id, 'רק אחרי 18:00');
+    const r2 = hq.mailbox.reply(go.id, 'כן, תפרוס עכשיו');
     assert.equal(hq.inbox.get(go.id)!.state, 'resolved');
     const m = r2.message!;
     assert.equal(m.to_identity, 'eli');
     assert.equal(m.priority, 'now');
     assert.equal(m.ref, 'op-1');
     assert.match(m.body, /עדכון לאפליקציה: תמונות בצ'אט/);
-    assert.match(m.body, /רק אחרי 18:00/);
+    assert.match(m.body, /תפרוס עכשיו/);
     assert.doesNotMatch(m.body, /סיים/);
     assert.throws(() => hq.mailbox.reply(go.id, 'שוב'), /already handled/, 'closed elsewhere: his words reach no one, so it fails');
     assert.throws(() => hq.mailbox.reply(askItem.id, 'שוב'), /already handled/);
     assert.throws(() => hq.mailbox.reply(9999, 'x'), /no inbox item/);
   } finally { await env.cleanup(); }
+});
+
+test('free text on a GO that is neither a yes nor a no does not close it: it is an ordinary message and the GO stays open (21/10)', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    const go = hq.inbox.add({ kind: 'go', from_identity: 'eli', title: 'GO: פריסה', headline: 'קורא מסך', body: 'פריסה', blocking: true, ref: 'op-9' });
+    const r = hq.mailbox.reply(go.id, 'תגיד אתה רציני מי בכלל צריך את זה?');
+    assert.equal(hq.inbox.get(go.id)!.state, 'open', 'the GO waits for his decision');
+    assert.equal(r.message!.to_identity, 'eli');
+    assert.equal(r.message!.kind, 'tell');
+    assert.match(r.message!.body, /עדיין פתוחה/);
+    assert.match(r.message!.body, /רציני/);
+    assert.equal(hq.mailbox.reply(go.id, 'לא').item!.state, 'resolved', 'a clear no closes it');
+    const go2 = hq.inbox.add({ kind: 'go', from_identity: 'eli', title: 'GO: עוד', body: 'x', blocking: true, ref: 'op-10' });
+    assert.equal(hq.mailbox.reply(go2.id, 'אשר').item!.state, 'resolved');
+  } finally { await env.cleanup(); }
+});
+
+test('goVerdict: a yes is only approval words; a qualified yes, a question or "לא הבנתי" never closes a GO', async () => {
+  const { goVerdict } = await import('../src/mailbox.ts');
+  for (const t of ['אשר', 'כן', 'GO', 'בסדר, תפרוס עכשיו', 'yes']) assert.equal(goVerdict(t), 'yes', t);
+  for (const t of ['בסדר אבל לא עכשיו', 'תפרוס רק אחרי 18:00', 'ok אבל מחר', 'תודה', 'עכשיו', 'זה', 'לא ממש הבנתי', 'לא כל כך ברור', 'no problem', 'no idea', 'כן, אבל רק אחרי 18:00', 'לא הבנתי מה הכוונה', 'למה?', 'תגיד אתה רציני מי צריך את זה']) {
+    assert.equal(goVerdict(t), 'other', t);
+  }
+  for (const t of ['לא', 'לא, בלי הבוטים', 'דחה']) assert.equal(goVerdict(t), 'no', t);
 });

@@ -220,6 +220,13 @@ export class Ingest {
             `הצוות "${team}" (t${t!.id}) לא נסגר: ${waitingLine(left, mailbox.names.owner.name)} מ-${mailbox.label(t!.identity!)}. `
             + `כדאי שהעובד יענה ${g(mailbox.names.owner, 'לו', 'לה')} קודם. אם בכל זאת לסגור, \`close_team\` שוב עם \`force: true\`.`);
         }
+        // A GO of the worker's that he has not decided: closing would leave his answer without an owner (force: handed over).
+        const gos = t!.state !== 'done' && t!.identity && a.force !== true ? mailbox.openGos(t!.identity, t!.started_at ?? t!.created_at) : [];
+        if (gos.length) {
+          reject(409, `close_team: ${t!.identity} has an open GO (inbox ${gos.map((x) => x!.id).join(', ')})`,
+            `הצוות "${team}" (t${t!.id}) לא נסגר: בקשת ה-GO "${gos[0]!.headline ?? gos[0]!.title}" (inbox ${gos[0]!.id}) של ${mailbox.label(t!.identity!)} עדיין פתוחה. `
+            + `חכה להחלטה. אם בכל זאת לסגור, \`close_team\` שוב עם \`force: true\`, והבקשה והתשובה עליה יעברו אליך.`);
+        }
         // The closer's line wins over the worker's: it is the last word, written for him.
         if (taskSummary(a.summary)) this.hq.store.db.prepare('UPDATE tasks SET summary = ? WHERE id = ?').run(taskSummary(a.summary), t!.id);
         // Also on a task that is already done: the lead marks what it waits for after the fact (#108).

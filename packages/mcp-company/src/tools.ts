@@ -150,9 +150,9 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       ...awaitingArgs,
     }, ['team']),
     tool('request_go', 'בקשת אישור לפעולה. מופיעה ' + G('אצלו', 'אצלה') + ' כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. '
-      + 'מה ' + G('שהוא כותב', 'שהיא כותבת') + ' בשיחה כשהבקשה פתוחה הוא התשובה. '
+      + 'אישור או דחייה ברורים בשיחה (או הכפתור) סוגרים את הבקשה; כל מה אחר ' + G('שהוא כותב', 'שהיא כותבת') + ' מגיע אליך כהודעה רגילה והבקשה נשארת פתוחה. לא סוגרים את המשימה כל עוד היא פתוחה. '
       + 'Request a go-ahead before acting. ' + G('He sees', 'She sees') + ' it as a message in ' + G('his', 'her') + ' chat with you with a GO button: the headline first, '
-      + 'the details (what) folded. Whatever ' + G('he types', 'she types') + ' in that chat while it is open is the answer.', {
+      + 'the details (what) folded. Only a clear yes or no closes it; anything else ' + G('he types', 'she types') + ' reaches you as an ordinary message and the request stays open. The task is not closed while it is open.', {
       headline: s('שורה ראשונה קצרה במילים ' + G('שלו', 'שלה') + ': מה משתנה ' + G('אצלו', 'אצלה') + ', בלי מונחים טכניים, '
         + 'e.g. "עדכון לאפליקציה: תמונות בצ\'אט" / one short line in ' + G('his', 'her') + ' words: what changes for ' + G('him', 'her')),
       what: s('הפרטים: מה נכנס, סיכון ואיך חוזרים אחורה (מקופלים) / details: what ships, risk, rollback (folded)'),

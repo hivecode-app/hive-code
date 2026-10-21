@@ -260,7 +260,7 @@ test('sweep and completeTask racing: the closed task stays done and no shift com
   } finally { await env.cleanup(); }
 });
 
-test('"סיימתי" on a delivery failure to a closed task does not make another one (the loop of 21/10)', async () => {
+test('his words and his answer on a GO of a closed worker reach whoever opened its task, never a delivery failure (21/10)', async () => {
   const env = await ingestEnv();
   try {
     const { hq, clock } = env;
@@ -272,26 +272,25 @@ test('"סיימתי" on a delivery failure to a closed task does not make anothe
     hq.scheduler.setTaskState(t.id, 'done');
     const failures = () => hq.inbox.open().filter((i) => i.kind === 'delivery_failure');
 
-    // He writes to the closed worker: one delivery failure, as before.
+    // He writes to the closed worker: it is passed to the opener, with why, and he gets no failure card.
     hq.mailbox.tell({ msg_id: 'o-1', to: worker, body: 'עוד משהו?' });
     await until(() => hq.mailbox.get('o-1')!.state === 'failed', 2000, 'message to a closed task fails');
-    assert.equal(failures().length, 1);
-
-    // He closes it: no "רן סיים" to the worker that never got it, so nothing new to close.
-    const { message } = hq.mailbox.complete(failures()[0]!.id);
-    assert.equal(message, null, 'nothing is told on a delivery failure');
-    await new Promise((r) => setTimeout(r, 100));
-    assert.equal(failures().length, 0, 'closing it ends it');
-
-    // A GO from a worker whose task closed since: closed quietly, nothing told.
-    const go = hq.inbox.add({ kind: 'go', title: 'פריסה', from_identity: worker, urgency: 'normal' });
-    assert.equal(hq.mailbox.complete(go.id).message, null);
-    const fed = hq.store.db.prepare(`SELECT data FROM events WHERE type = 'inbox.completed'`).all() as { data: string }[];
-    assert.ok(fed.some((r) => JSON.parse(r.data).id === go.id), 'the approved GO still reaches the feed');
-    await new Promise((r) => setTimeout(r, 100));
+    const fwd = hq.mailbox.get('o-1-fwd')!;
+    assert.equal(fwd.to_identity, 'eli');
+    assert.equal(fwd.from_identity, 'owner');
+    assert.match(fwd.body, /עוד משהו\?/);
+    assert.match(fwd.body, /נסגר/);
     assert.equal(failures().length, 0);
 
-    // Even if such a message is told and fails (closed task, or resurrected and lost), no new item.
+    // A GO from that worker: his "אישור" goes to the opener, with the context.
+    const go = hq.inbox.add({ kind: 'go', title: 'פריסה', from_identity: worker, urgency: 'normal' });
+    const done = hq.mailbox.complete(go.id).message!;
+    assert.equal(done.to_identity, 'eli');
+    assert.match(done.body, /כבר סיים ונסגר/);
+    const fed = hq.store.db.prepare(`SELECT data FROM events WHERE type = 'inbox.completed'`).all() as { data: string }[];
+    assert.ok(fed.some((r) => JSON.parse(r.data).id === go.id), 'the approved GO still reaches the feed');
+
+    // The system's own "סיימתי" lost on a closed task is not a new item for him.
     hq.mailbox.tell({ msg_id: 'inbox-900-done', from: 'owner', to: worker, kind: 'answer', body: 'רן סיים: x' });
     await until(() => hq.mailbox.get('inbox-900-done')!.state === 'failed', 2000, 'fails on the closed task');
     hq.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, state, attempts, resurrected, last_attempt_at, created_at)
@@ -299,12 +298,13 @@ test('"סיימתי" on a delivery failure to a closed task does not make anothe
     clock.advance(hq.cfg.timers.deliveryTimeoutMs * 2);
     await hq.mailbox.sweep();
     assert.equal(hq.mailbox.get('inbox-901-done')!.state, 'failed');
-    assert.equal(failures().length, 0, 'a lost "סיימתי" is not a new item for him');
+    assert.equal(failures().length, 0);
 
-    // His own words that never arrived still show up, once; closing that one is quiet again.
-    const go2 = hq.inbox.add({ kind: 'go', title: 'פריסה 2', from_identity: worker, urgency: 'normal' });
-    hq.mailbox.reply(go2.id, 'לא, מחר');
-    await until(() => failures().length === 1, 2000, 'a lost reply is a delivery failure');
+    // Nobody to pass it to (the opener and the manager are gone): the old failure card, once; closing it is quiet.
+    hq.store.db.prepare('UPDATE tasks SET labels = ?, project = NULL WHERE id = ?').run('[]', t.id);
+    hq.store.db.prepare(`UPDATE identities SET active = 0 WHERE id IN ('eli', ?)`).run(hq.cfg.managerId);
+    hq.mailbox.tell({ msg_id: 'o-2', to: worker, body: 'ולזה?' });
+    await until(() => failures().length === 1, 2000, 'no one to pass it to: a delivery failure');
     hq.mailbox.complete(failures()[0]!.id);
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(failures().length, 0);
@@ -423,5 +423,39 @@ test('#108: status done marks what the task still waits for; close_team override
     await post(sock, '/v1/ops', entry('close_team', { team: `t${id}`, awaiting: 'none' }, 'eli-1:63'));
     assert.equal(hq.scheduler.task(id)!.awaiting, null);
     assert.equal(hq.awaiting.list().length, 0);
+  } finally { await env.cleanup(); }
+});
+
+test('a task with an open GO is not closed: status done waits, close_team is refused; with force the GO and its answer go to the opener (21/10)', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock } = env;
+    const r = await post(sock, '/v1/ops', entry('open_team', { name: 'אפליקציה: קורא מסך', purpose: 'משהו', project: 'agent-company' }, 'eli-1:60'));
+    const id = r.json.result.task as number;
+    const worker = `agent-company-t${id}`;
+    await hq.scheduler.fill();
+    await until(() => hq.shifts.current(worker)?.state === 'live', 3000, 'task worker live');
+    await post(sock, '/v1/ops', entry('request_go', { what: 'לפרוס את הקורא מסך', headline: 'קורא מסך' }, `${worker}-1:01`, worker));
+    const go = hq.inbox.open().find((i) => i.kind === 'go' && i.from_identity === worker)!;
+
+    await post(sock, '/v1/ops', entry('status', { state: 'done', summary: 'x' }, `${worker}-1:02`, worker));
+    await until(() => !!hq.mailbox.get(`${worker}-1:02-go-open`), 3000, 'the worker hears why the task stays');
+    assert.match(hq.mailbox.get(`${worker}-1:02-go-open`)!.body, /קורא מסך/);
+    assert.equal(hq.scheduler.task(id)!.state, 'running');
+
+    const refused = await post(sock, '/v1/ops', entry('close_team', { team: `t${id}` }, 'eli-1:61'));
+    assert.notEqual(refused.json.result?.state, 'closing');
+    assert.equal(hq.scheduler.task(id)!.state, 'running');
+
+    await post(sock, '/v1/ops', entry('close_team', { team: `t${id}`, force: true }, 'eli-1:62'));
+    await until(() => hq.scheduler.task(id)!.state === 'done', 3000, 'closed with force');
+    await until(() => !!hq.mailbox.get(`task-${id}-go-handover`), 3000, 'handover');
+    const handover = hq.mailbox.get(`task-${id}-go-handover`)!;
+    assert.equal(handover.to_identity, 'eli');
+    assert.match(handover.body, /קורא מסך/);
+
+    const answer = hq.mailbox.reply(go.id, 'כן');
+    assert.equal(answer.message!.to_identity, 'eli', 'his answer is not lost on the closed worker');
+    assert.equal(hq.inbox.get(go.id)!.state, 'resolved');
   } finally { await env.cleanup(); }
 });

@@ -775,7 +775,7 @@ export class Scheduler {
     const next = reason === 'task_done' ? 'done' : reason === 'rest' ? 'resting' : t.worktree ? 'interrupted' : 'queued';
     this.store.db.prepare('UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?').run(next, this.store.now(), taskId);
     this.store.emit('task.state', t.identity, { id: taskId, state: next, reason });
-    if (next === 'done') { this.closeWorktree(taskId); this.onTaskDone?.(taskId); }
+    if (next === 'done') { this.closeWorktree(taskId); this.handOverOpenGos(t); this.onTaskDone?.(taskId); }
   }
 
   /** No message to the task's worker since the task was opened was accepted by its CLI: it never started on the task (a standing worker has older messages from before). */
@@ -964,6 +964,15 @@ export class Scheduler {
         this.store.emit('task.close_waiting', identity, { id, messages: waiting.map((m) => m.id) });
         return 'waiting';
       }
+      // A GO of its that he has not decided: the task stays, so his answer reaches the one who asked.
+      const gos = this.mailbox.openGos(identity, t.started_at ?? t.created_at);
+      if (gos.length) {
+        this.mailbox.tell({ msg_id: `${last.opId}-go-open`, from: 'hq', to: identity, kind: 'system', priority: 'now', ref: `inbox-${gos[0]!.id}`,
+          body: `המשימה לא נסגרה: בקשת ה-GO "${gos[0]!.headline ?? gos[0]!.title}" (inbox ${gos[0]!.id}) עדיין פתוחה אצל ${this.mailbox.names.owner.name}. `
+            + `חכה לתשובה (היא תגיע אליך כהודעה), פעל לפיה, ואז \`status\` עם \`state: "done"\` שוב.` });
+        this.store.emit('task.close_waiting', identity, { id, go: gos.map((x) => x!.id) });
+        return 'waiting';
+      }
       last.onClose?.();
       await this.completeTask(id);
       return 'done';
@@ -986,10 +995,22 @@ export class Scheduler {
     if (this.task(id)!.state !== 'done') {
       this.setTaskState(id, 'done');
       this.closeWorktree(id);
+      this.handOverOpenGos(t);
     }
     // A standing worker's next task may be waiting for this one.
     queueMicrotask(() => this.store.bg(this.fill(), 'scheduler.fill'));
     return this.task(id);
+  }
+
+  /** The task closed with a GO of its still open (close_team with force, the owner): the one responsible hears it is theirs now. */
+  private handOverOpenGos(t: TaskRow): void {
+    if (!t.identity) return;
+    const gos = this.mailbox.openGos(t.identity);
+    const to = gos.length ? this.mailbox.responsibleFor(t.identity) : null;
+    if (!to || to === t.identity) return;
+    this.mailbox.tell({ msg_id: `task-${t.id}-go-handover`, from: 'hq', to, kind: 'system', priority: 'next',
+      body: `${this.mailbox.label(t.identity)} נסגר כשבקשת ה-GO שלו עוד פתוחה: ${gos.map((x) => `"${x!.headline ?? x!.title}" (inbox ${x!.id})`).join(', ')}. `
+        + `התשובה של ${this.mailbox.names.owner.name} עליה (וכל מה שיכתוב לעובד שנסגר) תגיע אליך, והפעולה אחריה עליך.` });
   }
 
   /**

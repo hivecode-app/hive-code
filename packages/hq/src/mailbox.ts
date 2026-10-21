@@ -9,7 +9,7 @@ import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
 import type { Inbox } from './inbox.ts';
 import type { ShiftManager, ShiftRow } from './shifts.ts';
-import { getIdentity, isStandingWorker } from './org.ts';
+import { getIdentity, isStandingWorker, projectLead } from './org.ts';
 import { toDTO, type AttachmentDTO, type Uploads } from './uploads.ts';
 
 export interface MessageRow {
@@ -452,6 +452,28 @@ export class Mailbox {
     return r?.state === 'done';
   }
 
+  /**
+   * Who hears what was meant for [identity] when its task is closed: whoever opened the task, else its project's lead,
+   * else the manager (never a closed task worker). The identity itself while its task is open. Null: nobody else.
+   */
+  responsibleFor(identity: string): string | null {
+    if (!this.taskClosed(identity)) return identity;
+    const t = this.store.db.prepare('SELECT labels, project FROM tasks WHERE identity = ? ORDER BY id DESC LIMIT 1')
+      .get(identity) as { labels: string | null; project: string | null } | undefined;
+    const openedBy = (JSON.parse(t?.labels || '[]') as string[]).find((l) => l.startsWith('opened-by:'))?.slice('opened-by:'.length);
+    const lead = t?.project ? projectLead(this.store, t.project) : undefined;
+    for (const c of [openedBy, lead, this.cfg.managerId]) {
+      if (c && c !== identity && c !== OWNER && c !== 'hq' && getIdentity(this.store, c)?.active && !this.taskClosed(c)) return c;
+    }
+    return null;
+  }
+
+  /** His GO requests from [identity] that are still open (since [since]): a task with one is not done. */
+  openGos(identity: string, since = 0): ReturnType<Inbox['get']>[] {
+    return (this.store.db.prepare(`SELECT id FROM inbox WHERE kind = 'go' AND state = 'open' AND from_identity = ? AND created_at >= ? ORDER BY id`)
+      .all(identity, since) as { id: number }[]).map((r) => this.inbox.get(r.id));
+  }
+
   /** The task a message to a standing worker belongs to (`task-<id>-…`: the scheduler's task prompt and handoff ask), if it is that worker's. */
   private boundTask(m: MessageRow): number | null {
     const id = /^task-(\d+)-/.exec(m.id)?.[1];
@@ -477,12 +499,24 @@ export class Mailbox {
     const title = `הודעה ל-${this.label(m.to_identity)} לא נמסרה: ${why}`;
     this.store.emit('message.undelivered', m.to_identity, { id: m.id, from: m.from_identity, to: m.to_identity, why });
     if (m.from_identity === OWNER) {
+      // His words are never lost to a closed worker: whoever is responsible for the task gets them, with the context.
+      if (this.forwardToResponsible(m, why)) return;
       this.inbox.add({ kind: 'delivery_failure', title, body: m.body.slice(0, 400), from_identity: m.to_identity, urgency: 'normal',
         ref: m.id, dedupe_key: `delivery_failure:${m.id}` });
       return;
     }
     this.tell({ msg_id: `${m.id}-failed`, from: 'hq', to: m.from_identity, kind: 'system', ref: m.id, priority: 'next',
       body: `ההודעה שלך ${m.id} ל-${this.label(m.to_identity)} לא נמסרה: ${why}, והעובד לא מוקם מחדש. אם צריך להמשיך את העבודה, פותחים צוות חדש (open_team).` });
+  }
+
+  /** His message to a worker whose task closed, passed on to the one responsible for it. False: nobody to pass it to. */
+  private forwardToResponsible(m: MessageRow, why: string): boolean {
+    const to = this.responsibleFor(m.to_identity);
+    if (!to || to === m.to_identity) return false;
+    const files = m.attachments?.length ? `\n(${m.attachments.length} תמונות מצורפות לא הועברו)` : '';
+    this.tell({ msg_id: `${m.id}-fwd`, from: OWNER, to, kind: m.kind === 'answer' ? 'answer' : 'tell', priority: 'next', urgency: m.urgency,
+      body: `${this.names.owner.name} כתב ל-${this.label(m.to_identity)}, שכבר נסגר (${why}), ולכן זה מגיע אליך:\n${m.body}${files}` });
+    return true;
   }
 
   /**
@@ -534,9 +568,15 @@ export class Mailbox {
     }
     const requester = item.from_identity;
     if (!requester || requester === OWNER || requester === 'hq' || !getIdentity(this.store, requester)) return { item: this.inbox.get(itemId), message: null };
-    // A delivery failure's "requester" is the worker that never got the message, and a closed task's worker
-    // hears nothing more: telling either would fail again into a new delivery_failure, on every "סיימתי" (21/10).
-    if (item.kind === 'delivery_failure' || this.taskClosed(requester)) {
+    // A delivery failure's "requester" is the worker that never got the message: telling it would fail again into a new
+    // delivery_failure, on every "סיימתי" (21/10).
+    if (item.kind === 'delivery_failure') {
+      this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, message: null });
+      return { item: this.inbox.get(itemId), message: null };
+    }
+    // The worker's task closed since: its GO and the answer on it go to whoever is responsible for the task.
+    const target = this.responsibleFor(requester);
+    if (!target) {
       this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, message: null });
       return { item: this.inbox.get(itemId), message: null };
     }
@@ -547,9 +587,9 @@ export class Mailbox {
       ? `${o.name} ${g(o, 'סגר', 'סגרה')} את השאלה בלי תשובה: ${item.headline ?? item.body}`
       : `${o.name} ${verb}: ${item.title}`;
     const message = this.tell({
-      msg_id: `inbox-${itemId}-${opts.declined ? 'declined' : 'done'}`, from: OWNER, to: requester, kind: 'answer',
+      msg_id: `inbox-${itemId}-${opts.declined ? 'declined' : 'done'}`, from: OWNER, to: target, kind: 'answer',
       ref: item.ref ?? `inbox-${itemId}`, priority: 'now', urgency: item.urgency,
-      body: `${body}${opts.note ? `\n${opts.note}` : ''}`,
+      body: `${target === requester ? '' : `${this.closedNote(requester)}\n`}${body}${opts.note ? `\n${opts.note}` : ''}`,
     });
     this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, message: message.id });
     return { item: this.inbox.get(itemId), message };
@@ -578,15 +618,33 @@ export class Mailbox {
     this.attachmentsFor(attachments);
     if (!text && attachments.length) text = '(תמונה מצורפת)';
     if (!text) throw new Error('answer must be text or an image');
+    const target = this.responsibleFor(requester);
+    const lead = target && target !== requester ? `${this.closedNote(requester)}\n` : '';
+    // A GO closes only with a clear yes or no. Any other words (a question, "למה?") reach whoever answers for it
+    // as an ordinary message, and the GO stays open for his decision (21/10: a question closed a GO nobody could answer).
+    if (item.kind === 'go' && goVerdict(text) === 'other') {
+      if (!target) throw new Error(`inbox item ${itemId} has no worker to answer`);
+      const message = this.tell({
+        msg_id: `inbox-${itemId}-note-${randomUUID().slice(0, 8)}`, from: OWNER, to: target, kind: 'tell', priority: 'now', urgency: item.urgency, attachments,
+        body: `${lead}${this.names.owner.name} כתב על בקשת ה-GO "${item.headline ?? item.title}" (עדיין פתוחה, לא אושרה ולא נדחתה): ${text}`,
+      });
+      return { item: this.inbox.get(itemId), message };
+    }
+    if (!target) throw new Error(`inbox item ${itemId} has no worker to answer`);
     this.inbox.resolve(itemId, 'resolved');
     const what = item.kind === 'go' ? 'לבקשת ה-GO' : 'על';
     const message = this.tell({
-      msg_id: `inbox-${itemId}-reply`, from: OWNER, to: requester, kind: 'answer', ref: item.ref ?? `inbox-${itemId}`,
+      msg_id: `inbox-${itemId}-reply`, from: OWNER, to: target, kind: 'answer', ref: item.ref ?? `inbox-${itemId}`,
       priority: 'now', urgency: item.urgency, attachments,
-      body: `תשובה של ${this.names.owner.name} ${what} "${item.headline ?? item.title}": ${text}`,
+      body: `${lead}תשובה של ${this.names.owner.name} ${what} "${item.headline ?? item.title}": ${text}`,
     });
-    this.store.emit('inbox.completed', requester, { id: itemId, declined: false, message: message.id });
+    this.store.emit('inbox.completed', requester, { id: itemId, declined: item.kind === 'go' && goVerdict(text) === 'no', message: message.id });
     return { item: this.inbox.get(itemId), message };
+  }
+
+  /** Why this reaches someone other than the worker who asked. */
+  private closedNote(identity: string): string {
+    return `(${this.label(identity)} כבר סיים ונסגר, והבקשה שלו מגיעה אליך כי אתה האחראי על המשימה.)`;
   }
 
   // ── asks (B.4: a question to the owner is a message of kind `ask`) ─────────
@@ -676,4 +734,20 @@ export function waitingLine(msgs: Pick<MessageRow, 'body'>[], owner: string): st
   const last = msgs.at(-1)?.body.replace(/\s+/g, ' ').trim() ?? '';
   const quote = last.length > 80 ? `${last.slice(0, 79)}…` : last;
   return `${owner} מחכה לתשובה על «${quote}»${msgs.length > 1 ? ` (ועוד ${msgs.length - 1})` : ''}`;
+}
+
+/**
+ * His free text on a GO card: only a bare yes or a bare no closes it, anything else (a question, a condition, "בסדר אבל לא עכשיו") does not.
+ * A yes is made only of approval words, so any qualifier ("רק", "אבל", a time) makes it a remark. A no is short and starts with the word.
+ */
+const YES_WORDS = new Set(['go', 'ok', 'okay', 'yes', 'y', 'approve', 'approved', 'confirm', 'אשר', 'מאשר', 'מאושר', 'אישור', 'אושר', 'אשרתי',
+  'כן', 'בסדר', 'סבבה', 'יאללה', 'תפרוס', 'תפרסו', 'פרוס', 'בצע', 'קדימה', 'שחרר']);
+const YES_FILLER = new Set(['עכשיו', 'תודה', 'לך', 'על', 'זה', 'please', 'now']);
+export function goVerdict(text: string): 'yes' | 'no' | 'other' {
+  const t = text.trim().toLowerCase().replace(/[.!,"'״]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t || /[?؟]/.test(text)) return 'other';
+  const words = t.split(' ');
+  if (words.some((w) => YES_WORDS.has(w)) && words.every((w) => YES_WORDS.has(w) || YES_FILLER.has(w))) return 'yes';
+  if (words.length <= 3 && !/הבנתי|ברור|יודע|מבין|בטוח|מכיר|ממש|כל כך|idea|problem|ahead/.test(t) && /^(no|nope|cancel|reject|stop|לא|דחה|דוחה|נדחה|דחיתי|בטל|בטלתי|ביטול|עצור|עצרו|תעצור)$/.test(words[0]!)) return 'no';
+  return 'other';
 }
