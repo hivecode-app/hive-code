@@ -46,6 +46,11 @@ const URGENCY_HE: Record<Urgency, string> = { urgent: 'דחופה', normal: 'ר�
 interface AskRow { id: string; from_identity: string; question: string; headline: string | null; options: string; blocking: number; urgency: Urgency;
   state: AskDTO['state']; answer: string | null; answered_by: AskDTO['answered_by']; created_at: number; escalated_at: number | null }
 
+/** A `result` error of a turn that never started: no text, no turns, no time (a refused resume). */
+export function neverRan(ev: { subtype: string; text?: string; numTurns?: number; durationMs?: number }): boolean {
+  return ev.subtype === 'error_during_execution' && !ev.text && ev.numTurns === 0 && ev.durationMs === 0;
+}
+
 export class Mailbox {
   private store: Store;
   private cfg: HqConfig;
@@ -68,8 +73,10 @@ export class Mailbox {
       if (f.t === 'delivery') this.onDelivery(row, f.msgId, f.state, f.error);
       if (f.t === 'event' && f.ev.kind === 'result') {
         // error-watch.ts: a turn that ended in an error he did not cause (a stop he pressed is `interrupted`, #177).
+        // `neverRan`: a resume the CLI refused (no transcript) answers so; the shift ends as `resume_rejected` and the next
+        // run is a new shift (shifts.ts), so there was no turn to fail.
         // Replayed frames (reattach after an hq restart) were caught the first time.
-        if (f.ev.isError && !f.ev.interrupted && live !== false) {
+        if (f.ev.isError && !f.ev.interrupted && !neverRan(f.ev) && live !== false) {
           this.store.emit('turn.error', row.identity, { shift: row.id, identity: row.identity, subtype: f.ev.subtype, text: (f.ev.text ?? '').slice(0, 1000) });
         }
         this.onTurnEnd(row, f.ev);

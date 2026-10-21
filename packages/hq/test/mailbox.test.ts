@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, until } from './helpers.ts';
+import { neverRan } from '../src/mailbox.ts';
 
 test('tell to a resting identity wakes a shift, delivers, then seen → handled on reply', async () => {
   const env = await makeEnv();
@@ -211,4 +212,12 @@ test('his `now` asks the host to stop the worker if safe; what it waits for reac
       assert.equal(hq.mailbox.get(id)!.waiting_on, null, id);
     }
   } finally { await env.cleanup(); }
+});
+
+test('neverRan: רק result של חידוש שנדחה, לא כשל ביצוע אמיתי', () => {
+  const ev = { subtype: 'error_during_execution', text: '', numTurns: 0, durationMs: 0 };
+  assert.equal(neverRan(ev), true);
+  assert.equal(neverRan({ ...ev, numTurns: 3 }), false);
+  assert.equal(neverRan({ ...ev, durationMs: 900 }), false);
+  assert.equal(neverRan({ ...ev, text: 'boom' }), false);
 });
