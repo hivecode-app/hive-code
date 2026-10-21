@@ -409,6 +409,7 @@ export class Mailbox {
     this.setState(m.id, 'failed', { error: why });
     // System notes (a close reason that didn't make it before the stop, hq notices) are not re-reported.
     if (m.kind === 'system' || m.from_identity === 'hq') return;
+    if (this.fromInboxClose(m)) return;
     const title = `הודעה ל-${this.label(m.to_identity)} לא נמסרה: ${why}`;
     if (m.from_identity === OWNER) {
       this.inbox.add({ kind: 'delivery_failure', title, body: m.body.slice(0, 400), from_identity: m.to_identity, urgency: 'normal',
@@ -419,8 +420,17 @@ export class Mailbox {
       body: `ההודעה שלך ${m.id} ל-${this.label(m.to_identity)} לא נמסרה: ${why}, והעובד לא מוקם מחדש. אם צריך להמשיך את העבודה, פותחים צוות חדש (open_team).` });
   }
 
+  /**
+   * His "סיימתי" / "דחיתי" on an inbox item, told on to the requester: failing it is not a new item for him to close.
+   * A reply in his own words (`inbox-<n>-reply`) still is: those words never arrived.
+   */
+  private fromInboxClose(m: MessageRow): boolean {
+    return m.from_identity === OWNER && m.kind === 'answer' && /^inbox-\d+-(done|declined)$/.test(m.id);
+  }
+
   private fail(m: MessageRow): void {
     this.setState(m.id, 'failed');
+    if (this.fromInboxClose(m)) return;
     const why = m.error ? ` (${m.error})` : '';
     const title = `הודעה ל-${this.label(m.to_identity)} לא נמסרה`;
     const body = `${m.body.slice(0, 400)}${why}`;
@@ -458,6 +468,12 @@ export class Mailbox {
     }
     const requester = item.from_identity;
     if (!requester || requester === OWNER || requester === 'hq' || !getIdentity(this.store, requester)) return { item: this.inbox.get(itemId), message: null };
+    // A delivery failure's "requester" is the worker that never got the message, and a closed task's worker
+    // hears nothing more: telling either would fail again into a new delivery_failure, on every "סיימתי" (21/10).
+    if (item.kind === 'delivery_failure' || this.taskClosed(requester)) {
+      this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, message: null });
+      return { item: this.inbox.get(itemId), message: null };
+    }
     const o = this.names.owner;
     const verb = opts.declined ? g(o, 'דחה', 'דחתה') : g(o, 'סיים', 'סיימה');
     // A question he closed (#74): the asker hears which one, and that no answer is coming.

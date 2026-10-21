@@ -255,6 +255,57 @@ test('sweep and completeTask racing: the closed task stays done and no shift com
   } finally { await env.cleanup(); }
 });
 
+test('"סיימתי" on a delivery failure to a closed task does not make another one (the loop of 21/10)', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, clock } = env;
+    const t = hq.scheduler.addTask({ title: 'נסגרה', project: 'agent-company', labels: ['opened-by:eli'] });
+    const worker = `agent-company-t${t.id}`;
+    hq.store.db.prepare(`INSERT INTO identities (id, name, team_kind, project, reports_to, lifecycle, source, updated_at)
+      VALUES (?, 'אביב', 'task', 'agent-company', 'eli', 'ephemeral', 'runtime', 0)`).run(worker);
+    hq.store.db.prepare('UPDATE tasks SET identity = ? WHERE id = ?').run(worker, t.id);
+    hq.scheduler.setTaskState(t.id, 'done');
+    const failures = () => hq.inbox.open().filter((i) => i.kind === 'delivery_failure');
+
+    // He writes to the closed worker: one delivery failure, as before.
+    hq.mailbox.tell({ msg_id: 'o-1', to: worker, body: 'עוד משהו?' });
+    await until(() => hq.mailbox.get('o-1')!.state === 'failed', 2000, 'message to a closed task fails');
+    assert.equal(failures().length, 1);
+
+    // He closes it: no "רן סיים" to the worker that never got it, so nothing new to close.
+    const { message } = hq.mailbox.complete(failures()[0]!.id);
+    assert.equal(message, null, 'nothing is told on a delivery failure');
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(failures().length, 0, 'closing it ends it');
+
+    // A GO from a worker whose task closed since: closed quietly, nothing told.
+    const go = hq.inbox.add({ kind: 'go', title: 'פריסה', from_identity: worker, urgency: 'normal' });
+    assert.equal(hq.mailbox.complete(go.id).message, null);
+    const fed = hq.store.db.prepare(`SELECT data FROM events WHERE type = 'inbox.completed'`).all() as { data: string }[];
+    assert.ok(fed.some((r) => JSON.parse(r.data).id === go.id), 'the approved GO still reaches the feed');
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(failures().length, 0);
+
+    // Even if such a message is told and fails (closed task, or resurrected and lost), no new item.
+    hq.mailbox.tell({ msg_id: 'inbox-900-done', from: 'owner', to: worker, kind: 'answer', body: 'רן סיים: x' });
+    await until(() => hq.mailbox.get('inbox-900-done')!.state === 'failed', 2000, 'fails on the closed task');
+    hq.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, state, attempts, resurrected, last_attempt_at, created_at)
+      VALUES ('inbox-901-done', 'owner', 'amit', 'answer', 'רן סיים: y', 'normal', 'now', 'queued', 2, 1, ?, ?)`).run(clock.now(), clock.now());
+    clock.advance(hq.cfg.timers.deliveryTimeoutMs * 2);
+    await hq.mailbox.sweep();
+    assert.equal(hq.mailbox.get('inbox-901-done')!.state, 'failed');
+    assert.equal(failures().length, 0, 'a lost "סיימתי" is not a new item for him');
+
+    // His own words that never arrived still show up, once; closing that one is quiet again.
+    const go2 = hq.inbox.add({ kind: 'go', title: 'פריסה 2', from_identity: worker, urgency: 'normal' });
+    hq.mailbox.reply(go2.id, 'לא, מחר');
+    await until(() => failures().length === 1, 2000, 'a lost reply is a delivery failure');
+    hq.mailbox.complete(failures()[0]!.id);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(failures().length, 0);
+  } finally { await env.cleanup(); }
+});
+
 test('close_team by display name; an ambiguous name is rejected', async () => {
   const env = await ingestEnv();
   try {
