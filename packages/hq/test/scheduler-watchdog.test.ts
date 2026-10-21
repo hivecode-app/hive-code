@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, until } from './helpers.ts';
 import { capacity } from '../src/scheduler.ts';
+import { bgTasks } from '../src/shifts.ts';
 import { loadConfig } from '../src/config.ts';
 import { join } from 'node:path';
 
@@ -346,5 +347,103 @@ test('#128: no pressure (empty queue) → idle leads stay up; a lead in a turn h
     hq.shifts.markEnded('eli-1', 'dead', 'crash: process gone');
     assert.deepEqual(hq.scheduler.slots().leads, { active: 0, idle: 0, resting: 1 });
     assert.equal(hq.scheduler.slots().running, 0);
+  } finally { await env.cleanup(); }
+});
+
+test('#175: bgTasks follows the CLI background work: the full list, a backgrounded start, its end', () => {
+  assert.deepEqual(bgTasks([], 'background_tasks_changed', { tasks: [{ task_id: 'a' }, { task_id: 'b' }] }), ['a', 'b']);
+  assert.deepEqual(bgTasks(['a'], 'background_tasks_changed', { tasks: [] }), []);
+  assert.deepEqual(bgTasks([], 'task_started', { task_id: 'a', is_backgrounded: true }), ['a']);
+  assert.equal(bgTasks([], 'task_started', { task_id: 'f', is_backgrounded: false }), null, 'a foreground Bash is the turn itself');
+  assert.deepEqual(bgTasks(['a', 'b'], 'task_notification', { task_id: 'a', status: 'completed' }), ['b']);
+  assert.deepEqual(bgTasks(['a'], 'task_updated', { task_id: 'a', patch: { status: 'killed' } }), []);
+  assert.equal(bgTasks(['a'], 'task_updated', { task_id: 'a', patch: { description: 'x' } }), null);
+  assert.equal(bgTasks(['a'], 'task_progress', { task_id: 'a' }), null);
+});
+
+test('#175: a task shift waiting on its background work does not rest; it does once the work ends', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    const t = hq.scheduler.addTask({ title: 'מחכה ל-CI', project: 'agent-company' });
+    const sid = `agent-company-t${t.id}-1`;
+    await until(() => hq.shifts.get(sid)?.state === 'live', 3000, 'task shift live');
+    hq.watchdog.procCheck = () => hq.shifts.get(sid)!.proc_start;
+    hq.store.db.prepare(`UPDATE messages SET state = 'handled' WHERE to_identity = ?`).run(`agent-company-t${t.id}`);
+    const host = launcher.hosts.get(sid)!;
+    const sys = (subtype: string, raw: Record<string, unknown>) => host.event({ kind: 'other', type: 'system', subtype, raw: { type: 'system', subtype, ...raw } });
+    sys('task_started', { task_id: 'bci', task_type: 'local_bash', is_backgrounded: true });
+    sys('background_tasks_changed', { tasks: [{ task_id: 'bci', task_type: 'local_bash' }] });
+    await until(() => hq.shifts.get(sid)!.bg_tasks === '["bci"]', 3000, 'background work recorded');
+    assert.equal(hq.board().find((b) => b.id === `agent-company-t${t.id}`)!.status, 'working', 'not "פנוי" while its work runs');
+
+    clock.advance(40 * 60_000);
+    await hq.shifts.pingAll();
+    await hq.watchdog.sweep();
+    assert.equal(hq.shifts.get(sid)!.state, 'live', 'not rested with background work running');
+    assert.equal(hq.scheduler.task(t.id)!.state, 'running');
+
+    sys('task_notification', { task_id: 'bci', status: 'completed' });
+    sys('background_tasks_changed', { tasks: [] });
+    await until(() => hq.shifts.get(sid)!.bg_tasks === '[]', 3000, 'background work over');
+    clock.advance(21 * 60_000);
+    await hq.shifts.pingAll();
+    await hq.watchdog.sweep();
+    assert.equal(hq.shifts.get(sid)!.end_reason, 'rest');
+  } finally { await env.cleanup(); }
+});
+
+test('#175: background work that never ends keeps a shift up only until restBgMaxMs', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    const t = hq.scheduler.addTask({ title: 'שרת שרץ לנצח', project: 'agent-company' });
+    const sid = `agent-company-t${t.id}-1`;
+    await until(() => hq.shifts.get(sid)?.state === 'live', 3000, 'task shift live');
+    hq.watchdog.procCheck = () => hq.shifts.get(sid)!.proc_start;
+    hq.store.db.prepare(`UPDATE messages SET state = 'handled' WHERE to_identity = ?`).run(`agent-company-t${t.id}`);
+    launcher.hosts.get(sid)!.event({ kind: 'other', type: 'system', subtype: 'background_tasks_changed', raw: { tasks: [{ task_id: 'srv' }] } });
+    await until(() => hq.shifts.get(sid)!.bg_tasks === '["srv"]', 3000, 'background work recorded');
+    clock.advance(hq.cfg.timers.restBgMaxMs + 60_000);
+    await hq.shifts.pingAll();
+    await hq.watchdog.sweep();
+    assert.equal(hq.shifts.get(sid)!.end_reason, 'rest');
+    assert.equal(hq.shifts.get(sid)!.bg_tasks, '[]', 'the process and its work are gone');
+  } finally { await env.cleanup(); }
+});
+
+test('#175: a rested task is not shown as running, and hq wakes it after restWakeMs, once per rest', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    const t = hq.scheduler.addTask({ title: 'hq: משימה שנחה', project: 'agent-company' });
+    const who = `agent-company-t${t.id}`;
+    const sid = `${who}-1`;
+    await until(() => hq.shifts.get(sid)?.state === 'live', 3000, 'task shift live');
+    hq.watchdog.procCheck = () => hq.shifts.get(sid)!.proc_start;
+    hq.store.db.prepare(`UPDATE messages SET state = 'handled' WHERE to_identity = ?`).run(who);
+    assert.equal(hq.openTasks().find((o) => o.id === t.id)!.state, 'running');
+    clock.advance(21 * 60_000);
+    await hq.shifts.pingAll();
+    await hq.watchdog.sweep();
+    assert.equal(hq.scheduler.task(t.id)!.state, 'resting');
+
+    const open = hq.openTasks().find((o) => o.id === t.id)!;
+    assert.equal(open.state, 'queued', 'no one works on it: not "בעבודה"');
+    assert.equal(open.worker, null);
+    assert.ok(open.reason);
+    const head = hq.home.defaultRecipe().blocks.find((b) => b.type === 'headline') as { text: string };
+    assert.doesNotMatch(head.text, /משימה אחת בעבודה/, 'the home headline does not count it as running');
+
+    assert.deepEqual(hq.scheduler.wakeResting(), [], 'not before restWakeMs');
+    clock.advance(hq.cfg.timers.restWakeMs);
+    assert.deepEqual(hq.scheduler.wakeResting(), [t.id]);
+    assert.deepEqual(hq.scheduler.wakeResting(), [], 'once per rest');
+    await until(() => hq.scheduler.task(t.id)!.state === 'running', 3000, 'woken by hq');
+    assert.equal(launcher.launches.at(-1)!.resume, true);
+    const wake = hq.store.db.prepare(`SELECT body, from_identity FROM messages WHERE id LIKE ?`).get(`task-${t.id}-rest-wake-%`) as { body: string; from_identity: string };
+    assert.equal(wake.from_identity, 'hq');
+    assert.match(wake.body, /בדוק את מה שחיכית לו ותמשיך/);
+    assert.equal(hq.openTasks().find((o) => o.id === t.id)!.state, 'running');
   } finally { await env.cleanup(); }
 });

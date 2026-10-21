@@ -72,6 +72,9 @@ const STANDING_SHIFT = `(i.source = 'org' AND i.active = 1 AND COALESCE(i.team_k
 /** SQL over shifts s: a message to its identity not yet handled. */
 const PENDING = `SELECT 1 FROM messages m WHERE m.to_identity = s.identity AND m.state IN ('queued','delivered')`;
 
+/** #175: how many times hq wakes one task whose worker rested before it leaves it for a message. */
+const REST_WAKES = 6;
+
 /** Label on a standing worker's task that close_team is closing: the time it was asked for its handoff. */
 const CLOSING = 'closing-at:';
 
@@ -183,9 +186,10 @@ export class Scheduler {
     const cutoff = this.store.now() - this.cfg.timers.restOnPressureMs;
     const rows = this.store.db.prepare(`SELECT s.id, s.identity, s.started_at FROM shifts s JOIN identities i ON i.id = s.identity
       WHERE s.state = 'live' AND s.kind = 'work' AND s.task_id IS NULL AND s.in_turn = 0 AND ${STANDING_SHIFT}
+        AND (s.bg_tasks = '[]' OR COALESCE(s.last_event_at, s.started_at) <= @bgCutoff)
         AND COALESCE(s.last_event_at, s.started_at) <= @cutoff
         AND NOT EXISTS (${PENDING})
-      ORDER BY COALESCE(s.last_event_at, s.started_at)`).all({ mgr: this.cfg.managerId, cutoff }) as { id: string; identity: string; started_at: number }[];
+      ORDER BY COALESCE(s.last_event_at, s.started_at)`).all({ mgr: this.cfg.managerId, cutoff, bgCutoff: this.store.now() - this.cfg.timers.restBgMaxMs }) as { id: string; identity: string; started_at: number }[];
     const rested: string[] = [];
     for (const r of rows) {
       // A message may have come in, or started a turn, since the read (the stops before this one await): never cut one.
@@ -591,6 +595,38 @@ export class Scheduler {
     return true;
   }
 
+  /**
+   * #175: a task whose worker rested (idle, no message waiting) is left with no one on it: whatever it waited for (CI, a
+   * simulator) told its end to a process that is gone. restWakeMs after the rest hq wakes it once with a note; the id is
+   * fixed per rest (updated_at), so a sweep or a restart never sends it twice. A worker waiting for his answer, or with
+   * mail on the way, is woken by that. At most REST_WAKES per task: past that it waits for a message (stall-watch sees
+   * the project standing). Returns the tasks it woke.
+   */
+  wakeResting(): number[] {
+    if (!this.store.toggle('scheduler')) return [];
+    const cutoff = this.store.now() - this.cfg.timers.restWakeMs;
+    const rows = this.store.db.prepare(`SELECT t.id, t.identity, t.updated_at FROM tasks t WHERE t.state = 'resting' AND t.identity IS NOT NULL
+        AND t.updated_at <= ?
+        AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.identity = t.identity AND s.state IN ('starting','live'))
+        AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.to_identity = t.identity AND m.state IN ('queued','delivered'))
+        AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.from_identity = t.identity AND a.state IN ('open','escalated'))`)
+      .all(cutoff) as { id: number; identity: string; updated_at: number }[];
+    const woke: number[] = [];
+    for (const t of rows) {
+      const msgId = `task-${t.id}-rest-wake-${t.updated_at}`;
+      if (this.mailbox.get(msgId)) continue;
+      const n = (this.store.db.prepare(`SELECT COUNT(*) n FROM messages WHERE id LIKE ?`).get(`task-${t.id}-rest-wake-%`) as { n: number }).n;
+      if (n >= REST_WAKES) continue;
+      this.mailbox.tell({ msg_id: msgId, from: 'hq', to: t.identity, kind: 'system', priority: 'next',
+        body: [`נחת באמצע המשימה ${Math.round(this.cfg.timers.restWakeMs / 60_000)} דקות, ואף אחד לא עבד עליה. בדוק את מה שחיכית לו ותמשיך.`,
+          'עבודה שהרצת ברקע לפני שנחת כבר לא רצה, וההודעה על הסיום שלה לא תגיע: בדוק את התוצאה בעצמך (למשל `gh pr checks`), או הרץ אותה מחדש.',
+          'אם המשימה גמורה, סגור אותה עם `status`. אם אתה מחכה למישהו, כתוב לו ב-`tell` או ב-`ask`.'].join('\n') });
+      this.store.emit('scheduler.rest_wake', t.identity, { task: t.id, msg: msgId });
+      woke.push(t.id);
+    }
+    return woke;
+  }
+
   /** Tasks close_team is closing whose grace is over: closed now. */
   async closeOverdue(): Promise<void> {
     const rows = this.store.db.prepare(`SELECT id, labels FROM tasks WHERE state != 'done' AND labels LIKE '%"${CLOSING}%'`).all() as { id: number; labels: string }[];
@@ -704,6 +740,7 @@ export class Scheduler {
     this.escalateAsks();
     await this.ensureResidents();
     await this.closeOverdue();
+    this.wakeResting();
     await this.restOnPressure();
     await this.fill();
     // Empty-slot measurement (metric.empty_slot) is night.ts: per interval, with its reason.

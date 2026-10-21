@@ -4,7 +4,7 @@
 //   stuck       — in a turn, no event for 10 min, no long tool running → nudge → interrupt → new shift with handoff
 //   dead        — needs TWO signals ("failed probes are not proof of death"): process gone AND host unreachable,
 //                 or the same single signal on two consecutive sweeps. Then: resurrect (resume) if it has work.
-// Also: rest an idle non-resident shift after 20 min (B.2).
+// Also: rest an idle non-resident shift after 20 min (B.2), unless background work of its own still runs (#175).
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import type { Mailbox } from './mailbox.ts';
@@ -95,7 +95,9 @@ export class Watchdog {
       await this.unstick(s, now);
       return 'stuck';
     }
-    if (!s.in_turn && s.kind !== 'resident' && quiet >= this.cfg.timers.restAfterMs && !this.hasPending(s.identity)) {
+    // Background work still running (CI, a simulator): its end is told only to a live process, so a rest loses it (#175).
+    const bg = s.bg_tasks !== '[]' && quiet < this.cfg.timers.restBgMaxMs;
+    if (!s.in_turn && !bg && s.kind !== 'resident' && quiet >= this.cfg.timers.restAfterMs && !this.hasPending(s.identity)) {
       await this.shifts.stop(s.id, 'rest', s.started_at);
       this.store.emit('watchdog.rest', s.identity, { shift: s.id });
       return 'alive';

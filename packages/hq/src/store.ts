@@ -408,6 +408,9 @@ const MIGRATIONS: string[] = [
   `,
   // v17: the tool his `now` waits for (shift-host safe-tools.ts): {tool, command?, since}. The bubble says it.
   `ALTER TABLE messages ADD COLUMN waiting_on TEXT;`,
+  // v18: background work of the current run (Bash/Agent run_in_background): JSON [task_id]. Its end notifies only a
+  // live process, so the watchdog does not rest a shift while it is not empty (#175).
+  `ALTER TABLE shifts ADD COLUMN bg_tasks TEXT NOT NULL DEFAULT '[]';`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

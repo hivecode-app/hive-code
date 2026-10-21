@@ -18,11 +18,11 @@ test('store: WAL, migrations idempotent across reopen, toggles seeded once', () 
     const path = join(dir, 'hq.db');
     const s1 = new Store(path);
     assert.equal(s1.db.pragma('journal_mode', { simple: true }), 'wal');
-    assert.equal(s1.schemaVersion, 17);
+    assert.equal(s1.schemaVersion, 18);
     s1.setToggle('probes', false);
     s1.close();
     const s2 = new Store(path);
-    assert.equal(s2.schemaVersion, 17);
+    assert.equal(s2.schemaVersion, 18);
     assert.equal(s2.toggle('probes'), false, 'manual off survives restart');
     assert.equal(s2.toggle('scheduler'), true);
     const e = s2.emit('x', 'eli', { a: 1 });

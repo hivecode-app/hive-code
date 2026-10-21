@@ -24,6 +24,8 @@ export interface ShiftRow {
   in_turn: number; long_tool: number; rate_limited_until: number | null; stuck_since: number | null;
   nudged_at: number | null; interrupted_at: number | null; dead_signals: number; last_ping_ok_at: number | null;
   unit_released_at: number | null; run_start_seq: number | null; cwd: string | null;
+  /** JSON [task_id]: background work of this run still going (bgTasks below). */
+  bg_tasks: string;
 }
 
 export interface LaunchSpec {
@@ -265,7 +267,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       ON CONFLICT(id) DO UPDATE SET state='starting', kind=excluded.kind, started_at=excluded.started_at, ended_at=NULL,
         end_reason=NULL, last_event_at=excluded.last_event_at, in_turn=0, long_tool=0, stuck_since=NULL, nudged_at=NULL,
         interrupted_at=NULL, dead_signals=0, pid=NULL, host_pid=NULL, proc_start=NULL, last_ping_ok_at=NULL,
-        unit_released_at=NULL, run_start_seq=NULL, task_id=excluded.task_id, cwd=excluded.cwd`)
+        unit_released_at=NULL, run_start_seq=NULL, bg_tasks='[]', task_id=excluded.task_id, cwd=excluded.cwd`)
       .run(shiftId, identity, shiftNo, sessionId, kind, socketPath, taskId, now, now, cwd);
     const row = this.get(shiftId)!;
     this.store.emit('shift.state', identity, { shift: shiftId, state: 'starting', resume, reason: opts.reason, ...(moved && wouldResume ? { moved_from: last!.cwd, cwd } : {}) });
@@ -468,6 +470,10 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       else if (ev.kind === 'rate_limit') {
         fields.rate_limited_until = ev.status === 'rejected' && ev.resetsAt ? ev.resetsAt * (ev.resetsAt < 1e12 ? 1000 : 1) : null;
       }
+      else if (ev.kind === 'other' && ev.type === 'system' && (row.run_start_seq == null || f.seq >= row.run_start_seq)) {
+        const bg = bgTasks(JSON.parse(row.bg_tasks || '[]') as string[], ev.subtype, ev.raw as Record<string, unknown>);
+        if (bg) fields.bg_tasks = JSON.stringify(bg);
+      }
       // Deltas are live-only (never persisted by hq); everything else is a fact in the event log.
       if (ev.kind === 'text_delta' || ev.kind === 'thinking_delta') this.emit('delta', row, ev);
       else this.store.emit(`engine.${ev.kind}`, row.identity, { shift: id, seq: f.seq, ev });
@@ -479,6 +485,8 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       const ours = runSeq == null || f.seq >= runSeq;
       if (ours && f.state === 'busy') fields.in_turn = 1;
       if (ours && f.state === 'idle') fields.in_turn = 0;
+      // A new run (resume, restart) or an exit: the old process's background work died with it.
+      if (fields.run_start_seq != null || (ours && f.state === 'exited')) fields.bg_tasks = '[]';
       this.patch(id, fields);
       // Held in the CLI's own queue: a --resume delivers them, so they are never re-sent (bet 2).
       if (f.heldByCli?.length) {
@@ -501,7 +509,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     const row = this.get(id);
     if (!row || row.state === 'ended' || row.state === 'dead') return;
     if (startedAt != null && row.started_at !== startedAt) return;
-    this.patch(id, { state, ended_at: this.store.now(), end_reason: reason, in_turn: 0 });
+    this.patch(id, { state, ended_at: this.store.now(), end_reason: reason, in_turn: 0, bg_tasks: '[]' });
     this.conns.get(id)?.close();
     this.conns.delete(id);
     this.store.emit('shift.state', row.identity, { shift: id, state, reason });
@@ -749,4 +757,23 @@ function handoffYaml(a: Record<string, unknown>): string {
 
 function exitReason(f: Extract<LoggedFrame, { t: 'lifecycle' }>): string {
   return f.error ?? (f.exitCode === 0 ? 'exit' : 'crash');
+}
+
+/**
+ * Background work (Bash/Agent with run_in_background) after one `system` event of the CLI; null = no change. The CLI
+ * tells of its end only to a live process, so a shift with work here must not rest (#175). `background_tasks_changed`
+ * carries the whole list; `task_started` with `is_backgrounded` and the end (`task_notification`, a final
+ * `task_updated`) keep it right without one.
+ */
+export function bgTasks(cur: string[], subtype: string | undefined, raw: Record<string, unknown> | undefined): string[] | null {
+  if (!raw) return null;
+  const id = typeof raw.task_id === 'string' ? raw.task_id : null;
+  if (subtype === 'background_tasks_changed' && Array.isArray(raw.tasks)) {
+    return (raw.tasks as { task_id?: unknown }[]).map((t) => t?.task_id).filter((x): x is string => typeof x === 'string');
+  }
+  if (subtype === 'task_started' && id && raw.is_backgrounded === true && !cur.includes(id)) return [...cur, id];
+  const status = subtype === 'task_updated' ? (raw.patch as { status?: unknown } | undefined)?.status : null;
+  const ended = subtype === 'task_notification' || (typeof status === 'string' && !['running', 'pending'].includes(status));
+  if (ended && id && cur.includes(id)) return cur.filter((x) => x !== id);
+  return null;
 }

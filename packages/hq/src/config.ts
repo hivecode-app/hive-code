@@ -38,6 +38,8 @@ export interface HqConfig {
     pushAckTimeoutMs: number;    // B.8: urgent push not acked in 5 min → Telegram too
     backupMs: number;            // B.11: hourly
     restAfterMs: number;         // B.2: 20 min idle → rest
+    restBgMaxMs: number;         // #175: background work keeps a shift up, but not past this long without an event
+    restWakeMs: number;          // #175: a task whose worker rested is woken this long after ("check what you waited for")
     restOnPressureMs: number;    // #128: a standing shift idle this long rests when a task waits for a slot
     livenessMs: number;          // bet 4: claude ping (get_context_usage) interval; unresponsive after 3 misses
     unresponsiveActMs: number;   // unresponsive this long → interrupt, then a fresh process (resume)
@@ -167,6 +169,8 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       pushAckTimeoutMs: 5 * 60_000,
       backupMs: 60 * 60_000,
       restAfterMs: 20 * 60_000,
+      restBgMaxMs: 3 * 60 * 60_000,
+      restWakeMs: 10 * 60_000,
       restOnPressureMs: 5 * 60_000,
       livenessMs: 5_000,
       unresponsiveActMs: 2 * 60_000,

@@ -37,7 +37,8 @@ export function deriveStatus(i: IdentityRow, s: ShiftRow | undefined, f: {
       return { status: 'stuck', blocked_on: 'לא עונה' };
     }
     if (s.state === 'starting') return { status: f.hadEarlierShift ? 'restarting' : 'working', blocked_on: null };
-    if (s.in_turn) return { status: 'working', blocked_on: null };
+    // Between turns but with background work of its own running (CI, a build): working, not "פנוי" (#175).
+    if (s.in_turn || (s.bg_tasks ?? '[]') !== '[]') return { status: 'working', blocked_on: null };
     // Live and idle: awake, answers right away (APP-SPEC §6.2 "פנוי"). Never "נח" while a shift is up.
     return { status: 'free', blocked_on: null };
   }

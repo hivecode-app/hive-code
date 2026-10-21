@@ -66,6 +66,11 @@ export function openTasks(store: Store, scheduler: Scheduler, board: BoardEntry[
     if (on && b?.status === 'waiting_for_you') {
       state = 'waiting_for_you';
       since = (askSince.get(t.identity) as { t: number | null }).t ?? t.updated_at;
+    } else if (on && t.state === 'resting' && b?.live !== true) {
+      // #175: its worker rested and no one is on it now; hq wakes it (scheduler.wakeResting), or a message does.
+      state = 'queued';
+      reason = 'העובד נח';
+      since = t.updated_at;
     } else if (on) {
       state = 'running';
       since = t.started_at ?? t.updated_at;
@@ -83,7 +88,7 @@ export function openTasks(store: Store, scheduler: Scheduler, board: BoardEntry[
     return {
       id: t.id, ref: t.ref, project: t.project, title: plainTitle(t.title),
       opened_by: openedBy(t) ?? (t.project ? lead(t.project) : null),
-      worker: on ? t.identity : null,
+      worker: on && state !== 'queued' ? t.identity : null,
       state, position: state === 'queued' && pos >= 0 ? pos + 1 : null, reason, since,
     };
   });
