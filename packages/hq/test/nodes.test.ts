@@ -383,3 +383,68 @@ test('#224: a fill never waits on a node\'s ssh: tasks for here start now, a tas
     assert.equal(hq.scheduler.task(remote.id)!.machine, 'n2');
   } finally { await env.cleanup(); r.cleanup(); }
 });
+
+test('task-288: local under load, the head of the queue cannot go to the node: a task that can still goes', async () => {
+  const r = repo();
+  const calls: string[][] = [];
+  const env = await makeEnv({ projects: { proj: charter(r.checkout) }, cfg: { nodes: [NODE] }, deps: { ssh: fakeSsh(calls) }, noStart: true });
+  try {
+    const { hq } = env;
+    git(env.dir, 'init', '--quiet', '--initial-branch=main');
+    git(env.dir, 'add', 'company');
+    git(env.dir, 'commit', '--quiet', '-m', 'company');
+    hq.nodes.list[0]!.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await hq.start({ listen: false, timers: false });
+    hq.scheduler.loadInfo = () => ({ load1: 16, cpus: 8 });
+    const head = hq.scheduler.addTask({ title: 'ראש התור', project: 'proj', labels: ['needs-local'] });
+    const other = hq.scheduler.addTask({ title: 'פרויקט אחר', project: 'other' });
+    const free = hq.scheduler.addTask({ title: 'יכולה לצאת', project: 'proj' });
+    await hq.scheduler.fill();
+    await until(() => hq.scheduler.task(free.id)!.state === 'running', 8000, 'runs on the node');
+    assert.equal(hq.scheduler.task(free.id)!.machine, 'n2');
+    assert.equal(hq.scheduler.task(head.id)!.state, 'queued');
+    assert.equal(hq.scheduler.task(other.id)!.state, 'queued');
+  } finally { await env.cleanup(); r.cleanup(); }
+});
+
+test('task-288: a task handed to a standing worker goes to the node like a task worker\'s; one handed to a lead stays here', async () => {
+  const r = repo();
+  const calls: string[][] = [];
+  const env = await makeEnv({ projects: { proj: charter(r.checkout) }, cfg: { nodes: [NODE] }, deps: { ssh: fakeSsh(calls) }, noStart: true });
+  try {
+    const { hq } = env;
+    git(env.dir, 'init', '--quiet', '--initial-branch=main');
+    git(env.dir, 'add', 'company');
+    git(env.dir, 'commit', '--quiet', '-m', 'company');
+    hq.nodes.list[0]!.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await hq.start({ listen: false, timers: false });
+    const free = new Map([['n2', 2]]);
+    const worker = hq.scheduler.addTask({ title: 'לעובד קבוע', project: 'proj', identity: 'amit' });
+    const lead = hq.scheduler.addTask({ title: 'לראש צוות', project: 'proj', identity: 'eli' });
+    assert.equal(hq.scheduler.placeFor(hq.scheduler.task(worker.id)!, free), 'n2');
+    assert.equal(hq.scheduler.placeFor(hq.scheduler.task(lead.id)!, free), 'local');
+    await hq.scheduler.fill();
+    await until(() => hq.scheduler.task(worker.id)!.state === 'running', 8000, 'the standing worker\'s task runs');
+    assert.equal(hq.scheduler.task(worker.id)!.machine, 'n2');
+    assert.equal(env.launcher.launches.find((l) => l.identity === 'amit')!.machine, 'n2');
+  } finally { await env.cleanup(); r.cleanup(); }
+});
+
+test('task-288: closing a task from a node fetches back the preserved ref and the task\'s own branch, never main', async () => {
+  const closeOn = async (branch: string, over: Record<string, unknown> = {}) => {
+    const out = JSON.stringify({ ok: true, result: { path: '/w/.worktrees/company-t9', preserved: 'refs/company/preserved/company-t9', removed: true,
+      branchDeleted: false, ignored: [], repo: '/w', branch, ...over } });
+    const node = { def: { name: 'n2', ssh: 'root@n2.test' }, exec: async () => out, gitSsh: () => 'ssh' };
+    const ws = new RemoteWorkspaces(node as never, '/c', '/e');
+    const fetched: string[] = [];
+    ws.fetch = async (_repo, ref) => { fetched.push(ref); };
+    ws.companySha = async () => null;
+    await ws.close('/w/.worktrees/company-t9');
+    return fetched;
+  };
+  assert.deepEqual(await closeOn('company-t9'), ['refs/company/preserved/company-t9', 'refs/heads/company-t9']);
+  assert.deepEqual(await closeOn('main'), ['refs/company/preserved/company-t9'], 'a worktree left on main: main stays out');
+  assert.deepEqual(await closeOn('develop'), ['refs/company/preserved/company-t9']);
+  assert.deepEqual(await closeOn('HEAD'), ['refs/company/preserved/company-t9']);
+  assert.deepEqual(await closeOn('company-t9', { branchDeleted: true }), ['refs/company/preserved/company-t9']);
+});

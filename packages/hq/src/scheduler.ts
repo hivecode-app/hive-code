@@ -276,15 +276,24 @@ export class Scheduler {
    */
   placeFor(t: TaskRow, nodeFree: Map<string, number>): string {
     if (t.machine) return t.machine;
-    if (!this.nodes || t.worktree || t.started_at != null || !t.project) return LOCAL;
-    const labels = JSON.parse(t.labels || '[]') as string[];
-    if (labels.some((l) => LOCAL_LABELS.includes(l))) return LOCAL;
-    // A task handed to a standing worker (or to a lead) runs where that identity runs: here.
-    if (t.identity && getIdentity(this.store, t.identity)?.team_kind !== 'task') return LOCAL;
+    if (!this.nodes || !this.mayLeave(t)) return LOCAL;
     const best = this.nodes.list.filter((n) => n.def.projects.includes(t.project!) && this.store.toggle(nodeToggle(n.def.name))
       && (nodeFree.get(n.def.name) ?? 0) > 0)
       .sort((a, b) => (nodeFree.get(b.def.name) ?? 0) - (nodeFree.get(a.def.name) ?? 0))[0];
     return best?.def.name ?? LOCAL;
+  }
+
+  /**
+   * A task that has not started and may run on a node: a project task with no label that keeps it here, of a task
+   * worker or of a standing worker (assignee), who works it in a worktree and a new session like a task worker (start()).
+   * Task-288: it used to be task workers only, so every task handed to yael, ido or any other standing worker
+   * waited for a slot here while the node was empty. A task handed to a lead or yoav has no worktree: it runs where they run, here.
+   */
+  private mayLeave(t: TaskRow): boolean {
+    if (t.worktree || t.started_at != null || !t.project) return false;
+    if ((JSON.parse(t.labels || '[]') as string[]).some((l) => LOCAL_LABELS.includes(l))) return false;
+    if (!t.identity) return true;
+    return getIdentity(this.store, t.identity)?.team_kind === 'task' || this.standing(t.identity);
   }
 
   /** A node the task could run on, whether or not it has room now (waitReason). */
@@ -769,9 +778,9 @@ export class Scheduler {
     if (next === 'done') { this.closeWorktree(taskId); this.onTaskDone?.(taskId); }
   }
 
-  /** No message to the task's worker was ever accepted by its CLI: it never started on the task. */
+  /** No message to the task's worker since the task was opened was accepted by its CLI: it never started on the task (a standing worker has older messages from before). */
   private neverTook(t: TaskRow): boolean {
-    return !t.identity || !this.store.db.prepare(`SELECT 1 FROM messages WHERE to_identity = ? AND state IN ('delivered','seen','handled') LIMIT 1`).get(t.identity);
+    return !t.identity || !this.store.db.prepare(`SELECT 1 FROM messages WHERE to_identity = ? AND state IN ('delivered','seen','handled') AND created_at >= ? LIMIT 1`).get(t.identity, t.created_at);
   }
 
   private fallingBack = new Set<number>();
@@ -903,9 +912,7 @@ export class Scheduler {
   private couldGoTo(t: TaskRow, name: string): boolean {
     if (t.machine) return t.machine === name;
     const n = this.nodes?.get(name);
-    return !!n && !t.worktree && t.started_at == null && t.project != null && n.def.projects.includes(t.project)
-      && !(JSON.parse(t.labels || '[]') as string[]).some((l) => LOCAL_LABELS.includes(l))
-      && !(t.identity && getIdentity(this.store, t.identity)?.team_kind !== 'task');
+    return !!n && this.mayLeave(t) && n.def.projects.includes(t.project!);
   }
 
   /** Nodes being read right now (refreshNodes): their read is shared, and its end fills again. */

@@ -343,8 +343,12 @@ export class RemoteWorkspaces {
 
   async close(path: string, defaultBranch = 'main', keepBranch = false): Promise<CloseResult> {
     const r = await this.op<CloseResult & { repo?: string; branch?: string }>({ op: 'close', path, defaultBranch, keepBranch });
-    // What close keeps there comes here too: the preserved ref, and a branch with commits it did not delete.
-    const keep = [r.preserved, r.removed && !r.branchDeleted && r.branch && r.branch !== 'HEAD' ? `refs/heads/${r.branch}` : null];
+    // What close keeps there comes here too: the preserved ref, and the task's own branch when it has commits it did not
+    // delete. Never any other branch: a worker that left its worktree on `main` must not make us fetch `+main:main`
+    // into the production checkout (task-288; git refuses a checked-out branch, but the attempt is the danger).
+    const task = path.split('/').pop();
+    const own = !!r.branch && (r.branch === task || r.branch.startsWith('company-')) && r.branch !== defaultBranch;
+    const keep = [r.preserved, r.removed && !r.branchDeleted && own ? `refs/heads/${r.branch}` : null];
     for (const ref of keep) {
       if (!ref || !r.repo) continue;
       try { await this.fetch(r.repo, ref); }
