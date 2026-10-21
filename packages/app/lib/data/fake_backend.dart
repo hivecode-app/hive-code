@@ -157,7 +157,7 @@ class FakeBackend extends Backend {
   Future<CommandResult> send(String identityId, UserMsg msg) async {
     final chat = _data!.chats[identityId];
     if (chat == null) return const CommandResult.fail('השיחה לא נמצאה.');
-    chat.items.add(msg);
+    if (!chat.items.contains(msg)) chat.items.add(msg);
     final busy = chat.live.busy;
     if (busy && msg.priority != Priority.now) {
       msg.delivery = Delivery.queued;

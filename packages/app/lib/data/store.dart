@@ -93,6 +93,7 @@ class AppStore extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _retryTimer?.cancel();
     for (final p in _pending.values) {
       p.timer?.cancel();
     }
@@ -233,36 +234,73 @@ class AppStore extends ChangeNotifier {
     );
     setDraft(identityId, '');
     if (quote?.askId != null) return _answer(identityId, msg, quote!.askId!);
-    if (!_online && attachments.isNotEmpty) {
-      // The outbox keeps text only: an image waits on screen as "לא נמסר", with "ניסיון נוסף".
-      msg.delivery = Delivery.failed;
-      data?.chats[identityId]?.items.add(msg);
-      error = 'אין חיבור לשרת, ולכן התמונה לא נשלחה. אפשר לנסות שוב כשהחיבור יחזור.';
+    return _deliver(identityId, msg);
+  }
+
+  /// "ניסיון נוסף" on a message that was not delivered: the same message, with the same id, so hq
+  /// takes it once even if the first try did get there.
+  Future<UserMsg> resend(String identityId, UserMsg msg) async {
+    if (msg.replyTo?.askId != null) return _answer(identityId, msg, msg.replyTo!.askId!);
+    return _deliver(identityId, msg);
+  }
+
+  /// Messages on their way to hq right now (one send at a time per message).
+  final _inFlight = <String>{};
+
+  Future<CommandResult> _try(String identityId, UserMsg msg) async {
+    _inFlight.add(msg.id);
+    try {
+      return await backend.send(identityId, msg);
+    } finally {
+      _inFlight.remove(msg.id);
+    }
+  }
+
+  Future<UserMsg> _deliver(String identityId, UserMsg msg) async {
+    // Behind one that waits or is on its way, a new message waits its turn.
+    final waiting = data?.chats[identityId]?.items.any((i) => i is UserMsg && (i.delivery == Delivery.pendingConnection || _inFlight.contains(i.id))) ?? false;
+    if (!_online || waiting) {
+      // Durable outbox: shown with a clock and "ממתינה לחיבור" until the link is back. Behind a
+      // message that waits it waits too, so it does not arrive first.
+      _wait(identityId, msg);
+      if (_online) unawaited(flushOutbox());
       notifyListeners();
       return msg;
     }
-    if (!_online) {
-      // Durable outbox: shown with a clock and "ממתינה לחיבור" until the link is back.
-      msg.delivery = Delivery.pendingConnection;
-      data?.chats[identityId]?.items.add(msg);
-      _saveOutbox(identityId, msg);
-      notifyListeners();
-      return msg;
-    }
-    final r = await backend.send(identityId, msg);
-    if (!r.ok) {
-      msg.delivery = Delivery.failed;
-      error = r.error;
+    final r = await _try(identityId, msg);
+    if (!r.ok && r.transient) {
+      // It did not reach hq (the link fell, hq restarting): it waits and goes again by itself. The
+      // id goes with it, so a try that did get there is not taken twice.
+      _wait(identityId, msg);
+    } else {
+      if (!r.ok) {
+        msg.delivery = Delivery.failed;
+        error = r.error;
+      }
+      // Its answer is in (taken or refused): what waited behind it goes now.
+      if (!_disposed && (data?.chats[identityId]?.items.any((i) => i is UserMsg && i.delivery == Delivery.pendingConnection) ?? false)) {
+        unawaited(flushOutbox());
+      }
     }
     notifyListeners();
     return msg;
+  }
+
+  /// Into the outbox: on screen as "ממתינה לחיבור", saved on the device, and tried again.
+  void _wait(String identityId, UserMsg msg) {
+    msg.delivery = Delivery.pendingConnection;
+    final items = data?.chats[identityId]?.items;
+    if (items != null && !items.contains(msg)) items.add(msg);
+    final d = data;
+    if (d != null) _rewriteOutbox(d);
+    _scheduleRetry();
   }
 
   /// A reply that quotes a question answers it. Never queued: an answer to a question that may be
   /// gone by then needs a yes or no now, and a refusal says why (#55).
   Future<UserMsg> _answer(String identityId, UserMsg msg, String askId) async {
     final chat = data?.chats[identityId];
-    chat?.items.add(msg);
+    if (chat != null && !chat.items.contains(msg)) chat.items.add(msg); // "ניסיון נוסף" is the same bubble
     notifyListeners();
     final r = await backend.freeAnswer(askId, msg.text, attachments: msg.attachments);
     if (r.ok) {
@@ -303,6 +341,21 @@ class AppStore extends ChangeNotifier {
 
   /// "משיכה חזרה": the text goes back to the composer (chat.md §2.1).
   Future<String?> retract(String identityId, UserMsg msg) async {
+    if (_inFlight.contains(msg.id)) {
+      // Already on its way: hq may have it, so it is not taken off here as if it never went.
+      error = 'ההודעה כבר בדרך לשרת, ולכן אי אפשר למשוך אותה.';
+      notifyListeners();
+      return null;
+    }
+    if (msg.delivery == Delivery.pendingConnection) {
+      // Still on this device: it comes out of the outbox, and hq never hears of it.
+      data?.chats[identityId]?.items.remove(msg);
+      final d = data;
+      if (d != null) _rewriteOutbox(d);
+      setDraft(identityId, msg.text);
+      notifyListeners();
+      return msg.text;
+    }
     final r = await backend.retract(identityId, msg.id);
     if (!r.ok) {
       error = r.error;
@@ -413,21 +466,52 @@ class AppStore extends ChangeNotifier {
       for (final e in (jsonDecode(raw) as List).cast<Map<String, dynamic>>()) {
         final c = d.chats[e['to']];
         if (c == null || c.items.any((i) => i.id == e['id'])) continue;
-        c.items.add(UserMsg(id: e['id'], ts: DateTime.fromMillisecondsSinceEpoch(e['ts']), text: e['text'], priority: Priority.values.asNameMap()[e['priority']] ?? Priority.next, delivery: Delivery.pendingConnection));
+        c.items.add(UserMsg(
+          id: e['id'],
+          ts: DateTime.fromMillisecondsSinceEpoch(e['ts']),
+          text: e['text'],
+          priority: Priority.values.asNameMap()[e['priority']] ?? Priority.next,
+          delivery: Delivery.pendingConnection,
+          attachments: [
+            for (final a in (e['attachments'] as List? ?? const []).cast<Map<String, dynamic>>())
+              Attachment(name: a['name'], bytes: a['bytes'], mime: a['mime'], id: a['id']),
+          ],
+        ));
       }
     }
     notifyListeners();
   }
 
-  void _saveOutbox(String to, UserMsg m) {
-    final p = _prefs;
-    if (p == null) return;
-    final list = (jsonDecode(p.getString('outbox') ?? '[]') as List).cast<Map<String, dynamic>>();
-    list.add({'to': to, 'id': m.id, 'ts': m.ts.millisecondsSinceEpoch, 'text': m.text, 'priority': m.priority.name});
-    p.setString('outbox', jsonEncode(list));
+  /// A waiting message as the device keeps it. Images go with their upload ids; one that is not up
+  /// yet has only its bytes, which are not kept, so that message waits in memory only (null).
+  static Map<String, dynamic>? _outboxEntry(String to, UserMsg m) {
+    if (m.attachments.any((a) => a.id == null)) return null;
+    return {
+      'to': to,
+      'id': m.id,
+      'ts': m.ts.millisecondsSinceEpoch,
+      'text': m.text,
+      'priority': m.priority.name,
+      if (m.attachments.isNotEmpty) 'attachments': [for (final a in m.attachments) {'id': a.id, 'name': a.name, 'bytes': a.bytes, 'mime': a.mime}],
+    };
   }
 
   bool _flushing = false;
+
+  /// Tries again while something waits: 2s, 4s, 8s... up to a minute. A link that comes back
+  /// sends at once as well (_onBackend); this covers hq restarting under a link that looked up.
+  Timer? _retryTimer;
+  int _retryStep = 0;
+
+  void _scheduleRetry() {
+    if (_disposed || _retryTimer != null) return;
+    final secs = [2, 4, 8, 15, 30, 60][_retryStep.clamp(0, 5)];
+    _retryStep++;
+    _retryTimer = Timer(Duration(seconds: secs), () {
+      _retryTimer = null;
+      unawaited(flushOutbox());
+    });
+  }
 
   /// The saved outbox = what still waits in memory, plus entries for conversations not loaded yet.
   void _rewriteOutbox(CompanyData d) {
@@ -437,7 +521,7 @@ class AppStore extends ChangeNotifier {
     final waiting = [
       for (final c in d.chats.values)
         for (final m in c.items.whereType<UserMsg>().where((m) => m.delivery == Delivery.pendingConnection))
-          {'to': c.identityId, 'id': m.id, 'ts': m.ts.millisecondsSinceEpoch, 'text': m.text, 'priority': m.priority.name},
+          ?_outboxEntry(c.identityId, m),
     ];
     final all = [...kept, ...waiting];
     if (all.isEmpty) {
@@ -447,30 +531,49 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  /// Called when the link comes back: flush the outbox in order. A message the server refuses is
-  /// marked failed with the reason on screen, never left waiting for a link that is already up.
+  /// Called when the link comes back, and by the retry timer: flush the outbox in order. A message
+  /// hq refuses is marked failed with the reason on screen; one that still does not reach it waits
+  /// again, and so does everything after it (the order stays).
   Future<void> flushOutbox() async {
     final d = data;
     if (d == null || _flushing) return;
     _flushing = true;
+    var waiting = false;
     try {
       for (final c in d.chats.values.toList()) {
+        // One already on its way here goes first; what comes after it waits for its answer.
+        if (c.items.any((i) => _inFlight.contains(i.id))) continue;
         for (final m in c.items.whereType<UserMsg>().where((m) => m.delivery == Delivery.pendingConnection).toList()) {
-          c.items.remove(m);
-          final r = await backend.send(c.identityId, m);
-          if (!r.ok) {
-            // The link went down mid-flush: it waits again. Up and still refused: failed, with why.
-            m.delivery = _online ? Delivery.failed : Delivery.pendingConnection;
-            if (!c.items.contains(m)) c.items.add(m);
-            if (m.delivery == Delivery.failed) error = r.error;
+          if (waiting) break;
+          // Pulled back ("משיכה חזרה") while the ones before it went: it does not go.
+          if (!(d.chats[c.identityId]?.items.contains(m) ?? false) || m.delivery != Delivery.pendingConnection) continue;
+          final r = await _try(c.identityId, m);
+          if (r.ok) {
+            _retryStep = 0;
+          } else {
+            m.delivery = r.transient ? Delivery.pendingConnection : Delivery.failed;
+            if (r.transient) waiting = true;
+            if (!r.transient) error = r.error;
           }
         }
+        if (waiting) break;
       }
       _rewriteOutbox(d);
     } finally {
       _flushing = false;
     }
-    notifyListeners();
+    // A conversation with a send still on its way is left to that send: its answer carries on.
+    final more = d.chats.values.any((c) =>
+        !c.items.any((i) => _inFlight.contains(i.id)) && c.items.any((i) => i is UserMsg && i.delivery == Delivery.pendingConnection));
+    if (waiting) {
+      _scheduleRetry();
+    } else if (more && !_disposed) {
+      // Added while this ran, and hq answers: it goes now, not on the next timer.
+      unawaited(flushOutbox());
+    } else {
+      _retryStep = 0;
+    }
+    if (!_disposed) notifyListeners();
   }
 }
 

@@ -529,10 +529,7 @@ class _ChatScreenState extends State<ChatScreen> {
             }
           },
           onStopNow: () => _stop(chat, d.who(widget.identityId)),
-          onRetry: () {
-            chat.items.remove(it);
-            store.send(widget.identityId, it.text, it.priority, quote: it.replyTo, attachments: it.attachments);
-          },
+          onRetry: () => store.resend(widget.identityId, it),
         ),
       TextMsg() => TextBubble(msg: it),
       ToolGroup() => ToolGroupRow(group: it, forceOpen: openAllTools),

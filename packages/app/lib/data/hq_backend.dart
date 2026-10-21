@@ -129,11 +129,15 @@ class HqBackend extends Backend {
         return const CommandResult.fail('המכשיר הזה נותק מהחברה. צריך להיכנס שוב.');
       }
       if (r.statusCode == 404 || r.statusCode == 409) return const CommandResult.fail('הפריט כבר טופל או שאינו קיים יותר.');
+      // 502-504: the proxy is up and hq is not (a restart). The request never reached it.
+      if (r.statusCode >= 502 && r.statusCode <= 504) return const CommandResult.fail(_noLink, transient: true);
       return const CommandResult.fail('השרת לא קיבל את הפעולה. אפשר לנסות שוב.');
     } catch (_) {
-      return const CommandResult.fail('אין חיבור לשרת, ולכן הפעולה לא נשלחה. אפשר לנסות שוב.');
+      return const CommandResult.fail(_noLink, transient: true);
     }
   }
+
+  static const _noLink = 'אין חיבור לשרת, ולכן הפעולה לא נשלחה. אפשר לנסות שוב.';
 
   @override
   Future<void> start() async {
@@ -1016,7 +1020,7 @@ class HqBackend extends Backend {
   Future<CommandResult> freeAnswer(String askId, String text, {List<Attachment> attachments = const []}) async {
     final stale = await _stale(askId, null);
     if (stale != null) return stale;
-    final up = await _uploadAll(attachments);
+    final (up, _) = await _uploadAll(attachments);
     if (up == null) return const CommandResult.fail(_uploadFailed);
     // A GO is an inbox item: his words close it, and the worker gets them as they are.
     final path = askId.startsWith('inbox:')
@@ -1143,16 +1147,17 @@ class HqBackend extends Backend {
   @override
   Future<CommandResult> send(String identityId, UserMsg msg) async {
     final chat = _data?.chats.putIfAbsent(identityId, () => Conversation(identityId: identityId, items: []));
-    chat?.items.add(msg);
-    msg.delivery = Delivery.queued;
+    if (chat != null && !chat.items.contains(msg)) chat.items.add(msg); // a retry is the same bubble
+    // A retry from the outbox stays "ממתינה לחיבור" (and in the saved outbox) until hq answers.
+    if (msg.delivery != Delivery.pendingConnection) msg.delivery = Delivery.queued;
     notifyListeners();
     // Images go up first; the message carries their ids. One that fails fails the message, with
     // "ניסיון נוסף" (what is already up is not uploaded again).
-    final up = await _uploadAll(msg.attachments);
+    final (up, transient) = await _uploadAll(msg.attachments);
     if (up == null) {
-      msg.delivery = Delivery.failed;
+      msg.delivery = transient ? Delivery.pendingConnection : Delivery.failed;
       notifyListeners();
-      return const CommandResult.fail(_uploadFailed);
+      return CommandResult.fail(_uploadFailed, transient: transient);
     }
     msg.attachments = up;
     final r = await _send('POST', '/api/messages/tell', {
@@ -1163,39 +1168,48 @@ class HqBackend extends Backend {
       'priority': msg.priority.name,
       if (up.isNotEmpty) 'attachments': [for (final a in up) a.id],
     });
-    if (!r.ok) msg.delivery = Delivery.failed;
+    if (!r.ok) {
+      msg.delivery = r.transient ? Delivery.pendingConnection : Delivery.failed;
+    } else if (msg.delivery == Delivery.pendingConnection) {
+      msg.delivery = Delivery.queued; // hq has it; its events take it from here
+    }
     notifyListeners();
     return r;
   }
 
   static const _uploadFailed = 'התמונה לא עלתה לשרת, ולכן ההודעה לא נשלחה. אפשר לנסות שוב.';
 
-  /// Every image that is not up yet goes up; the list with their ids, or null when one did not get there.
-  Future<List<Attachment>?> _uploadAll(List<Attachment> list) async {
+  /// Every image that is not up yet goes up; the list with their ids, or null when one did not get
+  /// there, and whether that was the link (worth sending again) rather than hq refusing it.
+  Future<(List<Attachment>?, bool)> _uploadAll(List<Attachment> list) async {
     final up = <Attachment>[];
     for (final a in list) {
-      final id = a.id ?? await _upload(a);
-      if (id == null) return null;
-      up.add(a.id == null ? a.uploaded(id) : a);
+      if (a.id != null) {
+        up.add(a);
+        continue;
+      }
+      final (id, transient) = await _upload(a);
+      if (id == null) return (null, transient);
+      up.add(a.uploaded(id));
     }
-    return up;
+    return (up, false);
   }
 
-  /// One image to hq; its upload id, or null when it did not get there.
-  Future<String?> _upload(Attachment a) async {
+  /// One image to hq; its upload id, or null when it did not get there (and whether that was the link).
+  Future<(String?, bool)> _upload(Attachment a) async {
     final data = a.data;
-    if (data == null) return null;
+    if (data == null) return (null, false);
     try {
       final r = await _http.post(Uri.parse('$baseUrl/api/uploads'),
           headers: {'authorization': 'Bearer $token', 'content-type': a.mime, 'x-file-name': Uri.encodeComponent(a.name)}, body: data)
           .timeout(const Duration(seconds: 90));
       if (r.statusCode == 401) _refused();
-      if (r.statusCode != 200) return null;
+      if (r.statusCode != 200) return (null, r.statusCode >= 502 && r.statusCode <= 504);
       final id = ((jsonDecode(utf8.decode(r.bodyBytes)) as Map)['upload'] as Map)['id'] as String;
       _images[id] = data;
-      return id;
+      return (id, false);
     } catch (_) {
-      return null;
+      return (null, true);
     }
   }
 

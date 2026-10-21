@@ -119,10 +119,14 @@ class CompanyData {
 
 /// Result of a command that reaches the server. Failure text is one plain sentence (design-taste §7).
 class CommandResult {
-  const CommandResult.ok() : ok = true, error = null;
-  const CommandResult.fail(this.error) : ok = false;
+  const CommandResult.ok() : ok = true, error = null, transient = false;
+  const CommandResult.fail(this.error, {this.transient = false}) : ok = false;
   final bool ok;
   final String? error;
+
+  /// It never got an answer from hq (no link, a timeout, the proxy while hq restarts): the same
+  /// request may go again later. A refusal (4xx) is not transient.
+  final bool transient;
 }
 
 /// One Claude account as the switch button in settings shows it (B.7).
