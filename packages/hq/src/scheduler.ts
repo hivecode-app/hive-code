@@ -13,7 +13,7 @@ import { HELPER_TEAM, taskSteps } from './system-prompt.ts';
 import { memInfoMb } from './proc.ts';
 import { dirname, join } from 'node:path';
 import { noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
-import { LOCAL, LOCAL_LABELS, NodeUnreachable, nodeToggle, RemoteWorkspaces, type Nodes, type RemoteNode } from './nodes.ts';
+import { LOCAL, LOCAL_LABELS, NodeUnreachable, REMOTE_OK, nodeToggle, RemoteWorkspaces, type Nodes, type RemoteNode } from './nodes.ts';
 
 export interface TaskRow {
   id: number; ref: string | null; project: string | null; title: string; body: string; source: string; state: string;
@@ -81,6 +81,9 @@ const REST_WAKES = 6;
 /** Label on a standing worker's task that close_team is closing: the time it was asked for its handoff. */
 const CLOSING = 'closing-at:';
 
+/** End reason of a node's shift whose task moves here (fallbackLocal). */
+const NODE_FALLBACK = 'node_fallback';
+
 export class Scheduler {
   memInfo: () => { totalMb: number; availableMb: number } = memInfoMb;
   /** Night mode (night.ts) plugs in here: the scope filter, a note for every task prompt, and a look after each fill. */
@@ -115,9 +118,15 @@ export class Scheduler {
     this.cfg = cfg;
     this.shifts = shifts;
     this.mailbox = mailbox;
+    // A message stale on a node's shift that never took its task: the task moves here, no resurrection (fallbackLocal).
+    mailbox.nodeFallback = async (identity) => {
+      const t = this.store.db.prepare(`SELECT id FROM tasks WHERE identity = ? AND machine IS NOT NULL AND machine != 'local' AND state != 'done'
+        ORDER BY id DESC LIMIT 1`).get(identity) as { id: number } | undefined;
+      return t ? this.fallbackLocal(t.id, 'not accepted') : false;
+    };
     // A slot frees the moment a shift ends: fill it now, don't wait for the next sweep.
     shifts.on('ended', (row, reason) => {
-      if (row.task_id != null) this.onTaskShiftEnded(row.task_id, reason);
+      if (row.task_id != null) this.onTaskShiftEnded(row.task_id, reason, row.machine);
       // A failed launch frees nothing: refilling on it would spin (start → fail → ended → fill → …).
       if (row.kind === 'work' && reason !== 'launch_failed' && reason !== 'account_switch') this.store.bg(this.fill(), 'scheduler.fill');
     });
@@ -215,14 +224,15 @@ export class Scheduler {
 
   /**
    * Where a task that has no machine yet would go (nodes.ts): a node, when the task can run there (a task worker's
-   * task of a project the node lists, with no label that keeps it here) and the node has a free slot; else here.
+   * task of a project the node lists, opened as `remote-ok`, with no label that keeps it here) and the node has a free
+   * slot; else here.
    * A task with a machine stays on it: its worktree and session are there.
    */
   placeFor(t: TaskRow, nodeFree: Map<string, number>): string {
     if (t.machine) return t.machine;
     if (!this.nodes || t.worktree || t.started_at != null || !t.project) return LOCAL;
     const labels = JSON.parse(t.labels || '[]') as string[];
-    if (labels.some((l) => LOCAL_LABELS.includes(l))) return LOCAL;
+    if (!labels.includes(REMOTE_OK) || labels.some((l) => LOCAL_LABELS.includes(l))) return LOCAL;
     // A task handed to a standing worker (or to a lead) runs where that identity runs: here.
     if (t.identity && getIdentity(this.store, t.identity)?.team_kind !== 'task') return LOCAL;
     const best = this.nodes.list.filter((n) => n.def.projects.includes(t.project!) && this.store.toggle(nodeToggle(n.def.name))
@@ -308,7 +318,7 @@ export class Scheduler {
         const busy = new Set([...this.starting.keys()].map((id) => this.task(id)?.identity).filter((x): x is string => !!x));
         for (const t of this.queue()) {
           if (free <= 0 && ![...nodeFree.values()].some((n) => n > 0)) break;
-          if (this.starting.has(t.id)) continue;
+          if (this.starting.has(t.id) || this.fallingBack.has(t.id)) continue;
           const machine = this.placeFor(t, nodeFree);
           if ((machine === LOCAL ? free : nodeFree.get(machine) ?? 0) <= 0) continue;
           try {
@@ -591,8 +601,14 @@ export class Scheduler {
     }
   }
 
-  private onTaskShiftEnded(taskId: number, reason: string): void {
+  private onTaskShiftEnded(taskId: number, reason: string, machine: string = LOCAL): void {
     const t = this.task(taskId);
+    // On a node and its worker never took the task (did not come up, exited before accepting): it runs here instead.
+    if (reason === NODE_FALLBACK) return; // fallbackLocal sets the task itself
+    if (t && (machine ?? LOCAL) !== LOCAL && !['task_done', 'rest', 'account_switch'].includes(reason) && this.neverTook(t)) {
+      this.store.bg(this.fallbackLocal(taskId, reason), 'scheduler.node_fallback');
+      return;
+    }
     if (!t || t.state !== 'running') return;
     // B.7: the account manager resumes this same shift on another account right away; the task keeps running.
     if (reason === 'account_switch') return;
@@ -602,6 +618,52 @@ export class Scheduler {
     this.store.db.prepare('UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?').run(next, this.store.now(), taskId);
     this.store.emit('task.state', t.identity, { id: taskId, state: next, reason });
     if (next === 'done') this.closeWorktree(taskId);
+  }
+
+  /** No message to the task's worker was ever accepted by its CLI: it never started on the task. */
+  private neverTook(t: TaskRow): boolean {
+    return !t.identity || !this.store.db.prepare(`SELECT 1 FROM messages WHERE to_identity = ? AND state IN ('delivered','seen','handled') LIMIT 1`).get(t.identity);
+  }
+
+  private fallingBack = new Set<number>();
+
+  /**
+   * A task placed on a node whose worker never took it there goes back to the queue, to run here (adi, 22/10/2026):
+   * not a "message not delivered" for him, and not a resume loop on a session that never existed. Its prompt is
+   * dropped (the start here sends its own), the worktree there closes like any (preserved), and `needs-local` keeps it
+   * here. False when it does not apply (here already, done, or its worker did take it).
+   */
+  async fallbackLocal(taskId: number, why: string): Promise<boolean> {
+    const t = this.task(taskId);
+    if (!t || !t.machine || t.machine === LOCAL || t.state === 'done' || !this.neverTook(t)) return false;
+    if (this.fallingBack.has(taskId)) return true;
+    this.fallingBack.add(taskId);
+    try {
+      const db = this.store.db;
+      // Its messages first: the prompt there is dropped, and the others wait for the shift here (mailbox waitsForStart:
+      // nothing wakes or resurrects the worker until the start here brings it up, and its flush delivers them).
+      if (t.identity) this.mailbox.dropTaskPrompts(t.identity, taskId, `not taken on ${t.machine}: the task runs here`);
+      const cur = t.identity ? this.shifts.current(t.identity) : undefined;
+      if (cur && cur.kind !== 'foreign') await this.shifts.stop(cur.id, NODE_FALLBACK, cur.started_at).catch(() => {});
+      const labels = [...new Set([...(JSON.parse(t.labels || '[]') as string[]), 'needs-local'])];
+      db.prepare(`UPDATE tasks SET machine = NULL, worktree = NULL, state = 'queued', shift_id = NULL, started_at = NULL, labels = ?, updated_at = ?
+        WHERE id = ? AND state != 'done'`).run(JSON.stringify(labels), this.store.now(), taskId);
+      this.lastStartAt.delete(taskId);
+      this.store.emit('task.node_fallback', t.identity, { id: taskId, machine: t.machine, why });
+      this.store.emit('task.state', t.identity, { id: taskId, state: 'queued', reason: NODE_FALLBACK });
+      // The worktree there closes like any (preserved), in the background: the task does not wait for the node.
+      const { c } = t.worktree ? this.checkoutOf(t) : { c: undefined };
+      if (t.worktree && c) {
+        const ws = this.workspacesFor(t.machine);
+        this.store.bg(ws.close(t.worktree, c.defaultBranch).then((r) => {
+          if (r.error && r.error !== 'missing') this.store.emit('task.worktree_close_failed', t.identity, { id: taskId, path: t.worktree, machine: t.machine, error: r.error });
+        }), 'task.node_fallback.close');
+      }
+    } finally {
+      this.fallingBack.delete(taskId);
+    }
+    this.store.bg(this.fill(), 'scheduler.fill');
+    return true;
   }
 
   /** Tasks whose worker's status done waits for its turn: the latest call's op and onClose win. */

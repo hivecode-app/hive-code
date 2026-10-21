@@ -51,7 +51,7 @@ test('nodes: a task worker\'s task goes to the node, its worktree is made and cl
     assert.equal(hq.nodes.list[0]!.status?.up, true, `polled at start: ${hq.nodes.list[0]!.status?.error}`);
     assert.deepEqual(hq.scheduler.nodeSlots().map((n) => [n.name, n.total, n.free]), [['n2', 2, 2]]);
 
-    const t = hq.scheduler.addTask({ title: 'על השרת השני', project: 'proj' });
+    const t = hq.scheduler.addTask({ title: 'על השרת השני', project: 'proj', labels: ['remote-ok'] });
     await until(() => hq.scheduler.task(t.id)!.state === 'running', 8000, 'running');
     const wt = join(r.checkout, '.worktrees', `company-t${t.id}`);
     assert.equal(hq.scheduler.task(t.id)!.machine, 'n2');
@@ -68,6 +68,9 @@ test('nodes: a task worker\'s task goes to the node, its worktree is made and cl
     assert.equal(hq.scheduler.nodeSlots()[0]!.running, 1);
     assert.equal(hq.scheduler.slots().tasks, 0, 'holds no slot here');
     assert.equal(hq.board().find((b) => b.id === `proj-t${t.id}`)!.shift!.machine, 'n2');
+    // The task's prompt reaches the shift there: `live` comes in the same read as hello, and the flush finds the connection.
+    const prompt = hq.mailbox.list(`proj-t${t.id}`).find((m) => m.to_identity === `proj-t${t.id}`)!;
+    await until(() => hq.mailbox.get(prompt.id)!.state !== 'queued', 3000, 'task prompt delivered on the node');
 
     // Woken again after a rest: the same machine and worktree.
     await hq.shifts.stop(sid, 'rest');
@@ -75,13 +78,17 @@ test('nodes: a task worker\'s task goes to the node, its worktree is made and cl
     assert.equal(launcher.launches.at(-1)!.machine, 'n2');
 
     // A task that needs the browser stays here; so does everything while the switch is off.
-    const local = hq.scheduler.addTask({ title: 'עם דפדפן', project: 'proj', labels: ['needs-browser'] });
+    // Without remote-ok (the default): here.
+    const plain = hq.scheduler.addTask({ title: 'רגילה', project: 'proj' });
+    await until(() => hq.scheduler.task(plain.id)!.state === 'running', 8000, 'plain running');
+    assert.equal(launcher.launches.at(-1)!.machine, 'local');
+    const local = hq.scheduler.addTask({ title: 'עם דפדפן', project: 'proj', labels: ['remote-ok', 'needs-browser'] });
     await until(() => hq.scheduler.task(local.id)!.state === 'running', 8000, 'local running');
     assert.equal(launcher.launches.at(-1)!.machine, 'local');
     assert.equal(hq.scheduler.task(local.id)!.machine, null);
     hq.store.setToggle(nodeToggle('n2'), false);
     assert.equal(hq.scheduler.nodeSlots()[0]!.enabled, false, 'off: no new task goes there (one already there keeps its slot)');
-    const off = hq.scheduler.addTask({ title: 'כשהמתג כבוי', project: 'proj' });
+    const off = hq.scheduler.addTask({ title: 'כשהמתג כבוי', project: 'proj', labels: ['remote-ok'] });
     await until(() => hq.scheduler.task(off.id)!.state === 'running', 8000, 'off running');
     assert.equal(launcher.launches.at(-1)!.machine, 'local');
 
@@ -160,4 +167,46 @@ test('workspace-cli: ops side by side move the company checkout one at a time (n
     assert.equal(git(r.checkout, 'rev-parse', 'HEAD'), sha);
     assert.ok(!existsSync(join(r.checkout, '.git', 'company-sync.lock')), 'the lock is released');
   } finally { r.cleanup(); }
+});
+
+test('nodes: a worker there that never takes its task: the task runs here, and he hears nothing of it (adi 22/10)', async () => {
+  const r = repo();
+  const calls: string[][] = [];
+  // A slow worktree_setup: a message that comes in while the task's worktree here is being set up must wait for it.
+  const slow = charter(r.checkout).replace('  test: npm test', '  test: npm test\n  worktree_setup: sleep 1');
+  const env = await makeEnv({ projects: { proj: slow }, cfg: { nodes: [NODE] }, deps: { ssh: fakeSsh(calls) }, noStart: true });
+  try {
+    const { hq, launcher, clock } = env;
+    git(env.dir, 'init', '--quiet', '--initial-branch=main');
+    git(env.dir, 'add', 'company');
+    git(env.dir, 'commit', '--quiet', '-m', 'company');
+    hq.nodes.list[0]!.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    (hq.scheduler.workspacesFor('n2') as RemoteWorkspaces).fetch = async () => {};
+    await hq.start({ listen: false, timers: false });
+    launcher.mode = 'mute'; // the CLI there never accepts the prompt
+    const t = hq.scheduler.addTask({ title: 'לא נלקחה שם', project: 'proj', labels: ['remote-ok'] });
+    await until(() => hq.scheduler.task(t.id)!.state === 'running', 8000, 'running on the node');
+    assert.equal(hq.scheduler.task(t.id)!.machine, 'n2');
+    const prompt = hq.mailbox.list(`proj-t${t.id}`).find((m) => m.to_identity === `proj-t${t.id}`)!;
+    await until(() => (launcher.hosts.get(`proj-t${t.id}-1`)?.sent.length ?? 0) === 1, 3000, 'sent there');
+
+    launcher.mode = 'echo';
+    clock.advance(61_000);
+    const before = launcher.launches.length;
+    await hq.mailbox.sweep();
+    hq.mailbox.tell({ msg_id: 'during-setup', from: 'eli', to: `proj-t${t.id}`, body: 'עוד פרט למשימה' });
+    await until(() => hq.scheduler.task(t.id)!.state === 'running' && hq.scheduler.task(t.id)!.machine === null, 8000, 'running here');
+    assert.deepEqual(launcher.launches.slice(before).map((l) => l.cwd), [hq.scheduler.task(t.id)!.worktree], 'one launch here, in its worktree');
+    await until(() => hq.mailbox.get('during-setup')!.state !== 'queued', 3000, 'the message during setup is delivered by the start');
+    const here = launcher.launches.at(-1)!;
+    assert.equal(here.machine, 'local');
+    // One filesystem in this test: the node's worktree may still be there, so the one here can get a suffix.
+    assert.ok(here.cwd.startsWith(join(r.checkout, '.worktrees', `company-t${t.id}`)), 'a worktree here');
+    assert.equal(hq.scheduler.task(t.id)!.worktree, here.cwd);
+    assert.ok(JSON.parse(hq.scheduler.task(t.id)!.labels).includes('needs-local'));
+    assert.equal(hq.mailbox.get(prompt.id)!.state, 'failed', 'the prompt there is dropped');
+    await until(() => hq.mailbox.list(`proj-t${t.id}`).some((m) => m.to_identity === `proj-t${t.id}` && m.id !== prompt.id && m.state !== 'queued'), 3000, 'the prompt here is taken');
+    assert.ok(!hq.inbox.open().some((i) => i.kind === 'delivery_failure'), 'nothing for him');
+    assert.ok(hq.store.eventsAfter(0, 5000).some((e) => e.type === 'task.node_fallback'));
+  } finally { await env.cleanup(); r.cleanup(); }
 });

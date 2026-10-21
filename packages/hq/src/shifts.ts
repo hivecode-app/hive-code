@@ -401,6 +401,10 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
         const remote = (fresh.machine ?? LOCAL) !== LOCAL;
         const c = this.factory(row.id, path, remote ? { remote } : undefined);
         this.wire(c);
+        // Kept before open: a remote connection is up only once hello came, and `live` can come in the same read as
+        // hello, before open's caller runs again. The flush on `live` must already find it (connection() checks it is up).
+        this.conns.set(row.id, c);
+        const drop = () => { c.removeAllListeners(); if (this.conns.get(row.id) === c) this.conns.delete(row.id); };
         try {
           // A node's shift: its socket there, forwarded to the same path here (again after an hq restart).
           if (remote) {
@@ -411,12 +415,11 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
           const now = this.get(row.id);
           // Raced with markEnded/a relaunch while connecting: drop this socket, it belongs to a dead host.
           if (this.closed || !now || now.started_at !== fresh.started_at || (now.state !== 'starting' && now.state !== 'live')) {
-            c.removeAllListeners(); c.close(); return false;
+            drop(); c.close(); return false;
           }
-          this.conns.set(row.id, c);
           return true;
         } catch {
-          c.removeAllListeners();
+          drop();
           await new Promise((r) => setTimeout(r, delayMs));
         }
       }
@@ -475,6 +478,9 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     c.on('frame', (f: LoggedFrame) => { if (!this.closed) this.onFrame(id, f, c.isLive); });
     c.on('close', () => {
       if (this.closed) return;
+      // An older connection of this shift closing after the next one is registered (attach keeps it before open): not ours.
+      const cur = this.conns.get(id);
+      if (cur && cur !== c) return;
       this.heldExits.delete(id); // never carried into the next connection
       this.conns.delete(id);
       const row = this.get(id);
@@ -794,6 +800,9 @@ function handoffYaml(a: Record<string, unknown>): string {
 }
 
 function exitReason(f: Extract<LoggedFrame, { t: 'lifecycle' }>): string {
+  // A resume of a session that never had a turn (claude wrote no transcript): every resume fails the same way, so the
+  // next run must be a new shift, not another resume.
+  if (/No conversation found with session ID/.test(f.note ?? '')) return 'resume_rejected';
   return f.error ?? (f.exitCode === 0 ? 'exit' : 'crash');
 }
 

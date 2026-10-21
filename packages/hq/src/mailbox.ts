@@ -73,6 +73,8 @@ export class Mailbox {
 
   /** hq's own asks (account login): the answer goes straight here, in process: never the store, never the WS. */
   onHqAnswer: ((askId: string, answer: string) => void) | null = null;
+  /** Stale messages of a worker on a node that never took its task: true = handled there (the task moved here). */
+  nodeFallback: ((identity: string) => Promise<boolean>) | null = null;
 
   /** The owner's and the manager's names in texts, from org.yaml (re-read when it changes). */
   get names(): CompanyNames { return loadNames(this.cfg.companyDir, this.cfg.managerId); }
@@ -232,6 +234,9 @@ export class Mailbox {
     if (!shift) {
       // A task worker whose task is done is not woken again (it would take a slot as <identity>-2).
       if (this.taskClosed(m.to_identity)) { this.failClosed(m); return; }
+      // Its task has not started yet (a worktree being set up, back from a node): its start brings the shift up in the
+      // task's worktree, and the flush on `live` delivers this. A wake now would start it in hq's default cwd.
+      if (this.waitsForStart(m.to_identity)) return;
       // Resting or dead: wake it. The message becomes the first prompt once the host is live (flush on `live`).
       try {
         // Bound to its task: shifts.request refuses under the identity's lock if close_team got there first.
@@ -344,8 +349,16 @@ export class Mailbox {
   /** B.4 visible failures: 60s → retry with resurrection; another 60s → failed, in both inboxes. */
   async sweep(): Promise<void> {
     const cutoff = this.store.now() - this.cfg.timers.deliveryTimeoutMs;
-    const stale = (this.store.db.prepare(`SELECT * FROM messages WHERE state = 'queued' AND last_attempt_at IS NOT NULL AND last_attempt_at <= ?
+    let stale = (this.store.db.prepare(`SELECT * FROM messages WHERE state = 'queued' AND last_attempt_at IS NOT NULL AND last_attempt_at <= ?
       ORDER BY created_at, rowid`).all(cutoff) as StoredRow[]).map(hydrate);
+    // A worker on a node that never took its task: the task moves here (scheduler fallbackLocal), its messages wait
+    // for the shift here. Not a failure for him, and no resurrection there. A task worker whose task has not started
+    // yet is not resurrected either: its start delivers them.
+    const moved = new Set<string>();
+    for (const id of new Set(stale.map((m) => m.to_identity))) {
+      if ((this.nodeFallback && await this.nodeFallback(id).catch(() => false)) || this.waitsForStart(id)) moved.add(id);
+    }
+    stale = stale.filter((m) => !moved.has(m.to_identity));
     // A task worker whose task closed meanwhile is not resurrected: its messages close as failed, with why.
     for (const m of stale.filter((x) => !this.shifts.current(x.to_identity) && this.taskClosed(x.to_identity))) this.failClosed(m);
     for (const m of stale) { const b = this.boundTask(m); if (b != null && this.taskDone(b)) this.failBound(m); }
@@ -379,6 +392,22 @@ export class Mailbox {
       }
       for (const m of msgs) await this.deliver(m.id, true);
     }
+  }
+
+  /** A task worker with no shift whose task is queued and never started: the scheduler's start brings it up. */
+  waitsForStart(identity: string): boolean {
+    if (this.shifts.current(identity)) return false;
+    const r = this.store.db.prepare(`SELECT t.state, t.started_at FROM tasks t JOIN identities i ON i.id = t.identity
+      WHERE t.identity = ? AND i.team_kind = 'task' ORDER BY t.id DESC LIMIT 1`).get(identity) as { state: string; started_at: number | null } | undefined;
+    return r?.state === 'queued' && r.started_at == null;
+  }
+
+  /** A task's prompts to its worker that it never took (on a node, fallbackLocal): failed quietly, its next start sends one. */
+  dropTaskPrompts(identity: string, taskId: number, why: string): void {
+    const rows = this.store.db.prepare(`SELECT id FROM messages WHERE to_identity = ? AND id LIKE ? AND state = 'queued'`)
+      .all(identity, `task-${taskId}-%`) as { id: string }[];
+    for (const r of rows) this.setState(r.id, 'failed', { error: why });
+    this.store.db.prepare(`UPDATE messages SET resurrected = 0 WHERE to_identity = ? AND state = 'queued'`).run(identity);
   }
 
   /** The identity is a task worker and its task is done: nothing should start a shift for it. */

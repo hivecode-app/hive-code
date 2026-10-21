@@ -38,9 +38,13 @@ export const LOCAL = 'local';
 export const nodeToggle = (name: string) => `node:${name}`;
 
 /**
- * Labels that keep a task on this machine: it needs the browser (the MCP `browser` runs only here), a simulator or
- * an emulator, or someone said so. `needs-local` is the general one.
+ * A task goes to a node only when whoever opened it said it needs nothing that exists only here (ssh keys, tokens,
+ * kubectl, the browser, a simulator): `open_team` with `remote: true` (yoav, 22/10/2026: a task that ran there without
+ * ~/.ssh and kubectl came back half empty). The default is here.
  */
+export const REMOTE_OK = 'remote-ok';
+
+/** Labels that keep a task here even with REMOTE_OK (fallbackLocal adds `needs-local`). */
 export const LOCAL_LABELS = ['needs-local', 'needs-browser', 'needs-simulator'];
 
 export interface NodeStatus {

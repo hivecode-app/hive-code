@@ -126,9 +126,9 @@ test('open_team opens a task: queued under the project, the worker hears the tas
     assert.equal(t.ref, 'hivecode-app/hive-code#3');
     const again = await post(sock, '/v1/ops', entry('open_team', { name: 'תיקון typo ב-README', purpose: 'שוב', ref: 'hivecode-app/hive-code#3' }, 'yoav-1:02', 'yoav'));
     assert.equal(again.json.result.task, id, 'same ticket → same task');
-    assert.ok(!JSON.parse(t.labels).includes('needs-local'));
-    const local = await post(sock, '/v1/ops', entry('open_team', { name: 'בדיקה בדפדפן', purpose: 'y', project: 'agent-company', local: true }, 'yoav-1:01b', 'yoav'));
-    assert.ok(JSON.parse(hq.scheduler.task(local.json.result.task as number)!.labels).includes('needs-local'), 'local: true keeps it on this machine');
+    assert.ok(!JSON.parse(t.labels).includes('remote-ok'), 'default: here');
+    const remote = await post(sock, '/v1/ops', entry('open_team', { name: 'בלי מפתחות', purpose: 'y', project: 'agent-company', remote: true }, 'yoav-1:01b', 'yoav'));
+    assert.ok(JSON.parse(hq.scheduler.task(remote.json.result.task as number)!.labels).includes('remote-ok'), 'remote: true may run on a node');
     assert.equal((await post(sock, '/v1/ops', entry('open_team', { name: 'x', purpose: 'y', project: 'my project' }, 'yoav-1:03', 'yoav'))).status, 400, 'bad slug = permanent reject');
     assert.equal((await post(sock, '/v1/ops', entry('open_team', { name: 'x', purpose: 'y', project: 'nope' }, 'yoav-1:04', 'yoav'))).status, 400, 'unknown project');
     writeFileSync(join(env.cfg.companyDir, 'projects', 'sleepy.md'), '---\nproject: sleepy\nstatus: dormant\n---\n');

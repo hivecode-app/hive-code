@@ -116,8 +116,8 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       repo: s('ה-checkout מהאמנה (name), אם יש בפרויקט יותר מאחד. ברירת מחדל: הראשון / charter checkout name, default the first'),
       assignee: s('העובד הקבוע בפרויקט שהתחום שלו, e.g. ido. בלי: עובד זמני / standing worker of the project; default a temporary worker'),
       members: strs('identities של חברי הצוות / member identities'),
-      local: { type: 'boolean', description: 'המשימה צריכה דפדפן (MCP browser), סימולטור או אמולטור: היא רצה רק על השרת הראשי. בלי: hq יכול להריץ אותה גם על שרת אחר '
-        + '/ needs the browser, a simulator or an emulator: runs only on the main server; default: may run on another node' },
+      remote: { type: 'boolean', description: 'המשימה לא צריכה שום דבר שיש רק בשרת הראשי (מפתחות ssh, טוקנים, kubectl, דפדפן, סימולטור): hq יכול להריץ אותה גם על שרת אחר. בלי: רק בשרת הראשי '
+        + '/ needs nothing that exists only on the main server (ssh keys, tokens, kubectl, browser, simulator): may run on another node; default: main server only' },
     }, ['name', 'purpose']),
     tool('close_team', 'סגירת צוות משימה: המשימה נסגרת, המשמרת נעצרת והעבודה נשמרת. רק מי שפתח, המנהל שלו, המנהל של העובד או ' + n.manager.name + '. '
       + 'awaiting ו-awaiting_note גוברים על מה שהעובד סימן, ואפשר לסמן אותם גם על משימה שכבר נסגרה. '

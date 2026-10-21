@@ -176,8 +176,8 @@ export class Ingest {
         const ref = open?.ref ?? (taken ? `${base} · ${e.id}` : base);
         const task = this.hq.scheduler.addTask({
           title: need('name'), body: need('purpose'), project, ref, labels: [`opened-by:${e.identity}`, ...(s(a.repo) ? [`repo:${s(a.repo)}`] : []),
-            // A browser, a simulator: only here (nodes.ts LOCAL_LABELS).
-            ...(a.local === true ? ['needs-local'] : [])],
+            // Needs nothing that is only here: may run on a node (nodes.ts REMOTE_OK). Default: here.
+            ...(a.remote === true ? ['remote-ok'] : [])],
           identity: worker?.id,
         });
         return { ok: true, id: e.id, ref: `task-${task.id}`, result: { task: task.id, state: task.state } };

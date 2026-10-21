@@ -334,9 +334,9 @@
       },
       "description": "identities של חברי הצוות / member identities"
      },
-     "local": {
+     "remote": {
       "type": "boolean",
-      "description": "המשימה צריכה דפדפן (MCP browser), סימולטור או אמולטור: היא רצה רק על השרת הראשי. בלי: hq יכול להריץ אותה גם על שרת אחר / needs the browser, a simulator or an emulator: runs only on the main server; default: may run on another node"
+      "description": "המשימה לא צריכה שום דבר שיש רק בשרת הראשי (מפתחות ssh, טוקנים, kubectl, דפדפן, סימולטור): hq יכול להריץ אותה גם על שרת אחר. בלי: רק בשרת הראשי / needs nothing that exists only on the main server (ssh keys, tokens, kubectl, browser, simulator): may run on another node; default: main server only"
      }
     },
     "required": [
