@@ -3,11 +3,12 @@
 // with the company's calibration (memory/company/time-estimates.md) as a suggestion, and closes it with the real time:
 //   status done / eta_done → done (closed_at = the real moment, even when it was late)
 //   the task closes any other way → cancelled
-//   past due and still open → missed (swept; closing it later still keeps the real time)
+//   past due and still open → missed (swept; closing it later still keeps the real time, and `missed` stays on the row)
+// remind() is the scheduler's every-minute pass: the reminder before the due time, the one after it, the manager at +10 minutes.
 // A new estimate of the same worker on the same `what` is an update: the old row stays as given, closed as cancelled
 // with superseded_by pointing at the new one.
 import type { Store } from './store.ts';
-import { nextLocal, tzOffsetMs } from './timezone.ts';
+import { hhmm, nextLocal, tzOffsetMs } from './timezone.ts';
 
 export const ETA_KINDS = ['small-fix', 'feature', 'investigation', 'report', 'build', 'deploy', 'release'] as const;
 export type EtaKind = (typeof ETA_KINDS)[number];
@@ -32,12 +33,26 @@ const PLURAL: Record<EtaKind, string> = {
 export interface EstimateRow {
   id: number; identity: string; shift: string | null; task: number | null; project: string | null; kind: EtaKind; what: string;
   message_id: string | null; created_at: number; due_at: number; closed_at: number | null; outcome: EstimateOutcome | null; superseded_by: number | null;
+  /** When it went past its due time while open (= due_at). Stays when it closes late. */
+  missed_at: number | null; reminded_at: number | null; missed_told_at: number | null; escalated_at: number | null;
 }
 
 /** A row as the API shows it: `state` is the outcome or `open`, the times are in minutes, `late` = closed after its due time. */
 export interface EstimateView extends EstimateRow {
   state: EstimateState; estimated_min: number; actual_min: number | null; late: boolean;
+  /** Was ever past due while open, also after it closed late: what the statistics and the app count. */
+  missed: boolean;
 }
+
+/** The reminder comes when 20% of the estimate is left, but not more than REMIND_MAX_MIN and not less than REMIND_MIN_MIN before the due time. */
+export const REMIND_FRACTION = 0.2;
+export const REMIND_MIN_MIN = 2;
+export const REMIND_MAX_MIN = 10;
+/** A worker still silent this long after the due time is reported to their manager. */
+export const ESCALATE_AFTER_MS = 10 * 60_000;
+
+/** Where `remind` sends: a system message to `to`, once per `msgId`. */
+export interface Say { (to: string, msgId: string, body: string): void }
 
 export interface Suggestion {
   /** The Hebrew line the worker hears, e.g. «שחרורים יוצאים פי 2. אולי 120 דקות?». */
@@ -107,6 +122,8 @@ export interface EstimateFilter {
   project?: string; identity?: string; state?: EstimateState; kind?: string; message_id?: string; task?: number;
   /** created_at range, ms. */
   since?: number; until?: number; limit?: number;
+  /** Only the ones that were ever past due while open (also closed late). */
+  missed?: boolean;
 }
 
 export class Estimates {
@@ -121,8 +138,49 @@ export class Estimates {
 
   /** Past due and still open → outcome missed. Idempotent; closing such a row later keeps closed_at, the real time. */
   sweepMissed(): number {
-    const r = this.store.db.prepare(`UPDATE estimates SET outcome = 'missed' WHERE closed_at IS NULL AND outcome IS NULL AND due_at < ?`).run(this.store.now());
+    const r = this.store.db.prepare(`UPDATE estimates SET outcome = 'missed', missed_at = due_at WHERE closed_at IS NULL AND outcome IS NULL AND due_at < ?`).run(this.store.now());
     return r.changes;
+  }
+
+  /**
+   * The scheduler's sweep (scheduler.ts), every minute: the state is in the table, so a restart of hq sends nothing twice and loses nothing.
+   *  1. reminder: 20% left (2 to 10 minutes) → the worker, once per estimate (an update is a new row, so it starts over);
+   *  2. past due and open → missed, and the worker hears it once more;
+   *  3. ESCALATE_AFTER_MS past due and still open → `managerOf(worker)`, once. Null = nobody to tell.
+   * The owner is not told: `missed` shows in the API (GET /api/estimates) and is not a push.
+   */
+  remind(say: Say, tz: string, managerOf: (identity: string) => string | null): { reminded: number; missed: number; escalated: number } {
+    const db = this.store.db;
+    const now = this.store.now();
+    const out = { reminded: 0, missed: 0, escalated: 0 };
+    const open = `closed_at IS NULL`;
+    for (const x of db.prepare(`SELECT * FROM estimates WHERE ${open} AND reminded_at IS NULL AND due_at > ?`).all(now) as EstimateRow[]) {
+      const total = x.due_at - x.created_at;
+      const lead = Math.min(Math.max(total * REMIND_FRACTION, REMIND_MIN_MIN * 60_000), REMIND_MAX_MIN * 60_000);
+      // An estimate no longer than the lead has no time to be reminded in.
+      if (lead >= total || now < x.due_at - lead) continue;
+      if (db.prepare('UPDATE estimates SET reminded_at = ? WHERE id = ? AND reminded_at IS NULL').run(now, x.id).changes === 0) continue;
+      const left = Math.max(1, Math.round((x.due_at - now) / 60_000));
+      say(x.identity, `estimate-${x.id}-remind`, `הבטחת לרן "${x.what}" עד ${hhmm(x.due_at, tz)}. נשארו ${minutes(left)}. אם לא תעמוד בזה, תגיד לו עכשיו עם הערכה חדשה (\`eta_min\`), או תסגור עם \`eta_done\`.`);
+      this.store.emit('estimate.reminded', x.identity, { id: x.id, left_min: left });
+      out.reminded++;
+    }
+    this.sweepMissed();
+    for (const x of db.prepare(`SELECT * FROM estimates WHERE ${open} AND missed_at IS NOT NULL AND missed_told_at IS NULL`).all() as EstimateRow[]) {
+      if (db.prepare('UPDATE estimates SET missed_told_at = ? WHERE id = ? AND missed_told_at IS NULL').run(now, x.id).changes === 0) continue;
+      say(x.identity, `estimate-${x.id}-missed`, `היעד של "${x.what}" (${hhmm(x.due_at, tz)}) עבר, וההבטחה לרן עדיין פתוחה. תגיד לו עכשיו עם הערכה חדשה (\`eta_min\`), או תסגור עם \`eta_done\`.`);
+      this.store.emit('estimate.missed', x.identity, { id: x.id, due_at: x.due_at });
+      out.missed++;
+    }
+    for (const x of db.prepare(`SELECT * FROM estimates WHERE ${open} AND missed_at IS NOT NULL AND escalated_at IS NULL AND due_at <= ?`).all(now - ESCALATE_AFTER_MS) as EstimateRow[]) {
+      if (db.prepare('UPDATE estimates SET escalated_at = ? WHERE id = ? AND escalated_at IS NULL').run(now, x.id).changes === 0) continue;
+      const mgr = managerOf(x.identity);
+      if (!mgr) continue;
+      say(mgr, `estimate-${x.id}-escalation`, `${x.identity} הבטיח לרן "${x.what}" עד ${hhmm(x.due_at, tz)}, והיעד עבר לפני ${Math.round((now - x.due_at) / 60_000)} דקות בלי סגירה ובלי הערכה חדשה. כדאי לבדוק מה קורה.`);
+      this.store.emit('estimate.escalated', x.identity, { id: x.id, to: mgr });
+      out.escalated++;
+    }
+    return out;
   }
 
   /**
@@ -168,7 +226,7 @@ export class Estimates {
     const pick = opts.all ? open : opts.what ? open.filter((x) => norm(x.what) === norm(opts.what!)) : open.slice(-1);
     const now = this.store.now();
     for (const x of pick) {
-      this.store.db.prepare(`UPDATE estimates SET closed_at = ?, outcome = 'done' WHERE id = ?`).run(now, x.id);
+      this.store.db.prepare(`UPDATE estimates SET closed_at = ?, outcome = 'done', missed_at = CASE WHEN ? > due_at THEN due_at ELSE missed_at END WHERE id = ?`).run(now, now, x.id);
       this.store.emit('estimate.closed', identity, { id: x.id, outcome: 'done', actual_min: Math.round((now - x.created_at) / 60_000), late: now > x.due_at });
     }
     return pick.map((x) => this.get(x.id)!);
@@ -194,6 +252,7 @@ export class Estimates {
       ...r, state: r.outcome ?? 'open', estimated_min: Math.round((r.due_at - r.created_at) / 60_000),
       actual_min: r.closed_at != null && r.outcome === 'done' ? Math.round((r.closed_at - r.created_at) / 60_000) : null,
       late: r.closed_at != null && r.outcome === 'done' && r.closed_at > r.due_at,
+      missed: r.missed_at != null,
     };
   }
 
@@ -204,6 +263,7 @@ export class Estimates {
     const add = (sql: string, v: string | number | undefined) => { if (v !== undefined) { where.push(sql); args.push(v); } };
     add('project = ?', f.project); add('identity = ?', f.identity); add('kind = ?', f.kind); add('message_id = ?', f.message_id); add('task = ?', f.task);
     add('created_at >= ?', f.since); add('created_at < ?', f.until);
+    if (f.missed) where.push('missed_at IS NOT NULL');
     if (f.state === 'open') where.push('closed_at IS NULL AND outcome IS NULL');
     else if (f.state) { where.push('outcome = ?'); args.push(f.state); }
     const limit = Math.min(Math.max(f.limit ?? 200, 1), 1000);

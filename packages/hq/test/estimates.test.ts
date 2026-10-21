@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WalEntry } from '@company/shared';
 import { makeEnv, type TestEnv } from './helpers.ts';
-import { median, parseEta } from '../src/estimates.ts';
+import { Estimates, median, parseEta } from '../src/estimates.ts';
+import { Store } from '../src/store.ts';
 
 const MIN = 60_000;
 let n = 0;
@@ -222,6 +223,147 @@ test('GET /api/estimates filters by project, worker, state, date and message_id'
   } finally { await env.cleanup(); }
 });
 
+// ---- reminders (remind, driven by the scheduler's sweep) ----
+
+const mail = (env: TestEnv, to: string) => env.hq.store.db.prepare(`SELECT id, body FROM messages WHERE to_identity = ? AND from_identity = 'hq' AND id LIKE 'estimate-%' ORDER BY id`).all(to) as { id: string; body: string }[];
+
+test('reminder: one message at 20% left (clamped 2..10 minutes), not twice, and not for an estimate too short to have one', async () => {
+  const env = await makeEnv();
+  try {
+    op(env, 'status', { state: 'working', eta_min: 100, eta_kind: 'feature', eta_what: 'הפיצ\'ר' });
+    op(env, 'status', { state: 'working', eta_min: 20, eta_kind: 'build', eta_what: 'בילד' });
+    op(env, 'status', { state: 'working', eta_min: 1, eta_kind: 'build', eta_what: 'קצר' });
+    await env.hq.scheduler.sweep();
+    assert.deepEqual(mail(env, 'ac-ceo'), [], 'nothing before the time');
+    env.clock.advance(85 * MIN); // 100 min: 20% = 20 → capped at 10; 15 left; the 20-minute one is past due, so no reminder for it
+    await env.hq.scheduler.sweep();
+    assert.equal(mail(env, 'ac-ceo').filter((m) => m.id.endsWith('-remind')).length, 0, '15 min left of 100: not yet');
+    env.clock.advance(5 * MIN);
+    await env.hq.scheduler.sweep();
+    const reminders = mail(env, 'ac-ceo').filter((m) => m.id.endsWith('-remind'));
+    assert.equal(reminders.length, 1);
+    assert.match(reminders[0]!.body, /הבטחת לרן "הפיצ'ר" עד \d\d:\d\d\. נשארו 10 דקות\./);
+    assert.match(reminders[0]!.body, /`eta_min`.*`eta_done`/);
+    for (let i = 0; i < 3; i++) { env.clock.advance(MIN); await env.hq.scheduler.sweep(); }
+    assert.equal(mail(env, 'ac-ceo').filter((m) => m.id.endsWith('-remind')).length, 1, 'once per estimate');
+  } finally { await env.cleanup(); }
+});
+
+test('reminder for a 20-minute estimate comes at 4 minutes left, a 5-minute one at the 2-minute floor', async () => {
+  const env = await makeEnv();
+  try {
+    op(env, 'status', { state: 'working', eta_min: 20, eta_kind: 'build', eta_what: 'בילד' });
+    op(env, 'status', { state: 'working', eta_min: 5, eta_kind: 'build', eta_what: 'חמש' }, 'eli');
+    env.clock.advance(15 * MIN);
+    await env.hq.scheduler.sweep();
+    assert.equal(mail(env, 'ac-ceo').length, 0, '5 left of 20: not yet');
+    assert.match(mail(env, 'eli').find((m) => m.id.endsWith('-missed'))!.body, /עבר/, 'the 5-minute one is already past due');
+    env.clock.advance(MIN);
+    await env.hq.scheduler.sweep();
+    assert.match(mail(env, 'ac-ceo')[0]!.body, /נשארו 4 דקות/);
+  } finally { await env.cleanup(); }
+});
+
+test('an updated estimate resets the reminder: the new row is reminded on its own time', async () => {
+  const env = await makeEnv();
+  try {
+    op(env, 'status', { state: 'working', eta_min: 30, eta_kind: 'feature', eta_what: 'משימה' });
+    env.clock.advance(25 * MIN);
+    await env.hq.scheduler.sweep();
+    assert.equal(mail(env, 'ac-ceo').filter((m) => m.id.endsWith('-remind')).length, 1);
+    op(env, 'status', { state: 'working', eta_min: 30, eta_kind: 'feature', eta_what: 'משימה' });
+    await env.hq.scheduler.sweep();
+    assert.equal(mail(env, 'ac-ceo').filter((m) => m.id.endsWith('-remind')).length, 1, 'new estimate: not reminded yet');
+    env.clock.advance(25 * MIN);
+    await env.hq.scheduler.sweep();
+    assert.equal(mail(env, 'ac-ceo').filter((m) => m.id.endsWith('-remind')).length, 2);
+    assert.equal(env.hq.estimates.list({ state: 'cancelled' }).length, 1, 'the superseded one is never reminded after');
+  } finally { await env.cleanup(); }
+});
+
+test('a closed estimate is not reminded', async () => {
+  const env = await makeEnv();
+  try {
+    op(env, 'status', { state: 'working', eta_min: 30, eta_kind: 'feature', eta_what: 'משימה' });
+    env.clock.advance(20 * MIN);
+    op(env, 'status', { state: 'working', eta_done: true, eta_what: 'משימה' });
+    env.clock.advance(20 * MIN);
+    await env.hq.scheduler.sweep();
+    assert.deepEqual(mail(env, 'ac-ceo'), []);
+  } finally { await env.cleanup(); }
+});
+
+test('past due: missed, one more message to the worker, nothing to the owner, the manager only 10 minutes after the due time', async () => {
+  const env = await makeEnv();
+  try {
+    op(env, 'status', { state: 'working', eta_min: 10, eta_kind: 'build', eta_what: 'בילד' });
+    env.clock.advance(11 * MIN);
+    await env.hq.scheduler.sweep();
+    assert.equal(env.hq.estimates.list()[0]!.state, 'missed');
+    assert.equal(env.hq.estimates.list()[0]!.missed, true);
+    const toWorker = mail(env, 'ac-ceo').filter((m) => m.id.endsWith('-missed'));
+    assert.equal(toWorker.length, 1);
+    assert.match(toWorker[0]!.body, /היעד של "בילד".*עבר/);
+    assert.deepEqual(mail(env, 'yoav').filter((m) => m.id.endsWith('-escalation')), [], 'the manager waits 10 minutes');
+    assert.equal((env.hq.store.db.prepare(`SELECT COUNT(*) n FROM messages WHERE to_identity = 'owner' AND id LIKE 'estimate-%'`).get() as { n: number }).n, 0);
+    env.clock.advance(9 * MIN);
+    await env.hq.scheduler.sweep();
+    const esc = mail(env, (env.hq.store.db.prepare(`SELECT reports_to r FROM identities WHERE id = 'ac-ceo'`).get() as { r: string }).r).filter((m) => m.id.endsWith('-escalation'));
+    assert.equal(esc.length, 1);
+    assert.match(esc[0]!.body, /ac-ceo.*"בילד".*עבר לפני 10 דקות/);
+    for (let i = 0; i < 3; i++) { env.clock.advance(MIN); await env.hq.scheduler.sweep(); }
+    assert.equal(mail(env, 'ac-ceo').filter((m) => m.id.endsWith('-missed')).length, 1, 'once');
+  } finally { await env.cleanup(); }
+});
+
+test('an update before the manager is told: no escalation. A late close keeps missed and the real time', async () => {
+  const env = await makeEnv();
+  try {
+    op(env, 'status', { state: 'working', eta_min: 10, eta_kind: 'build', eta_what: 'בילד' });
+    op(env, 'status', { state: 'working', eta_min: 10, eta_kind: 'build', eta_what: 'שני' });
+    env.clock.advance(12 * MIN);
+    await env.hq.scheduler.sweep();
+    op(env, 'status', { state: 'working', eta_min: 30, eta_kind: 'build', eta_what: 'בילד' }); // new estimate in time
+    op(env, 'status', { state: 'working', eta_done: true, eta_what: 'שני' }); // closes late
+    env.clock.advance(10 * MIN);
+    await env.hq.scheduler.sweep();
+    assert.deepEqual(mail(env, 'yoav').filter((m) => m.id.endsWith('-escalation')), []);
+    const late = env.hq.estimates.list({ missed: true }).find((x) => x.what === 'שני')!;
+    assert.equal(late.state, 'done');
+    assert.equal(late.missed, true);
+    assert.equal(late.late, true);
+    assert.equal(late.actual_min, 12);
+    assert.equal(env.hq.estimates.list({ missed: true }).length, 2, 'the superseded one that was missed keeps it too');
+  } finally { await env.cleanup(); }
+});
+
+test('survives a restart: the marks are in the table, a fresh Estimates sends nothing again and loses nothing', async () => {
+  const env = await makeEnv();
+  try {
+    op(env, 'status', { state: 'working', eta_min: 30, eta_kind: 'feature', eta_what: 'משימה' });
+    env.clock.advance(26 * MIN);
+    await env.hq.scheduler.sweep();
+    env.clock.advance(5 * MIN);
+    await env.hq.scheduler.sweep();
+    const before = mail(env, 'ac-ceo').length;
+    assert.equal(before, 2, 'reminder + missed');
+    const reopened = new Store(env.cfg.dbPath, { now: env.clock.now });
+    try {
+      const sent: string[] = [];
+      const say = (_to: string, id: string) => { sent.push(id); };
+      const again = new Estimates(reopened).remind(say, 'UTC', () => 'yoav');
+      assert.deepEqual(sent, []);
+      assert.deepEqual(again, { reminded: 0, missed: 0, escalated: 0 });
+      // The escalation was not yet due, and it still comes after the restart, once.
+      env.clock.advance(10 * MIN);
+      new Estimates(reopened).remind(say, 'UTC', () => 'yoav');
+      new Estimates(reopened).remind(say, 'UTC', () => 'yoav');
+      assert.equal(sent.length, 1);
+      assert.match(sent[0]!, /-escalation$/);
+    } finally { reopened.db.close(); }
+  } finally { await env.cleanup(); }
+});
+
 import { accuracyLine, yesterdayRange, type EstimateView } from '../src/estimates.ts';
 
 const view = (id: number, o: Partial<EstimateView> & { est?: number; act?: number }): EstimateView => {
@@ -229,7 +371,7 @@ const view = (id: number, o: Partial<EstimateView> & { est?: number; act?: numbe
   const created_at = id * 1000;
   const closed = o.act != null ? created_at + o.act * MIN : null;
   return { id, identity: 'dana', shift: null, task: null, project: 'agent-company', kind: 'feature', what: `משהו ${id}`, message_id: null, created_at,
-    due_at: created_at + est * MIN, closed_at: closed, outcome: closed ? 'done' : null, superseded_by: null, state: closed ? 'done' : 'open',
+    due_at: created_at + est * MIN, closed_at: closed, outcome: closed ? 'done' : null, superseded_by: null, missed_at: null, reminded_at: null, missed_told_at: null, escalated_at: null, missed: false, state: closed ? 'done' : 'open',
     estimated_min: est, actual_min: o.act ?? null, late: closed != null && o.act! > est, ...o };
 };
 

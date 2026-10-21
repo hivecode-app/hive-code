@@ -139,6 +139,11 @@ export class Hq {
     this.estimates = new Estimates(this.store);
     this.night.estimates = this.estimates;
     this.scheduler.onTaskDone = (id) => this.estimates.cancelForTask(id);
+    this.scheduler.onSweep = () => {
+      if (!this.store.toggle('scheduler')) return;
+      this.estimates.remind((to, msg_id, body) => { this.mailbox.tell({ msg_id, from: 'hq', to, kind: 'system', priority: 'next', body }); }, this.timeZone(),
+        (id) => { const m = getIdentity(this.store, id)?.reports_to ?? this.cfg.managerId; return m === 'owner' || m === id ? null : m; });
+    };
     this.conversations = new Conversations(this.store, (id) => this.conversationTitle(id));
     this.conversations.setAlert((m) => this.store.bg(this.pusher.notifyMessage(m), 'push.message'));
     this.pusher.titleOf = (id) => this.conversationTitle(id);

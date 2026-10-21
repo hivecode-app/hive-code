@@ -440,6 +440,14 @@ const MIGRATIONS: string[] = [
   CREATE INDEX estimates_task ON estimates(task) WHERE task IS NOT NULL;
   CREATE INDEX estimates_kind ON estimates(project, kind, outcome);
   `,
+  // v22: the reminders of an estimate (estimates.ts remind): each is sent once, the time is its mark. missed_at (= due_at) stays when a late one closes.
+  `
+  ALTER TABLE estimates ADD COLUMN missed_at INTEGER;
+  ALTER TABLE estimates ADD COLUMN reminded_at INTEGER;
+  ALTER TABLE estimates ADD COLUMN missed_told_at INTEGER;
+  ALTER TABLE estimates ADD COLUMN escalated_at INTEGER;
+  UPDATE estimates SET missed_at = due_at WHERE outcome = 'missed';
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

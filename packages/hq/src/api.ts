@@ -268,7 +268,8 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   });
 
   // Time estimates (estimates.ts): what workers promised and how it ended. Filters: project, identity, state
-  // (open|missed|done|cancelled), kind, message_id, task, since/until (created_at, ms or ISO), limit.
+  // (open|missed|done|cancelled), kind, message_id, task, since/until (created_at, ms or ISO), limit, missed=1 (ever past
+  // due, also closed late: each row has `missed` and `missed_at`).
   route('GET', '/api/estimates', ({ url }) => {
     const q = (k: string) => url.searchParams.get(k) || undefined;
     const when = (k: string): number | undefined => {
@@ -286,7 +287,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     };
     const kind = oneOf(q('kind'), ETA_KINDS, 'kind');
     return { estimates: hq.estimates.list({ project: q('project'), identity: q('identity'), kind, message_id: q('message_id'), task: count('task'),
-      state: oneOf(q('state'), ['open', 'missed', 'done', 'cancelled'] as const, 'state'), since: when('since'), until: when('until'), limit: count('limit') }) };
+      state: oneOf(q('state'), ['open', 'missed', 'done', 'cancelled'] as const, 'state'), since: when('since'), until: when('until'), limit: count('limit'), missed: q('missed') === '1' || undefined }) };
   });
 
   route('GET', '/api/tasks', () => ({ tasks: hq.scheduler.tasks(), queue: hq.scheduler.queue().map((t) => ({ id: t.id, bucket: t.bucket })) }));

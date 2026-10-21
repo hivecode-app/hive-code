@@ -165,6 +165,9 @@ export class Scheduler {
     return this.store.db.prepare(`SELECT * FROM tasks ORDER BY CASE WHEN state IN ('done') THEN 1 ELSE 0 END, updated_at DESC LIMIT 500`).all() as TaskRow[];
   }
 
+  /** Runs at the end of every sweep (estimates.ts remind: no timer of its own per estimate). */
+  onSweep?: () => void;
+
   /** A task that ends (any way) cancels the estimates still open on it; the ones its worker closed with status done are already closed. */
   onTaskDone?: (id: number) => void;
 
@@ -896,6 +899,7 @@ export class Scheduler {
     await this.fill();
     // Empty-slot measurement (metric.empty_slot) is night.ts: per interval, with its reason.
     await this.retryCloses();
+    this.onSweep?.();
     this.store.setMeta('last_sweep_at', String(now));
   }
 }
