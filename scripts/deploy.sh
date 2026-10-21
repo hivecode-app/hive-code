@@ -270,6 +270,8 @@ deploy_hq() {
 
   # Safe restart: shifts are their own units (company-shift@), outside hq's cgroup (scripts/lib/hq-restart.sh).
   hq_restarted=1
+  # The checkout is the new commit now: its lib, not the one sourced in preflight from the previous commit (#209).
+  source "$repo/scripts/lib/hq-restart.sh"
   hq_safe_restart || fail "$HQ_RESTART_MSG"
   say "hq הופעל מחדש על ${sha:0:7}; $HQ_RESTART_MSG"
 }

@@ -9,7 +9,7 @@
 //                                                           prints the PR body (Hebrew)
 //   node scripts/engine.mjs db-backup <hq.db> <out>        online copy (SQLite backup API, safe while hq runs)
 //   node scripts/engine.mjs db-migrate-dry <copy>          runs this engine's hq.db migrations on <copy>: "<before> <after>"
-import { readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { readFileSync, writeFileSync, chmodSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -42,6 +42,16 @@ export function migrationBody(plan) {
     '',
     'נפתח על ידי `company update`. העדכון ממתין: אחרי המיזוג מריצים שוב `company update`.',
   ].join('\n');
+}
+
+const HQ_STOP_REASONS = new Set(['rest', 'task_done', 'owner_stop', 'resurrect', 'unresponsive', 'stuck', 'brief_failed', 'node_fallback']);
+
+/** Runs `fn` on a read-only hq.db; `fallback` when it is not there (a fresh install) or cannot be read. */
+async function dbOr(file, fn, fallback) {
+  if (!existsSync(file)) return fallback;
+  const { default: Database } = await import('better-sqlite3');
+  const db = new Database(file, { readonly: true, fileMustExist: true });
+  try { return fn(db); } catch { return fallback; } finally { db.close(); }
 }
 
 async function main([cmd, ...a]) {
@@ -88,11 +98,27 @@ async function main([cmd, ...a]) {
       console.log(`${before} ${after}`);
       return;
     }
+    case 'events-seq': {
+      // The newest event seq in hq.db (0 when there is no db): a mark taken before hq restarts.
+      console.log(await dbOr(a[0], (db) => db.prepare(`SELECT COALESCE(MAX(seq), 0) AS n FROM events`).get().n, 0));
+      return;
+    }
+    case 'shifts-rested': {
+      // The shift units hq itself ended on purpose after event seq a[1] (rest, task_done, owner_stop...): their last
+      // shift.state is `ended` with one of the reasons hq itself passes to shifts.stop (packages/hq/src). Anything else
+      // (no_result, crashed, spawn_failed, crash: ...) is the shift dying, so it stays a fall. A unit that is gone
+      // without such a record fell.
+      const rows = await dbOr(a[0], (db) => db.prepare(`SELECT data FROM events WHERE type = 'shift.state' AND seq > ? ORDER BY seq`).all(Number(a[1])), []);
+      const last = new Map();
+      for (const r of rows) { try { const d = JSON.parse(r.data); if (d.shift) last.set(d.shift, d); } catch { /* not ours */ } }
+      for (const [id, d] of last) if (d.state === 'ended' && HQ_STOP_REASONS.has(d.reason)) console.log(`company-shift@${id}.service`);
+      return;
+    }
     case 'org-version':
       console.log(ORG_VERSION);
       return;
     default:
-      console.error('usage: engine.mjs latest-tag|pinned-claude|org-plan|org-migrate|db-backup|db-migrate-dry|org-version');
+      console.error('usage: engine.mjs latest-tag|pinned-claude|org-plan|org-migrate|db-backup|db-migrate-dry|events-seq|shifts-rested|org-version');
       process.exit(2);
   }
 }

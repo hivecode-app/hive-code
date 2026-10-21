@@ -23,6 +23,8 @@ if (cmd === 'latest-tag') console.log(process.env.FAKE_LATEST ?? '');
 if (cmd === 'pinned-claude') console.log(readFileSync(join(root, 'pin'), 'utf8').trim());
 if (cmd === 'org-plan') console.log(process.env.FAKE_ORG_PLAN ?? 'ok 1 1');
 if (cmd === 'org-migrate') { if (process.env.FAKE_MIGRATE_FAIL) process.exit(1); const f = join(a, 'company/org.yaml'); writeFileSync(f, readFileSync(f, 'utf8').replace('version: 1', 'version: 2')); console.log('body'); }
+if (cmd === 'events-seq') console.log(5);
+if (cmd === 'shifts-rested' && process.env.FAKE_RESTED) console.log(process.env.FAKE_RESTED);
 if (cmd === 'db-backup') copyFileSync(a, b);
 if (cmd === 'db-migrate-dry') console.log('14 15');
 `;
@@ -127,6 +129,29 @@ test('update: a shift that falls in the restart is a failure, and rolls back', (
     const r = f.run();
     assert.equal(r.status, 1);
     assert.match(r.stdout, /משמרות נפלו ב-restart: company-shift@yoav-3/);
+    assert.equal(readlinkSync(join(f.engines, 'current')), 'v1.0.0');
+  } finally { f.done(); }
+});
+
+test('update: a shift hq itself put to rest after the restart did not fall, so the update stands', () => {
+  const f = fixture();
+  try {
+    writeFileSync(join(f.t, 'shifts-after'), '');
+    const r = f.run([], { FAKE_RESTED: 'company-shift@yoav-3.service' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(readlinkSync(join(f.engines, 'current')), 'v1.1.0');
+  } finally { f.done(); }
+});
+
+test('update: only the unit with no rest record fails, though another one was rested', () => {
+  const f = fixture();
+  try {
+    writeFileSync(join(f.t, 'shifts'), 'company-shift@yoav-3.service loaded active running x\ncompany-shift@dana-3.service loaded active running x\n');
+    writeFileSync(join(f.t, 'shifts-after'), '');
+    const r = f.run([], { FAKE_RESTED: 'company-shift@dana-3.service' });
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /משמרות נפלו ב-restart: company-shift@yoav-3\.service/);
+    assert.doesNotMatch(r.stdout, /נפלו[^\n]*dana-3/);
     assert.equal(readlinkSync(join(f.engines, 'current')), 'v1.0.0');
   } finally { f.done(); }
 });

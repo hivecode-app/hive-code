@@ -229,6 +229,8 @@ mv -T "$ENGINES/.current.new" "$ENGINES/current"
 switched=1
 systemctl --user daemon-reload
 hq_restarted=1
+# The new engine's lib, not the one sourced from the running (previous) engine at the top (#209).
+source "$ENGINES/current/scripts/lib/hq-restart.sh"
 hq_safe_restart || fail "$HQ_RESTART_MSG"
 say "hq הופעל מחדש על $tag; $HQ_RESTART_MSG"
 # The installer's web unit (Caddy for the app) serves from engine/current too; try-restart: nothing when there is none.

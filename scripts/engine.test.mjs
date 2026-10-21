@@ -66,3 +66,30 @@ test('hq.db: an online backup (600), and the migrations run on a copy only', () 
     db.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('shifts-rested: a unit hq ended on purpose after the mark; a crash, a dead one, a live one and older events are not', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engine-rested-'));
+  try {
+    const file = join(dir, 'hq.db');
+    const db = new Database(file);
+    db.exec(`CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, type TEXT NOT NULL, identity TEXT, data TEXT NOT NULL DEFAULT 'null')`);
+    const ev = (data) => db.prepare(`INSERT INTO events (ts, type, identity, data) VALUES (0, 'shift.state', 'x', ?)`).run(JSON.stringify(data));
+    ev({ shift: 'old-1', state: 'ended', reason: 'rest' });
+    const mark = execFileSync('node', [ENGINE, 'events-seq', file], { encoding: 'utf8' }).trim();
+    assert.equal(mark, '1');
+    ev({ shift: 'dana-3', state: 'ended', reason: 'rest' });
+    ev({ shift: 'noa-2', state: 'ended', reason: 'crash' });
+    ev({ shift: 'mia-1', state: 'ended', reason: 'no_result' });
+    ev({ shift: 'ben-1', state: 'ended', reason: 'crashed' });
+    ev({ shift: 'tom-1', state: 'dead', reason: 'host_gone' });
+    ev({ shift: 'rut-1', state: 'ended', reason: 'task_done' });
+    ev({ shift: 'rut-1', state: 'starting' }); // started again: the last record is not an end
+    ev({ shift: 'eli-1', state: 'live' });
+    db.close();
+    const out = execFileSync('node', [ENGINE, 'shifts-rested', file, mark], { encoding: 'utf8' }).trim();
+    assert.equal(out, 'company-shift@dana-3.service');
+    // No db at all (a fresh install): the mark is 0 and nothing is rested.
+    assert.equal(execFileSync('node', [ENGINE, 'events-seq', join(dir, 'none.db')], { encoding: 'utf8' }).trim(), '0');
+    assert.equal(execFileSync('node', [ENGINE, 'shifts-rested', join(dir, 'none.db'), '0'], { encoding: 'utf8' }).trim(), '');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
