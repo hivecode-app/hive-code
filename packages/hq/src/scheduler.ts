@@ -1052,18 +1052,6 @@ export class Scheduler {
     return t;
   }
 
-  /** Adds and removes labels (PATCH /api/tasks/:id): a lead marks a queued task `remote-ok` with no DB edit. */
-  setTaskLabels(id: number, add: string[], remove: string[]): TaskRow | undefined {
-    const cur = this.task(id);
-    if (!cur) return undefined;
-    const labels = [...new Set([...(JSON.parse(cur.labels || '[]') as string[]), ...add])].filter((l) => !remove.includes(l));
-    this.store.db.prepare('UPDATE tasks SET labels = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(labels), this.store.now(), id);
-    const t = this.task(id)!;
-    this.store.emit('task.labels', t.identity, { id, labels });
-    queueMicrotask(() => this.store.bg(this.fill(), 'scheduler.fill'));
-    return t;
-  }
-
   /** A.4: blocking ask → manager after N minutes (immediately at night, B.16). Non-blocking asks wait. */
   escalateAsks(): void {
     if (!this.store.toggle('escalation')) return;

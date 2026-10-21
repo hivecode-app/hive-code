@@ -82,14 +82,6 @@ test('nodes: a task worker\'s task goes to the node, its worktree is made and cl
     const plain = hq.scheduler.addTask({ title: 'רגילה', project: 'proj' });
     await until(() => hq.scheduler.task(plain.id)!.state === 'running', 8000, 'plain running');
     assert.equal(launcher.launches.at(-1)!.machine, 'local');
-    // Marked remote-ok while it waits (PATCH /api/tasks/:id, task-235): it goes there.
-    hq.store.setToggle('scheduler', false);
-    const marked = hq.scheduler.addTask({ title: 'סומנה אחר כך', project: 'proj' });
-    hq.scheduler.setTaskLabels(marked.id, ['remote-ok'], []);
-    hq.store.setToggle('scheduler', true);
-    await hq.scheduler.fill();
-    await until(() => hq.scheduler.task(marked.id)!.state === 'running', 8000, 'marked running');
-    assert.equal(hq.scheduler.task(marked.id)!.machine, 'n2');
     const local = hq.scheduler.addTask({ title: 'עם דפדפן', project: 'proj', labels: ['remote-ok', 'needs-browser'] });
     await until(() => hq.scheduler.task(local.id)!.state === 'running', 8000, 'local running');
     assert.equal(launcher.launches.at(-1)!.machine, 'local');

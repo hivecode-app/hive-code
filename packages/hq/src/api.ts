@@ -306,27 +306,11 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     catch (e) { throw new HttpError(400, (e as Error).message); }
   });
 
-  const HQ_LABELS = ['opened-by:', 'repo:', 'closing-at:'];
-  // Priority (p0..p3, B.16 queue order) and labels (e.g. `remote-ok`, task-235) without editing hq.db by hand.
-  // `labels` are added and `remove_labels` removed; the rest of the task's labels stay as they are.
+  // Priority (p0..p3, B.16 queue order) without editing hq.db by hand.
   route('PATCH', '/api/tasks/:id', async ({ params, body }) => {
     const b = await body();
-    const id = Number(params[0]);
-    const list = (v: unknown, name: string): string[] | undefined => {
-      if (v === undefined) return undefined;
-      if (!Array.isArray(v) || v.length === 0 || !v.every((l) => typeof l === 'string' && l.trim() !== '')) throw new HttpError(400, `${name} must be a non-empty array of non-empty strings`);
-      // hq writes these itself (who opened it, which checkout, when it closes). `needs-local` (fallbackLocal) is hq's too,
-      // but taking it off is a lead's call: the task may go back to the node. `company:night` is a lead's to set.
-      const own = v.find((l: string) => HQ_LABELS.some((p) => l.trim().startsWith(p)));
-      if (own) throw new HttpError(400, `${name}: ${own} is hq's own`);
-      return v.map((l: string) => l.trim());
-    };
-    const add = list(b.labels, 'labels'), remove = list(b.remove_labels, 'remove_labels');
-    if (b.priority === undefined && !add && !remove) throw new HttpError(400, 'nothing to change: priority, labels or remove_labels');
-    if (b.priority !== undefined && (!Number.isInteger(b.priority) || (b.priority as number) < 0 || (b.priority as number) > 3)) throw new HttpError(400, 'priority must be an integer 0..3');
-    if (!hq.scheduler.task(id)) throw new HttpError(404, `no task ${params[0]}`);
-    if (add || remove) hq.scheduler.setTaskLabels(id, add ?? [], remove ?? []);
-    const t = b.priority !== undefined ? hq.scheduler.setTaskPriority(id, b.priority as number) : hq.scheduler.task(id);
+    if (!Number.isInteger(b.priority) || (b.priority as number) < 0 || (b.priority as number) > 3) throw new HttpError(400, 'priority must be an integer 0..3');
+    const t = hq.scheduler.setTaskPriority(Number(params[0]), b.priority as number);
     if (!t) throw new HttpError(404, `no task ${params[0]}`);
     return { task: t };
   });

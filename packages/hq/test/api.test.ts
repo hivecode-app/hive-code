@@ -105,22 +105,6 @@ test('API: org/board with derived status, tell, asks/answer, toggles, tasks, inb
     assert.equal((await call('PATCH', `/api/tasks/${tid}`, { priority: 7 })).status, 400);
     assert.equal((await call('PATCH', `/api/tasks/${tid}`, { priority: '1' })).status, 400);
     assert.equal((await call('PATCH', '/api/tasks/99999', { priority: 1 })).status, 404);
-    // task-235: mark remote-ok (and take it back) without the DB; labels hq writes itself are not touched.
-    hq.store.db.prepare('UPDATE tasks SET labels = ? WHERE id = ?').run(JSON.stringify(['opened-by:adi']), tid);
-    const lab = await call('PATCH', `/api/tasks/${tid}`, { labels: ['remote-ok'] });
-    assert.deepEqual(JSON.parse(lab.json.task.labels), ['opened-by:adi', 'remote-ok']);
-    assert.equal(lab.json.task.priority, 0, 'priority untouched');
-    assert.deepEqual(JSON.parse((await call('PATCH', `/api/tasks/${tid}`, { labels: ['remote-ok'], priority: 1 })).json.task.labels), ['opened-by:adi', 'remote-ok']);
-    assert.equal(hq.scheduler.task(tid)!.priority, 1);
-    assert.deepEqual(JSON.parse((await call('PATCH', `/api/tasks/${tid}`, { remove_labels: ['remote-ok'] })).json.task.labels), ['opened-by:adi']);
-    assert.equal((await call('PATCH', `/api/tasks/${tid}`, { remove_labels: ['opened-by:adi'] })).status, 400);
-    assert.equal((await call('PATCH', `/api/tasks/${tid}`, { labels: ['repo:x'] })).status, 400);
-    assert.deepEqual(JSON.parse((await call('PATCH', `/api/tasks/${tid}`, { labels: ['company:night'] })).json.task.labels), ['opened-by:adi', 'company:night']);
-    await call('PATCH', `/api/tasks/${tid}`, { remove_labels: ['company:night'] });
-    assert.equal((await call('PATCH', `/api/tasks/${tid}`, { labels: 'remote-ok' })).status, 400);
-    assert.equal((await call('PATCH', `/api/tasks/${tid}`, {})).status, 400);
-    assert.equal((await call('PATCH', `/api/tasks/${tid}`, { labels: [] })).status, 400);
-    assert.equal((await call('PATCH', '/api/tasks/99999', { labels: ['remote-ok'] })).status, 404);
 
     const st = await call('POST', '/api/shifts/start', { identity: 'rotem' });
     assert.equal(st.json.shift.identity, 'rotem');

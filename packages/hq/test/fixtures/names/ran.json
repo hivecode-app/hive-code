@@ -394,7 +394,7 @@
      },
      "remote": {
       "type": "boolean",
-      "description": "true כשהמשימה לא צריכה מפתחות, kubectl, סודות של hq-host, דפדפן או סימולטור. כך היא רצה על השרת השני ולא מחכה בתור. בלי: רק בשרת הראשי / true when the task needs no keys, kubectl, hq-host secrets, browser or simulator: it then runs on the second server instead of waiting in the queue; default: main server only"
+      "description": "המשימה לא צריכה שום דבר שיש רק בשרת הראשי (מפתחות ssh, טוקנים, kubectl, דפדפן, סימולטור): hq יכול להריץ אותה גם על שרת אחר. בלי: רק בשרת הראשי / needs nothing that exists only on the main server (ssh keys, tokens, kubectl, browser, simulator): may run on another node; default: main server only"
      }
     },
     "required": [
