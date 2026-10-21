@@ -34,7 +34,7 @@ import { TabHandoffs } from './tab/handoffs.ts';
 import { CdpTabBrowser, type TabBrowser } from './tab/browser.ts';
 import { startTabServer, type TabServer } from './tab/server.ts';
 import { clockOf, readTimeZone } from './timezone.ts';
-import { Nodes, RoutingLauncher, nodeToggle, type SshRun } from './nodes.ts';
+import { Nodes, RoutingLauncher, nodeToggle, type RemoteNode, type SshRun } from './nodes.ts';
 
 /** The phone view's own diagnostics go to the journal, not the event log (frames and taps are not events). */
 const tabLog = (msg: string, data?: unknown) => console.log(`tab: ${msg}${data === undefined ? '' : ` ${JSON.stringify(data)}`}`);
@@ -121,6 +121,7 @@ export class Hq {
     this.mailbox = new Mailbox(this.store, cfg, this.shifts, this.inbox, deps.foreign ?? noForeignInjector, this.uploads);
     this.scheduler = new Scheduler(this.store, cfg, this.shifts, this.mailbox);
     this.scheduler.nodes = this.nodes;
+    this.scheduler.pollNode = (n) => this.pollNode(n);
     this.night = new Night(this.store, cfg, this.scheduler, this.mailbox, this.inbox, deps.issues);
     this.accounts = new AccountManager(this.store, cfg, this.shifts, this.mailbox, this.inbox, deps.accounts);
     this.watchdog = new Watchdog(this.store, cfg, this.shifts, this.mailbox, this.inbox);
@@ -284,21 +285,36 @@ export class Hq {
    * back) is an event, and the manager hears of it once while shifts or the switch depend on it (no false quiet).
    */
   async pollNodes(): Promise<void> {
-    await Promise.all(this.nodes.list.map(async (n) => {
-      const name = n.def.name;
-      const running = (this.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND machine = ?`).get(name) as { n: number }).n;
-      // Switched off, and nothing of ours left there (no shift, no open task with its worktree there): leave it alone.
-      const placed = this.store.db.prepare(`SELECT 1 FROM tasks WHERE machine = ? AND (state != 'done' OR worktree IS NOT NULL) LIMIT 1`).get(name);
-      if (!this.store.toggle(nodeToggle(name)) && !running && !placed) { if (n.connected) n.close(); n.status = null; return; }
-      const was = n.status?.up;
-      const st = await n.poll(this.store.now());
-      if (was === st.up || (was === undefined && st.up)) return;
-      this.store.emit(st.up ? 'node.up' : 'node.down', null, { node: name, error: st.error, running });
-      if (!st.up) {
-        this.mailbox.tell({ msg_id: `node-down-${name}-${this.store.now()}`, from: 'hq', to: this.cfg.managerId, priority: 'next',
-          body: `השרת ${name} לא עונה (${st.error ?? 'בלי פרטים'}). ${running ? `${running} משמרות רצות שם, וה-watchdog יסמן אותן כמתות. ` : ''}משימות חדשות לא יוצאות אליו עד שיחזור. כיבוי: המתג \`${nodeToggle(name)}\` באוטומציות.` });
-      }
-    }));
+    await Promise.all(this.nodes.list.map((n) => this.pollNode(n)));
+  }
+
+  /** One node's poll (pollNodes, and the scheduler right before a start there, #224). Polls of one node at once share one. */
+  pollNode(n: RemoteNode): Promise<void> {
+    const name = n.def.name;
+    let p = this.polling.get(name);
+    if (!p) {
+      p = this.pollNodeOnce(n).finally(() => this.polling.delete(name));
+      this.polling.set(name, p);
+    }
+    return p;
+  }
+
+  private polling = new Map<string, Promise<void>>();
+
+  private async pollNodeOnce(n: RemoteNode): Promise<void> {
+    const name = n.def.name;
+    const running = (this.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND machine = ?`).get(name) as { n: number }).n;
+    // Switched off, and nothing of ours left there (no shift, no open task with its worktree there): leave it alone.
+    const placed = this.store.db.prepare(`SELECT 1 FROM tasks WHERE machine = ? AND (state != 'done' OR worktree IS NOT NULL) LIMIT 1`).get(name);
+    if (!this.store.toggle(nodeToggle(name)) && !running && !placed) { if (n.connected) n.close(); n.status = null; return; }
+    const was = n.status?.up;
+    const st = await n.poll(this.store.now());
+    if (was === st.up || (was === undefined && st.up)) return;
+    this.store.emit(st.up ? 'node.up' : 'node.down', null, { node: name, error: st.error, running });
+    if (!st.up) {
+      this.mailbox.tell({ msg_id: `node-down-${name}-${this.store.now()}`, from: 'hq', to: this.cfg.managerId, priority: 'next',
+        body: `השרת ${name} לא עונה (${st.error ?? 'בלי פרטים'}). ${running ? `${running} משמרות רצות שם, וה-watchdog יסמן אותן כמתות. ` : ''}משימות חדשות לא יוצאות אליו עד שיחזור. כיבוי: המתג \`${nodeToggle(name)}\` באוטומציות.` });
+    }
   }
 
   get port(): number | null { return this.api?.port ?? null; }

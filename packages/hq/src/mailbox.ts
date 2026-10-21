@@ -75,6 +75,10 @@ export class Mailbox {
   onHqAnswer: ((askId: string, answer: string) => void) | null = null;
   /** Stale messages of a worker on a node that never took its task: true = handled there (the task moved here). */
   nodeFallback: ((identity: string) => Promise<boolean>) | null = null;
+  /** #224: a stale task brief its worker never took: true = the scheduler took it back (the task starts again). */
+  briefStale: ((m: MessageRow) => Promise<boolean>) | null = null;
+  /** #224: a task worker between failed starts: its next start brings it up, so nothing here wakes it. */
+  startPending: ((identity: string) => boolean) | null = null;
 
   /** The owner's and the manager's names in texts, from org.yaml (re-read when it changes). */
   get names(): CompanyNames { return loadNames(this.cfg.companyDir, this.cfg.managerId); }
@@ -359,6 +363,13 @@ export class Mailbox {
       if ((this.nodeFallback && await this.nodeFallback(id).catch(() => false)) || this.waitsForStart(id)) moved.add(id);
     }
     stale = stale.filter((m) => !moved.has(m.to_identity));
+    // A task's brief its worker's shift never took (claude died, never came up, the machine choked): not a failure for
+    // him. The scheduler drops it, stops the shift and starts the task again after a backoff (#224).
+    const taken = new Set<string>();
+    if (this.briefStale) {
+      for (const m of stale) if (this.get(m.id)?.state === 'queued' && await this.briefStale(m).catch(() => false)) taken.add(m.id);
+    }
+    stale = stale.filter((m) => !taken.has(m.id) && this.get(m.id)?.state === 'queued' && !this.waitsForStart(m.to_identity));
     // A task worker whose task closed meanwhile is not resurrected: its messages close as failed, with why.
     for (const m of stale.filter((x) => !this.shifts.current(x.to_identity) && this.taskClosed(x.to_identity))) this.failClosed(m);
     for (const m of stale) { const b = this.boundTask(m); if (b != null && this.taskDone(b)) this.failBound(m); }
@@ -397,15 +408,16 @@ export class Mailbox {
   /** A task worker with no shift whose task is queued and never started: the scheduler's start brings it up. */
   waitsForStart(identity: string): boolean {
     if (this.shifts.current(identity)) return false;
+    if (this.startPending?.(identity)) return true;
     const r = this.store.db.prepare(`SELECT t.state, t.started_at FROM tasks t JOIN identities i ON i.id = t.identity
       WHERE t.identity = ? AND i.team_kind = 'task' ORDER BY t.id DESC LIMIT 1`).get(identity) as { state: string; started_at: number | null } | undefined;
     return r?.state === 'queued' && r.started_at == null;
   }
 
   /** A task's prompts to its worker that it never took (on a node, fallbackLocal): failed quietly, its next start sends one. */
-  dropTaskPrompts(identity: string, taskId: number, why: string): void {
+  dropTaskPrompts(identity: string, taskId: number, why: string, prefix = `task-${taskId}-`): void {
     const rows = this.store.db.prepare(`SELECT id FROM messages WHERE to_identity = ? AND id LIKE ? AND state = 'queued'`)
-      .all(identity, `task-${taskId}-%`) as { id: string }[];
+      .all(identity, `${prefix}%`) as { id: string }[];
     for (const r of rows) this.setState(r.id, 'failed', { error: why });
     this.store.db.prepare(`UPDATE messages SET resurrected = 0 WHERE to_identity = ? AND state = 'queued'`).run(identity);
   }

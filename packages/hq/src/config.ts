@@ -57,6 +57,7 @@ export interface HqConfig {
     rssWorkMb: number;           // placeholder until measured at the gate
     residents: string[];         // resident pool (not counted in work slots): org.yaml `resident: true`, else the manager
     maxSlots: number;
+    maxLoad: number;             // #224: no new shift here while load1 per CPU is over this (load from outside the shifts too)
   };
   backupsKeep: number;
   /** WebAuthn and device pairing (auth.ts). */
@@ -188,7 +189,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       turnEndWaitMs: 3 * 60_000,
       accountsMs: 10 * 60_000,
     },
-    capacity: { reserveMb: 4096, rssIdleMb: 450, rssWorkMb: 2500, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8 },
+    capacity: { reserveMb: 4096, rssIdleMb: 450, rssWorkMb: 2500, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8, maxLoad: 1.5 },
     backupsKeep: 48,
     auth: {
       rpId: 'localhost',

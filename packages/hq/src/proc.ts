@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { availableParallelism, loadavg } from 'node:os';
 
 /** /proc/<pid>/stat field 22 (starttime). pid + procStart guards against pid reuse (B.5). */
 export function procStart(pid: number): string | null {
@@ -16,6 +17,11 @@ export function memInfoMb(): { totalMb: number; availableMb: number } {
   const txt = readFileSync('/proc/meminfo', 'utf8');
   const get = (k: string) => Number(new RegExp(`^${k}:\\s+(\\d+)`, 'm').exec(txt)?.[1] ?? 0) / 1024;
   return { totalMb: get('MemTotal'), availableMb: get('MemAvailable') };
+}
+
+/** Load average over the last minute and the CPUs it is shared by (#224: load from outside the shifts counts too). */
+export function loadInfo(): { load1: number; cpus: number } {
+  return { load1: loadavg()[0] ?? 0, cpus: availableParallelism() };
 }
 
 /** Namespace for shift session ids (B.2): uuidv5(NS, `${identity}:${shift_no}`).

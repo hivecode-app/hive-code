@@ -48,7 +48,7 @@ export function openTasks(store: Store, scheduler: Scheduler, board: BoardEntry[
   const tasks = store.db.prepare(`SELECT * FROM tasks WHERE state NOT IN ('done','closed') ORDER BY created_at, id`).all() as TaskRow[];
   if (!tasks.length) return [];
   const queue = scheduler.queue().map((t) => t.id);
-  const free = scheduler.slots().free;
+  const slots = scheduler.slots();
   const byId = new Map(board.map((b) => [b.id, b]));
   const askSince = store.db.prepare(`SELECT MIN(created_at) t FROM asks WHERE from_identity = ? AND state IN ('open','escalated')`);
   const leads = new Map<string, string | null>();
@@ -76,7 +76,7 @@ export function openTasks(store: Store, scheduler: Scheduler, board: BoardEntry[
       since = t.started_at ?? t.updated_at;
     } else if (pos >= 0) {
       state = 'queued';
-      reason = scheduler.waitReason(t, free);
+      reason = scheduler.waitReason(t, slots);
     } else {
       // Out of the queue: a decision it waits for, or night mode keeps it for the day.
       const decision = t.state === 'parked' || t.state === 'needs_decision' || labels.includes('needs-decision');

@@ -7,7 +7,7 @@ import { loadConfig } from '../src/config.ts';
 import { join } from 'node:path';
 
 test('capacity formula: floor((RAM − reserve − residents × idle) / work), capped by what is free now', () => {
-  const cfg = loadConfig({ stateDir: '/nonexistent', capacity: { reserveMb: 4096, rssIdleMb: 500, rssWorkMb: 2500, residents: ['yoav'], maxSlots: 8 } });
+  const cfg = loadConfig({ stateDir: '/nonexistent', capacity: { reserveMb: 4096, rssIdleMb: 500, rssWorkMb: 2500, residents: ['yoav'], maxSlots: 8, maxLoad: 1.5 } });
   assert.deepEqual(capacity(cfg, { totalMb: 23_552, availableMb: 19_000 }, 0, 1), { total: 7, running: 0, free: 5 });
   assert.equal(capacity(cfg, { totalMb: 23_552, availableMb: 19_000 }, 6, 1).free, 1);
   assert.equal(capacity(cfg, { totalMb: 23_552, availableMb: 5_000 }, 0, 1).free, 0);
@@ -290,7 +290,7 @@ test('#128: idle leads hold no work slot; with a task waiting they rest after 5 
     await until(() => ['l-1', 'l-2'].every((m) => hq.mailbox.get(m)!.state === 'delivered'), 3000, 'leads up');
     hq.mailbox.markHandled('l-1'); hq.mailbox.markHandled('l-2');
     await until(() => !hq.shifts.get('eli-1')!.in_turn && !hq.shifts.get('ac-ceo-1')!.in_turn && hq.shifts.get('yoav-1')?.state === 'live', 3000, 'idle');
-    assert.deepEqual(hq.scheduler.slots(), { total: 2, running: 0, free: 2, tasks: 0, leads: { active: 0, idle: 2, resting: 0 } });
+    assert.deepEqual(hq.scheduler.slots(), { total: 2, running: 0, free: 2, pressure: null, load: 0.06, availableMb: 9196, tasks: 0, leads: { active: 0, idle: 2, resting: 0 } });
 
     hq.store.setToggle('scheduler', true);
     const t1 = hq.scheduler.addTask({ title: 'א', project: 'agent-company' });

@@ -314,6 +314,7 @@ export async function makeEnv(opts: { cfg?: Partial<HqConfig>; deps?: HqDeps; pr
     ...opts.deps,
   });
   hq.scheduler.memInfo = () => ({ totalMb: 23_000, availableMb: 19_000 });
+  hq.scheduler.loadInfo = () => ({ load1: 0.5, cpus: 8 });
   if (!opts.noStart) await hq.start({ listen: false, timers: false });
   return {
     hq, cfg, clock, launcher, dir, telegrams, webPushes, tabBrowser,

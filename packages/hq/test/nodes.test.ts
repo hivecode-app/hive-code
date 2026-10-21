@@ -210,3 +210,125 @@ test('nodes: a worker there that never takes its task: the task runs here, and h
     assert.ok(hq.store.eventsAfter(0, 5000).some((e) => e.type === 'task.node_fallback'));
   } finally { await env.cleanup(); r.cleanup(); }
 });
+
+test('#224: memory and load there are read again right before a start: a node that choked since the last poll gets no task', async () => {
+  const r = repo();
+  const calls: string[][] = [];
+  const health = { totalMb: 32_000, availableMb: 30_000, load1: 0.4, cpus: 8 };
+  const env = await makeEnv({ projects: { proj: charter(r.checkout) }, cfg: { nodes: [NODE] }, deps: { ssh: fakeSsh(calls, health) }, noStart: true });
+  try {
+    const { hq, launcher, clock } = env;
+    git(env.dir, 'init', '--quiet', '--initial-branch=main');
+    git(env.dir, 'add', 'company');
+    git(env.dir, 'commit', '--quiet', '-m', 'company');
+    hq.nodes.list[0]!.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await hq.start({ listen: false, timers: false });
+    assert.equal(hq.scheduler.nodeSlots()[0]!.free, 2, 'fine at the last poll');
+    health.load1 = 52;
+    health.availableMb = 1000;
+    clock.advance(20_000);
+    const t = hq.scheduler.addTask({ title: 'כשהשני נחנק', project: 'proj', labels: ['remote-ok'] });
+    await until(() => hq.scheduler.task(t.id)!.state === 'running', 8000, 'running');
+    assert.equal(hq.scheduler.task(t.id)!.machine, null, 'here, not on the choked node');
+    assert.equal(launcher.launches.at(-1)!.machine, 'local');
+    const n = hq.scheduler.nodeSlots()[0]!;
+    assert.deepEqual([n.free, n.busy], [0, true]);
+  } finally { await env.cleanup(); r.cleanup(); }
+});
+
+test('#224: a task placed on a node that is switched off, or whose worktree there is gone, comes back to the queue and runs here', async () => {
+  const r = repo();
+  const calls: string[][] = [];
+  const env = await makeEnv({ projects: { proj: charter(r.checkout) }, cfg: { nodes: [NODE] }, deps: { ssh: fakeSsh(calls) }, noStart: true });
+  try {
+    const { hq, launcher } = env;
+    git(env.dir, 'init', '--quiet', '--initial-branch=main');
+    git(env.dir, 'add', 'company');
+    git(env.dir, 'commit', '--quiet', '-m', 'company');
+    hq.nodes.list[0]!.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    (hq.scheduler.workspacesFor('n2') as RemoteWorkspaces).fetch = async () => {};
+    await hq.start({ listen: false, timers: false });
+
+    // Switched off: a task pinned there (interrupted, its worktree there) is not started there again.
+    hq.store.setToggle('scheduler', false);
+    const off = hq.scheduler.addTask({ title: 'על שרת כבוי', project: 'proj', labels: ['remote-ok'] });
+    const gone = join(r.checkout, '.worktrees', `company-t${off.id}-there`);
+    hq.store.db.prepare(`UPDATE tasks SET machine = 'n2', worktree = ?, state = 'interrupted', started_at = 1 WHERE id = ?`).run(gone, off.id);
+    hq.store.setToggle(nodeToggle('n2'), false);
+    hq.store.setToggle('scheduler', true);
+    assert.equal(hq.scheduler.waitReason(hq.scheduler.task(off.id)!, hq.scheduler.slots()), 'מתחילה עכשיו', 'not "waiting for n2"');
+    await hq.scheduler.fill();
+    await until(() => hq.scheduler.task(off.id)!.state === 'running', 8000, 'running here');
+    const t1 = hq.scheduler.task(off.id)!;
+    assert.equal(t1.machine, null);
+    assert.ok(t1.worktree && t1.worktree !== gone && existsSync(t1.worktree), 'a new worktree here');
+    assert.equal(launcher.launches.at(-1)!.machine, 'local');
+    assert.ok(hq.store.eventsAfter(0, 5000).some((e) => e.type === 'task.unpinned'));
+
+    // Started there, so its next brief says where its work from there is now.
+    const brief = hq.mailbox.list(`proj-t${off.id}`).filter((m) => m.to_identity === `proj-t${off.id}`).at(-1)!;
+    assert.match(brief.body, /המשימה התחילה ב-`n2` וחזרה לכאן/);
+
+    // Switched off, and the close there fails: it still comes back, and its brief says the work stayed there.
+    const ws2 = hq.scheduler.workspacesFor('n2') as RemoteWorkspaces;
+    const realClose = ws2.close.bind(ws2);
+    ws2.close = async () => { throw new Error('ssh: connection timed out'); };
+    hq.store.setToggle('scheduler', false);
+    const stuck = hq.scheduler.addTask({ title: 'סגירה שנכשלה', project: 'proj', labels: ['remote-ok'] });
+    const there = join(r.checkout, '.worktrees', `company-t${stuck.id}-there`);
+    hq.store.db.prepare(`UPDATE tasks SET machine = 'n2', worktree = ?, state = 'interrupted', started_at = 1 WHERE id = ?`).run(there, stuck.id);
+    hq.store.setToggle('scheduler', true);
+    await hq.scheduler.fill();
+    await until(() => hq.scheduler.task(stuck.id)!.state === 'running', 8000, 'running here');
+    const b3 = hq.mailbox.list(`proj-t${stuck.id}`).filter((m) => m.to_identity === `proj-t${stuck.id}`).at(-1)!;
+    assert.match(b3.body, /וייתכן שהעבודה משם לא נמשכה/);
+    assert.ok(b3.body.includes(there), 'where it stayed');
+    assert.ok(hq.store.eventsAfter(0, 5000).some((e) => e.type === 'task.worktree_close_failed' && (e.data as { id: number }).id === stuck.id));
+    ws2.close = realClose;
+
+    // Switch on, but the worktree there is gone and its branch too: back to the queue unplaced, not out of it (no
+    // needs-decision). Unplaced, it may go to a node again: with a new worktree, from the start.
+    hq.store.setToggle(nodeToggle('n2'), true);
+    hq.store.setToggle('scheduler', false);
+    const lost = hq.scheduler.addTask({ title: 'בלי worktree שם', project: 'proj', labels: ['remote-ok'] });
+    const nothing = join(r.checkout, '.worktrees', 'company-t999-nothing');
+    hq.store.db.prepare(`UPDATE tasks SET machine = 'n2', worktree = ?, state = 'interrupted', started_at = 1 WHERE id = ?`).run(nothing, lost.id);
+    hq.store.setToggle('scheduler', true);
+    await hq.scheduler.fill();
+    await until(() => hq.scheduler.task(lost.id)!.state === 'running', 8000, 'running');
+    const t2 = hq.scheduler.task(lost.id)!;
+    assert.ok(t2.worktree && t2.worktree !== nothing && existsSync(t2.worktree), 'a new worktree');
+    assert.ok(!JSON.parse(t2.labels).includes('needs-decision'));
+    assert.ok(hq.store.eventsAfter(0, 5000).some((e) => e.type === 'task.unpinned' && (e.data as { id: number }).id === lost.id));
+  } finally { await env.cleanup(); r.cleanup(); }
+});
+
+test('#224: a fill never waits on a node\'s ssh: tasks for here start now, a task that could go there waits for the read', async () => {
+  const r = repo();
+  const calls: string[][] = [];
+  const env = await makeEnv({ projects: { proj: charter(r.checkout) }, cfg: { nodes: [NODE] }, deps: { ssh: fakeSsh(calls) }, noStart: true });
+  try {
+    const { hq, clock } = env;
+    git(env.dir, 'init', '--quiet', '--initial-branch=main');
+    git(env.dir, 'add', 'company');
+    git(env.dir, 'commit', '--quiet', '-m', 'company');
+    hq.nodes.list[0]!.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await hq.start({ listen: false, timers: false });
+    let release!: () => void;
+    let reads = 0;
+    hq.scheduler.pollNode = (n) => { reads++; return new Promise<void>((res) => { release = () => { n.status = { ...n.status!, at: clock.now() }; res(); }; }); };
+    clock.advance(20_000);
+    hq.store.setToggle('scheduler', false);
+    const remote = hq.scheduler.addTask({ title: 'יכולה לצאת', project: 'proj', labels: ['remote-ok'] });
+    const here = hq.scheduler.addTask({ title: 'רק כאן', project: 'proj' });
+    hq.store.setToggle('scheduler', true);
+    await hq.scheduler.fill();
+    await until(() => hq.scheduler.task(here.id)!.state === 'running', 8000, 'the task for here runs while the node is read');
+    assert.equal(hq.scheduler.task(remote.id)!.state, 'queued', 'waits for the read');
+    await hq.scheduler.fill();
+    assert.equal(reads, 1, 'one read at a time');
+    release();
+    await until(() => hq.scheduler.task(remote.id)!.state === 'running', 8000, 'starts once read');
+    assert.equal(hq.scheduler.task(remote.id)!.machine, 'n2');
+  } finally { await env.cleanup(); r.cleanup(); }
+});

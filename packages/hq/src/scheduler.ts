@@ -10,7 +10,7 @@ import { waitingLine, type Mailbox } from './mailbox.ts';
 import { ShiftBusyError, type ShiftManager } from './shifts.ts';
 import { ensureRuntimeIdentity, getIdentity, isStandingWorker, projectLead, taskWorkerName } from './org.ts';
 import { HELPER_TEAM, taskSteps } from './system-prompt.ts';
-import { memInfoMb } from './proc.ts';
+import { loadInfo, memInfoMb } from './proc.ts';
 import { dirname, join } from 'node:path';
 import { noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
 import { LOCAL, LOCAL_LABELS, NodeUnreachable, REMOTE_OK, nodeToggle, RemoteWorkspaces, type Nodes, type RemoteNode } from './nodes.ts';
@@ -84,8 +84,36 @@ const CLOSING = 'closing-at:';
 /** End reason of a node's shift whose task moves here (fallbackLocal). */
 const NODE_FALLBACK = 'node_fallback';
 
+/** End reason of a shift stopped because it never took its task's brief (briefStale). */
+const BRIEF_FAILED = 'brief_failed';
+
+/** #224: briefs not taken (or launches failed) in a row before the monitoring lead hears of the task, once. */
+const BRIEF_FAILS = 3;
+
+/** #224: a node's memory and load are read again before a start when the last read is older than this. */
+const NODE_FRESH_MS = 15_000;
+
+/** Label on a task that started on a node and came back to the queue (unpin), `moved-from:<node>:<path>`: its next brief says where its work is. */
+const MOVED_FROM = 'moved-from:';
+
+/** Label on a task that came back from a node whose worktree there could not be closed: `left-on:<node>:<path>`. */
+const LEFT_ON = 'left-on:';
+
+/** unpin waits this long for the node's worktree to close before the task comes back anyway (#224). */
+const UNPIN_CLOSE_MS = 90_000;
+
+/** A task's worktree is gone and its branch too (prepareWorktree). */
+class WorktreeGone extends Error { override name = 'WorktreeGone'; }
+
+/** What the board and the queue say when the machine is too loaded to start a shift (#224). */
+export const BUSY_REASON = 'השרת עמוס';
+
 export class Scheduler {
   memInfo: () => { totalMb: number; availableMb: number } = memInfoMb;
+  /** #224: load here (/proc/loadavg). Tests swap it. */
+  loadInfo: () => { load1: number; cpus: number } = loadInfo;
+  /** Reads a node's memory and load again (hq sets it, to keep its up/down notices); default: the plain poll. */
+  pollNode: (n: RemoteNode) => Promise<unknown> = (n) => n.poll(this.store.now());
   /** Night mode (night.ts) plugs in here: the scope filter, a note for every task prompt, and a look after each fill. */
   scope: () => string[] | null = () => null;
   promptNote: () => string | null = () => null;
@@ -124,9 +152,11 @@ export class Scheduler {
         ORDER BY id DESC LIMIT 1`).get(identity) as { id: number } | undefined;
       return t ? this.fallbackLocal(t.id, 'not accepted') : false;
     };
+    mailbox.briefStale = (m) => this.briefStale(m);
+    mailbox.startPending = (identity) => this.retrying(identity);
     // A slot frees the moment a shift ends: fill it now, don't wait for the next sweep.
     shifts.on('ended', (row, reason) => {
-      if (row.task_id != null) this.onTaskShiftEnded(row.task_id, reason, row.machine);
+      if (row.task_id != null) this.onTaskShiftEnded(row.task_id, reason, row.machine, row);
       // A failed launch frees nothing: refilling on it would spin (start → fail → ended → fill → …).
       if (row.kind === 'work' && reason !== 'launch_failed' && reason !== 'account_switch') this.store.bg(this.fill(), 'scheduler.fill');
     });
@@ -205,8 +235,16 @@ export class Scheduler {
       AND EXISTS (SELECT 1 FROM shifts s WHERE s.identity = i.id AND s.kind = 'work')
       AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.identity = i.id AND s.state IN ('starting','live'))`)
       .get({ mgr: this.cfg.managerId }) as { n: number }).n;
-    const c = capacity(this.cfg, this.memInfo(), tasks + active, Math.max(residents, this.cfg.capacity.residents.length) + idle);
-    return { ...c, tasks, leads: { active, idle, resting } };
+    const mem = this.memInfo();
+    const c = capacity(this.cfg, mem, tasks + active, Math.max(residents, this.cfg.capacity.residents.length) + idle);
+    // #224: the machine itself, whatever loads it (a CI runner, a build outside the shifts): over the load or short of
+    // memory for one more shift, nothing starts, and the queue says why.
+    const { load1, cpus } = this.loadInfo();
+    const load = cpus > 0 ? Math.round((load1 / cpus) * 100) / 100 : null;
+    const overLoad = load != null && load > this.cfg.capacity.maxLoad;
+    const shortMem = c.total > c.running && mem.availableMb - this.cfg.capacity.reserveMb < this.cfg.capacity.rssWorkMb;
+    const pressure: 'load' | 'memory' | null = overLoad ? 'load' : shortMem ? 'memory' : null;
+    return { ...c, free: overLoad ? 0 : c.free, pressure, load, availableMb: Math.round(mem.availableMb), tasks, leads: { active, idle, resting } };
   }
 
   /**
@@ -214,7 +252,7 @@ export class Scheduler {
    * node's maxSlots, and none while its load per CPU is over maxLoad or it is down. The switch (`enabled`) stops new
    * tasks going there (placeFor); a task already there keeps its slots, its worktree and session are there.
    */
-  nodeSlots(): { name: string; enabled: boolean; up: boolean; error: string | null; load: number | null; total: number; running: number; free: number }[] {
+  nodeSlots(): { name: string; enabled: boolean; up: boolean; error: string | null; load: number | null; total: number; running: number; free: number; busy: boolean }[] {
     return (this.nodes?.list ?? []).map((n) => {
       const name = n.def.name;
       const running = (this.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND machine = ?`).get(name) as { n: number }).n
@@ -222,10 +260,12 @@ export class Scheduler {
       const st = n.status;
       const enabled = this.store.toggle(nodeToggle(name));
       const load = st?.up && st.cpus ? Math.round((st.load1 / st.cpus) * 100) / 100 : null;
-      if (!st?.up) return { name, enabled, up: false, error: st?.error ?? null, load, total: 0, running, free: 0 };
+      if (!st?.up) return { name, enabled, up: false, error: st?.error ?? null, load, total: 0, running, free: 0, busy: false };
       const c = capacity({ ...this.cfg, capacity: { ...this.cfg.capacity, maxSlots: n.def.maxSlots } }, st, running, 0);
-      const free = load != null && load <= n.def.maxLoad ? c.free : 0;
-      return { name, enabled, up: true, error: null, load, total: c.total, running, free };
+      const overLoad = load == null || load > n.def.maxLoad;
+      const free = overLoad ? 0 : c.free;
+      const busy = overLoad || (c.total > running && st.availableMb - this.cfg.capacity.reserveMb < this.cfg.capacity.rssWorkMb);
+      return { name, enabled, up: true, error: null, load, total: c.total, running, free, busy };
     });
   }
 
@@ -261,9 +301,12 @@ export class Scheduler {
    */
   async restOnPressure(): Promise<string[]> {
     if (!this.store.toggle('scheduler')) return [];
-    const { free, total } = this.slots();
-    // At the maxSlots cap a rested lead frees no slot: it would only wake slower.
-    if (free > 0 || total >= this.cfg.capacity.maxSlots || !this.queue().some((t) => this.waitReason(t, free) === 'מחכה למשבצת')) return [];
+    const slots = this.slots();
+    const { free, total } = slots;
+    // At the maxSlots cap a rested lead frees no slot: it would only wake slower. Over the load, resting one frees no
+    // CPU; short of memory it does.
+    if (free > 0 || total >= this.cfg.capacity.maxSlots || slots.pressure === 'load') return [];
+    if (!this.queue().some((t) => ['מחכה למשבצת', BUSY_REASON].includes(this.waitReason(t, slots)))) return [];
     const cutoff = this.store.now() - this.cfg.timers.restOnPressureMs;
     const rows = this.store.db.prepare(`SELECT s.id, s.identity, s.started_at FROM shifts s JOIN identities i ON i.id = s.identity
       WHERE s.state = 'live' AND s.kind = 'work' AND s.task_id IS NULL AND s.in_turn = 0 AND ${STANDING_SHIFT}
@@ -290,9 +333,69 @@ export class Scheduler {
   /** The last launch error, for the empty-slot reason (B.16). Cleared by the next successful start. */
   lastStartError: string | null = null;
 
-  /** A task that just started (and crashed or failed to launch) waits taskRetryMs before the next try. */
+  /**
+   * #224: briefs of a task its worker never took (claude died or never came up) and launches that failed, in a row.
+   * Each one after the first doubles the task's backoff (taskRetryMs, ×2, ×4… up to ×16); the BRIEF_FAILS-th tells the monitoring lead once. A brief taken resets it.
+   */
+  private briefFails = new Map<number, { n: number; since: number }>();
+
+  /** A task that just started (and crashed or failed to launch) waits taskRetryMs before the next try, longer after failures in a row. */
   inBackoff(id: number): boolean {
-    return this.store.now() - (this.lastStartAt.get(id) ?? -Infinity) < this.cfg.timers.taskRetryMs;
+    const wait = this.cfg.timers.taskRetryMs * Math.min(16, 2 ** Math.max(0, (this.briefFails.get(id)?.n ?? 0) - 1));
+    return this.store.now() - (this.lastStartAt.get(id) ?? -Infinity) < wait;
+  }
+
+  /** A task worker between failed starts (#224): its start brings it up, nothing else wakes it (mailbox). */
+  retrying(identity: string): boolean {
+    // A standing worker is more than its task: a message to it wakes it as always.
+    if (getIdentity(this.store, identity)?.team_kind !== 'task') return false;
+    const t = this.store.db.prepare(`SELECT id FROM tasks WHERE identity = ? AND state IN ('queued','open','interrupted') ORDER BY id DESC LIMIT 1`)
+      .get(identity) as { id: number } | undefined;
+    return !!t && this.briefFails.has(t.id) && !this.shifts.current(identity);
+  }
+
+  /**
+   * #224: a start that did not take (its brief never accepted, or the launch failed). Not his business: the task
+   * waits a longer backoff and tries again, and after BRIEF_FAILS in a row the monitoring lead hears of it once.
+   */
+  private startFailed(taskId: number, why: string): void {
+    const t = this.task(taskId);
+    if (!t || t.state === 'done') return;
+    const now = this.store.now();
+    const prev = this.briefFails.get(taskId);
+    const f = { n: (prev?.n ?? 0) + 1, since: prev?.since ?? now };
+    this.briefFails.set(taskId, f);
+    this.lastStartAt.set(taskId, now);
+    this.store.emit('task.start_not_taken', t.identity, { id: taskId, n: f.n, why });
+    if (f.n !== BRIEF_FAILS) return;
+    this.mailbox.tell({ msg_id: `hq-start-failing-t${taskId}-${f.since}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system', priority: 'next',
+      body: [`משימה ${t.ref ?? `#${taskId}`} (${t.title}) לא עלתה ${BRIEF_FAILS} פעמים ברצף: ${why.slice(0, 300)}.`,
+        `העובד (\`${t.identity ?? '—'}\`) לא קיבל את הבריף, או שהמשמרת לא עלתה. hq ממשיך לנסות עם המתנה ארוכה יותר. כדאי לבדוק את השרת (עומס, זיכרון) ואת היומן של המשמרת.`].join('\n') });
+  }
+
+  /** The brief of one run of a task's shift (start()'s prompt id). */
+  private briefId(taskId: number, shift: { id: string; started_at: number }): string {
+    return `task-${taskId}-${shift.id}-${shift.started_at}`;
+  }
+
+  /**
+   * mailbox.sweep: a stale message that is a task's brief (its worker's shift is up but never took it). Instead of a
+   * resurrection and a failure in his inbox, the brief is dropped, the shift stops and the task tries again (#224).
+   * True when it was a brief and is handled here.
+   */
+  async briefStale(m: { id: string; to_identity: string; error: string | null }): Promise<boolean> {
+    const id = Number(/^task-(\d+)-/.exec(m.id)?.[1]);
+    if (!id || !m.id.startsWith(`task-${id}-${m.to_identity}-`) || this.mailbox.get(m.id)?.state !== 'queued') return false;
+    const t = this.task(id);
+    if (!t || t.identity !== m.to_identity || t.state === 'done') return false;
+    // A lead's or a resident's shift is more than this task: it is resurrected as any (never stopped here).
+    if (getIdentity(this.store, m.to_identity)?.team_kind !== 'task' && !this.standing(m.to_identity)) return false;
+    // Every brief of the task still waiting (an older run's too): one failure, and none of them reaches the next run.
+    this.mailbox.dropTaskPrompts(m.to_identity, id, 'brief not taken: the task starts again', `task-${id}-${m.to_identity}-`);
+    this.startFailed(id, m.error ?? 'הבריף לא התקבל');
+    const cur = this.shifts.current(m.to_identity);
+    if (cur && cur.kind !== 'foreign' && cur.task_id === id) await this.shifts.stop(cur.id, BRIEF_FAILED, cur.started_at).catch(() => {});
+    return true;
   }
 
   /**
@@ -317,6 +420,10 @@ export class Scheduler {
     let failed = false;
     const run = (async () => {
       let passes = 0;
+      // #224: a node's memory and load as they are now, not as the last poll saw them (the machine may have choked since).
+      // Read in the background: a task that could go to a node being read waits for the read (its end fills again);
+      // everything else starts now.
+      this.refreshNodes();
       do {
         this.refill = false;
         let free = this.slots().free;
@@ -324,8 +431,14 @@ export class Scheduler {
         // A standing worker takes one task at a time: one starting in this fill holds it too.
         const busy = new Set([...this.starting.keys()].map((id) => this.task(id)?.identity).filter((x): x is string => !!x));
         for (const t of this.queue()) {
-          if (free <= 0 && ![...nodeFree.values()].some((n) => n > 0)) break;
           if (this.starting.has(t.id) || this.fallingBack.has(t.id)) continue;
+          // #224: placed on a node that is switched off now (or gone from the config): back to the queue, unplaced.
+          if (t.machine && t.machine !== LOCAL && (!this.nodes?.get(t.machine) || !this.store.toggle(nodeToggle(t.machine)))) {
+            this.store.bg(this.unpin(t, 'node switched off'), 'scheduler.unpin');
+            continue;
+          }
+          if (this.reading.size && [...this.reading.keys()].some((n) => this.couldGoTo(t, n))) continue;
+          if (free <= 0 && ![...nodeFree.values()].some((n) => n > 0)) break;
           const machine = this.placeFor(t, nodeFree);
           if ((machine === LOCAL ? free : nodeFree.get(machine) ?? 0) <= 0) continue;
           try {
@@ -374,11 +487,13 @@ export class Scheduler {
 
   /**
    * Why a task in the queue has not started, in his words (#128): what fill() would skip it for, else that every
-   * slot is taken. `free` is slots().free, read once by the caller for the whole list.
+   * slot is taken, or that the machine is too loaded (#224). `slots` is slots(), read once by the caller for the whole list.
    */
-  waitReason(t: TaskRow, free: number): string {
+  waitReason(t: TaskRow, slots: { free: number; pressure?: 'load' | 'memory' | null }): string {
+    const { free } = slots;
     if (!this.store.toggle('scheduler')) return 'התור עצור';
     if (this.starting.has(t.id)) return 'מתחילה עכשיו';
+    if (this.fallingBack.has(t.id) && t.machine && t.machine !== LOCAL) return `חוזרת מ-${t.machine}`;
     if (this.dormant(t.project)) return 'הפרויקט לא פעיל';
     if (t.identity && this.standing(t.identity) && this.workerBusy(t.identity, t.id)) {
       return `מחכה ${pre('ש', getIdentity(this.store, t.identity)?.name ?? t.identity)} יתפנה`;
@@ -387,10 +502,16 @@ export class Scheduler {
     const node = this.nodeCandidate(t);
     const there = node ? this.nodeSlots().find((n) => n.name === node.def.name) : undefined;
     if (t.machine && t.machine !== LOCAL) {
+      // Switched off, or gone from the config: the next fill brings it back to the queue (unpin), once no shift of its is up.
+      if (!this.nodes?.get(t.machine) || !this.store.toggle(nodeToggle(t.machine))) {
+        return t.identity && this.shifts.current(t.identity) ? `${t.machine} כבוי` : 'מתחילה עכשיו';
+      }
       if (!there?.up) return `מחכה ל-${t.machine}, שלא עונה`;
-      return there.free > 0 ? 'מתחילה עכשיו' : `מחכה למשבצת ב-${t.machine}`;
+      if (there.free > 0) return 'מתחילה עכשיו';
+      return there.busy ? `${t.machine} עמוס` : `מחכה למשבצת ב-${t.machine}`;
     }
-    return free > 0 || (there?.free ?? 0) > 0 ? 'מתחילה עכשיו' : 'מחכה למשבצת';
+    if (free > 0 || (there?.free ?? 0) > 0) return 'מתחילה עכשיו';
+    return slots.pressure ? BUSY_REASON : 'מחכה למשבצת';
   }
 
   private standing(identity: string): boolean {
@@ -444,6 +565,12 @@ export class Scheduler {
           if (!t.worktree) this.store.db.prepare('UPDATE tasks SET machine = NULL WHERE id = ? AND worktree IS NULL').run(t.id);
           throw e;
         }
+        // #224: on a node, its worktree there is gone and its branch too: nothing there to go back to. It goes back to
+        // the queue unplaced, not out of it. Any other failure there is what it is for a task here (below).
+        if (e instanceof WorktreeGone && t.machine && t.machine !== LOCAL) {
+          const cur = this.task(t.id);
+          if (cur && await this.unpin(cur, e.message, false)) return false;
+        }
         // Wrong machine, no repository, worktree and branch gone: retrying will not help. Out of the
         // queue (needs-decision) and the opener hears why.
         const labels = [...new Set([...(JSON.parse(t.labels || '[]') as string[]), 'needs-decision'])];
@@ -467,7 +594,11 @@ export class Scheduler {
       // spareTurn: a message may have started a turn during the worktree setup. The task waits for it, no backoff.
       row = await this.shifts.request(identity, { kind: 'work', reason: 'task', taskId: t.id, cwd: ws?.path, forceNew: fresh, spareTurn: fresh });
     } catch (e) {
-      if (!(e instanceof ShiftBusyError)) throw e;
+      if (!(e instanceof ShiftBusyError)) {
+        // #224: a launch that failed (spawn, systemd) tries again after a longer backoff; his inbox hears nothing.
+        this.startFailed(t.id, `launch: ${(e as Error).message}`);
+        throw e;
+      }
       this.lastStartAt.delete(t.id);
       return false;
     }
@@ -521,7 +652,7 @@ export class Scheduler {
     const ws = this.workspacesFor(t.machine);
     if (t.worktree) {
       const { c } = this.checkoutOf(t);
-      if (!(await ws.ensure(t.worktree, c?.path, ch ?? undefined))) throw new Error(`task ${t.id}: worktree ${t.worktree} is gone and its branch too`);
+      if (!(await ws.ensure(t.worktree, c?.path, ch ?? undefined))) throw new WorktreeGone(`task ${t.id}: worktree ${t.worktree} is gone and its branch too`);
       return { path: t.worktree, note: worktreeNote(t.worktree, ch) + this.charterNote(t) };
     }
     // Started before hq made worktrees: its session and work live where it ran (hq's default cwd and
@@ -534,7 +665,7 @@ export class Scheduler {
     const w = await ws.create(ch, c, `company-t${t.id}`);
     this.store.db.prepare('UPDATE tasks SET worktree = ?, updated_at = ? WHERE id = ?').run(w.path, this.store.now(), t.id);
     this.store.emit('task.worktree', null, { id: t.id, path: w.path, branch: w.branch, base: w.base });
-    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) + this.charterNote(t) };
+    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) + this.charterNote(t) + movedNote(t) };
   }
 
   /**
@@ -608,13 +739,22 @@ export class Scheduler {
     }
   }
 
-  private onTaskShiftEnded(taskId: number, reason: string, machine: string = LOCAL): void {
+  private onTaskShiftEnded(taskId: number, reason: string, machine: string = LOCAL, row?: { id: string; started_at: number }): void {
     const t = this.task(taskId);
     // On a node and its worker never took the task (did not come up, exited before accepting): it runs here instead.
     if (reason === NODE_FALLBACK) return; // fallbackLocal sets the task itself
     if (t && (machine ?? LOCAL) !== LOCAL && !['task_done', 'rest', 'account_switch'].includes(reason) && this.neverTook(t)) {
       this.store.bg(this.fallbackLocal(taskId, reason), 'scheduler.node_fallback');
       return;
+    }
+    // #224: this run's brief: never taken (claude died or never came up) is a failed start, not his business; taken
+    // ends a run of failures.
+    const brief = t && row ? this.mailbox.get(this.briefId(taskId, row)) : undefined;
+    if (brief && brief.to_identity === t?.identity) {
+      if (brief.state === 'queued' && !['task_done', 'rest', 'account_switch', 'resurrect', BRIEF_FAILED].includes(reason)) {
+        this.mailbox.dropTaskPrompts(brief.to_identity, taskId, `brief not taken (${reason}): the task starts again`, `task-${taskId}-${brief.to_identity}-`);
+        this.startFailed(taskId, brief.error ?? reason);
+      } else if (['delivered', 'seen', 'handled'].includes(brief.state)) this.briefFails.delete(taskId);
     }
     if (!t || t.state !== 'running') return;
     // B.7: the account manager resumes this same shift on another account right away; the task keeps running.
@@ -658,19 +798,99 @@ export class Scheduler {
       this.lastStartAt.delete(taskId);
       this.store.emit('task.node_fallback', t.identity, { id: taskId, machine: t.machine, why });
       this.store.emit('task.state', t.identity, { id: taskId, state: 'queued', reason: NODE_FALLBACK });
-      // The worktree there closes like any (preserved), in the background: the task does not wait for the node.
-      const { c } = t.worktree ? this.checkoutOf(t) : { c: undefined };
-      if (t.worktree && c) {
-        const ws = this.workspacesFor(t.machine);
-        this.store.bg(ws.close(t.worktree, c.defaultBranch).then((r) => {
-          if (r.error && r.error !== 'missing') this.store.emit('task.worktree_close_failed', t.identity, { id: taskId, path: t.worktree, machine: t.machine, error: r.error });
-        }), 'task.node_fallback.close');
-      }
+      this.store.bg(this.closeThere(t), 'task.node_fallback.close');
     } finally {
       this.fallingBack.delete(taskId);
     }
     this.store.bg(this.fill(), 'scheduler.fill');
     return true;
+  }
+
+  /**
+   * The worktree a task had on a node closes like any: uncommitted work preserved, and the preserved ref and a branch
+   * with commits fetched back here (RemoteWorkspaces.close). fallbackLocal does not wait for it; unpin does.
+   */
+  private closeThere(t: TaskRow): Promise<string | null> {
+    const { c } = t.worktree ? this.checkoutOf(t) : { c: undefined };
+    if (!t.worktree || !c || !t.machine || !this.nodes?.get(t.machine)) return Promise.resolve(null);
+    const failed = (error: string) => {
+      this.store.emit('task.worktree_close_failed', t.identity, { id: t.id, path: t.worktree, machine: t.machine, error });
+      return error;
+    };
+    return this.workspacesFor(t.machine).close(t.worktree, c.defaultBranch)
+      .then((r) => (r.error && r.error !== 'missing' ? failed(r.error) : null), (e: Error) => failed(e.message));
+  }
+
+  /**
+   * #224: a task in the queue placed on a node it cannot run on now (switched off, gone from the config, or its
+   * worktree there is gone) goes back to the queue unplaced, with no session there to resume: it starts fresh where
+   * fill() puts it. Its worktree there closes first (preserved, and its branch and preserved ref fetched back here), and
+   * a task that had started there says so in its next brief (MOVED_FROM; not when its worktree there was gone,
+   * `carried` false). Nothing moves while a shift of its worker is
+   * up. Returns the task as it is now, or undefined when it was left alone.
+   */
+  private async unpin(t: TaskRow, why: string, carried = true): Promise<TaskRow | undefined> {
+    if (!t.machine || t.machine === LOCAL || (t.identity && this.shifts.current(t.identity)) || this.fallingBack.has(t.id)) return undefined;
+    this.fallingBack.add(t.id);
+    try {
+      // A choked or unreachable node does not hold the task for the close's own timeout: past UNPIN_CLOSE_MS the close
+      // goes on in the background, and the brief says the work may still be there.
+      let timer: NodeJS.Timeout | undefined;
+      const closeError = await Promise.race([this.closeThere(t),
+        new Promise<string>((res) => { timer = setTimeout(() => {
+          const error = `no answer from ${t.machine} in ${UNPIN_CLOSE_MS / 1000}s (the close goes on there)`;
+          this.store.emit('task.worktree_close_timeout', t.identity, { id: t.id, path: t.worktree, machine: t.machine });
+          res(error);
+        }, UNPIN_CLOSE_MS); })])
+        .finally(() => clearTimeout(timer));
+      const labels = (JSON.parse(t.labels || '[]') as string[]).filter((l) => !l.startsWith(MOVED_FROM) && !l.startsWith(LEFT_ON));
+      // Where its work from there is now: fetched back here, or left there when the close failed.
+      if (carried && t.started_at != null) labels.push(`${closeError ? LEFT_ON : MOVED_FROM}${t.machine}:${t.worktree}`);
+      const r = this.store.db.prepare(`UPDATE tasks SET machine = NULL, worktree = NULL, state = 'queued', shift_id = NULL, started_at = NULL, labels = ?,
+        updated_at = ? WHERE id = ? AND machine = ? AND state IN ('queued','open','interrupted')`).run(JSON.stringify(labels), this.store.now(), t.id, t.machine);
+      if (!r.changes) return undefined;
+      // Its prompts for the shift there are dropped: the start sends its own.
+      if (t.identity) this.mailbox.dropTaskPrompts(t.identity, t.id, `unplaced from ${t.machine}: ${why}`);
+      this.lastStartAt.delete(t.id);
+      this.store.emit('task.unpinned', t.identity, { id: t.id, machine: t.machine, why });
+      this.store.emit('task.state', t.identity, { id: t.id, state: 'queued', reason: 'unpinned' });
+    } finally {
+      this.fallingBack.delete(t.id);
+    }
+    this.store.bg(this.fill(), 'scheduler.fill');
+    return this.task(t.id);
+  }
+
+  /** A task in the queue that could start on node `name` (pinned there, or a remote-ok task of a project it lists). */
+  private couldGoTo(t: TaskRow, name: string): boolean {
+    if (t.machine) return t.machine === name;
+    const n = this.nodes?.get(name);
+    return !!n && !t.worktree && t.started_at == null && t.project != null && n.def.projects.includes(t.project)
+      && (JSON.parse(t.labels || '[]') as string[]).includes(REMOTE_OK);
+  }
+
+  /** Nodes being read right now (refreshNodes): their read is shared, and its end fills again. */
+  private reading = new Map<string, Promise<unknown>>();
+
+  /**
+   * Nodes whose memory and load were read more than NODE_FRESH_MS ago are read again, in the background, when a task in
+   * the queue could go there (switched-off ones are not). fill() holds only the tasks that could go to a node being
+   * read (`reading`), and the read's end fills again. Nothing here waits on an ssh.
+   */
+  private refreshNodes(): void {
+    if (!this.nodes?.list.length) return;
+    const now = this.store.now();
+    const stale = this.nodes.list.filter((n) => this.store.toggle(nodeToggle(n.def.name)) && (!n.status || now - n.status.at > NODE_FRESH_MS));
+    if (!stale.length) return;
+    const queue = this.queue();
+    for (const n of stale) {
+      const name = n.def.name;
+      if (this.reading.has(name) || !queue.some((t) => this.couldGoTo(t, name))) continue;
+      this.reading.set(name, this.pollNode(n).catch(() => {}).finally(() => {
+        this.reading.delete(name);
+        this.store.bg(this.fill(), 'scheduler.fill');
+      }));
+    }
   }
 
   /** Tasks whose worker's status done waits for its turn: the latest call's op and onClose win. */
@@ -912,4 +1132,21 @@ function worktreeNote(path: string, ch: ReturnType<typeof readCharter>, branch?:
     cmds ? `**פקודות מהאמנה:** ${cmds}` : '',
     ch?.ciCheck ? `**CI:** ממזגים רק כשהבדיקה \`${ch.ciCheck}\` ירוקה ב-PR.` : '',
   ].filter(Boolean).join('\n');
+}
+
+/** A task that started on a node and came back (unpin): where its work from there is now (fetched back on close). */
+function movedNote(t: { id: number; labels: string }): string {
+  const labels = JSON.parse(t.labels || '[]') as string[];
+  const left = labels.find((l) => l.startsWith(LEFT_ON))?.slice(LEFT_ON.length);
+  if (left) {
+    const [node, ...rest] = left.split(':');
+    const path = rest.join(':');
+    const name = path.split('/').pop();
+    return `\n**המשימה התחילה ב-\`${node}\` וחזרה לכאן, וייתכן שהעבודה משם לא נמשכה** (הסגירה שם נכשלה או לא ענתה). אם היא לא כאן, היא ב-\`${node}\`: ב-worktree \`${path}\`, או בענף \`${name}\` וב-\`refs/company/preserved/${name}\` שם. בדוק קודם אם הענף וה-ref הגיעו לכאן, ואם צריך את העבודה משם, כתוב למי ששלח את המשימה לפני שמתחילים מחדש.`;
+  }
+  const moved = labels.find((l) => l.startsWith(MOVED_FROM))?.slice(MOVED_FROM.length);
+  if (!moved) return '';
+  const [from, ...rest] = moved.split(':');
+  const name = rest.join(':').split('/').pop() || `company-t${t.id}`;
+  return `\n**המשימה התחילה ב-\`${from}\` וחזרה לכאן.** מה שנעשה שם נמשך ל-checkout הזה: הענף \`${name}\` (אם היו בו commits) ו-\`refs/company/preserved/${name}\` (שינויים שלא קומטו). בדוק אותם והמשך מהם, לא מאפס.`;
 }

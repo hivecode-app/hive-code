@@ -12,7 +12,7 @@ import { parse } from 'yaml';
 import { OWNER, pre } from '@company/shared';
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
-import type { Scheduler, TaskRow } from './scheduler.ts';
+import { BUSY_REASON, type Scheduler, type TaskRow } from './scheduler.ts';
 import type { Mailbox, MessageRow } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
 import { hhmm as localHHMM, nextLocal, readTimeZone } from './timezone.ts';
@@ -300,10 +300,11 @@ export class Night {
       .get(nightId) as { id: number; reason: string } | undefined;
   }
 
-  private reason(queue: TaskRow[], slots: { total: number; free: number }): string {
+  private reason(queue: TaskRow[], slots: { total: number; free: number; pressure?: 'load' | 'memory' | null }): string {
     if (!this.store.toggle('scheduler')) return 'המתזמן כבוי';
     const accounts = this.store.db.prepare('SELECT health FROM accounts').all() as { health: string }[];
     if (accounts.length && accounts.every((a) => /block|limit|exhaust|expired/i.test(a.health))) return 'כל החשבונות חסומים';
+    if (slots.pressure === 'load') return BUSY_REASON;
     if (slots.total === 0 || slots.free <= 0) return 'אין זיכרון פנוי במחשב';
     if (queue.every((t) => this.scheduler.inBackoff(t.id))) {
       return this.scheduler.lastStartError ? `הפעלה נכשלה: ${this.scheduler.lastStartError.slice(0, 120)}` : 'ממתין לניסיון חוזר אחרי הפעלה שנכשלה';
