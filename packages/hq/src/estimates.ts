@@ -2,7 +2,7 @@
 // A worker gives eta_min or eta_at, eta_kind and eta_what in `tell` or `status` (ingest.ts). hq stores it here, answers
 // with the company's calibration (memory/company/time-estimates.md) as a suggestion, and closes it with the real time:
 //   status done / eta_done → done (closed_at = the real moment, even when it was late)
-//   the task closes any other way → cancelled
+//   the task closes any other way → cancelled, but one already past due stays missed (a promise that was not kept)
 //   past due and still open → missed (swept; closing it later still keeps the real time, and `missed` stays on the row)
 // remind() is the scheduler's every-minute pass: the reminder before the due time, the one after it, the manager at +10 minutes.
 // A new estimate of the same worker on the same `what` is an update: the old row stays as given, closed as cancelled
@@ -232,13 +232,17 @@ export class Estimates {
     return pick.map((x) => this.get(x.id)!);
   }
 
-  /** The task ended some other way than its worker saying done: its estimates were never delivered. */
+  /**
+   * The task ended some other way than its worker saying done: its estimates were never delivered. One that was already
+   * past due stays `missed` (closed, but still a promise that was not kept); only one cancelled before its due time is `cancelled`.
+   */
   cancelForTask(taskId: number): number {
     const now = this.store.now();
-    const ids = (this.store.db.prepare('SELECT id, identity FROM estimates WHERE task = ? AND closed_at IS NULL').all(taskId) as { id: number; identity: string }[]);
+    const ids = (this.store.db.prepare('SELECT id, identity, due_at FROM estimates WHERE task = ? AND closed_at IS NULL').all(taskId) as { id: number; identity: string; due_at: number }[]);
     for (const x of ids) {
-      this.store.db.prepare(`UPDATE estimates SET closed_at = ?, outcome = 'cancelled' WHERE id = ?`).run(now, x.id);
-      this.store.emit('estimate.closed', x.identity, { id: x.id, outcome: 'cancelled', task: taskId });
+      const outcome = x.due_at < now ? 'missed' : 'cancelled';
+      this.store.db.prepare(`UPDATE estimates SET closed_at = ?, outcome = ? WHERE id = ?`).run(now, outcome, x.id);
+      this.store.emit('estimate.closed', x.identity, { id: x.id, outcome, task: taskId });
     }
     return ids.length;
   }
@@ -287,11 +291,12 @@ export function yesterdayRange(ts: number, tz: string): { since: number; until: 
  * One line for the morning summary: how yesterday's estimates ended. On time = closed done by its due time; late = closed
  * done after it (with the factor actual / estimated); unclosed = past due and still open (an open one not yet due is not known
  * yet, and is left out). Cancelled ones are
- * not counted (replaced by a newer estimate, or the task ended without its worker saying done). Null when there were none.
- * Names of what was late or unclosed come with the worker; a per-kind count only for a kind that had something off,
+ * not counted (replaced by a newer estimate, or the task ended before it was due). Null when there were none.
+ * An estimate that was missed and then cancelled with its task stays counted as unclosed.
+ * Names of what was late or unclosed come with the worker (`name` turns an identity into the Hebrew name); a per-kind count only for a kind that had something off,
  * and only when more than one kind was given.
  */
-export function accuracyLine(rows: EstimateView[]): string | null {
+export function accuracyLine(rows: EstimateView[], name: (identity: string) => string = (id) => id): string | null {
   const all = rows.filter((r) => r.state !== 'cancelled' && r.state !== 'open');
   if (!all.length) return null;
   const order = (a: EstimateView, b: EstimateView) => a.created_at - b.created_at || a.id - b.id;
@@ -299,8 +304,8 @@ export function accuracyLine(rows: EstimateView[]): string | null {
   const unclosed = all.filter((r) => r.state === 'missed').sort(order);
   const onTime = all.length - late.length - unclosed.length;
   const parts = [`${all.length}`, `${onTime} בזמן`];
-  if (late.length) parts.push(`${late.length} באיחור (${late.map((r) => `${r.identity}, "${r.what}", פי ${num(r.actual_min! / Math.max(1, r.estimated_min))}`).join('; ')})`);
-  if (unclosed.length) parts.push(`${unclosed.length} שלא נסגרה (${unclosed.map((r) => `${r.identity}, "${r.what}"`).join('; ')})`);
+  if (late.length) parts.push(`${late.length} באיחור (${late.map((r) => `${name(r.identity)}, "${r.what}", פי ${num(r.actual_min! / Math.max(1, r.estimated_min))}`).join('; ')})`);
+  if (unclosed.length) parts.push(`${unclosed.length} ${unclosed.length === 1 ? 'שלא נסגרה' : 'שלא נסגרו'} (${unclosed.map((r) => `${name(r.identity)}, "${r.what}"`).join('; ')})`);
   const head = `הערכות אתמול: ${parts[0]}, מתוכן ${parts.slice(1).join(' ו-')}`;
   let line = head;
   const kinds = new Map<EtaKind, EstimateView[]>();

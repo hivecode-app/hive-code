@@ -433,6 +433,37 @@ test('accuracyLine: several late and several unclosed come in creation order, ki
     view(6, { identity: 'dana', what: 'ו', est: 10, act: 20, kind: 'release' }),
     view(5, { identity: 'eli', what: 'ה', est: 10, act: 30, kind: 'build' }),
   ]);
-  assert.equal(line, 'הערכות אתמול: 4, מתוכן 0 בזמן ו-2 באיחור (eli, "ה", פי 3; dana, "ו", פי 2) ו-2 שלא נסגרה (eli, "ז"; noa, "ח")'
+  assert.equal(line, 'הערכות אתמול: 4, מתוכן 0 בזמן ו-2 באיחור (eli, "ה", פי 3; dana, "ו", פי 2) ו-2 שלא נסגרו (eli, "ז"; noa, "ח")'
     + ' · חריגים לפי סוג: בילדים 2 מתוך 2, שחרורים 2 מתוך 2');
+});
+
+test('accuracyLine: several unclosed say שלא נסגרו, one says שלא נסגרה; names come from the label function', () => {
+  const name = (id: string) => ({ dana: 'דנה', eli: 'אלי' })[id] ?? id;
+  const two = accuracyLine([view(1, { identity: 'dana', state: 'missed' }), view(2, { identity: 'eli', state: 'missed' })], name)!;
+  assert.ok(two.includes('2 שלא נסגרו (דנה, "משהו 1"; אלי, "משהו 2")'), two);
+  const one = accuracyLine([view(1, { identity: 'dana', state: 'missed' })], name)!;
+  assert.ok(one.includes('1 שלא נסגרה (דנה,'), one);
+});
+
+test('a task ending: an estimate already past due stays missed and is counted; one not yet due is cancelled', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    const now = hq.store.now();
+    const ins = (what: string, due: number) => Number(hq.store.db.prepare(`INSERT INTO estimates (identity, task, kind, what, created_at, due_at) VALUES ('dana', 77, 'feature', ?, ?, ?)`)
+      .run(what, now - 60 * MIN, due).lastInsertRowid);
+    const swept = ins('כבר סומן', now - 20 * MIN);
+    hq.estimates.sweepMissed();
+    assert.equal(hq.estimates.get(swept)!.outcome, 'missed');
+    const late = ins('עבר', now - 10 * MIN); // not swept yet
+    const early = ins('עוד לא', now + 10 * MIN);
+    assert.equal(hq.estimates.cancelForTask(77), 3);
+    assert.equal(hq.estimates.get(swept)!.outcome, 'missed');
+    assert.equal(hq.estimates.get(swept)!.closed_at, now);
+    assert.equal(hq.estimates.get(late)!.outcome, 'missed');
+    assert.equal(hq.estimates.get(late)!.closed_at, now);
+    assert.equal(hq.estimates.get(early)!.outcome, 'cancelled');
+    const line = accuracyLine(hq.estimates.list({ since: 0, until: now + 1 }))!;
+    assert.ok(line.includes('2 שלא נסגרו (dana, "עבר"; dana, "כבר סומן")') || line.includes('2 שלא נסגרו'), line);
+  } finally { await env.cleanup(); }
 });

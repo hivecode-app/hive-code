@@ -350,7 +350,7 @@ export class Night {
     if (!this.estimates) return null;
     const { since, until } = yesterdayRange(end, this.timeZone());
     // 1000 is the most list() returns; a day with more estimates than that is not a day this company has.
-    return accuracyLine(this.estimates.list({ since, until, limit: 1000 }));
+    return accuracyLine(this.estimates.list({ since, until, limit: 1000 }), (id) => this.mailbox.label(id));
   }
 
   /** The morning summary, computed only from the store (night.md: "מתוך ה-store, לא מהזיכרון שלו"). */
