@@ -93,6 +93,55 @@ for (const [name, expect, mutate] of cases) {
   });
 }
 
+// Paths a charter points a worker at: the company's (~/company, /home/<user>/company) map onto the checked tree,
+// the engine's (~/projects/agent-company) onto this engine, skills/ onto company/skills.
+const GOOD_PATHS = "merge_instructions:\n  - 'סקירה לפי `/home/someone/company/company/skills/reviewer/SKILL.md`.'\n  - 'פריסה לפי `~/company/company/skills/ship/SKILL.md`, בדיקה ב-`node ~/projects/agent-company/scripts/check-contract.mjs .`.'\n";
+test('charter paths that exist pass: company, engine, skills/, and paths that are not ours', () => {
+  const dir = copy();
+  try {
+    edit(dir, 'company/projects/engine.md', 'grants: []\n', `grants: []\n${GOOD_PATHS}`);
+    appendFileSync(join(dir, 'company/projects/engine.md'), '\nלפני: `skills/verify/SKILL.md` ו-`../skills/setup/SKILL.md`, [הסוקר](../skills/reviewer/SKILL.md#שלבים), `~/company/company/skills/ship/SKILL.md:12`, וגם בלי קוד ~/company/company/skills/verify/SKILL.md, ב-/home/someone/company/company/skills/ship/SKILL.md:3-9 ו-**~/company/company/skills/setup/SKILL.md**!, [~/company/company/skills/ship/SKILL.md](../skills/ship/SKILL.md), https://example.com/home/x/company/nope בשרת אחר: `/root/app.env`, `~/projects/engine-<slug>`.\n');
+    const r = run(dir);
+    assert.equal(r.code, 0, r.out);
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
+});
+
+for (const [name, text, missing] of [
+  ['the engine path of #156', "merge_instructions:\n  - 'סקירה לפי `/home/someone/projects/agent-company/company/skills/reviewer/SKILL.md`.'\n", '/home/someone/projects/agent-company/company/skills/reviewer/SKILL.md'],
+  ['a plain company path, without code', "merge_instructions: 'לפי /home/someone/company/company/skills/nope/SKILL.md'\n", '/home/someone/company/company/skills/nope/SKILL.md'],
+  ['a plain path after a Hebrew prefix', "merge_instructions: 'פריסה ב-~/projects/agent-company/company/skills/ship/SKILL.md'\n", '~/projects/agent-company/company/skills/ship/SKILL.md'],
+  ['an absolute link target, after its anchor', "merge_instructions: '[הסוקר](/home/someone/company/company/skills/nope/SKILL.md#שלבים)'\n", '/home/someone/company/company/skills/nope/SKILL.md'],
+  ['a company skill that is not there', "merge_instructions: 'לפי `~/company/company/skills/nope/SKILL.md`'\n", '~/company/company/skills/nope/SKILL.md'],
+]) {
+  test(`fails on a charter path that does not exist: ${name}, with charter and line`, () => {
+    const dir = copy();
+    try {
+      const file = 'company/projects/engine.md';
+      edit(dir, file, 'grants: []\n', `grants: []\n${text}`);
+      const line = readFileSync(join(dir, file), 'utf8').split('\n').findIndex((l) => l.includes(missing)) + 1;
+      const r = run(dir);
+      assert.equal(r.code, 1, r.out);
+      assert.ok(r.out.includes(`${file}:${line}: path "${missing}" does not exist`), r.out);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+}
+
+test('fails on a relative skills/ path in a charter body', () => {
+  const dir = copy();
+  try {
+    appendFileSync(join(dir, 'company/projects/shop.md'), '\nלפני שכותבים: `skills/flutter/SKILL.md`.\n');
+    const r = run(dir);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /company\/projects\/shop\.md:\d+: path "skills\/flutter\/SKILL\.md" does not exist/);
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
+});
+
 test('broken charter YAML is reported at its line in the file (#70)', () => {
   const dir = copy();
   try {

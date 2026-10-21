@@ -220,6 +220,53 @@ function checkLinks(file) {
   }
 }
 
+// Paths a charter tells a worker to read (in merge_instructions and in the body): absolute ones into the company
+// (~/company/...) or the engine (~/projects/agent-company/...), anywhere on a line, and, inside `code` or a link
+// target, relative ones into skills/ (`skills/x`, `../skills/x`). After #156 five charters pointed at a skill path that did not exist and nothing
+// noticed. The company's deployed paths map onto the checkout being checked (a PR worktree checks its own tree), and
+// the engine's onto this engine. Other absolute paths (other machines, other repos, placeholders) are not ours to check.
+const HOME_PREFIX = String.raw`(?:~|/home/[^/\s]+)`;
+const PATH_ROOTS = [
+  [new RegExp(`^${HOME_PREFIX}/company(?=/|$)`), () => root],
+  [new RegExp(`^${HOME_PREFIX}/projects/agent-company(?=/|$)`), () => engineRoot],
+];
+const clean = (tok) => tok.replace(/^[('"<*\u200e\u200f]+/, '').replace(/#.*$/, '').replace(/[)\]'"<>.,;!?*…\u200e\u200f]+$/, '')
+  .replace(/(:\d+(-\d+)?)+:?$|:$/, '');
+const skip = (tok) => !tok || /[<>*${}]/.test(tok);
+export function charterPathRefs(text) {
+  const refs = [];
+  text.split('\n').forEach((line, i) => {
+    const add = (path) => { if (!refs.some((r) => r.line === i + 1 && r.path === path)) refs.push({ line: i + 1, path }); };
+    for (const m of line.matchAll(/`([^`]+)`/g)) for (const t of m[1].split(/\s+/)) {
+      const tok = clean(t);
+      if (!skip(tok) && (/^(~\/|\/)/.test(tok) || /^(\.\.\/)*skills\//.test(tok))) add(tok);
+    }
+    // Relative link targets are checkLinks'.
+    for (const m of line.replace(/`[^`]*`/g, '').matchAll(/\]\(([^)\s]+)\)/g)) {
+      const tok = safeDecode(m[1].replace(/^<(.*)>$/, '$1').replace(/#.*$/, ''));
+      if (!skip(tok) && /^(~\/|\/)/.test(tok)) add(tok);
+    }
+    // Written without `code` (a plain merge_instructions step, "ב-/home/..."): the company's and the engine's paths still count.
+    for (const t of line.split(/[\s`[\]()]+/)) {
+      if (t.includes('://')) continue;
+      const at = t.search(new RegExp(`${HOME_PREFIX}/`));
+      const tok = at < 0 ? '' : clean(t.slice(at));
+      if (!skip(tok) && PATH_ROOTS.some(([re]) => re.test(tok))) add(tok);
+    }
+  });
+  return refs;
+}
+function checkCharterPaths(charter, companyDir) {
+  for (const { line, path } of charterPathRefs(readFileSync(charter, 'utf8'))) {
+    let target = null;
+    if (path.startsWith('skills/')) target = join(companyDir, path);
+    else if (path.startsWith('../')) target = join(dirname(charter), path);
+    else for (const [re, base] of PATH_ROOTS) if (re.test(path)) { target = join(base(), path.replace(re, '')); break; }
+    if (!target || existsSync(target)) continue;
+    err(`${rel(charter)}:${line}: path "${path}" does not exist (looked for ${target})`);
+  }
+}
+
 function listMarkdown(dir) {
   const out = [];
   for (const e of readdirSync(dir)) {
@@ -432,6 +479,7 @@ export function main() {
         if (!isObj(dr) || !Array.isArray(dr.paths) || !dr.paths.length || !dr.paths.every((v) => typeof v === 'string' && v)) err(`${rel(charter)}: design_review needs "paths", a list of paths`);
         for (const k of ['wait_minutes', 'small_lines']) if (isObj(dr) && dr[k] != null && !(Number.isInteger(dr[k]) && dr[k] > 0)) err(`${rel(charter)}: design_review "${k}" must be a positive whole number`);
       }
+      checkCharterPaths(charter, companyDir);
       if (fm.ci === 'required' && !fm.ci_check) err(`${rel(charter)}: ci: required needs "ci_check" (the check name a merge waits for)`);
     }
     const projDir = join(companyDir, 'projects');
