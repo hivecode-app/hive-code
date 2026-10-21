@@ -775,10 +775,13 @@ class HqBackend extends Backend {
     final card = m['from_identity'] == 'owner' && m['kind'] == 'answer' ? cardFor(existing, m['ref'] as String?) : null;
     if (card != null) return answerItem(m, card, d.who(card.from).name, [...existing, ...typed]);
     if (m['from_identity'] == 'owner') {
+      // An answer whose card is no longer in the chat (answered, so out of the open asks) is still his words
+      // alone: hq's "תשובה לשאלה <id>: " wrapping is for the worker.
+      final body = m['kind'] == 'answer' ? answerText(m['body'] as String).$1 : m['body'] as String;
       return UserMsg(
         id: m['id'] as String,
         ts: ts,
-        text: m['body'] as String,
+        text: body,
         delivery: mapDelivery(m['state'] as String?),
         priority: Priority.values.byName((m['priority'] as String?) ?? 'next'),
         attachments: attachmentsOf(m),

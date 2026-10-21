@@ -225,4 +225,15 @@ void main() {
     expect(go.state, AskState.open);
     expect(find.text('אישור'), findsOneWidget);
   });
+
+  testWidgets('his button answer is "מאשר" under a small quote of the question, no internal id', (tester) async {
+    final store = await pumpApp(tester, size: const Size(342, 600), home: const ChatScreen(identityId: 'dana'));
+    store.data!.chats['dana']!.items.add(UserMsg(id: 'm-answer', ts: kDemoNow, text: 'מאשר', delivery: Delivery.delivered,
+        replyTo: const Quote(author: 'דנה', text: 'להעביר גם את הבוטים?', askId: 'a1')));
+    store.touch();
+    await tester.pump();
+    expect(find.textContaining('תשובה לשאלה noa', findRichText: true), findsNothing);
+    expect(find.textContaining('מאשר', findRichText: true), findsWidgets);
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/chat_answer_quote.png'));
+  });
 }

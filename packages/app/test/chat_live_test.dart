@@ -288,4 +288,15 @@ void main() {
     final go = items.whereType<GoCard>().single;
     expect(go.answer, 'נסגר');
   }, timeout: const Timeout(Duration(seconds: 20)));
+
+  test('an answer whose card is gone from the chat is his words alone, without hq\'s question id', () async {
+    final (b, hq) = await up();
+    hq.messages = [
+      {'id': 'a7-answer', 'from_identity': 'owner', 'to_identity': 'yoav', 'kind': 'answer', 'ref': 'noa-1:mviisehy-02b744b9ed', 'body': 'תשובה לשאלה noa-1:mviisehy-02b744b9ed: מאשר', 'created_at': 2200, 'state': 'handled'},
+    ];
+    b.showConversation('yoav');
+    await b.openConversation('yoav');
+    final mine = b.data!.chats['yoav']!.items.whereType<UserMsg>().single;
+    expect(mine.text, 'מאשר');
+  }, timeout: const Timeout(Duration(seconds: 20)));
 }
