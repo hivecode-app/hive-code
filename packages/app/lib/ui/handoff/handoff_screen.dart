@@ -28,6 +28,7 @@ class _HandoffScreenState extends State<HandoffScreen> {
   bool thanks = false;
   bool busy = false;
   String? error;
+  bool errorFault = false;
   Timer? _close;
 
   @override
@@ -67,6 +68,7 @@ class _HandoffScreenState extends State<HandoffScreen> {
       setState(() {
         busy = false;
         error = r.error;
+        errorFault = !r.transient;
       });
       return;
     }
@@ -167,15 +169,7 @@ class _HandoffScreenState extends State<HandoffScreen> {
                     alignment: AlignmentDirectional.centerStart,
                     child: Btn(busy ? 'שולח…' : 'שליחת הקוד ${toName(who.name)}', kind: BtnKind.primary, onTap: busy || code.text.trim().isEmpty ? null : _send),
                   ),
-                  if (error != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 10),
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Ic('error', size: 18, color: p.urgent),
-                        const SizedBox(width: 6),
-                        Expanded(child: Text(error!, style: T.secondary.copyWith(color: p.text))),
-                      ]),
-                    ),
+                  if (error != null) ShownError(error!, screen: 'העברה אליך', padding: const EdgeInsets.only(top: 10), report: errorFault),
                 ]),
               ),
             ),

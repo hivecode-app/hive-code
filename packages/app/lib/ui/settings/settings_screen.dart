@@ -219,6 +219,9 @@ class _AccountSwitch extends StatefulWidget {
 class _AccountSwitchState extends State<_AccountSwitch> {
   AccountsView? view;
   String? note;
+
+  /// [note] is a refusal of hq's (shown as an error, and sent).
+  bool noteFailed = false;
   bool busy = false;
 
   @override
@@ -242,6 +245,7 @@ class _AccountSwitchState extends State<_AccountSwitch> {
     if (mounted) {
       setState(() {
         busy = false;
+        noteFailed = !r.ok && !r.transient;
         note = r.ok ? (name == null ? 'החברה בוחרת לבד לפי המקום שנשאר.' : 'משמרות חדשות הולכות לחשבון הזה, והחיות עוברות בסוף התור הנוכחי.') : r.error;
       });
     }
@@ -285,7 +289,10 @@ class _AccountSwitchState extends State<_AccountSwitch> {
             if (v.pinned != null) Btn('אוטומטי', onTap: busy ? null : () => _pin(null)),
           ]),
         ),
-        if (note != null) Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 11), child: Text(note!, style: T.secondary.copyWith(color: p.text))),
+        if (note != null && noteFailed)
+          ShownError(note!, screen: 'הגדרות · חשבונות', padding: const EdgeInsets.fromLTRB(16, 0, 16, 11))
+        else if (note != null)
+          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 11), child: Text(note!, style: T.secondary.copyWith(color: p.text))),
       ]),
     ]);
   }

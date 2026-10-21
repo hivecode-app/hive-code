@@ -235,7 +235,9 @@ export class ErrorWatch {
       const id = `err-${r.sig.slice(0, 10)}-${now}`;
       this.db.prepare(`UPDATE error_signatures SET state = 'asked', ask_id = ?, shown_count = cycle_count, answer = NULL WHERE sig = ?`).run(id, r.sig);
       const row = this.get(r.sig)!;
-      this.hq.mailbox.ask({ msg_id: id, from: 'hq', title: 'תפסתי תקלה', question: this.line(row), headline: clip(what(row, this.label), 80),
+      // The card (design review, #207): the title carries how many times and since when, the headline what and where;
+      // the error's own words are in the details.
+      this.hq.mailbox.ask({ msg_id: id, from: 'hq', title: this.title(row), question: this.line(row), headline: clip(what(row, this.label, false), 80),
         options: [HANDLE, NOT_NOW], blocking: false, urgency: 'normal' });
       this.hq.store.emit('error.asked', r.identity, { sig: r.sig, ask: id, count: row.cycle_count });
     }
@@ -305,11 +307,17 @@ export class ErrorWatch {
       const line = this.line(r);
       this.db.prepare('UPDATE asks SET question = ? WHERE id = ?').run(line, r.ask_id);
       this.db.prepare('UPDATE error_signatures SET shown_count = cycle_count WHERE sig = ?').run(r.sig);
-      this.hq.inbox.updateByRef('ask', r.ask_id!, { body: line });
+      this.hq.inbox.updateByRef('ask', r.ask_id!, { body: line, title: this.title(r) });
     }
   }
 
   private label = (id: string): string => this.hq.mailbox.label(id);
+
+  /** The card's title: "תפסתי תקלה · 3 פעמים מ-13:40", or once: "תפסתי תקלה · 13:40". */
+  title(r: SigRow): string {
+    const tz = this.hq.timeZone();
+    return `תפסתי תקלה · ${r.cycle_count === 1 ? hhmm(r.last_seen, tz) : `${r.cycle_count} פעמים מ-${hhmm(firstOfCycle(r), tz)}`}`;
+  }
 
   /** One line in his words: what, how many times, where. */
   line(r: SigRow): string {
@@ -372,8 +380,9 @@ function threshold(type: string): number { return INTERNAL.has(type) ? INTERNAL_
 function firstOfCycle(r: SigRow): number { return r.cycle_start; }
 
 /** What happened, in his words. */
-export function what(r: Pick<SigRow, 'type' | 'component' | 'message'>, label: (id: string) => string): string {
-  const msg = r.message ? ` «${clip(r.message, 100)}»` : '';
+/** [quote]: with the error's own words («…»); the card's headline leaves them to the details. */
+export function what(r: Pick<SigRow, 'type' | 'component' | 'message'>, label: (id: string) => string, quote = true): string {
+  const msg = quote && r.message ? ` «${clip(r.message, 100)}»` : '';
   switch (r.type) {
     case 'turn.error': return `סבב של ${label(r.component)} נגמר בשגיאה${msg}`;
     case 'message.undelivered': return `הודעה ל${label(r.component)} לא נמסרה${msg}`;

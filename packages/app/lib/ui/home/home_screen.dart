@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../data/error_report.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
@@ -109,7 +110,8 @@ class WaitRow extends StatelessWidget {
                     maxLines: 1, style: T.secondary.copyWith(color: p.text2)),
               ),
               const SizedBox(width: 6),
-              Text(item.time, style: T.meta.copyWith(color: p.text3)),
+              // A fault the system caught says how many times and since when in its kicker, in place of the time.
+              if (!isCaughtFault(item.from, item.askId)) Text(item.time, style: T.meta.copyWith(color: p.text3)),
             ]),
             Padding(
               padding: const EdgeInsets.only(top: 1),
@@ -277,6 +279,7 @@ class _AnswerFieldState extends State<AnswerField> {
   late bool open = widget.item.options.isEmpty;
   bool busy = false;
   String? error;
+  bool errorFault = false;
 
   @override
   void initState() {
@@ -302,6 +305,7 @@ class _AnswerFieldState extends State<AnswerField> {
     setState(() {
       busy = false;
       error = r.ok ? null : r.error;
+      errorFault = !r.transient;
     });
   }
 
@@ -347,15 +351,7 @@ class _AnswerFieldState extends State<AnswerField> {
                 : IconButton(tooltip: 'שליחה', icon: Ic('send', size: 20, color: busy ? p.text3 : p.accent), onPressed: busy ? null : _send),
           ),
         ),
-        if (error != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Ic('error', size: 18, color: p.urgent),
-              const SizedBox(width: 6),
-              Expanded(child: Text(error!, style: T.secondary.copyWith(color: p.text))),
-            ]),
-          ),
+        if (error != null) ShownError(error!, screen: 'מחכה לך', padding: const EdgeInsets.only(top: 8), report: errorFault),
       ],
     ]);
   }

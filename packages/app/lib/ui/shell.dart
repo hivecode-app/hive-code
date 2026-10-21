@@ -97,7 +97,12 @@ class _ErrorBar extends StatelessWidget {
           child: Row(children: [
             Ic('error', size: 18, fill: true, color: p.urgent),
             const SizedBox(width: 8),
-            Expanded(child: Text(text, style: T.secondary.copyWith(color: p.text))),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                Text(text, style: T.secondary.copyWith(color: p.text)),
+                if (StoreScope.of(context).errorReported) const SentNote(),
+              ]),
+            ),
             TextButton(onPressed: StoreScope.read(context).clearError, child: Text('הבנתי', style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700))),
           ]),
         ),
@@ -233,11 +238,14 @@ class _FirstLoad extends StatelessWidget {
       const SystemBar(),
       Expanded(
         child: Center(
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Spin(child: Ic('progress_activity', size: 20, color: p.text2)),
-            const SizedBox(width: 8),
-            Text('מתעדכן', style: T.secondary.copyWith(color: p.text2)),
-          ]),
+          child: LoadingWatch(
+            screen: 'טעינה ראשונה',
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Spin(child: Ic('progress_activity', size: 20, color: p.text2)),
+              const SizedBox(width: 8),
+              Text('מתעדכן', style: T.secondary.copyWith(color: p.text2)),
+            ]),
+          ),
         ),
       ),
     ]);

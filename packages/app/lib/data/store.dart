@@ -10,6 +10,7 @@ import '../model/company_time.dart' as company_time;
 import '../model/models.dart';
 import '../theme/tokens.dart';
 import 'backend.dart';
+import 'error_report.dart';
 
 /// One answer waiting out its 3 seconds. The UI renders [label] in place of the buttons.
 class PendingAnswer {
@@ -83,7 +84,33 @@ class AppStore extends ChangeNotifier {
   }
 
   /// Last error to show as a dismissable bar ("הבנתי"), never a self-hiding snackbar (design-taste E16).
-  String? error;
+  /// Every one set here is shown, and so goes to hq by itself (error_report.dart).
+  String? get error => _error;
+  String? _error;
+  set error(String? e) {
+    _error = e;
+    errorReported = e != null;
+    if (e != null) reportShown('bar', e);
+  }
+
+  /// The bar's error went to hq ("נשלח לטיפול" under it); not so for a [notice].
+  bool errorReported = false;
+
+  /// A command hq refused: on the bar, and sent. One that did not reach hq (no link, hq restarting) is
+  /// shown only: a phone without signal is not a fault, and hq being down is the monitoring's.
+  void _failed(CommandResult r) {
+    if (r.transient) {
+      notice(r.error ?? '');
+    } else {
+      error = r.error;
+    }
+  }
+
+  /// The same bar for something that is not a fault (a limit he reached, a recording too short): not sent.
+  void notice(String text) {
+    _error = text;
+    errorReported = false;
+  }
 
   Future<void> start() async {
     try {
@@ -118,7 +145,7 @@ class AppStore extends ChangeNotifier {
     cancelUndo(key, notify: false);
     final p = PendingAnswer(key, to, isGo, seconds ?? undoSeconds, () async {
       final r = await action();
-      if (!r.ok) error = r.error;
+      if (!r.ok) _failed(r);
     }, text, line);
     _pending[key] = p;
     p.timer = Timer.periodic(const Duration(seconds: 1), (t) {
@@ -221,7 +248,7 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _check(CommandResult r) async {
     if (!r.ok) {
-      error = r.error;
+      _failed(r);
       notifyListeners();
     }
   }
@@ -254,7 +281,7 @@ class AppStore extends ChangeNotifier {
   void addImage(String identityId, Attachment a) {
     final list = _images.putIfAbsent(identityId, () => []);
     if (list.length >= maxImages) {
-      error = 'אפשר לצרף עד $maxImages תמונות להודעה אחת.';
+      notice('אפשר לצרף עד $maxImages תמונות להודעה אחת.');
     } else {
       list.add(a);
     }
@@ -319,7 +346,7 @@ class AppStore extends ChangeNotifier {
     } else {
       if (!r.ok) {
         msg.delivery = Delivery.failed;
-        error = r.error;
+        _failed(r);
       }
       // Its answer is in (taken or refused): what waited behind it goes now.
       if (!_disposed && (data?.chats[identityId]?.items.any((i) => i is UserMsg && i.delivery == Delivery.pendingConnection) ?? false)) {
@@ -362,7 +389,7 @@ class AppStore extends ChangeNotifier {
       }
     } else {
       msg.delivery = Delivery.failed;
-      error = r.error;
+      _failed(r);
     }
     notifyListeners();
     return msg;
@@ -377,7 +404,7 @@ class AppStore extends ChangeNotifier {
       item.state = WaitState.answered;
       item.answerLine = 'ענית: $text';
     } else {
-      error = r.error;
+      _failed(r);
     }
     notifyListeners();
     return r;
@@ -387,7 +414,7 @@ class AppStore extends ChangeNotifier {
   Future<String?> retract(String identityId, UserMsg msg) async {
     if (_inFlight.contains(msg.id)) {
       // Already on its way: hq may have it, so it is not taken off here as if it never went.
-      error = 'ההודעה כבר בדרך לשרת, ולכן אי אפשר למשוך אותה.';
+      notice('ההודעה כבר בדרך לשרת, ולכן אי אפשר למשוך אותה.');
       notifyListeners();
       return null;
     }
@@ -402,7 +429,7 @@ class AppStore extends ChangeNotifier {
     }
     final r = await backend.retract(identityId, msg.id);
     if (!r.ok) {
-      error = r.error;
+      _failed(r);
       notifyListeners();
       return null;
     }
@@ -431,7 +458,7 @@ class AppStore extends ChangeNotifier {
     final r = await backend.setAutomation(a.key, on);
     if (!r.ok) {
       a.enabled = !on;
-      error = r.error;
+      _failed(r);
       notifyListeners();
     }
   }
@@ -597,7 +624,7 @@ class AppStore extends ChangeNotifier {
           } else {
             m.delivery = r.transient ? Delivery.pendingConnection : Delivery.failed;
             if (r.transient) waiting = true;
-            if (!r.transient) error = r.error;
+            if (!r.transient) _failed(r);
           }
         }
         if (waiting) break;

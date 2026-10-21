@@ -21,9 +21,12 @@ class Session {
 /// Plain sentences for the screen (design-taste §7). [code] is set for the passkey cases the
 /// screen reacts to (offer pairing, offer the code-only path).
 class AuthFailure implements Exception {
-  const AuthFailure(this.message, {this.code});
+  const AuthFailure(this.message, {this.code, this.fault = false});
   final String message;
   final PasskeyError? code;
+
+  /// The server refused for no reason of his (not a wrong code, a cancelled fingerprint or no link): sent to hq.
+  final bool fault;
   @override
   String toString() => message;
 }
@@ -123,7 +126,7 @@ class AuthClient {
     })();
     if (err.contains('pairing code')) throw const AuthFailure('הקוד שגוי, כבר שומש או שפג תוקפו. צריך קוד חדש ממסך המכשירים שבהגדרות.');
     if (err.contains('unknown passkey')) throw const AuthFailure('ה-passkey הזה לא רשום בחברה, או שהוסר. צריך לצמד את המכשיר עם קוד.');
-    throw AuthFailure(otherwise);
+    throw AuthFailure(otherwise, fault: true);
   }
 
   Future<String> _passkey(Future<PasskeyResult> call) async {
@@ -168,7 +171,7 @@ class AuthClient {
     } catch (_) {
       throw const AuthFailure('אין חיבור לשרת. אפשר לנסות שוב.');
     }
-    if (r.statusCode != 200) throw const AuthFailure('השרת לא החזיר את רשימת המכשירים.');
+    if (r.statusCode != 200) throw const AuthFailure('השרת לא החזיר את רשימת המכשירים.', fault: true);
     final j = (jsonDecode(utf8.decode(r.bodyBytes)) as Map).cast<String, dynamic>();
     return (
       devices: [for (final d in (j['devices'] as List).cast<Map<String, dynamic>>()) DeviceInfo.fromJson(d)],

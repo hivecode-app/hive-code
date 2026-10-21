@@ -160,7 +160,7 @@ class NativeGlue {
         final bytes = await f.readAsBytes();
         final mime = imageMime(bytes);
         if (mime == null) {
-          store.error = 'אפשר לשלוח תמונות מסוג PNG, ‏JPEG, ‏GIF או WebP.';
+          store.notice('אפשר לשלוח תמונות מסוג PNG, ‏JPEG, ‏GIF או WebP.');
           store.touch();
         } else {
           store.addImage(to, Attachment(name: f.name, bytes: bytes.length, mime: mime, data: bytes));

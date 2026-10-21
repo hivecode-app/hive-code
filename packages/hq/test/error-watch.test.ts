@@ -56,7 +56,8 @@ test('a new error is one item for him after the first wait; again → the same i
     assert.match(a.question, /הודעה ל.* לא נמסרה/);
     assert.match(a.question, /2 פעמים/);
     const [item] = items(e);
-    assert.equal(item!.title, 'תפסתי תקלה');
+    assert.match(item!.title, /^תפסתי תקלה · 2 פעמים מ-\d\d:\d\d$/);
+    assert.doesNotMatch(item!.headline ?? '', /«/, 'the error\'s words are in the details, not the headline');
     assert.equal(item!.blocking, false);
 
     // Another with another message id is the same signature: no new item, the count on this one.
@@ -65,6 +66,7 @@ test('a new error is one item for him after the first wait; again → the same i
     assert.equal(asks(e).length, 1);
     assert.equal(items(e).length, 1);
     assert.match(items(e)[0]!.body, /3 פעמים/);
+    assert.match(items(e)[0]!.title, /^תפסתי תקלה · 3 פעמים/);
     assert.match(asks(e)[0]!.question, /3 פעמים/);
     assert.equal(sigs(e)[0]!.count, 3);
   } finally { await e.cleanup(); }

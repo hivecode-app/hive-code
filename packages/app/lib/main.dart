@@ -7,6 +7,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'data/auth_client.dart';
 import 'data/backend.dart';
 import 'data/backend_select.dart';
+import 'data/error_report.dart';
 import 'data/hq_backend.dart';
 import 'data/store.dart';
 import 'model/company_time.dart';
@@ -22,6 +23,11 @@ import 'ui/shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // error-catcher: a crash in the app goes to hq like any error shown to him (error_report.dart).
+  ErrorReports.instance.catchCrashes();
+  unawaited(NativeBridge.instance.appVersionCode().then((v) {
+    if (v != null) ErrorReports.instance.appVersion = 'android $v';
+  }, onError: (_) {}));
   runApp(AuthGate(initial: await selectBackend(), hqUrl: await initialServer(), pairLink: await NativeBridge.instance.getPairLink()));
 }
 
@@ -253,6 +259,14 @@ class _CompanyAppState extends State<CompanyApp> {
     super.initState();
     kGlue = glue;
     glue.start();
+    // Where he was when an error showed: the tab, or on a desktop the conversation open in the main column.
+    // In his words: hq writes it on the card ("שגיאה באפליקציה במסך שיחות").
+    ErrorReports.instance.screenOf = () {
+      if (!nav.wide) return kDests.firstWhere((d) => d.tab == nav.tab).label;
+      final id = widget.store.selectedConversation;
+      final name = id == null ? null : widget.store.data?.identities[id]?.name;
+      return widget.store.homeOpen || name == null ? 'הבית' : 'שיחה עם $name';
+    };
     // An open conversation is read, and doesn't alert, only while the app is in front and has focus: a desktop
     // window left open behind another one (inactive) must not read his messages or keep them from alerting.
     // The lifecycle only hears changes and, on the web, can miss the first focus: start from the truth and

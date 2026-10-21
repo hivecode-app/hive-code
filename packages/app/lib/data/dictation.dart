@@ -24,10 +24,12 @@ const kDictateToken = String.fromEnvironment('DICTATE_TOKEN');
 const kDictateRate = 16000;
 const kMicFailed = 'לא הצלחתי להקליט מהמיקרופון. אפשר להכתיב דרך המיקרופון שבמקלדת.';
 
-/// A failure already worded for the owner.
+/// A failure already worded for the owner. [fault]: ours or the service's, so it goes to hq
+/// (error_report.dart); not so for one that is his to fix (a permission, a recording too short).
 class DictationError implements Exception {
-  const DictationError(this.message);
+  const DictationError(this.message, {this.fault = true});
   final String message;
+  final bool fault;
   @override
   String toString() => message;
 }
@@ -59,7 +61,7 @@ class MicRecorder implements Recorder {
     } catch (_) {
       throw const DictationError(kMicFailed);
     }
-    if (!allowed) throw const DictationError('אין הרשאה למיקרופון. אפשר לאשר אותה בהגדרות המכשיר ולנסות שוב.');
+    if (!allowed) throw const DictationError('אין הרשאה למיקרופון. אפשר לאשר אותה בהגדרות המכשיר ולנסות שוב.', fault: false);
     await _sub?.cancel();
     _pcm.clear();
     _broken = false;
@@ -150,7 +152,7 @@ class DictateClient {
     final get = _session;
     if (get == null) return (baseUrl, token);
     final s = await get();
-    if (s == null) throw const DictationError('ההכתבה עובדת רק ממכשיר מחובר. צריך להתחבר קודם.');
+    if (s == null) throw const DictationError('ההכתבה עובדת רק ממכשיר מחובר. צריך להתחבר קודם.', fault: false);
     final hq = s.baseUrl.endsWith('/') ? s.baseUrl.substring(0, s.baseUrl.length - 1) : s.baseUrl;
     return ('$hq/api/dictate', s.token);
   }
@@ -178,7 +180,7 @@ class DictateClient {
     } catch (_) {
       throw const DictationError('שירות ההכתבה החזיר תשובה לא צפויה. אפשר לנסות שוב.');
     }
-    if (text.isEmpty) throw const DictationError('לא נשמע דיבור בהקלטה. אפשר לנסות שוב.');
+    if (text.isEmpty) throw const DictationError('לא נשמע דיבור בהקלטה. אפשר לנסות שוב.', fault: false);
     return text;
   }
 }

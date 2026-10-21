@@ -39,6 +39,7 @@ class _SignInScreenState extends State<SignInScreen> {
   late final code = TextEditingController(text: widget.pairCode ?? '');
   late final server = TextEditingController(text: widget.server == null || widget.server!.isEmpty ? '' : serverHost(widget.server!));
   String? error;
+  bool errorFault = false;
   bool busy = false;
 
   /// Shown after the passkey prompt was dismissed during pairing: pair with the code alone.
@@ -85,7 +86,12 @@ class _SignInScreenState extends State<SignInScreen> {
       final s = await f();
       if (mounted) widget.onSignedIn(s);
     } on AuthFailure catch (e) {
-      if (mounted) setState(() => error = e.message);
+      if (mounted) {
+        setState(() {
+          error = e.message;
+          errorFault = e.fault;
+        });
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -210,15 +216,7 @@ class _SignInScreenState extends State<SignInScreen> {
                     ]),
                   ),
                 ]),
-                if (error != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Ic('error', size: 18, color: p.urgent),
-                      const SizedBox(width: 6),
-                      Expanded(child: Text(error!, style: T.secondary.copyWith(color: p.text))),
-                    ]),
-                  ),
+                if (error != null) ShownError(error!, screen: 'כניסה', padding: const EdgeInsets.fromLTRB(16, 12, 16, 0), report: errorFault),
                 if (widget.onCancel != null)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),

@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../data/error_report.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
@@ -42,7 +43,7 @@ class WaitItemScreen extends StatelessWidget {
               Row(children: [
                 Monogram.of(d, item.from, size: AvSize.sm),
                 const SizedBox(width: 10),
-                Expanded(child: Text('${item.kicker} · ${item.time}', style: T.secondary.copyWith(color: p.text2))),
+                Expanded(child: Text(isCaughtFault(item.from, item.askId) ? item.kicker : '${item.kicker} · ${item.time}', style: T.secondary.copyWith(color: p.text2))),
               ]),
               const SizedBox(height: 14),
               // A finished task's card (#219): what to check first, in his words; what changed under it.

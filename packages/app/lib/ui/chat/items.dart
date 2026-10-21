@@ -5,6 +5,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../data/backend.dart';
+import '../../data/error_report.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
@@ -136,7 +138,8 @@ class UserBubble extends StatelessWidget {
           link: 'משיכה חזרה',
           onTap: onRetract),
       Delivery.pendingConnection => _QLine(text: 'ממתינה לחיבור · ', link: 'משיכה חזרה', onTap: onRetract),
-      Delivery.failed => _QLine(text: 'לא נמסר · ', link: 'ניסיון נוסף', onTap: onRetry),
+      // hq catches a message it could not deliver by itself (error-watch.ts): "נשלח לטיפול" is true here too.
+      Delivery.failed => _QLine(text: ErrorReports.instance.active ? 'לא נמסר · ${SentNote.text} · ' : 'לא נמסר · ', link: 'ניסיון נוסף', onTap: onRetry),
       _ => null,
     };
     if (under == null) return bubble;
@@ -202,11 +205,29 @@ class AttachmentImage extends StatefulWidget {
 class _AttachmentImageState extends State<AttachmentImage> {
   Future<Uint8List?>? _load;
 
+  /// It did not load and went to hq ("נשלח לטיפול" under it).
+  bool _reported = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final a = widget.attachment;
-    _load ??= a.data != null ? Future.value(a.data) : (a.id == null ? Future.value(null) : StoreScope.read(context).backend.attachmentData(a.id!));
+    _load ??= a.data != null
+        ? Future.value(a.data)
+        : (a.id == null
+            ? Future.value(null)
+            : _fetch(StoreScope.read(context).backend, a.id!));
+  }
+
+  /// An image that did not load while hq is reachable is an error shown (error_report.dart); without a
+  /// link it is not a fault, only no signal.
+  Future<Uint8List?> _fetch(Backend b, String id) async {
+    final d = await b.attachmentData(id);
+    if (d == null && b.status.state == LinkState.online) {
+      reportShown('screen', 'תמונה בשיחה לא נטענה', screen: 'תמונה בשיחה');
+      _reported = true;
+    }
+    return d;
   }
 
   @override
@@ -225,8 +246,11 @@ class _AttachmentImageState extends State<AttachmentImage> {
           color: p.surface2,
           child: Center(
             child: snap.connectionState == ConnectionState.done
-                ? Ic('image', size: 32, color: p.text3, semantic: 'התמונה לא נטענה')
-                : SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: p.text3)),
+                ? Column(mainAxisSize: MainAxisSize.min, children: [
+                    Ic('image', size: 32, color: p.text3, semantic: 'התמונה לא נטענה'),
+                    if (_reported) const SentNote(),
+                  ])
+                : LoadingWatch(screen: 'תמונה בשיחה', child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: p.text3))),
           ),
         );
       },
@@ -1078,7 +1102,7 @@ class _AskCardViewState extends State<AskCardView> {
     final headline = card.headline;
     final keys = go
         ? DecisionKeys.go(onGo: () => store.answerCard(card, card.options.first), onNotNow: wait == null ? null : () => store.notNow(wait))
-        : DecisionKeys.ask(card.options, onPick: (o) => store.answerCard(card, o), onOther: widget.onOther, keys: MediaQuery.sizeOf(context).width >= 800 && identical(shortcutAsk(store.data?.chats[card.from]), card));
+        : DecisionKeys.ask(card.options, other: !isCaughtFault(card.from, card.askId), onPick: (o) => store.answerCard(card, o), onOther: widget.onOther, keys: MediaQuery.sizeOf(context).width >= 800 && identical(shortcutAsk(store.data?.chats[card.from]), card));
 
     // The whole card is the details' toggle; the buttons are its only answers.
     final top = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [

@@ -23,6 +23,7 @@ import '../model/models.dart';
 import '../theme/icons.dart';
 import 'backend.dart';
 import 'engine_model.dart';
+import 'error_report.dart';
 
 class HqBackend extends Backend {
   HqBackend({required this.baseUrl, required this.token, http.Client? client}) : _http = client ?? http.Client();
@@ -139,8 +140,15 @@ class HqBackend extends Backend {
 
   static const _noLink = 'אין חיבור לשרת, ולכן הפעולה לא נשלחה. אפשר לנסות שוב.';
 
+  /// What he was shown goes to hq (error_report.dart); 0 when it did not get there.
+  Future<int> _postError(Map<String, dynamic> body) async {
+    final r = await _http.post(Uri.parse('$baseUrl/api/client-errors'), headers: _headers, body: jsonEncode(body)).timeout(const Duration(seconds: 10));
+    return r.statusCode;
+  }
+
   @override
   Future<void> start() async {
+    ErrorReports.instance.attach(_postError);
     // The last snapshot on this device shows at once (quality.md: "מחכה לך" from cache in <=1s);
     // the fresh one replaces it a moment later.
     await _restoreCache();
@@ -162,6 +170,7 @@ class HqBackend extends Backend {
   @override
   void dispose() {
     _disposed = true;
+    ErrorReports.instance.detach(_postError);
     _homeTick?.cancel();
     _replayGuard?.cancel();
     _onlineAgain?.cancel();
@@ -1493,6 +1502,8 @@ CompanyData mapSnapshot({
       'delivery_failure' => 'הודעה לא נמסרה',
       'shift_failure' => 'עובד לא חזר אחרי קריסה',
       'awaiting' => 'לבדוק',
+      // The system asks with its own title ("תפסתי תקלה", error-watch.ts): it has no name to stand for it.
+      'ask' when isCaughtFault(i['from_identity'] as String?, i['ref'] as String?) && (i['title'] as String?)?.isNotEmpty == true => i['title'] as String,
       _ => i['blocking'] == true ? 'חוסם' : 'שאלה',
     };
   }
@@ -1514,7 +1525,9 @@ CompanyData mapSnapshot({
     final options = <AskOption>[
       if (kind == WaitKind.go || kind == WaitKind.urgentProd) const AskOption(id: 'go', label: 'GO', primary: true),
       if (kind == WaitKind.awaiting) ...kAwaitingOptions,
-      if (ask != null) for (final o in (ask['options'] as List).cast<String>()) AskOption(id: o, label: o),
+      // The system's card for a fault (error-watch.ts): its first answer ("לטפל") is the main one.
+      if (ask != null)
+        for (final (n, o) in (ask['options'] as List).cast<String>().indexed) AskOption(id: o, label: o, primary: n == 0 && isCaughtFault(i['from_identity'] as String?, i['ref'] as String?)),
     ];
     final headline = ((i['headline'] as String?) ?? (ask?['headline'] as String?))?.trim();
     waiting.add(WaitItem(

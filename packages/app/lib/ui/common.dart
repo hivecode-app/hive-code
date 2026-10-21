@@ -1,10 +1,13 @@
 // Shared building blocks, one per mockup CSS class: .ms (Ic), .av (Monogram), .st (StatusWord),
 // .badge (Badge), .btn (Btn), .sec (Section), .list/.row (ListBlock), and the markup text (Rich).
 
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../data/backend.dart';
+import '../data/error_report.dart';
 import '../model/models.dart';
 import '../native/open_url.dart';
 import '../theme/icons.dart';
@@ -763,4 +766,107 @@ class Toggle extends StatelessWidget {
       ),
     );
   }
+}
+
+/// "נשלח לטיפול": the small line next to an error that went to hq by itself (error_report.dart).
+/// Nothing while the app is not signed in to hq (the demo, the sign-in screen before there is a link).
+class SentNote extends StatelessWidget {
+  const SentNote({super.key, this.inline = false});
+
+  /// Part of a line of text (" · נשלח לטיפול") rather than a line of its own.
+  final bool inline;
+  static const text = 'נשלח לטיפול';
+
+  @override
+  Widget build(BuildContext context) {
+    if (!ErrorReports.instance.active) return const SizedBox.shrink();
+    final p = context.p;
+    return Text(inline ? ' · $text' : text, style: T.meta.copyWith(color: p.text2));
+  }
+}
+
+/// An error on a screen (the red mark and its sentence), shown and so sent to hq once per text,
+/// with "נשלח לטיפול" under it. [report]: false for one that is his to fix (a wrong code).
+class ShownError extends StatefulWidget {
+  const ShownError(this.text, {super.key, required this.screen, this.report = true, this.padding = EdgeInsets.zero});
+  final String text;
+  final String screen;
+  final bool report;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  State<ShownError> createState() => _ShownErrorState();
+}
+
+class _ShownErrorState extends State<ShownError> {
+  @override
+  void initState() {
+    super.initState();
+    _report();
+  }
+
+  @override
+  void didUpdateWidget(ShownError old) {
+    super.didUpdateWidget(old);
+    if (old.text != widget.text) _report();
+  }
+
+  void _report() {
+    if (widget.report) reportShown('screen', widget.text, screen: widget.screen);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Padding(
+      padding: widget.padding,
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Ic('error', size: 18, color: p.urgent),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(widget.text, style: T.secondary.copyWith(color: p.text)),
+            if (widget.report) const SentNote(),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
+/// A screen still loading after [after] is an error he is shown (error-catcher): it goes to hq once,
+/// and "נשלח לטיפול" shows under what is loading. [child] is the spinner and its word.
+class LoadingWatch extends StatefulWidget {
+  const LoadingWatch({super.key, required this.screen, required this.child, this.after = const Duration(seconds: 15)});
+  final String screen;
+  final Widget child;
+  final Duration after;
+
+  @override
+  State<LoadingWatch> createState() => _LoadingWatchState();
+}
+
+class _LoadingWatchState extends State<LoadingWatch> {
+  Timer? _timer;
+  bool stuck = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(widget.after, () {
+      reportShown('stuck', 'המסך נתקע בטעינה יותר מ-${widget.after.inSeconds} שניות', screen: widget.screen);
+      if (mounted) setState(() => stuck = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => !stuck
+      ? widget.child
+      : Column(mainAxisSize: MainAxisSize.min, children: [widget.child, const SizedBox(height: 6), const SentNote()]);
 }

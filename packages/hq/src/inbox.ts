@@ -77,10 +77,11 @@ export class Inbox {
   }
 
   /** The same item, new words (error-watch.ts: the count went up). Open items only. */
-  updateByRef(kind: InboxKind, ref: string, u: { body?: string; headline?: string }): void {
+  updateByRef(kind: InboxKind, ref: string, u: { body?: string; headline?: string; title?: string }): void {
     const rows = this.store.db.prepare(`SELECT id FROM inbox WHERE kind = ? AND ref = ? AND state = 'open'`).all(kind, ref) as { id: number }[];
     for (const r of rows) {
-      this.store.db.prepare('UPDATE inbox SET body = COALESCE(?, body), headline = COALESCE(?, headline) WHERE id = ?').run(u.body ?? null, u.headline ?? null, r.id);
+      this.store.db.prepare('UPDATE inbox SET body = COALESCE(?, body), headline = COALESCE(?, headline), title = COALESCE(?, title) WHERE id = ?')
+        .run(u.body ?? null, u.headline ?? null, u.title ?? null, r.id);
       this.store.emit('inbox.updated', null, this.get(r.id));
     }
   }

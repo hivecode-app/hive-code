@@ -79,11 +79,13 @@ class DecisionKeys extends StatelessWidget {
 
   /// The buttons of a question: one per option, then "תשובה אחרת" ("תשובה" when it has no options).
   /// [keys]: the desktop's number keys before the first four options ("1" to "4"), as its shortcuts answer them.
-  static List<DecisionButton> ask(List<AskOption> options, {required void Function(AskOption) onPick, required VoidCallback onOther, bool keys = false}) {
+  /// [other]: false for the system's card for a fault ("לטפל" · "לא עכשיו", like a GO): words go through the card.
+  static List<DecisionButton> ask(List<AskOption> options,
+      {required void Function(AskOption) onPick, required VoidCallback onOther, bool keys = false, bool other = true}) {
     final opts = options.where((o) => o.id != 'q' && o.id != 'not_now').toList();
     return [
       for (final (i, o) in opts.indexed) DecisionButton(o.label, primary: o.primary, hint: keys && i < 4 ? '${i + 1}' : null, onTap: () => onPick(o)),
-      DecisionButton(options.isEmpty ? 'תשובה' : 'תשובה אחרת', onTap: onOther),
+      if (other || opts.isEmpty) DecisionButton(options.isEmpty ? 'תשובה' : 'תשובה אחרת', onTap: onOther),
     ];
   }
 }

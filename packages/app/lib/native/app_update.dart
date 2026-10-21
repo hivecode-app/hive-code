@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/backend_select.dart';
+import '../data/error_report.dart';
 import '../model/company_time.dart';
 import 'native_bridge.dart';
 
@@ -134,8 +135,14 @@ class AppUpdate extends ChangeNotifier {
       case 'needs_permission':
         _set(UpdatePhase.needsPermission);
       default:
-        _set(UpdatePhase.failed);
+        _failed('$res');
     }
+  }
+
+  /// "העדכון לא הצליח." is shown, and so sent to hq (error_report.dart).
+  void _failed(String why) {
+    reportShown('screen', 'העדכון לא הצליח ($why)', screen: 'עדכון גרסה');
+    _set(UpdatePhase.failed);
   }
 
   Future<void> cancel() => _bridge.cancelUpdate();
@@ -157,7 +164,7 @@ class AppUpdate extends ChangeNotifier {
       case 'cancelled' || 'aborted':
         _set(UpdatePhase.available);
       case 'failed':
-        _set(UpdatePhase.failed);
+        _failed('${e['error'] ?? 'failed'}');
     }
   }
 

@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
 import '../../data/backend.dart';
+import '../../data/error_report.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
@@ -22,7 +23,7 @@ import 'convs_v2.dart' show WordFit;
 
 /// One row of "בוער" or "מחכה לך".
 class HeadLine {
-  const HeadLine({required this.key, required this.from, required this.text, required this.word, this.at, this.item, this.hot = false});
+  const HeadLine({required this.key, required this.from, required this.text, required this.word, this.at, this.item, this.hot = false, this.timed = true});
 
   /// Stable across rebuilds: what the row animates by.
   final String key;
@@ -38,6 +39,9 @@ class HeadLine {
   /// The inbox item behind it; null for a stuck worker.
   final WaitItem? item;
   final bool hot;
+
+  /// "4 דק'" at its end. Not for a fault the system caught: its [word] says how many times and since when.
+  final bool timed;
 }
 
 class HeadData {
@@ -54,7 +58,9 @@ class HeadData {
 
   /// The row of a waiting item.
   static HeadLine lineOf(WaitItem w) {
-    final kicker = w.kicker.split(' · ').first;
+    // The system's card for a fault (error-watch.ts): "תפסתי תקלה · 3 פעמים מ-13:40", whole, in place of the time.
+    final caught = isCaughtFault(w.from, w.askId);
+    final kicker = caught ? w.kicker : w.kicker.split(' · ').first;
     final h = hot(w);
     return HeadLine(
       key: w.id,
@@ -64,6 +70,7 @@ class HeadData {
       at: w.createdAt,
       item: w,
       hot: h,
+      timed: !caught,
     );
   }
 
@@ -447,7 +454,7 @@ class _LineRow extends StatelessWidget {
     final store = StoreScope.of(context);
     final d = store.data!;
     final name = d.who(l.from).name;
-    final time = HeadData.ago(l.at, now);
+    final time = l.timed ? HeadData.ago(l.at, now) : '';
     final second = T.small.copyWith(color: p.text2);
     void open() {
       final item = l.item;
@@ -483,7 +490,9 @@ class _LineRow extends StatelessWidget {
                     Expanded(
                       child: l.hot
                           ? WordFit(lead: '${l.word} ', leadStyle: const TextStyle(fontWeight: FontWeight.w700), text: '· $name', style: second)
-                          : WordFit(lead: '$name ', text: l.word.isEmpty ? ' ' : '· ${l.word}', style: second),
+                          : !l.timed
+                              ? WordFit(lead: '', text: l.word, style: second) // a fault: the system's face says who
+                              : WordFit(lead: '$name ', text: l.word.isEmpty ? ' ' : '· ${l.word}', style: second),
                     ),
                     if (time.isNotEmpty) ...[const SizedBox(width: 8), Text(time, style: second.copyWith(fontFeatures: _tabular))],
                   ]),
@@ -555,7 +564,7 @@ List<DecisionButton>? decisionKeysOf(BuildContext context, WaitItem item) {
     case WaitKind.blockingAsk:
     case WaitKind.softAsk:
       if (item.askId == null) return null;
-      return DecisionKeys.ask(item.options, onPick: (o) => store.answerWait(item, o), onOther: () {
+      return DecisionKeys.ask(item.options, other: !isCaughtFault(item.from, item.askId), onPick: (o) => store.answerWait(item, o), onOther: () {
         if (!(store.data?.canChat(item.from) ?? false)) return Nav.waitItem(context, item);
         ChatScreen.pendingTarget[item.from] = item.askId!;
         Nav.chat(context, item.from, quote: Quote(author: store.nameOf(item.from), text: (item.headline ?? item.body).split('\n').first, askId: item.askId), focus: true);

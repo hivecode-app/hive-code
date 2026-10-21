@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../data/error_report.dart';
 import '../data/store.dart';
 import '../model/models.dart';
 import '../theme/tokens.dart';
@@ -236,7 +237,7 @@ class UpdateStrip extends StatelessWidget {
         UpdatePhase.failed => [
             Ic('error', size: 17, color: p.text2),
             const SizedBox(width: 6),
-            Expanded(child: Text('העדכון לא הצליח.', style: meta)),
+            Expanded(child: Text('העדכון לא הצליח.${ErrorReports.instance.active ? ' ${SentNote.text}.' : ''}', style: meta)),
             action('לנסות שוב', update.install),
             close,
           ],

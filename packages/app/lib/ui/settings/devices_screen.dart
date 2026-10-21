@@ -27,6 +27,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
   List<PasskeyInfo> passkeys = const [];
   PairCode? pairCode;
   String? error;
+  bool errorFault = false;
   bool loading = true;
 
   @override
@@ -62,7 +63,12 @@ class _DevicesScreenState extends State<DevicesScreen> {
         error = null;
       });
     } on AuthFailure catch (e) {
-      if (mounted) setState(() => error = e.message);
+      if (mounted) {
+        setState(() {
+          error = e.message;
+          errorFault = e.fault;
+        });
+      }
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -72,7 +78,12 @@ class _DevicesScreenState extends State<DevicesScreen> {
     try {
       await f();
     } on AuthFailure catch (e) {
-      if (mounted) setState(() => error = e.message);
+      if (mounted) {
+        setState(() {
+          error = e.message;
+          errorFault = e.fault;
+        });
+      }
     }
     await _reload();
   }
@@ -112,7 +123,12 @@ class _DevicesScreenState extends State<DevicesScreen> {
       final c = await client!.newPairCode(session!.token);
       if (mounted) setState(() => pairCode = c);
     } on AuthFailure catch (e) {
-      if (mounted) setState(() => error = e.message);
+      if (mounted) {
+        setState(() {
+          error = e.message;
+          errorFault = e.fault;
+        });
+      }
     }
   }
 
@@ -136,22 +152,14 @@ class _DevicesScreenState extends State<DevicesScreen> {
           Expanded(
             child: ListView(padding: EdgeInsets.zero, children: [
               if (loading)
-                Padding(padding: const EdgeInsets.all(24), child: Center(child: Spin(child: Ic('progress_activity', color: p.text2))))
+                Padding(padding: const EdgeInsets.all(24), child: Center(child: LoadingWatch(screen: 'הגדרות · מכשירים', child: Spin(child: Ic('progress_activity', color: p.text2)))))
               else if (session == null)
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Text('המכשיר הזה לא מחובר לחברה, ולכן אין כאן מכשירים.', style: T.secondary.copyWith(color: p.text2)),
                 )
               else ...[
-                if (error != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Ic('error', size: 18, color: p.urgent),
-                      const SizedBox(width: 6),
-                      Expanded(child: Text(error!, style: T.secondary.copyWith(color: p.text))),
-                    ]),
-                  ),
+                if (error != null) ShownError(error!, screen: 'הגדרות · מכשירים', padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), report: errorFault),
                 Section('מכשירים', top: 8, count: devices == null ? null : '${devices!.length}'),
                 ListBlock(inset: 16, children: [
                   for (final d in devices ?? const <DeviceInfo>[])

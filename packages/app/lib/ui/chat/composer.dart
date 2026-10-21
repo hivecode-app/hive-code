@@ -86,9 +86,14 @@ class _ComposerState extends State<Composer> {
     widget.onSent?.call();
   }
 
-  void _fail(String message) {
+  /// [fault]: sent to hq as well (error_report.dart); his own to fix (a permission, too short) only shown.
+  void _fail(String message, {bool fault = true}) {
     final s = StoreScope.read(context);
-    s.error = message;
+    if (fault) {
+      s.error = message;
+    } else {
+      s.notice(message);
+    }
     s.touch();
   }
 
@@ -97,13 +102,13 @@ class _ComposerState extends State<Composer> {
     if (transcribing || _starting) return;
     final dict = Dictation.instance;
     if (recording) return _stopAndTranscribe();
-    if (dict.client == null) return _fail('ההכתבה לא מחוברת בגרסה הזו. אפשר להכתיב דרך המיקרופון שבמקלדת.');
+    if (dict.client == null) return _fail('ההכתבה לא מחוברת בגרסה הזו. אפשר להכתיב דרך המיקרופון שבמקלדת.', fault: false);
     // Starting waits on the permission prompt; taps meanwhile must not start a second recording.
     _starting = true;
     try {
       await dict.recorder.start();
     } on DictationError catch (e) {
-      if (mounted) _fail(e.message);
+      if (mounted) _fail(e.message, fault: e.fault);
       return;
     } catch (_) {
       if (mounted) _fail(kMicFailed);
@@ -134,12 +139,12 @@ class _ComposerState extends State<Composer> {
     });
     try {
       final pcm = await dict.recorder.stop();
-      if (pcm.length < kDictateRate * 2 ~/ 4) throw const DictationError('ההקלטה קצרה מדי. אפשר ללחוץ, לדבר, ואז ללחוץ שוב.');
+      if (pcm.length < kDictateRate * 2 ~/ 4) throw const DictationError('ההקלטה קצרה מדי. אפשר ללחוץ, לדבר, ואז ללחוץ שוב.', fault: false);
       final text = await dict.client!.transcribe(wavFromPcm(pcm));
       if (!mounted) return;
       _insert(text);
     } on DictationError catch (e) {
-      if (mounted) _fail(e.message);
+      if (mounted) _fail(e.message, fault: e.fault);
     } catch (_) {
       if (mounted) _fail(kMicFailed);
     } finally {
@@ -192,7 +197,12 @@ class _ComposerState extends State<Composer> {
         _addImage(await f.readAsBytes(), f.name);
       }
     } on PlatformException catch (e) {
-      if (mounted) _fail(e.code.contains('camera') ? 'אין גישה למצלמה. אפשר לאשר אותה בהגדרות המכשיר.' : 'לא הצלחתי לפתוח את התמונות. אפשר לנסות שוב.');
+      if (!mounted) return;
+      if (e.code.contains('camera')) {
+        _fail('אין גישה למצלמה. אפשר לאשר אותה בהגדרות המכשיר.', fault: false);
+      } else {
+        _fail('לא הצלחתי לפתוח את התמונות. אפשר לנסות שוב.');
+      }
     } catch (_) {
       if (mounted) _fail('לא הצלחתי לפתוח את התמונות. אפשר לנסות שוב.');
     }

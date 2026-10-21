@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../data/backend.dart';
+import '../../data/error_report.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
@@ -575,7 +576,8 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       EventLine() => _eventLine(it),
       HandoffCard() => HandoffCardView(card: it, from: widget.identityId),
-      ErrorLine() => ServiceLine(text: it.text, icon: 'error', iconColor: context.p.urgent),
+      // A turn that ended in an error: hq caught it itself (turn.error, error-watch.ts).
+      ErrorLine() => ServiceLine(text: ErrorReports.instance.active ? '${it.text} ${SentNote.text}.' : it.text, icon: 'error', iconColor: context.p.urgent),
       UnknownItem() => ServiceLine(text: 'אירוע: ${it.kind}'),
     };
   }
