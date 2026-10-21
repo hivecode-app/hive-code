@@ -165,8 +165,8 @@ Future<BuildContext> _pump(WidgetTester tester,
   // unless the test says otherwise.
   store.statusSeenAt = DateTime(2026, 10, 20, 18, 0);
   store.markChatsSeen(chatsSeen ?? _at);
-  // [head]: the head alone (legacyHead): the phone now opens with HomeV2 (task 205), and these cover the widget itself.
-  await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: head ? legacyHead() : null));
+  // [head]: the home alone (homeAlone), unfolded.
+  await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: head ? homeAlone() : null));
   await tester.pump();
   return tester.element(find.byType(Scaffold).first);
 }
@@ -180,16 +180,6 @@ Future<void> _shot(WidgetTester tester, String name) async {
 const _tall = Size(342, 1500);
 
 void main() {
-  testWidgets('chats: what waits is the card on top, a face and a line each; nothing else above the list', (tester) async {
-    await _pump(tester, earlierWaiting: true, head: true);
-    expect(find.byType(ChatsHead), findsOneWidget);
-    expect(findShown('מיכל, תפעול עסקי בבוט ההזמנות, נכנסת לעבודה'), findsOneWidget);
-    expect(findShown('עדי · GO לפרודקשן'), findsOneWidget);
-    expect(findShown('בועז · GO לפרודקשן'), findsOneWidget);
-    expect(find.textContaining('מאז'), findsNothing, reason: 'he was here just now: nothing since');
-    await _shot(tester, '02-chats-waiting');
-  });
-
   testWidgets('status: what waits, what finished since the last visit, a line per project', (tester) async {
     final ctx = await _pump(tester, size: _tall, earlierWaiting: true);
     NavScope.read(ctx).go(AppTab.status);
@@ -329,7 +319,7 @@ void main() {
     expect(tasks.single.worker, 'agent-company-t14');
   });
 
-  // ── the head: one card of what needs him (t63) ──────────────────────────
+  // ── the home alone: what needs him, the blocks and the lanes ───────────────
 
   Future<void> headShot(WidgetTester tester, String name) async {
     await tester.pumpAndSettle();
@@ -338,54 +328,6 @@ void main() {
   }
 
   final at19 = DateTime(2026, 10, 20, 19, 0);
-
-  testWidgets('head: everything. Burning first and heavier, then what waits, then "since" in one folded line', (tester) async {
-    await _pump(tester, head: true, earlierWaiting: true, burning: true, summaries: true, chatsSeen: at19);
-    expect(findShown('האתר של החנות לא עונה'), findsOneWidget);
-    expect(findShown('תקלה בפרודקשן · רותם'), findsOneWidget);
-    expect(find.text("4 דק'"), findsOneWidget, reason: 'how long, at the end');
-    final title = tester.widget<RichText>(findShown('האתר של החנות לא עונה'));
-    expect(title.text.style?.fontWeight ?? (title.text as TextSpan).children?.first.style?.fontWeight, isNotNull);
-    // The order: burning, waiting, since.
-    double y(String s) => tester.getTopLeft(findShown(s)).dy;
-    expect(y('האתר של החנות לא עונה'), lessThan(y('עדי · GO לפרודקשן')));
-    expect(y('בועז · GO לפרודקשן'), lessThan(y('מאז 19:00')));
-    expect(find.text('ועוד 4'), findsOneWidget);
-    expect(findShown('שרת 2.6.7 יציב'), findsNothing, reason: 'folded: only the newest sentence');
-    expect(find.bySemanticsLabel(RegExp(r'^בוער, תקלה בפרודקשן, רותם, לפני 4 דקות\. האתר של החנות לא עונה$')), findsOneWidget);
-    expect(find.bySemanticsLabel(RegExp(r'^מחכה לך, GO לפרודקשן, עדי')), findsOneWidget);
-    expect(find.bySemanticsLabel('מאז 19:00, הסתיימו 5 דברים'), findsOneWidget);
-    await headShot(tester, 'all');
-  });
-
-  testWidgets('head: "since" opens inside the card, every sentence with who and when; a second tap folds it', (tester) async {
-    await _pump(tester, head: true, summaries: true, chatsSeen: at19, size: const Size(342, 900));
-    await tester.tap(findShown('מאז 19:00'));
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(findShown('שרת 2.6.7 יציב אחרי 24 שעות'), findsOneWidget, reason: 'opening, animated');
-    await tester.pumpAndSettle();
-    for (final line in _summaries.values) {
-      expect(findShown(line), findsWidgets, reason: line);
-    }
-    await headShot(tester, 'since-open');
-    await tester.tap(findShown('מאז 19:00'));
-    await tester.pumpAndSettle();
-    expect(findShown('שרת 2.6.7 יציב'), findsNothing);
-  });
-
-  testWidgets('head: quiet. Nothing burns, waits or finished since: no card at all', (tester) async {
-    await _pump(tester, head: true);
-    expect(tester.getSize(find.byType(ChatsHead, skipOffstage: false)).height, 0);
-    await headShot(tester, 'quiet');
-  });
-
-  testWidgets('head: dark, and text at 130%', (tester) async {
-    await _pump(tester, head: true, earlierWaiting: true, burning: true, summaries: true, chatsSeen: at19, dark: true);
-    await headShot(tester, 'dark');
-    await tester.pumpWidget(const SizedBox());
-    await _pump(tester, head: true, earlierWaiting: true, burning: true, summaries: true, chatsSeen: at19, textScale: 1.3);
-    await headShot(tester, 'text-130');
-  });
 
   testWidgets('head: a tap on what waits opens its page, and "לשיחה עם" from there the conversation', (tester) async {
     await _pump(tester, head: true, earlierWaiting: true);
@@ -399,7 +341,7 @@ void main() {
     expect(tester.widget<ChatScreen>(find.byType(ChatScreen)).identityId, 'boaz');
   });
 
-  testWidgets('head: a swipe is "לא עכשיו"; a handled row folds away in 200ms; the empty card folds too', (tester) async {
+  testWidgets('head: a swipe is "לא עכשיו"; a handled row folds away in 200ms', (tester) async {
     final ctx = await _pump(tester, head: true, earlierWaiting: true);
     final store = StoreScope.read(ctx);
     final adi = store.data!.waiting.firstWhere((w) => w.from == 'adi');
@@ -409,18 +351,18 @@ void main() {
     expect(adi.state, WaitState.notNow);
     expect(findShown('עדי · GO לפרודקשן'), findsNothing);
     expect(findShown('בועז · GO לפרודקשן'), findsOneWidget);
-    final h = tester.getSize(find.byType(ChatsHead, skipOffstage: false)).height;
-    // Answered elsewhere: the row shrinks and goes; it was the last one, so the card folds with it.
+    // Answered elsewhere: the row shrinks and goes.
+    final row = find.ancestor(of: findShown('בועז · GO לפרודקשן'), matching: find.byType(SizeTransition)).first;
+    final h = tester.getSize(row).height;
     boaz.state = WaitState.answered;
     store.touch();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    final mid = tester.getSize(find.byType(ChatsHead, skipOffstage: false)).height;
+    final mid = tester.getSize(row).height;
     expect(mid, greaterThan(0));
     expect(mid, lessThan(h));
-    await tester.pump(const Duration(milliseconds: 150));
-    await tester.pump();
-    expect(tester.getSize(find.byType(ChatsHead, skipOffstage: false)).height, 0);
+    await tester.pumpAndSettle();
+    expect(findShown('בועז · GO לפרודקשן'), findsNothing);
     // Back (the "לא עכשיו" undone on another device): it comes in again.
     adi.state = WaitState.open;
     store.touch();
@@ -572,24 +514,6 @@ void main() {
     await tester.tap(find.byIcon(kIcons['close']!));
     await tester.pumpAndSettle();
     expect(find.text('מחכה לך'), findsOneWidget, reason: 'the legend is back');
-  });
-
-  testWidgets('head: swiping the last row folds the card without bringing the swiped row back', (tester) async {
-    final ctx = await _pump(tester, head: true, earlierWaiting: true);
-    final store = StoreScope.read(ctx);
-    await tester.drag(findShown('עדי · GO לפרודקשן'), const Offset(-300, 0));
-    await tester.pumpAndSettle();
-    await tester.drag(findShown('בועז · GO לפרודקשן'), const Offset(-300, 0));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    expect(store.data!.waiting.every((w) => w.state == WaitState.notNow), isTrue);
-    expect(tester.getSize(find.byType(ChatsHead, skipOffstage: false)).height, 0);
-    // Back again later: it comes in again.
-    final adi = store.data!.waiting.firstWhere((w) => w.from == 'adi');
-    adi.state = WaitState.open;
-    store.touch();
-    await tester.pumpAndSettle();
-    expect(findShown('עדי · GO לפרודקשן'), findsOneWidget);
   });
 
   test('project: each worker once in who', () {

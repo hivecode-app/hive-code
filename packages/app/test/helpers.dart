@@ -62,23 +62,16 @@ Future<AppStore> pumpApp(WidgetTester tester, {Widget? home, bool dark = false, 
   return store;
 }
 
-/// The head the phone opened with before task 205, alone: hq's recipe (HomeBlocks), else the card (ChatsHead).
-/// The phone now opens with HomeV2 in the list (convs_v2.dart); these tests cover the widgets themselves.
-Widget legacyHead() => const _LegacyHead();
+/// The home alone (HomeV2, unfolded): the phone has it as the list's first item (convs_v2.dart) and the desktop
+/// in the main column (desktop.dart); these tests cover the widget itself.
+Widget homeAlone() => const _HomeAlone();
 
-class _LegacyHead extends StatelessWidget {
-  const _LegacyHead();
+class _HomeAlone extends StatelessWidget {
+  const _HomeAlone();
   @override
   Widget build(BuildContext context) {
-    final store = StoreScope.of(context);
-    final d = store.data;
+    final d = StoreScope.of(context).data;
     if (d == null) return const SizedBox.shrink();
-    final now = CompanyTime.now();
-    final since = store.chatsSeenAt ?? dayStart(now);
-    return Scaffold(
-      body: ListView(padding: EdgeInsets.zero, children: [
-        if (d.home case final recipe?) HomeBlocks(recipe: recipe, data: d, now: now, since: since) else ChatsHead(data: HeadData.of(d, since: since), since: since, now: now),
-      ]),
-    );
+    return Scaffold(body: ListView(padding: EdgeInsets.zero, children: [HomeV2(recipe: d.home, data: d, now: CompanyTime.now())]));
   }
 }

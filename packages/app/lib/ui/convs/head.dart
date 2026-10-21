@@ -1,10 +1,7 @@
-// The head of the chats screen: one card, like iOS's notification summary, with only what needs him
-// or changed since he was here. Each part only when it has something; with none, there is no card.
-// 1. בוער: a production failure, a message that did not get through, a stuck worker. First, and heavier.
-// 2. מחכה לך: a face per item, its headline, who and what kind; a tap opens the card in the chat (#79),
-//    a swipe is "לא עכשיו" (#74).
-// 3. מאז שהיית פה: one folded line; a tap opens every sentence inside the card.
-// Hierarchy is type and space only: no color, no fills, one hairline between the parts (design-taste).
+// What needs him, as rows for the home (home_v2.dart): "בוער" (a production failure, a message that did not get
+// through, a stuck worker; first, and heavier) and "מחכה לך" (a face per item, its headline, who and what kind;
+// a tap opens the card in the chat (#79), a swipe is "לא עכשיו" (#74), a decision is taken right on the row).
+// Hierarchy is type and space only: no color, no fills (design-taste).
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
@@ -127,108 +124,6 @@ class HeadData {
 const _kMotion = Duration(milliseconds: 200);
 const _kCurve = Curves.easeOutCubic;
 final _tabular = [const FontFeature.tabularFigures()];
-
-/// The card. Nothing when there is nothing; when it empties it folds away.
-class ChatsHead extends StatefulWidget {
-  const ChatsHead({super.key, required this.data, required this.since, required this.now});
-  final HeadData data;
-  final DateTime since;
-  final DateTime now;
-
-  @override
-  State<ChatsHead> createState() => _ChatsHeadState();
-}
-
-class _ChatsHeadState extends State<ChatsHead> with SingleTickerProviderStateMixin {
-  late final AnimationController _card = AnimationController(vsync: this, duration: _kMotion, value: widget.data.empty ? 0 : 1);
-  late final _cardCurve = CurvedAnimation(parent: _card, curve: _kCurve);
-
-  /// What the card shows: the data, or while it folds away, the last data it had.
-  late HeadData _shown = widget.data;
-
-  /// "מאז שהיית פה" opened.
-  bool _open = false;
-
-  /// Rows swiped away: their Dismissible already shrank them, they leave without a second animation.
-  final _swiped = <String>{};
-
-  @override
-  void didUpdateWidget(ChatsHead old) {
-    super.didUpdateWidget(old);
-    if (!widget.data.empty) {
-      _shown = widget.data;
-      _card.forward();
-    } else if (!_shown.empty) {
-      // Folding with the last data it had, minus rows a swipe already took (their Dismissible is gone).
-      final h = _shown;
-      _shown = HeadData(
-        burning: [for (final l in h.burning) if (!_swiped.contains(l.key)) l],
-        waiting: [for (final l in h.waiting) if (!_swiped.contains(l.key)) l],
-        done: h.done,
-      );
-      _card.reverse().whenComplete(() {
-        if (!mounted || !widget.data.empty) return;
-        setState(() => _shown = const HeadData());
-        _swiped.clear();
-      });
-    }
-    if (widget.data.done.isEmpty) _open = false;
-  }
-
-  @override
-  void dispose() {
-    _cardCurve.dispose();
-    _card.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Empty while folding (the last row swiped away): the frame still folds, it doesn't snap.
-    if (_shown.empty && _card.value == 0) return const SizedBox.shrink();
-    final p = context.p;
-    final h = _shown;
-    final rows = <(String, Widget)>[];
-    for (final l in h.burning) {
-      rows.add((l.key, _LineRow(l: l, now: widget.now, onSwiped: () => _swiped.add(l.key))));
-    }
-    if (h.burning.isNotEmpty && h.waiting.isNotEmpty) rows.add(('sep:waiting', _Hairline(p.line)));
-    for (final l in h.waiting) {
-      rows.add((l.key, _LineRow(l: l, now: widget.now, onSwiped: () => _swiped.add(l.key))));
-    }
-    if (h.done.isNotEmpty) {
-      if (h.burning.isNotEmpty || h.waiting.isNotEmpty) rows.add(('sep:since', _Hairline(p.line)));
-      rows.add(('since', SinceBlock(data: SinceData(since: widget.since, items: h.done), now: widget.now, open: _open, onToggle: () => setState(() => _open = !_open))));
-    }
-    return SizeTransition(
-      sizeFactor: _cardCurve,
-      alignment: AlignmentDirectional.topCenter,
-      child: FadeTransition(
-        opacity: _card,
-        child: Container(
-          color: p.surface,
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: Semantics(
-            container: true,
-            label: 'מה צריך ממך',
-            explicitChildNodes: true,
-            child: Container(
-              decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: p.line)),
-              clipBehavior: Clip.antiAlias,
-              child: Material(
-                type: MaterialType.transparency,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: _Animated(rows: rows, skip: _swiped),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 /// "בוער" as a block of its own (the home recipe's `alert`): [items] that burn (production failures, messages that
 /// did not get through) and the [stuck] workers, a row each, in the card's look and motion.
@@ -384,13 +279,6 @@ class _AnimatedState extends State<_Animated> with TickerProviderStateMixin {
             ),
           ),
       ]);
-}
-
-class _Hairline extends StatelessWidget {
-  const _Hairline(this.color);
-  final Color color;
-  @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Container(height: 1, color: color));
 }
 
 /// A face: the worker's monogram, and on it a small badge with the kind of thing.

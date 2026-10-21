@@ -40,18 +40,23 @@ class _DesktopFrameState extends State<DesktopFrame> {
     return f != null && f != focus && f.context?.findAncestorWidgetOfExactType<EditableText>() != null;
   }
 
+  /// The main column shows a conversation (not the home).
+  static bool _chatShown(AppNav nav, AppStore store) => !(nav.tab == AppTab.chats && store.homeOpen);
+
   KeyEventResult _onKey(FocusNode _, KeyEvent e) {
     if (e is! KeyDownEvent) return KeyEventResult.ignored;
     final nav = NavScope.read(context);
     final store = StoreScope.read(context);
     final k = e.physicalKey;
     final ctrl = HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isMetaPressed;
+    // With the home open no conversation is on the screen: what acts on one (stop, answer) does nothing.
+    final chatShown = _chatShown(nav, store);
     if (ctrl && k == PhysicalKeyboardKey.keyK) {
       _quickSwitch();
       return KeyEventResult.handled;
     }
     if (ctrl && k == PhysicalKeyboardKey.period) {
-      store.stop(store.currentConversation);
+      if (chatShown) store.stop(store.currentConversation);
       return KeyEventResult.handled;
     }
     if (k == PhysicalKeyboardKey.escape) {
@@ -92,6 +97,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
     const digits = [PhysicalKeyboardKey.digit1, PhysicalKeyboardKey.digit2, PhysicalKeyboardKey.digit3, PhysicalKeyboardKey.digit4];
     final di = digits.indexOf(k);
     if (di >= 0) {
+      if (!chatShown) return KeyEventResult.handled;
       final chat = store.data?.chats[store.currentConversation];
       final ask = shortcutAsk(chat);
       final opts = ask == null ? const <AskOption>[] : shortcutOptions(ask);
@@ -251,7 +257,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
             if (side != null && ctxCol) SizedBox(width: 330, child: Container(color: p.surface, child: side)),
           ]),
         ),
-        const _KeyBar(),
+        _KeyBar(chat: _chatShown(nav, store)),
       ]),
     );
   }
@@ -271,7 +277,10 @@ const kShortcuts = [
 ];
 
 class _KeyBar extends StatelessWidget {
-  const _KeyBar();
+  const _KeyBar({required this.chat});
+
+  /// A conversation is on the screen: its keys (answer, stop) are listed too.
+  final bool chat;
   @override
   Widget build(BuildContext context) {
     final p = context.p;
@@ -287,8 +296,10 @@ class _KeyBar extends StatelessWidget {
         item(['Ctrl K'], 'מעבר מהיר'),
         item(['Ctrl F'], 'חיפוש בשיחה'),
         item(['G', 'I'], 'מחכה לך'),
-        item(['1', '3'], 'תשובה לשאלה'),
-        item(['Ctrl .'], 'עצירת העובד'),
+        if (chat) ...[
+          item(['1', '3'], 'תשובה לשאלה'),
+          item(['Ctrl .'], 'עצירת העובד'),
+        ],
         item(['?'], 'כל הקיצורים'),
       ]),
     );

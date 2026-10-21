@@ -4,7 +4,6 @@
 import 'dart:convert';
 
 import 'package:agent_company/data/hq_backend.dart' show mapSnapshot;
-import 'package:agent_company/data/store.dart';
 import 'package:agent_company/model/home_recipe.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/blocks/blocks.dart';
@@ -160,25 +159,4 @@ void main() {
     expect(find.text('אין משימות פתוחות'), findsOneWidget);
   });
 
-  testWidgets('the home block: the recipe\'s task, drawn from the live list', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 400));
-    store.data!.openTasks = _tasks();
-    final ctx = tester.element(find.byType(Scaffold).first);
-    Navigator.of(ctx).push(MaterialPageRoute(
-      builder: (context) => Scaffold(
-        body: ListView(children: [
-          HomeBlocks(
-            recipe: HomeRecipe(version: 1, composedBy: 'adi', composedAt: kDemoNow, blocks: [HomeBlock.fromJson({'type': 'tasks', 'tasks': [83]})!]),
-            data: StoreScope.of(context).data!,
-            now: kDemoNow,
-            since: kDemoNow,
-          ),
-        ]),
-      ),
-    ));
-    await tester.pumpAndSettle();
-    expect(find.byType(OpenTaskRow), findsOneWidget);
-    expect(findShown('דוח שבועי'), findsOneWidget);
-    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/blocks/open-tasks-block.png'));
-  });
 }

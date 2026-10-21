@@ -1,3 +1,4 @@
+import 'package:agent_company/data/store.dart';
 import 'package:agent_company/ui/nav.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +13,10 @@ void main() {
       await pumpApp(tester, dark: dark, size: const Size(1440, 860));
       final ctx = tester.element(find.byType(Scaffold).first);
       NavScope.read(ctx).go(AppTab.chats);
+      // The app opens on the home (desktop_home_test.dart); a conversation shows the chat and its context.
+      final store = StoreScope.read(ctx);
+      store.homeOpen = false;
+      store.touch();
       await tester.pump();
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/desktop_$t.png'));
     });

@@ -1,63 +1,22 @@
-// The head of the chats screen drawn from hq's recipe (ui/convs/home_blocks.dart), on a sample hq at
-// 20/10/2026 23:10 (test/fixtures/samples/hq_night: /api/board, /api/inbox, /api/asks, /api/toggles and
-// /api/messages?identity=owner, in the shape of a real day of hq, with invented projects, titles and messages). Three recipes the way עדי would
-// compose them on that day ("בוקר שקט", "יש תקלה", "יום עמוס"), and hq's own default. The two GOs of
-// "יום עמוס" are the ones of 19:57 (samples/hq_evening/inbox-earlier); the incident of "יש תקלה" is made up, and so is
-// "מה לבדוק" (#108 was not deployed at 23:10): two tasks of the day, marked the way their workers would.
+// What hq's recipe shows on this device (ui/convs/home_blocks.dart liveBlocks), on a sample hq at 20/10/2026 23:10
+// (test/fixtures/samples/hq_night). The home draws it in HomeV2 (home_v2_test.dart); these cover the recipe itself.
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:agent_company/data/backend.dart';
-import 'package:agent_company/data/fake_backend.dart';
 import 'package:agent_company/data/hq_backend.dart';
-import 'package:agent_company/data/store.dart';
-import 'package:agent_company/main.dart';
 import 'package:agent_company/model/home_recipe.dart';
 import 'package:agent_company/model/models.dart';
-import 'package:agent_company/ui/blocks/blocks.dart';
-import 'package:agent_company/ui/common.dart';
 import 'package:agent_company/ui/convs/conversations_screen.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
-import 'helpers.dart';
 
 const _dir = 'test/fixtures/samples/hq_night';
 final _at = DateTime(2026, 10, 20, 23, 10);
-final _seen = DateTime(2026, 10, 20, 20, 0);
 
 Map<String, dynamic> _json(String path) => jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
 List<Map<String, dynamic>> _list(String name, String key) => (_json('$_dir/$name.json')[key] as List).cast<Map<String, dynamic>>();
 
-final _incident = <String, dynamic>{
-  'id': 90,
-  'kind': 'incident',
-  'title': 'האתר של החנות לא עונה',
-  'body': 'shop.example.com/healthz מחזיר 502 כבר 4 דקות.',
-  'from_identity': 'rotem',
-  'urgency': 'urgent',
-  'blocking': true,
-  'ref': 'rotem-1:mock',
-  'state': 'open',
-  'created_at': DateTime(2026, 10, 20, 23, 6).millisecondsSinceEpoch,
-  'link': null,
-  'headline': 'האתר של החנות לא עונה',
-  'snoozed_at': null,
-};
-
 List<Map<String, dynamic>> get _gos => (_json('test/fixtures/samples/hq_evening/inbox-earlier.json')['items'] as List).cast<Map<String, dynamic>>();
-
-class _Snapshot extends FakeBackend {
-  _Snapshot(this.snapshot) : super(simulate: false);
-  final CompanyData snapshot;
-  @override
-  CompanyData? get data => snapshot;
-  @override
-  SystemStatus get status => const SystemStatus(LinkState.online);
-  @override
-  Future<void> start() async => notifyListeners();
-}
 
 final _awaiting = [
   AwaitingTask(id: 49, kind: AwaitingKind.deploy, title: 'מיזוג מה שגיל הכניס בשרת 2.6.9, והכנה לפריסה', summary: 'ורקר 2.6.10 מוכן לפריסה',
@@ -82,224 +41,7 @@ CompanyData _data({List<Map<String, dynamic>> inbox = const []}) {
 HomeRecipe _recipe(List<Map<String, dynamic>> blocks, {String by = 'adi', DateTime? at, int version = 7}) =>
     HomeRecipe.fromJson({'version': version, 'composed_by': by, 'composed_at': (at ?? DateTime(2026, 10, 20, 23, 8)).millisecondsSinceEpoch, 'source': 'agent', 'blocks': blocks});
 
-// ── the recipes, as עדי would compose them on the day ──
-
-/// Nothing waits, three tasks run in the company: a line, who is at work, the day, what finished.
-final _quiet = _recipe([
-  {'type': 'headline', 'text': 'שקט. שלוש משימות רצות בחברה, ושום דבר לא מחכה לך'},
-  {'type': 'people', 'identities': ['agent-company-t63', 'agent-company-t64', 'agent-company-t65'], 'caption': 'בונים את ראש המסך החדש'},
-  {'type': 'since', 'items': ['יש שלוש הצעות לראש מסך השיחות, מצולמות מהאפליקציה', 'המוקד הקולי מבין לאן הלקוח נוסע לפי "מ-" ו"ל-"', 'הפרויקט "החדשות" עבר לחברה, עם מתן כראש צוות']},
-  {'type': 'lanes', 'projects': ['agent-company', 'voice', 'shop-bot'], 'emphasis': 'quiet'},
-  {'type': 'note', 'text': 'בבוט ההזמנות שתי משימות של רון והילה מחכות למשבצת פנויה', 'icon': 'schedule', 'emphasis': 'quiet'},
-]);
-
-/// Lumo's site is down: that first and heavy, what Rotem knows, the project it stops.
-final _incidentRecipe = _recipe([
-  {'type': 'headline', 'text': 'האתר של החנות לא עונה כבר 4 דקות', 'emphasis': 'strong'},
-  {'type': 'alert', 'inbox': 90, 'emphasis': 'strong'},
-  {'type': 'note', 'text': 'רותם בודקת. בפעם הקודמת זה היה ה-ingress, וחזר אחרי הפעלה מחדש', 'icon': 'monitor_heart'},
-  {'type': 'project', 'project': 'shop-bot', 'note': 'הפריסה של 2.6.10 מחכה עד שהאתר יחזור'},
-  {'type': 'lanes', 'projects': ['shop-bot', 'shop', 'agent-company']},
-]);
-
-/// Two GOs wait, three tasks run, a lot finished: the decisions first, then the day.
-List<Map<String, dynamic>> get _busyBlocks => [
-      {'type': 'headline', 'text': 'יום עמוס: שני GO מחכים לך, ושלוש משימות רצות'},
-      {'type': 'waiting', 'inbox': [36, 34]},
-      {'type': 'awaiting', 'tasks': [49, 62]},
-      {'type': 'lanes', 'projects': ['agent-company', 'voice', 'shop-bot', 'news']},
-      {'type': 'project', 'project': 'agent-company', 'note': 'ראש המסך החדש בשלושה צוותים, מוכן לראות הלילה'},
-      {'type': 'project', 'project': 'voice'},
-      {'type': 'since', 'items': ['המוקד הקולי מבין לאן הלקוח נוסע לפי "מ-" ו"ל-"', 'תמונות בהודעה של עובד אליך מוצגות', 'הפרויקט "החדשות" עבר לחברה']},
-      {'type': 'note', 'text': 'שווה לאשר את 2.6.10 לפני הלילה, כדי שהקנרי ירוץ עד הבוקר', 'icon': 'rocket_launch'},
-    ];
-
-/// hq's own (home.ts defaultRecipe): a sentence, alert and waiting when there are, a line per project that moved today, since.
-HomeRecipe _default(CompanyData d, {bool quiet = true}) => HomeRecipe.fromJson({
-      'version': 0,
-      'composed_by': 'hq',
-      'composed_at': _at.millisecondsSinceEpoch,
-      'source': 'default',
-      'fallback': 'none',
-      'blocks': [
-        {'type': 'headline', 'text': 'משימה אחת בעבודה ו-3 הסתיימו ביממה האחרונה.'},
-        {'type': 'project', 'project': d.projects.firstWhere((p) => p.active).id, 'note': 'התמונות עולות גם מהטלפון'},
-        {'type': 'since', 'items': ['x']},
-        if (quiet) {'type': 'quiet', 'projects': [for (final p in d.projects.where((p) => p.active).skip(1)) p.id]},
-      ],
-    });
-
-Future<AppStore> _pump(WidgetTester tester, CompanyData d, HomeRecipe? recipe, {Size size = const Size(342, 1500), bool dark = false, double textScale = 1}) async {
-  await loadFonts();
-  Motion.frozen = true;
-  tester.platformDispatcher.textScaleFactorTestValue = textScale;
-  addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-  SharedPreferences.setMockInitialValues({});
-  tester.view.physicalSize = size * 2;
-  tester.view.devicePixelRatio = 2;
-  pinClock(_at);
-  addTearDown(tester.view.reset);
-  d.home = recipe;
-  final store = AppStore(_Snapshot(d));
-  await store.start();
-  store.markChatsSeen(_seen);
-  // The phone now opens with HomeV2 (task 205): the head alone, so this covers the widget itself.
-  await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: legacyHead()));
-  await tester.pumpAndSettle();
-  return store;
-}
-
-Future<void> _shot(WidgetTester tester, String name) async {
-  await tester.pumpAndSettle();
-  expect(tester.takeException(), isNull);
-  await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/sample_home/$name.png'));
-}
-
-/// The blocks on screen, top to bottom, by the card's label or the block's own widget.
-List<String> _order(WidgetTester tester) {
-  final out = <(double, String)>[];
-  void add(Finder f, String name) {
-    for (final e in f.evaluate()) {
-      final box = e.renderObject as RenderBox?;
-      if (box == null || !box.hasSize || box.size.height < 1) continue;
-      out.add((box.localToGlobal(Offset.zero).dy, name));
-    }
-  }
-
-  add(find.byType(Headline), 'headline');
-  add(find.byType(AlertBlock), 'alert');
-  add(find.byType(WaitingBlock), 'waiting');
-  add(find.byType(AwaitingBlock), 'awaiting');
-  add(find.byType(LanesBlock), 'lanes');
-  add(find.byType(ProjectBlock), 'project');
-  add(find.byType(PeopleBlock), 'people');
-  add(find.byType(SinceBlock), 'since');
-  add(find.byType(NoteBlock), 'note');
-  add(find.byType(QuietBlock), 'quiet');
-  out.sort((a, b) => a.$1.compareTo(b.$1));
-  return [for (final x in out) x.$2];
-}
-
 void main() {
-  testWidgets('"בוקר שקט": a line, who is at work, what finished, the day, a quiet note; who arranged it', (tester) async {
-    await _pump(tester, _data(), _quiet);
-    expect(_order(tester), ['headline', 'people', 'since', 'lanes', 'note']);
-    expect(findShown('שקט. שלוש משימות רצות בחברה'), findsOneWidget);
-    expect(findShown('בונים את ראש המסך החדש'), findsOneWidget);
-    expect(findShown('סודר ע״י עדי · 23:08'), findsOneWidget);
-    await _shot(tester, '1-quiet');
-  });
-
-  testWidgets('"יש תקלה": the incident first and heavy, then what is known and what it stops', (tester) async {
-    await _pump(tester, _data(inbox: [_incident]), _incidentRecipe);
-    expect(_order(tester), ['headline', 'alert', 'note', 'project', 'lanes']);
-    expect(findShown('תקלה בפרודקשן · רותם'), findsOneWidget);
-    expect(findShown('הפריסה של 2.6.10 מחכה עד שהאתר יחזור'), findsOneWidget);
-    await _shot(tester, '2-incident');
-  });
-
-  testWidgets('"יום עמוס": the decisions, the day, two projects in one card, what finished, a nudge', (tester) async {
-    await _pump(tester, _data(inbox: _gos), _recipe(_busyBlocks), size: const Size(342, 1900));
-    expect(_order(tester), ['headline', 'waiting', 'awaiting', 'lanes', 'project', 'project', 'since', 'note']);
-    expect(findShown('עדי · GO לפרודקשן'), findsOneWidget);
-    expect(findShown('בועז · GO לפרודקשן'), findsOneWidget);
-    await _shot(tester, '3-busy');
-  });
-
-  testWidgets('the default: hq\'s own shape, said quietly under it', (tester) async {
-    final d = _data();
-    await _pump(tester, d, _default(d), size: const Size(342, 1900));
-    expect(_order(tester), ['headline', 'project', 'since', 'quiet']);
-    final quiet = d.projects.where((p) => p.active).skip(1).toList();
-    expect(find.text('שקט גם ב:'), findsOneWidget);
-    expect(find.bySemanticsLabel('פתיחת ${quiet.first.name}'), findsOneWidget);
-    expect(find.text(quiet.last.name), findsOneWidget, reason: 'the last name has no comma');
-    expect(findShown('סדר קבוע'), findsOneWidget);
-    // hq's "since" is live: what finished after his last visit (20:00), not the recipe's words.
-    expect(findShown('מאז 20:00'), findsOneWidget);
-    await _shot(tester, '0-default');
-  });
-
-  testWidgets('the default, every project moved today: no "quiet" line', (tester) async {
-    final d = _data();
-    await _pump(tester, d, _default(d, quiet: false), size: const Size(342, 1900));
-    expect(_order(tester), ['headline', 'project', 'since']);
-    expect(find.text('שקט גם ב:'), findsNothing);
-  });
-
-  testWidgets('the default at text scale 1.3: the quiet names wrap whole, right to left', (tester) async {
-    final d = _data();
-    await _pump(tester, d, _default(d), size: const Size(342, 1900), textScale: 1.3);
-    await _shot(tester, '0-default-text13');
-  });
-
-  testWidgets('a new recipe moves: what stays keeps its place, what goes folds up, what comes opens', (tester) async {
-    final d = _data(inbox: _gos);
-    final store = await _pump(tester, d, _quiet, size: const Size(342, 1900));
-    expect(_order(tester), ['headline', 'people', 'since', 'lanes', 'note']);
-    d.home = _recipe(_busyBlocks, at: DateTime(2026, 10, 20, 23, 12), version: 8);
-    store.touch();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    // Mid-way: the people strip is leaving, what waits is coming in, both on screen at part height.
-    final people = tester.getSize(find.byType(PeopleBlock)).height;
-    expect(people, greaterThan(0));
-    expect(find.byType(WaitingBlock), findsOneWidget);
-    await tester.pumpAndSettle();
-    expect(find.byType(PeopleBlock), findsNothing);
-    expect(_order(tester), ['headline', 'waiting', 'awaiting', 'lanes', 'project', 'project', 'since', 'note']);
-    expect(findShown('סודר ע״י עדי · 23:12'), findsOneWidget);
-    expect(findShown('יום עמוס'), findsOneWidget, reason: 'the headline stayed and took its new words');
-  });
-
-  testWidgets('live data wins: an item that closed leaves the block at once; the block goes with its last item', (tester) async {
-    final d = _data(inbox: _gos);
-    final store = await _pump(tester, d, _recipe(_busyBlocks), size: const Size(342, 1900));
-    final adi = d.waiting.firstWhere((w) => w.from == 'adi');
-    final boaz = d.waiting.firstWhere((w) => w.from == 'boaz');
-    adi.state = WaitState.answered;
-    store.touch();
-    await tester.pumpAndSettle();
-    expect(findShown('עדי · GO לפרודקשן'), findsNothing);
-    expect(findShown('בועז · GO לפרודקשן'), findsOneWidget);
-    boaz.state = WaitState.answered;
-    store.touch();
-    await tester.pumpAndSettle();
-    expect(find.byType(WaitingBlock), findsNothing);
-    expect(_order(tester).take(2), ['headline', 'awaiting']);
-  });
-
-  testWidgets('two blocks of one kind are two rows, and a new recipe moves them like any other', (tester) async {
-    final d = _data();
-    final store = await _pump(tester, d, _recipe([
-      {'type': 'note', 'text': 'הערה ראשונה', 'icon': 'info'},
-      {'type': 'note', 'text': 'הערה שנייה', 'icon': 'info'},
-    ]));
-    expect(find.byType(NoteBlock), findsNWidgets(2));
-    expect(findShown('הערה ראשונה'), findsOneWidget);
-    d.home = _recipe([
-      {'type': 'note', 'text': 'הערה שנייה', 'icon': 'info'},
-      {'type': 'headline', 'text': 'כותרת'},
-      {'type': 'note', 'text': 'הערה שלישית', 'icon': 'info'},
-    ], version: 9);
-    store.touch();
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    expect(_order(tester), ['note', 'headline', 'note']);
-    expect(findShown('הערה שלישית'), findsOneWidget);
-  });
-
-  testWidgets('no recipe (an hq from before): the card alone, as before', (tester) async {
-    await _pump(tester, _data(inbox: _gos), null);
-    expect(find.byType(HomeBlocks), findsNothing);
-    expect(find.byType(ChatsHead), findsOneWidget);
-  });
-
-  testWidgets('dark', (tester) async {
-    await _pump(tester, _data(inbox: [_incident]), _incidentRecipe, dark: true);
-    await _shot(tester, '2-incident-dark');
-  });
-
   test('recipe: JSON round trip; a block this app doesn\'t know is left out; emphasis and keys', () {
     final r = HomeRecipe.fromJson({
       'version': 3, 'composed_by': 'adi', 'composed_at': 1, 'source': 'agent',

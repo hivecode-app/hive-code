@@ -7,6 +7,7 @@ import '../../data/backend.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import '../nav.dart';
+import 'data.dart';
 
 class QuietBlock extends StatelessWidget {
   const QuietBlock({super.key, required this.projects, required this.data, this.color});
@@ -20,7 +21,8 @@ class QuietBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
     final style = T.row2.copyWith(color: p.text2);
-    final known = {for (final x in data.projects) x.id: x};
+    // Names from the board; an hq that sent no projects gets them from the tickets, as everywhere.
+    final known = {for (final x in projectsByActivity(data)) x.id: x};
     // Material, not a coloured Container: the names' ripple is drawn on it.
     return Material(
       color: color ?? p.surface,

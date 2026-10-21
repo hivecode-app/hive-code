@@ -7,7 +7,6 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
-import '../entity_link.dart';
 import '../nav.dart';
 import '../blocks/tasks.dart';
 import 'convs_v2.dart';
@@ -66,8 +65,8 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         _QuickSwitch(onChanged: (v) => setState(() => q = v)),
         Expanded(
           child: ListView(padding: EdgeInsets.zero, children: [
-            // v2: the home is the first row; it opens in the main column (desktop.dart).
-            if (kDesignV2 && q.isEmpty) ...[HomeEntryRow(selected: store.homeOpen), Container(height: 1, color: p.line)],
+            // The home is the first row; it opens in the main column (desktop.dart).
+            if (q.isEmpty) ...[HomeEntryRow(selected: store.homeOpen), Container(height: 1, color: p.line)],
             for (final (i, c) in list.indexed) ...[
               if (i > 0) Padding(padding: const EdgeInsetsDirectional.only(start: 62), child: Container(height: 1, color: p.line)),
               ConversationRow(c: c, compact: true, selected: !store.homeOpen && store.currentConversation == c.identityId, opened: opened[c.identityId] ?? const []),
@@ -422,22 +421,6 @@ class UnreadPill extends StatelessWidget {
   }
 }
 
-/// Who is in the middle of a task of their own, and what (#53): a standing worker with a task in hand. The tasks
-/// someone handed to task workers, running or queued, are the line under the one who opened them ([openedTasks]).
-typedef WorkingLine = ({String text, String? who});
-
-Map<String, List<WorkingLine>> nowWorking(CompanyData d) {
-  final out = <String, List<WorkingLine>>{};
-  for (final who in d.identities.values) {
-    if (who.temp || who.id == d.managerId) continue;
-    final pr = d.presence[who.id];
-    if (pr == null || pr.status == WorkerStatus.resting || pr.status == WorkerStatus.done || pr.status == WorkerStatus.free) continue;
-    final task = pr.currentTask ?? pr.activity;
-    if (task != null && task.isNotEmpty) out[who.id] = [(text: plainTitle(task), who: null)];
-  }
-  return out;
-}
-
 /// "מה פתוח אצלי" (#128): the open tasks under each one who opened them (a lead, Yoav, a standing worker), queued
 /// ones too. A task worker that opened one is not a conversation here: its tasks go under its own opener's row.
 Map<String, List<OpenTask>> openedTasks(CompanyData d) {
@@ -461,68 +444,4 @@ Map<String, List<OpenTask>> openedTasks(CompanyData d) {
     if (id != null) (out[id] ??= []).add(t);
   }
   return out;
-}
-
-/// A conversation under "עכשיו בעבודה": the name and team, then the task with `play_arrow`.
-class WorkingRow extends StatelessWidget {
-  const WorkingRow({super.key, required this.c, required this.lines, this.opened = const []});
-  final ConversationSummary c;
-  final List<WorkingLine> lines;
-
-  /// The open tasks this one opened (#128), as in [ConversationRow].
-  final List<OpenTask> opened;
-  @override
-  Widget build(BuildContext context) {
-    final d = StoreScope.of(context).data!;
-    final p = context.p;
-    final who = d.who(c.identityId);
-    final unread = c.unread > 0;
-    return Material(
-      color: p.surface,
-      child: InkWell(
-        onTap: () => Nav.chat(context, c.identityId),
-        onLongPress: () => pickMute(context, c.identityId),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Monogram.of(d, c.identityId),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-                  Text(who.name, style: T.name.copyWith(color: p.text)),
-                  if (c.muted) ...[const SizedBox(width: 4), Ic('notifications_off', size: 16, color: p.text3, semantic: 'מושתקת')],
-                  const SizedBox(width: 6),
-                  Expanded(child: Rich(d.roleLine(c.identityId), maxLines: 1, style: T.secondary.copyWith(color: p.text2))),
-                  const SizedBox(width: 6),
-                  Text(c.time, style: T.meta.copyWith(color: unread && !c.muted ? p.text : p.text3, fontWeight: unread && !c.muted ? FontWeight.w700 : null)),
-                ]),
-                // A task worker's line opens that worker; the rest of the row, and the lead's unread count, the lead.
-                for (final (i, l) in lines.take(3).indexed)
-                  Row(children: [
-                    Expanded(
-                      child: EntityLink(
-                        identity: l.who == c.identityId ? null : l.who,
-                        minHeight: kLinkLine,
-                        borderRadius: BorderRadius.circular(8),
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 3),
-                          child: Row(children: [
-                            Ic('play_arrow', size: 18, fill: true, color: p.text),
-                            const SizedBox(width: 4),
-                            Expanded(child: Rich(l.text, auto: true, maxLines: 1, style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text))),
-                          ]),
-                        ),
-                      ),
-                    ),
-                    if (i == 0 && unread) ...[const SizedBox(width: 8), Padding(padding: const EdgeInsets.only(top: 3), child: UnreadPill(c.unread, muted: c.muted))],
-                  ]),
-                if (opened.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2), child: OpenTasksLine(identityId: c.identityId, tasks: opened)),
-              ]),
-            ),
-          ]),
-        ),
-      ),
-    );
-  }
 }

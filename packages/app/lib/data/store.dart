@@ -8,7 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../model/company_time.dart' as company_time;
 import '../model/models.dart';
-import '../theme/tokens.dart';
 import 'backend.dart';
 import 'error_report.dart';
 
@@ -70,8 +69,8 @@ class AppStore extends ChangeNotifier {
   /// Desktop: which conversation is open in the main column.
   String? selectedConversation;
 
-  /// v2 desktop: the main column shows the home (the app opens on it); opening a conversation closes it.
-  bool homeOpen = kDesignV2;
+  /// Desktop: the main column shows the home (the app opens on it); opening a conversation closes it.
+  bool homeOpen = true;
 
   /// Desktop selection with a default: the first conversation with something unread (not muted), else the manager.
   /// The default sticks once data is in: opening it reads it, and the selection must not then jump to the next unread one.
