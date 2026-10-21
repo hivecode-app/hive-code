@@ -4,3 +4,4 @@ export {
 } from './prime.ts';
 export * from './compact.ts';
 export * from './guard.ts';
+export * from './merge.ts';

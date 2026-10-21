@@ -6,10 +6,12 @@ import { homedir } from 'node:os';
 import { ENV, englishLines, hebrewReason, shiftDir, statePaths } from '@company/shared';
 import { writeCompactHandoff } from './compact.ts';
 import { checkToolUse } from './guard.ts';
+import { checkMerge, detectMerges } from './merge.ts';
 import { appendSpool, mkdirp, UNKNOWN_SHIFT } from './spool.ts';
 
 // Last-resort guard: a hook must never hold up the turn.
-setTimeout(() => process.exit(0), 3000).unref();
+const guardTimer = setTimeout(() => process.exit(0), 3000);
+guardTimer.unref();
 import { buildAdditionalContext, readPrimeFile } from './prime.ts';
 
 const stateRoot = statePaths(homedir(), process.env[ENV.stateDir] || undefined).root;
@@ -37,6 +39,26 @@ function readStdin(): Promise<string> {
   });
 }
 
+/** Merge gate (dir-0011): only a Bash command that merges a PR pays for `gh`. A check that does not finish in time blocks. */
+async function mergeGate(payload: unknown): Promise<string | null> {
+  const p = (payload ?? {}) as { tool_name?: unknown; tool_input?: { command?: unknown }; cwd?: unknown };
+  const command = p.tool_input?.command;
+  if (p.tool_name !== 'Bash' || typeof command !== 'string' || !/\bgh\b/.test(command)) return null;
+  const cwd = typeof p.cwd === 'string' && p.cwd ? p.cwd : process.cwd();
+  try {
+    if (!detectMerges(command, cwd).length) return null;
+    clearTimeout(guardTimer);
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<string>((res) => {
+      timer = setTimeout(() => res('מיזוג נחסם: בדיקת הסקירה לא רצה (הקריאה ל-`gh` לא הסתיימה בזמן), ואין מיזוג בלי שהיא עברה. מנסים שוב.'), 8000);
+    });
+    try { return await Promise.race([checkMerge(command, cwd), late]); } finally { clearTimeout(timer); }
+  } catch (e) {
+    logError('merge-gate', e);
+    return 'מיזוג נחסם: בדיקת הסקירה לא רצה (שגיאה פנימית ב-hook), ואין מיזוג בלי שהיא עברה.';
+  }
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const argEvent = (args[0] === 'hook' ? args[1] : args[0]) ?? '';
@@ -56,6 +78,7 @@ async function main(): Promise<void> {
     try {
       reason = checkToolUse((payload ?? {}) as object, { repo: process.env[ENV.repo], company: process.env[ENV.home], identity: process.env[ENV.identity] });
     } catch (e) { logError('guard', e); }
+    if (!reason) reason = await mergeGate(payload);
     if (!reason) return;
     try { appendSpool(stateRoot, shift, { ts: new Date().toISOString(), event: 'PreToolUse.denied', pid: process.pid, payload }); }
     catch (e) { logError('spool', e); }

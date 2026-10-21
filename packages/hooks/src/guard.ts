@@ -173,7 +173,7 @@ export function bashWrite(command: string, cwd0: string, root: string, home: str
 const WRITE_REDIRECTS = new Set(['>', '>>', '>|', '&>', '&>>', '>&']);
 const SEPARATORS = new Set(['&&', '||', ';', ';;', '|', '|&', '&', '(', ')']);
 
-interface Tok { w?: string; op?: string; subs?: string[] }
+export interface Tok { w?: string; op?: string; subs?: string[] }
 
 const OPS = /^(&&|\|\||;;|\|&|&>>|&>|>>|>\||>&|<<<|<<-|<<|<&|<>|[;|&<>()])/;
 
