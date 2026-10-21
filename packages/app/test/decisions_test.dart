@@ -8,6 +8,7 @@ import 'package:agent_company/main.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
 import 'package:agent_company/ui/convs/conversations_screen.dart';
+import 'package:agent_company/ui/decision.dart';
 import 'package:agent_company/ui/home/home_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -201,4 +202,14 @@ void main() {
     expect(find.text('אישור'), findsOneWidget);
   });
 
+  testWidgets('a screen reader can press a decision button: it is a button with its words and a tap', (tester) async {
+    final semantics = tester.ensureSemantics();
+    var taps = 0;
+    await pumpApp(tester, home: Scaffold(body: Center(child: DecisionButton('אישור', primary: true, onTap: () => taps++))));
+    expect(tester.getSemantics(find.byType(DecisionButton)), isSemantics(label: 'אישור', isButton: true, hasTapAction: true));
+    tester.semantics.tap(find.semantics.byLabel('אישור'));
+    await tester.pump();
+    expect(taps, 1);
+    semantics.dispose();
+  });
 }

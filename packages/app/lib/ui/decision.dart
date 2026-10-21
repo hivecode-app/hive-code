@@ -27,6 +27,8 @@ class DecisionButton extends StatelessWidget {
       button: true,
       excludeSemantics: true,
       label: label,
+      // The InkWell's own tap is under excludeSemantics: without this a screen reader can't press it.
+      onTap: onTap,
       child: Material(
         color: primary ? p.accent : Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: primary ? p.accent : p.line, width: 1.2)),
