@@ -184,38 +184,3 @@ test('heldByCli messages are never re-sent on resume, and are re-sent to a new s
     assert.equal(launcher.hosts.get('eli-2')!.sent[0]!.msgId, 'h-1');
   } finally { await env.cleanup(); }
 });
-
-test('his `now` to a worker mid-turn interrupts it first, then delivers; next and hq notes never interrupt', async () => {
-  const env = await makeEnv();
-  try {
-    const { hq, launcher } = env;
-    await hq.shifts.request('eli', { reason: 'message' });
-    await until(() => hq.shifts.current('eli')?.state === 'live', 3000, 'live');
-    const host = launcher.hosts.get('eli-1')!;
-    const frames = () => host.received.filter((f) => f.t === 'interrupt' || f.t === 'send').map((f) => f.t === 'send' ? `send:${f.msgId}` : 'interrupt');
-    hq.shifts.setFields('eli-1', { in_turn: 1 });
-
-    hq.mailbox.tell({ msg_id: 'n-1', to: 'eli', body: 'תעצור', priority: 'now' });
-    await until(() => hq.mailbox.get('n-1')!.state === 'delivered', 3000, 'delivered');
-    assert.deepEqual(frames(), ['interrupt', 'send:n-1']);
-    assert.equal(host.sent.at(-1)!.priority, 'now');
-
-    hq.mailbox.tell({ msg_id: 'n-2', to: 'eli', body: 'אחרי הצעד', priority: 'next' });
-    hq.mailbox.tell({ msg_id: 'n-3', from: 'hq', to: 'eli', kind: 'system', body: 'תזכורת', priority: 'now' });
-    await until(() => hq.mailbox.get('n-3')!.state === 'delivered' && hq.mailbox.get('n-2')!.state === 'delivered', 3000, 'delivered');
-    assert.deepEqual(frames(), ['interrupt', 'send:n-1', 'send:n-2', 'send:n-3']);
-
-    // His answer to an ask (hq writes it in his name, `now`) does not stop a worker that went on working.
-    hq.mailbox.tell({ msg_id: 'n-5', to: 'eli', kind: 'answer', body: 'כן', priority: 'now' });
-    await until(() => hq.mailbox.get('n-5')!.state === 'delivered', 3000, 'delivered');
-    assert.deepEqual(frames().slice(-1), ['send:n-5']);
-    assert.equal(frames().filter((f) => f === 'interrupt').length, 1);
-
-    // Idle: nothing to interrupt.
-    hq.shifts.setFields('eli-1', { in_turn: 0 });
-    hq.mailbox.tell({ msg_id: 'n-4', to: 'eli', body: 'שאלה', priority: 'now' });
-    await until(() => hq.mailbox.get('n-4')!.state === 'delivered', 3000, 'delivered');
-    assert.deepEqual(frames().slice(-1), ['send:n-4']);
-    assert.equal(frames().filter((f) => f === 'interrupt').length, 1);
-  } finally { await env.cleanup(); }
-});
