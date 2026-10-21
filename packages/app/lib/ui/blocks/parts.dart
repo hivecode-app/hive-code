@@ -42,14 +42,19 @@ class BlockCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
     return Container(
-      color: p.surface,
+      // The card sits on the paper itself, no band of white around it (v2).
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: Semantics(
         container: true,
         label: label,
         explicitChildNodes: true,
         child: Container(
-          decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: p.line)),
+          // Dark: a card is a step up in tone, without a line (v2, audit #32).
+          decoration: BoxDecoration(
+            color: p.dark ? p.surface2 : p.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: p.dark ? null : Border.all(color: p.line),
+          ),
           clipBehavior: Clip.antiAlias,
           child: Material(type: MaterialType.transparency, child: child),
         ),

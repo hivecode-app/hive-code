@@ -1,5 +1,7 @@
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
+import 'motion.dart';
 import 'tokens.dart';
 
 /// Material 3 theme from the palette. Dynamic color is off on purpose (APP-SPEC §7.2).
@@ -37,9 +39,20 @@ ThemeData buildTheme(Palette p) {
       waitDuration: const Duration(milliseconds: 600),
     ),
     textSelectionTheme: TextSelectionThemeData(cursorColor: p.accent, selectionColor: p.accent.withValues(alpha: 0.25), selectionHandleColor: p.accent),
-    pageTransitionsTheme: const PageTransitionsTheme(builders: {
-      TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
-    }),
+    pageTransitionsTheme: kDesignV2
+        // v2 (language-v2 §5): Android keeps the system's predictive back and iOS its edge swipe;
+        // web and desktop get a shared axis X that follows the reading direction.
+        ? const PageTransitionsTheme(builders: {
+            TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+            TargetPlatform.linux: SharedAxisPageTransitionsBuilder(),
+            TargetPlatform.windows: SharedAxisPageTransitionsBuilder(),
+            TargetPlatform.macOS: SharedAxisPageTransitionsBuilder(),
+            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.fuchsia: SharedAxisPageTransitionsBuilder(),
+          })
+        : const PageTransitionsTheme(builders: {
+            TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+          }),
     extensions: [p],
   );
 }

@@ -35,17 +35,20 @@ void main() {
     expect(nav.tab, AppTab.projects);
   });
 
-  testWidgets('back with search open closes the search first, then leaves the app', (tester) async {
+  // The search is the field on top of the list (convs_v2.dart, task 205): what he typed is the open search.
+  testWidgets('back with a search typed clears it first, then leaves the app', (tester) async {
     await pumpApp(tester);
     await tester.tap(find.text('שיחות').last);
     await tester.pump();
-    await tester.tap(find.byTooltip('חיפוש'));
+    await tester.enterText(find.byType(TextField), 'דנה');
     await tester.pump();
-    expect(find.byTooltip('סגירת החיפוש'), findsOneWidget);
+    expect(find.byType(HomeV2), findsNothing, reason: 'searching: the results, not the home');
     final nav = NavScope.read(tester.element(find.byType(Shell)));
+    expect(nav.backHandler, isNotNull);
     await tester.binding.handlePopRoute();
     await tester.pump();
-    expect(find.byTooltip('סגירת החיפוש'), findsNothing);
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, isEmpty);
+    expect(find.byType(HomeV2), findsOneWidget);
     expect(nav.tab, AppTab.chats);
     expect(nav.backHandler, isNull, reason: 'nothing left for back on the main screen: it leaves the app');
   });
@@ -54,14 +57,15 @@ void main() {
     await pumpApp(tester);
     await tester.tap(find.text('שיחות').last);
     await tester.pump();
-    await tester.tap(find.byTooltip('חיפוש'));
+    await tester.enterText(find.byType(TextField), 'דנה');
     await tester.pump();
     await tester.tap(find.text('סטטוס').last);
     await tester.pump();
     await tester.tap(find.text('שיחות').last);
     await tester.pump();
-    expect(find.byTooltip('סגירת החיפוש'), findsNothing);
     final nav = NavScope.read(tester.element(find.byType(Shell)));
+    // The search closed with the tab: nothing typed, and back leaves the app.
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, isEmpty);
     expect(nav.backHandler, isNull);
   });
 

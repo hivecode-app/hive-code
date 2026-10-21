@@ -53,4 +53,8 @@ jobs:
       - name: flutter test
         if: steps.app.outputs.run == 'true'
         working-directory: packages/app
+        # The layout fixtures are a day of hq at +07 and build their times with local DateTime, so a UTC runner
+        # (ci-host) moves them across the day. Pinned here until the fixtures carry an explicit day (ticket below).
+        env:
+          TZ: Asia/Bangkok
         run: '"$HOME/flutter/bin/flutter" test'

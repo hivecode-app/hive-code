@@ -114,8 +114,12 @@ class SinceText {
 }
 
 class HomeRecipe {
-  const HomeRecipe({required this.version, required this.composedBy, required this.composedAt, required this.blocks, this.source = 'agent', this.fallback, this.reason});
+  const HomeRecipe({required this.version, required this.composedBy, required this.composedAt, required this.blocks, this.source = 'agent', this.fallback, this.reason, this.waitingChangedAt});
   final int version;
+
+  /// When what waits for him last changed in hq (an item came in, was answered or put off); null from an
+  /// older hq, or when nothing ever waited. A headline composed before it may no longer be true.
+  final DateTime? waitingChangedAt;
 
   /// The identity that composed it, or `hq` for the default.
   final String composedBy;
@@ -136,6 +140,7 @@ class HomeRecipe {
         source: j['source'] as String? ?? 'agent',
         fallback: j['fallback'] as String?,
         reason: j['reason'] as String?,
+        waitingChangedAt: j['waiting_changed_at'] is num ? DateTime.fromMillisecondsSinceEpoch((j['waiting_changed_at'] as num).toInt()) : null,
         blocks: [
           for (final b in (j['blocks'] as List? ?? const []).whereType<Map>())
             ?HomeBlock.fromJson(b.cast<String, dynamic>()),
@@ -149,6 +154,7 @@ class HomeRecipe {
         'source': source,
         if (fallback != null) 'fallback': fallback,
         if (reason != null) 'reason': reason,
+        if (waitingChangedAt != null) 'waiting_changed_at': waitingChangedAt!.millisecondsSinceEpoch,
         'blocks': [for (final b in blocks) b.toJson()],
       };
 }

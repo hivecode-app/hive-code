@@ -101,7 +101,7 @@ class Lane {
   final List<LaneDone> done;
   final List<LaneRun> running;
 
-  /// How many things in it wait for him: a hollow `pause` mark at now.
+  /// How many things in it wait for him: a hollow `front_hand` mark at now.
   final int waiting;
 
   /// The tasks waiting their turn, in queue order (#128): a hollow `schedule` mark at now, on a track of its own.

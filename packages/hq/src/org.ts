@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
+import { TONES, type Tone } from '@company/shared';
 import { HELPER_TEAM } from './system-prompt.ts';
 import type { Store } from './store.ts';
 import { readCharter } from './workspace.ts';
@@ -213,6 +214,28 @@ export interface ProjectRow { id: string; name: string | null; status: string; t
  * the charter's own (company/projects/<id>.md): that is what hq acts on (dormant projects get no workers),
  * so the board shows the same thing; org.yaml's status is the fallback when the charter is missing.
  */
+/** Each team's tone (org.yaml `teams[].tone`, language-v2 §3), and through `projects[].team` each project's. A tone
+ *  outside the eight is dropped (the contract check refuses it). */
+export function listTones(companyDir: string): { teams: Map<string, Tone>; projects: Map<string, Tone> } {
+  const teams = new Map<string, Tone>();
+  const projects = new Map<string, Tone>();
+  const file = join(companyDir, 'org.yaml');
+  if (!existsSync(file)) return { teams, projects };
+  let org: { teams?: { id?: unknown; tone?: unknown; project?: unknown }[]; projects?: { id?: unknown; team?: unknown }[] };
+  try { org = (parse(readFileSync(file, 'utf8')) ?? {}) as typeof org; } catch { return { teams, projects }; }
+  const isTone = (v: unknown): v is Tone => typeof v === 'string' && (TONES as readonly string[]).includes(v);
+  for (const t of Array.isArray(org.teams) ? org.teams : []) {
+    if (typeof t?.id !== 'string' || !isTone(t.tone)) continue;
+    teams.set(t.id, t.tone);
+    if (typeof t.project === 'string') projects.set(t.project, t.tone);
+  }
+  for (const p of Array.isArray(org.projects) ? org.projects : []) {
+    const tone = typeof p?.team === 'string' ? teams.get(p.team) : undefined;
+    if (typeof p?.id === 'string' && tone) projects.set(p.id, tone);
+  }
+  return { teams, projects };
+}
+
 export function listProjects(companyDir: string): ProjectRow[] {
   const file = join(companyDir, 'org.yaml');
   if (!existsSync(file)) return [];

@@ -143,7 +143,8 @@ Future<AppStore> _pump(WidgetTester tester, CompanyData d, HomeRecipe? recipe, {
   final store = AppStore(_Snapshot(d));
   await store.start();
   store.markChatsSeen(_seen);
-  await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light));
+  // The phone now opens with HomeV2 (task 205): the head alone, so this covers the widget itself.
+  await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: legacyHead()));
   await tester.pumpAndSettle();
   return store;
 }

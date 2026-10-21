@@ -63,7 +63,7 @@ void main() {
     expect(openTasksLine(t), '4 משימות · אחת רצה · אחת מחכה לך · 1 בתור · אחת חסומה');
     expect(openTasksLine([t[0], t[0], t[2]]), '3 משימות · 2 רצות · 1 בתור');
     expect(openTasksLine([t[2]]), 'בתור, מקום 1: דוח שבועי');
-    expect(openTasksIcon(t), 'pause_circle', reason: 'what needs him first');
+    expect(openTasksIcon(t), 'front_hand', reason: 'what needs him first');
     expect(openTasksIcon([t[2]]), 'schedule');
   });
 
@@ -89,8 +89,9 @@ void main() {
     expect(Lane.fromJson(jsonDecode(jsonEncode(lane.toJson())) as Map<String, dynamic>).queued, ['דוח שבועי']);
   });
 
-  testWidgets('chats: the line under Yoav opens what he opened; a tap on a running one opens its worker', (tester) async {
-    final store = await pumpApp(tester, home: const Scaffold(body: ConversationsScreen()), size: const Size(342, 1100));
+  // The phone's rows have no such line since task 205 (נועה, 21/10); the wide screen's list keeps it.
+  testWidgets('wide screen: the line under Yoav opens what he opened; a tap on a running one opens its worker', (tester) async {
+    final store = await pumpApp(tester, home: const Scaffold(body: ConversationsScreen(compact: true)), size: const Size(342, 1100));
     store.data!.openTasks = _tasks();
     store.touch();
     await tester.pumpAndSettle();
@@ -121,7 +122,7 @@ void main() {
   });
 
   testWidgets('a task a task worker opened (open_team) goes under the one who opened that worker\'s task', (tester) async {
-    final store = await pumpApp(tester, home: const Scaffold(body: ConversationsScreen()), size: const Size(342, 1100));
+    final store = await pumpApp(tester, home: const Scaffold(body: ConversationsScreen(compact: true)), size: const Size(342, 1100));
     final d = store.data!;
     final temp = d.identities.values.firstWhere((i) => i.temp).id;
     d.openTasks = [

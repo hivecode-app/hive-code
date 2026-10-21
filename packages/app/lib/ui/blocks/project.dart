@@ -78,7 +78,7 @@ class ProjectBlock extends StatelessWidget {
                     Expanded(child: Text(l.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.body.copyWith(fontWeight: FontWeight.w500, color: p.text, height: 21 / 15.5))),
                     if (l.waiting > 0) ...[
                       const SizedBox(width: 8),
-                      Ic('pause_circle', size: 16, fill: true, color: p.text),
+                      Ic('front_hand', size: 16, fill: true, color: p.text),
                       const SizedBox(width: 3),
                       Text('${l.waiting}', style: second.copyWith(color: p.text, fontWeight: FontWeight.w700, fontFeatures: kTabular)),
                     ],

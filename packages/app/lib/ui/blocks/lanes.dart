@@ -3,7 +3,7 @@
 // · a running task: a thick bar from its start to now on a track of its own under the dots, the face of whoever
 //   is on it inside its now end, breathing;
 // · a finished task: a small filled dot where it finished; dots on the same few pixels are one, with a count;
-// · something waiting for him: a hollow ring with `pause` just past now;
+// · something waiting for him: a hollow ring with `front_hand` just past now;
 // · tasks waiting their turn (#128): a hollow ring with `schedule` just past now, on a track of its own;
 // · a production failure: `warning` where it happened.
 // RTL: time flows right to left, now is at the left edge. A tap picks the nearest mark and tells its story under
@@ -330,7 +330,7 @@ class _LaneRow extends StatelessWidget {
           child: Container(
             decoration: BoxDecoration(shape: BoxShape.circle, color: p.surface, border: Border.all(color: p.text, width: 1.5)),
             alignment: Alignment.center,
-            child: Ic('pause', size: 11, fill: true, color: p.text),
+            child: Ic('front_hand', size: 11, color: p.text),
           ),
         ),
       ));
@@ -557,7 +557,16 @@ class _Legend extends StatelessWidget {
           ),
           'כמה יחד',
         ),
-        item(Container(width: 12, height: 12, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: p.text, width: 1.5))), 'מחכה לך'),
+        item(
+          Container(
+            width: 13,
+            height: 13,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: p.text, width: 1.5)),
+            child: Ic('front_hand', size: 9, color: p.text),
+          ),
+          'מחכה לך',
+        ),
         item(
           Container(
             width: 13,

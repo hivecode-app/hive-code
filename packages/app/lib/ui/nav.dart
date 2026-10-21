@@ -59,6 +59,7 @@ class Nav {
     final store = StoreScope.read(context);
     if (nav.wide) {
       store.selectedConversation = identityId;
+      store.homeOpen = false;
       nav.go(AppTab.chats);
       store.touch();
       if (quote != null || focus) ChatScreen.pendingQuote[identityId] = quote;

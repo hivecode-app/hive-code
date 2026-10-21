@@ -45,6 +45,8 @@ export interface HomeRecipe {
   source: 'agent' | 'default';
   fallback?: 'none' | 'stale' | 'invalid' | 'off';
   blocks: Block[];
+  /** When what waits for him last changed (inbox.lastChange): a headline composed before it may no longer be true. */
+  waiting_changed_at?: number | null;
 }
 
 export const STALE_MS = 30 * 60_000;
@@ -359,7 +361,7 @@ export class Home {
       } catch { fallback = 'invalid'; }
     }
     recipe ??= { ...this.defaultRecipe(), version: row?.version ?? 0, fallback };
-    return { ...recipe, blocks: this.live(recipe.blocks, refs) };
+    return { ...recipe, blocks: this.live(recipe.blocks, refs), waiting_changed_at: this.hq.inbox.lastChange() };
   }
 
   /** Every inbox (or task) id a stored recipe mentions, so re-validation accepts ones that closed since. */

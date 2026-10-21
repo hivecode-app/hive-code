@@ -148,7 +148,7 @@ CompanyData _data({bool earlierWaiting = false, bool burning = false, bool summa
 }
 
 Future<BuildContext> _pump(WidgetTester tester,
-    {Size size = kPhone, bool earlierWaiting = false, bool burning = false, bool summaries = false, DateTime? chatsSeen, bool dark = false, double textScale = 1}) async {
+    {Size size = kPhone, bool earlierWaiting = false, bool burning = false, bool summaries = false, DateTime? chatsSeen, bool dark = false, double textScale = 1, bool head = false}) async {
   await loadFonts();
   Motion.frozen = true;
   SharedPreferences.setMockInitialValues({});
@@ -164,7 +164,8 @@ Future<BuildContext> _pump(WidgetTester tester,
   // unless the test says otherwise.
   store.statusSeenAt = DateTime(2026, 10, 20, 18, 0);
   store.markChatsSeen(chatsSeen ?? _at);
-  await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light));
+  // [head]: the head alone (legacyHead): the phone now opens with HomeV2 (task 205), and these cover the widget itself.
+  await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: head ? legacyHead() : null));
   await tester.pump();
   return tester.element(find.byType(Scaffold).first);
 }
@@ -177,41 +178,14 @@ Future<void> _shot(WidgetTester tester, String name) async {
 
 const _tall = Size(342, 1500);
 
-Iterable<String> _rows(WidgetTester tester) => [
-      for (final w in tester.widgetList(find.byWidgetPredicate((w) => w is ConversationRow || w is WorkingRow)))
-        w is ConversationRow ? w.c.identityId : (w as WorkingRow).c.identityId,
-    ];
-
 void main() {
-  testWidgets('chats: Yoav pinned, who is at work, what each one opened, then the rest by latest', (tester) async {
-    await _pump(tester, size: _tall);
-    final rows = _rows(tester).toList();
-    expect(rows.first, 'yoav');
-    expect(find.byType(Dismissible), findsNothing, reason: 'nothing waits and nothing since: no card');
-    // At work: Keren on her own task. The two tasks Adi's team runs (Shani, Omer) are the line under her (#128).
-    final working = [for (final w in tester.widgetList<WorkingRow>(find.byType(WorkingRow))) w.c.identityId];
-    expect(working, ['keren']);
-    final lines = {for (final w in tester.widgetList<OpenTasksLine>(find.byType(OpenTasksLine))) w.identityId: openTasksLine(w.tasks)};
-    expect(lines, {'adi': '2 משימות · 2 רצות', 'shachar': 'רצה: שעת משלוח "לא ידוע" לא נאמרת ללקוח'});
-    expect(find.byWidgetPredicate((w) => w is Ic && w.name == 'play_arrow'), findsNWidgets(3));
-    // Then one list by latest, who works now in his own place in it, each once; task workers without an
-    // unread message are not here.
-    expect(rows.sublist(1, 6), ['adi', 'shachar', 'boaz', 'keren', 'inbal']);
-    expect(rows.toSet().length, rows.length);
-    expect(rows.where((id) => id.startsWith('agent-company-t')), isEmpty);
-    // Two lines a row: "פנוי" / "נח" under a name says nothing and is gone.
-    expect(find.text('פנוי'), findsNothing);
-    await _shot(tester, '01-chats');
-  });
-
   testWidgets('chats: what waits is the card on top, a face and a line each; nothing else above the list', (tester) async {
-    await _pump(tester, earlierWaiting: true);
+    await _pump(tester, earlierWaiting: true, head: true);
     expect(find.byType(ChatsHead), findsOneWidget);
     expect(findShown('מיכל, תפעול עסקי בבוט ההזמנות, נכנסת לעבודה'), findsOneWidget);
     expect(findShown('עדי · GO לפרודקשן'), findsOneWidget);
     expect(findShown('בועז · GO לפרודקשן'), findsOneWidget);
     expect(find.textContaining('מאז'), findsNothing, reason: 'he was here just now: nothing since');
-    expect(_rows(tester).first, 'yoav', reason: 'the list starts under the card');
     await _shot(tester, '02-chats-waiting');
   });
 
@@ -251,20 +225,6 @@ void main() {
       Navigator.of(tester.element(find.byType(ChatScreen).last)).pop();
       await tester.pumpAndSettle();
     }
-
-    // Under Adi, what her team runs (#128): the line opens the list, Shani's task in it opens Shani; Adi's name opens Adi.
-    final shani = d.tickets.firstWhere((t) => t.doneAt == null && t.assignee == 'שני');
-    await tester.tap(find.byWidgetPredicate((w) => w is OpenTasksLine && w.identityId == 'adi'));
-    await tester.pumpAndSettle();
-    await tester.tap(findShown('לא נקרא, התראות על הודעות').last);
-    await tester.pumpAndSettle();
-    expect(find.text('מה פתוח אצל עדי'), findsNothing, reason: 'the sheet closes as the chat opens');
-    expect(open(), shani.assigneeId);
-    await back();
-    await tester.tap(find.text('עדי').first);
-    await tester.pumpAndSettle();
-    expect(open(), 'adi');
-    await back();
 
     // On status: a finished task of a task worker opens who opened it, not the project.
     NavScope.read(ctx).go(AppTab.status);
@@ -362,9 +322,10 @@ void main() {
         status: WorkerStatus.working, assigneeId: 'agent-company-t14', openedBy: 'eli'));
     store.touch();
     await tester.pump();
-    final line = tester.widgetList<OpenTasksLine>(find.byType(OpenTasksLine)).where((w) => w.identityId == 'eli').single;
-    expect(openTasksLine(line.tasks), 'רצה: השוואת מחירים');
-    expect(line.tasks.single.worker, 'agent-company-t14');
+    // The line under Eli's row (the desktop's list; the phone's rows have no such line since task 205).
+    final tasks = openedTasks(d)['eli']!;
+    expect(openTasksLine(tasks), 'רצה: השוואת מחירים');
+    expect(tasks.single.worker, 'agent-company-t14');
   });
 
   // ── the head: one card of what needs him (t63) ──────────────────────────
@@ -378,7 +339,7 @@ void main() {
   final at19 = DateTime(2026, 10, 20, 19, 0);
 
   testWidgets('head: everything. Burning first and heavier, then what waits, then "since" in one folded line', (tester) async {
-    await _pump(tester, earlierWaiting: true, burning: true, summaries: true, chatsSeen: at19);
+    await _pump(tester, head: true, earlierWaiting: true, burning: true, summaries: true, chatsSeen: at19);
     expect(findShown('האתר של החנות לא עונה'), findsOneWidget);
     expect(findShown('תקלה בפרודקשן · רותם'), findsOneWidget);
     expect(find.text("4 דק'"), findsOneWidget, reason: 'how long, at the end');
@@ -397,7 +358,7 @@ void main() {
   });
 
   testWidgets('head: "since" opens inside the card, every sentence with who and when; a second tap folds it', (tester) async {
-    await _pump(tester, summaries: true, chatsSeen: at19, size: const Size(342, 900));
+    await _pump(tester, head: true, summaries: true, chatsSeen: at19, size: const Size(342, 900));
     await tester.tap(findShown('מאז 19:00'));
     await tester.pump(const Duration(milliseconds: 100));
     expect(findShown('שרת 2.6.7 יציב אחרי 24 שעות'), findsOneWidget, reason: 'opening, animated');
@@ -412,21 +373,21 @@ void main() {
   });
 
   testWidgets('head: quiet. Nothing burns, waits or finished since: no card at all', (tester) async {
-    await _pump(tester);
+    await _pump(tester, head: true);
     expect(tester.getSize(find.byType(ChatsHead, skipOffstage: false)).height, 0);
     await headShot(tester, 'quiet');
   });
 
   testWidgets('head: dark, and text at 130%', (tester) async {
-    await _pump(tester, earlierWaiting: true, burning: true, summaries: true, chatsSeen: at19, dark: true);
+    await _pump(tester, head: true, earlierWaiting: true, burning: true, summaries: true, chatsSeen: at19, dark: true);
     await headShot(tester, 'dark');
     await tester.pumpWidget(const SizedBox());
-    await _pump(tester, earlierWaiting: true, burning: true, summaries: true, chatsSeen: at19, textScale: 1.3);
+    await _pump(tester, head: true, earlierWaiting: true, burning: true, summaries: true, chatsSeen: at19, textScale: 1.3);
     await headShot(tester, 'text-130');
   });
 
   testWidgets('head: a tap on what waits opens the conversation at its card', (tester) async {
-    await _pump(tester, earlierWaiting: true);
+    await _pump(tester, head: true, earlierWaiting: true);
     await tester.tap(findShown('בועז · GO לפרודקשן'));
     await tester.pumpAndSettle();
     expect(find.byType(ChatScreen), findsOneWidget);
@@ -434,7 +395,7 @@ void main() {
   });
 
   testWidgets('head: a swipe is "לא עכשיו"; a handled row folds away in 200ms; the empty card folds too', (tester) async {
-    final ctx = await _pump(tester, earlierWaiting: true);
+    final ctx = await _pump(tester, head: true, earlierWaiting: true);
     final store = StoreScope.read(ctx);
     final adi = store.data!.waiting.firstWhere((w) => w.from == 'adi');
     final boaz = store.data!.waiting.firstWhere((w) => w.from == 'boaz');
@@ -463,7 +424,7 @@ void main() {
   });
 
   testWidgets('head: a stuck worker burns, with the task he is stuck on', (tester) async {
-    final ctx = await _pump(tester);
+    final ctx = await _pump(tester, head: true);
     final store = StoreScope.read(ctx);
     final keren = store.data!.presence['keren']!;
     store.data!.presence['keren'] = Presence(status: WorkerStatus.stuck, currentTask: keren.currentTask, activity: keren.activity);
@@ -476,15 +437,11 @@ void main() {
   testWidgets('leaving the chats tab, or the app, is the visit: "since" starts there, kept for every device', (tester) async {
     final ctx = await _pump(tester, summaries: true, chatsSeen: at19);
     final store = StoreScope.read(ctx);
-    expect(findShown('מאז 19:00'), findsOneWidget);
     NavScope.read(ctx).go(AppTab.status);
     await tester.pump();
     expect(store.chatsSeenAt!.isAfter(at19), isTrue);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getInt(AppStore.kChatsSeenKey), store.chatsSeenAt!.millisecondsSinceEpoch);
-    NavScope.read(ctx).go(AppTab.chats);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('מאז'), findsNothing, reason: 'nothing finished after he left');
   });
 
   test('head data: the summary in his words, else the title without its area; newest first', () {
@@ -613,7 +570,7 @@ void main() {
   });
 
   testWidgets('head: swiping the last row folds the card without bringing the swiped row back', (tester) async {
-    final ctx = await _pump(tester, earlierWaiting: true);
+    final ctx = await _pump(tester, head: true, earlierWaiting: true);
     final store = StoreScope.read(ctx);
     await tester.drag(findShown('עדי · GO לפרודקשן'), const Offset(-300, 0));
     await tester.pumpAndSettle();

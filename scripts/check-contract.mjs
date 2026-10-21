@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { parse as yamlParse } from 'yaml';
 import { resolveCompanyHome } from '../packages/shared/src/company-home.ts';
+import { TONES } from '../packages/shared/src/index.ts';
 
 const engineRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -156,6 +157,8 @@ function findColorKeys(node, path, where) {
   else if (node && typeof node === 'object') {
     for (const [k, v] of Object.entries(node)) {
       if (/colou?r/i.test(k)) err(`${where}: "${path}.${k}" - colour fields are not allowed; use symbol (icon name) and words`);
+      // A team's tone names a hue from a fixed set (checked with the teams), for identity, never a signal.
+      if (k === 'tone' && /^\.teams\[\d+\]$/.test(path)) continue;
       findColorKeys(v, `${path}.${k}`, where);
     }
   } else if (typeof node === 'string' && (/^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(node.trim()) || /^(rgb|hsl)a?\(/i.test(node.trim()) || COLOUR_WORDS.has(node.trim().toLowerCase()))) {
@@ -362,6 +365,7 @@ export function main() {
       if (!t.name) err(`${W}: ${who} has no name`);
       if (!KINDS.includes(t.kind)) err(`${W}: ${who} kind "${t.kind}" is not one of ${KINDS.join('|')}`);
       checkSymbol(who, t.symbol, W);
+      if (t.tone != null && !TONES.includes(t.tone)) err(`${W}: ${who} tone "${t.tone}" is not one of ${TONES.join('|')}`);
       if (!identityIds.has(t.lead)) err(`${W}: ${who} lead "${t.lead}" is not an identity`);
       if (t.members != null && !Array.isArray(t.members)) err(`${W}: ${who} members must be a list`);
       for (const m of Array.isArray(t.members) ? t.members : []) if (!identityIds.has(m)) err(`${W}: ${who} member "${m}" is not an identity`);

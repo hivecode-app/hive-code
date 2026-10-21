@@ -4,6 +4,7 @@ import 'package:agent_company/data/fake_backend.dart';
 import 'package:agent_company/data/store.dart';
 import 'package:agent_company/main.dart';
 import 'package:agent_company/ui/common.dart';
+import 'package:agent_company/ui/convs/conversations_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -59,4 +60,25 @@ Future<AppStore> pumpApp(WidgetTester tester, {Widget? home, bool dark = false, 
   await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: home));
   await tester.pump();
   return store;
+}
+
+/// The head the phone opened with before task 205, alone: hq's recipe (HomeBlocks), else the card (ChatsHead).
+/// The phone now opens with HomeV2 in the list (convs_v2.dart); these tests cover the widgets themselves.
+Widget legacyHead() => const _LegacyHead();
+
+class _LegacyHead extends StatelessWidget {
+  const _LegacyHead();
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final d = store.data;
+    if (d == null) return const SizedBox.shrink();
+    final now = CompanyTime.now();
+    final since = store.chatsSeenAt ?? dayStart(now);
+    return Scaffold(
+      body: ListView(padding: EdgeInsets.zero, children: [
+        if (d.home case final recipe?) HomeBlocks(recipe: recipe, data: d, now: now, since: since) else ChatsHead(data: HeadData.of(d, since: since), since: since, now: now),
+      ]),
+    );
+  }
 }

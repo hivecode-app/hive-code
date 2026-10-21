@@ -375,11 +375,18 @@ class HqBackend extends Backend {
       if (other == kSystemId || !seen.add(other)) continue; // the system has no conversation (#55)
       final i = d.conversations.indexWhere((c) => c.identityId == other);
       final st = _convs?[other];
+      final own = m['from_identity'] == 'owner' ? ownLine(m) : null;
+      // A card he closed with a tap is not words of his: no "אתה: " and no ticks (task 205).
+      final mine = own != null && !own.tapped;
       final c = ConversationSummary(
         identityId: other,
-        lastLine: (m['from_identity'] == 'owner' ? 'את/ה: ' : '') + lastLineOf(m),
+        lastLine: (mine ? 'את/ה: ' : '') + (own?.text ?? lastLineOf(m)),
         time: _hm(m['created_at'] as int),
-        lastIsMine: m['from_identity'] != 'owner',
+        at: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int),
+        delivery: mine ? mapDelivery(m['state'] as String?) : null,
+        text: own?.text ?? lastLineOf(m),
+        msgId: m['id'] as String?,
+        lastIsMine: !mine,
         // hq's count, read on any device; an hq without it: the latest message, until it is handled.
         unread: openIdentity == other && _visible
             ? 0
@@ -395,6 +402,11 @@ class HqBackend extends Backend {
         d.conversations.add(c);
       }
     }
+    d.recent = [
+      for (final m in (res['messages'] as List).cast<Map<String, dynamic>>())
+        if ((m['from_identity'] == 'owner' ? m['to_identity'] : m['from_identity']) case final String id when id != kSystemId)
+          (id: id, text: m['from_identity'] == 'owner' ? ownLine(m).text : lastLineOf(m), at: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int), mine: m['from_identity'] == 'owner' && !ownLine(m).tapped),
+    ];
     // Recent first, then the rest; Yoav stays pinned in the list widget.
     final order = [for (final m in (res['messages'] as List)) (m['from_identity'] == 'owner' ? m['to_identity'] : m['from_identity']) as String];
     int rank(ConversationSummary c) {
@@ -476,7 +488,10 @@ class HqBackend extends Backend {
       out.add({
         'from_identity': m['from_identity'],
         'to_identity': m['to_identity'],
-        'body': lastLineOf(m),
+        'id': m['id'],
+        // His: two lines, enough for [ownLine] to tell a tapped card ("סיים: …") from one with his note.
+        'body': m['from_identity'] == 'owner' ? (m['body'] as String).split('\n').take(2).join('\n') : lastLineOf(m),
+        if (m['attachments'] != null) 'attachments': m['attachments'],
         'created_at': m['created_at'],
         'state': m['state'],
       });
@@ -670,6 +685,16 @@ class HqBackend extends Backend {
         m.waitingOn = WaitingOn.parse(data['waiting_on']) ?? m.waitingOn;
         notifyListeners();
       }
+      // The ticks on his row move with the message (queued, delivered, read).
+      final i = d.conversations.indexWhere((c) => c.msgId != null && c.msgId == data['id']);
+      if (i >= 0 && d.conversations[i].delivery != null) {
+        final c = d.conversations[i];
+        d.conversations[i] = c.copyWith(delivery: furtherDelivery(c.delivery ?? Delivery.queued, mapDelivery(data['state'] as String?)));
+        for (final m in (_lastLines?['messages'] as List?)?.cast<Map<String, dynamic>>() ?? const <Map<String, dynamic>>[]) {
+          if (m['id'] == data['id']) m['state'] = data['state'];
+        }
+        notifyListeners();
+      }
     }
     if (type == 'message.new') {
       final m = (e['data'] as Map).cast<String, dynamic>();
@@ -692,6 +717,8 @@ class HqBackend extends Backend {
           notifyListeners();
         }
       } else {
+        // What he sends, from any device, brings its conversation to the top as "אתה: ", as in WhatsApp.
+        if (from == 'owner' && to != kSystemId) _bumpMine(m);
         // The owner's own messages from another device, system lines, and messages between
         // workers: they belong to an open conversation (the one they involve), or wait for it.
         final chatId = from == 'owner' ? to : (to == 'owner' ? from : (openIdentity == from || openIdentity == to ? openIdentity : null));
@@ -850,6 +877,51 @@ class HqBackend extends Backend {
     return r;
   }
 
+  /// His own message as the conversation's last line, with its delivery state (the row's ticks). A card he
+  /// closed with a tap ("סיימת: …") moves the conversation up too, without "אתה: " and without ticks.
+  void _bumpMine(Map<String, dynamic> m) {
+    final d = _data;
+    if (d == null) return;
+    final id = m['to_identity'] as String, ts = m['created_at'] as int;
+    final i = d.conversations.indexWhere((c) => c.identityId == id);
+    final prev = i >= 0 ? d.conversations[i] : null;
+    if (prev?.at != null && prev!.at!.millisecondsSinceEpoch > ts) return;
+    final own = ownLine(m), line = own.text;
+    // So a reload (or the cache at the next start) doesn't put back the line before his.
+    _keepLast(id, {'id': m['id'], 'from_identity': 'owner', 'to_identity': id, 'body': (m['body'] as String).split('\n').take(2).join('\n'), 'attachments': m['attachments'], 'created_at': ts, 'state': m['state']});
+    final c = ConversationSummary(
+      identityId: id,
+      lastLine: own.tapped ? line : 'את/ה: $line',
+      time: _hm(ts),
+      at: DateTime.fromMillisecondsSinceEpoch(ts),
+      delivery: own.tapped ? null : mapDelivery(m['state'] as String?),
+      text: line,
+      msgId: m['id'] as String?,
+      unread: prev?.unread ?? 0,
+      pinned: prev?.pinned ?? false,
+      muted: prev?.muted ?? false,
+    );
+    if (i >= 0) d.conversations.removeAt(i);
+    d.conversations.insert(0, c);
+    _addRecent(d, (id: id, text: line, at: c.at!, mine: !own.tapped));
+    notifyListeners();
+  }
+
+  /// [_lastLines] with [m] as [id]'s latest message.
+  void _keepLast(String id, Map<String, dynamic> m) {
+    final kept = _lastLines;
+    if (kept == null) return;
+    _lastLines = {
+      'messages': [m, ...(kept['messages'] as List).cast<Map<String, dynamic>>().where((x) => (x['from_identity'] == 'owner' ? x['to_identity'] : x['from_identity']) != id)],
+    };
+  }
+
+  /// A message for search, once: the first replay after a connect sends the last ones again.
+  static void _addRecent(CompanyData d, RecentLine r) {
+    if (d.recent.any((x) => x.id == r.id && x.at == r.at && x.text == r.text)) return;
+    d.recent.insert(0, r);
+  }
+
   void _bumpConversation(String id, String line, int ts) {
     final d = _data;
     if (d == null) return;
@@ -872,6 +944,8 @@ class HqBackend extends Backend {
       identityId: id,
       lastLine: line.split('\n').first,
       time: _hm(ts),
+      at: DateTime.fromMillisecondsSinceEpoch(ts),
+      text: line.split('\n').first,
       lastIsMine: true,
       unread: unread,
       pinned: prev?.pinned ?? false,
@@ -880,6 +954,7 @@ class HqBackend extends Backend {
     // Newest first, as in WhatsApp: a new message brings its conversation to the top of "אחרון".
     if (i >= 0) d.conversations.removeAt(i);
     d.conversations.insert(0, c);
+    _addRecent(d, (id: id, text: line.split('\n').first, at: c.at!, mine: false));
   }
 
   @override
@@ -1356,6 +1431,11 @@ CompanyData mapSnapshot({
     return opener['team'] as String?;
   }
 
+  // A task worker without a project (an errand) takes the tone of the team it works for, as it takes its symbol.
+  final teamTone = <String, String>{
+    for (final b in board)
+      if (b['tone'] is String && b['team'] is String && b['team_kind'] != 'task') b['team'] as String: b['tone'] as String,
+  };
   for (final b in board) {
     final id = b['id'] as String;
     final team = (b['team'] as String?) ?? 'company';
@@ -1365,9 +1445,11 @@ CompanyData mapSnapshot({
     final symbol = teamSymbols[host ?? team] ?? (own != null && kIcons.containsKey(own) ? own : 'build');
     final named = host ?? team;
     final teamName = teamNames[named] ?? (project != null ? projectNames[project] : null) ?? named;
-    teams.putIfAbsent(team, () => Team(id: team, name: teamName, symbol: symbol, permanent: b['team_kind'] == 'permanent'));
+    final tone = b['tone'] as String? ?? teamTone[host ?? team];
+    teams.putIfAbsent(team, () => Team(id: team, name: teamName, symbol: symbol, permanent: b['team_kind'] == 'permanent', tone: tone));
     if (b['lifecycle'] == 'lead' && teams[team]!.leadId == null) {
-      teams[team] = Team(id: team, name: teams[team]!.name, symbol: teams[team]!.symbol, leadId: id, permanent: teams[team]!.permanent);
+      final t = teams[team]!;
+      teams[team] = Team(id: team, name: t.name, symbol: t.symbol, leadId: id, permanent: t.permanent, tone: t.tone);
     }
     final gender = (b['gender'] as String?) == 'f' ? Gender.f : Gender.m;
     ids[id] = Identity(
@@ -1695,6 +1777,21 @@ AskCard? cardFor(List<ChatItem> items, String? ref) =>
   return (body, false);
 }
 
+/// His message as a row's last line (task 205): the words he wrote, without what hq wraps around an answer.
+/// A card he closed with a tap is what he did, "סיימת: GO …", and `tapped`: no "אתה: " and no ticks, since
+/// those are for words of his (hq writes "רן סיים: …" from him to the worker, mailbox.ts complete).
+({String text, bool tapped}) ownLine(Map<String, dynamic> m) {
+  final body = (m['body'] as String?) ?? '';
+  // hq's "סיים: / דחה: / סגר" is always a closing tap (mailbox.complete): its note is a button's word ("GO",
+  // "retry", "done"), never his own; what he types goes through reply, wrapped differently.
+  final n = companyNames, first = body.split('\n').first;
+  for (final (he, you) in [(n.o('סיים', 'סיימה'), 'סיימת'), (n.o('דחה', 'דחתה'), 'דחית'), (n.o('סגר', 'סגרה'), 'סגרת')]) {
+    if (first.startsWith('${n.owner} $he')) return (text: '$you${first.substring('${n.owner} $he'.length)}', tapped: true);
+  }
+  final (said, _) = answerText(body);
+  return (text: said == body ? lastLineOf(m) : said.split('\n').first, tapped: false);
+}
+
 /// hq's wrappings (mailbox.ts), built from the names in force; rebuilt only when they change.
 List<RegExp> get _answerEnvelopes {
   final n = companyNames;
@@ -1703,7 +1800,8 @@ List<RegExp> get _answerEnvelopes {
     _envelopes = [
       RegExp(r'^תשובה לשאלה \S+: ([\s\S]*)$'),
       RegExp('^תשובה של $owner (?:לבקשת ה-GO|על) "[\\s\\S]*?": ([\\s\\S]*)\$'),
-      RegExp('^$owner ${n.o('סיים', 'סיימה')}: [^\\n]*\\n([\\s\\S]*)\$'),
+      // The card's title can run to several lines (ingest.ts); the note, a button's word, is the last one.
+      RegExp('^$owner ${n.o('סיים', 'סיימה')}: [\\s\\S]*\\n([^\\n]*)\$'),
     ];
     _envelopesFor = n;
   }

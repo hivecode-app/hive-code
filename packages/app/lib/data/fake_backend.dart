@@ -253,13 +253,13 @@ class FakeBackend extends Backend {
 
 CompanyData buildDemo(DateTime Function(int h, int m) at) {
   const teams = {
-    'mgmt': Team(id: 'mgmt', name: 'הנהלה', symbol: 'explore', leadId: 'yoav'),
-    'monitor': Team(id: 'monitor', name: 'ניטור', symbol: 'shield', leadId: 'rotem'),
-    'personal': Team(id: 'personal', name: 'הצוות האישי', symbol: 'folder_shared', leadId: 'eli'),
-    'improve': Team(id: 'improve', name: 'מחלקת השיפור', symbol: 'build', leadId: 'noga'),
-    'lumo': Team(id: 'lumo', name: 'לומו', symbol: 'local_shipping', leadId: 'dana', permanent: false),
-    'tikibot': Team(id: 'tikibot', name: 'טיקיבוט', symbol: 'smart_toy', permanent: false),
-    'voice': Team(id: 'voice', name: 'voice-bot', symbol: 'graphic_eq', permanent: false),
+    'mgmt': Team(id: 'mgmt', name: 'הנהלה', symbol: 'explore', leadId: 'yoav', tone: 'slate'),
+    'monitor': Team(id: 'monitor', name: 'ניטור', symbol: 'shield', leadId: 'rotem', tone: 'slate'),
+    'personal': Team(id: 'personal', name: 'הצוות האישי', symbol: 'folder_shared', leadId: 'eli', tone: 'slate'),
+    'improve': Team(id: 'improve', name: 'מחלקת השיפור', symbol: 'build', leadId: 'noga', tone: 'slate'),
+    'lumo': Team(id: 'lumo', name: 'לומו', symbol: 'local_shipping', leadId: 'dana', permanent: false, tone: 'teal'),
+    'tikibot': Team(id: 'tikibot', name: 'טיקיבוט', symbol: 'smart_toy', permanent: false, tone: 'clay'),
+    'voice': Team(id: 'voice', name: 'voice-bot', symbol: 'graphic_eq', permanent: false, tone: 'sky'),
   };
   const ids = {
     'yoav': Identity(id: 'yoav', name: 'יואב', title: 'מנהל החברה', teamId: 'mgmt'),

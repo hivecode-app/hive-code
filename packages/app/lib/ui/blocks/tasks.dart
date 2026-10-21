@@ -4,7 +4,7 @@
 // · at the top of "סטטוס";
 // · the home block `tasks {tasks: [ids] | "open"}`.
 // A row is the task in his words and its state: running (`play_arrow`) with who is on it, queued (`schedule`)
-// with its place in line, waiting for him (`pause_circle`), or blocked (`block`). A tap goes where every task
+// with its place in line, waiting for him (`front_hand`), or blocked (`block`). A tap goes where every task
 // goes ([EntityLink]): the worker on it, or whoever opened it while nobody is on it yet.
 import 'package:flutter/material.dart';
 
@@ -20,7 +20,7 @@ import 'parts.dart';
 const kOpenTaskIcon = {
   OpenTaskState.running: 'play_arrow',
   OpenTaskState.queued: 'schedule',
-  OpenTaskState.waitingForYou: 'pause_circle',
+  OpenTaskState.waitingForYou: 'front_hand',
   OpenTaskState.blocked: 'block',
 };
 
@@ -124,13 +124,25 @@ class OpenTaskRow extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsetsDirectional.fromSTEB(16, 10, 16, 10),
         child: Row(children: [
-          BlockSymbol(kOpenTaskIcon[t.state]!),
+          // v2: the face is who it is about, in its team's tone; the state is the icon and the word
+          // on the second line (language-v2 §3). v1: the state icon in a grey circle.
+          if (kDesignV2 && d != null && (t.worker ?? t.openedBy) != null)
+            SizedBox(width: 40, child: Align(alignment: AlignmentDirectional.centerStart, child: Monogram.of(d, (t.worker ?? t.openedBy)!, size: AvSize.sm, ring: p.surface)))
+          else
+            BlockSymbol(kOpenTaskIcon[t.state]!),
           const SizedBox(width: 12),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
               Rich(t.title, auto: true, maxLines: 2, style: T.body.copyWith(fontWeight: FontWeight.w500, color: p.text, height: 21 / 15.5)),
               const SizedBox(height: 2),
-              Text(meta, maxLines: 2, overflow: TextOverflow.ellipsis, style: T.small.copyWith(color: p.text2)),
+              if (kDesignV2)
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Padding(padding: const EdgeInsets.only(top: 2), child: Ic(kOpenTaskIcon[t.state]!, size: 15, fill: true, color: p.text2)),
+                  const SizedBox(width: 4),
+                  Expanded(child: Text(meta, maxLines: 2, overflow: TextOverflow.ellipsis, style: T.small.copyWith(color: p.text2))),
+                ])
+              else
+                Text(meta, maxLines: 2, overflow: TextOverflow.ellipsis, style: T.small.copyWith(color: p.text2)),
             ]),
           ),
         ]),

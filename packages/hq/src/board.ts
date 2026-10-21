@@ -1,7 +1,7 @@
 // Derived status (B.11): never stored, computed at read time from facts — live shift, last event,
 // open ask, rate limit, task state. Precedence follows what he needs to see first.
 import { hostname } from 'node:os';
-import { STATUS_SYMBOL, type DerivedStatus } from '@company/shared';
+import { STATUS_SYMBOL, type DerivedStatus, type Tone } from '@company/shared';
 import type { Store } from './store.ts';
 import type { IdentityRow } from './org.ts';
 import { listIdentities } from './org.ts';
@@ -11,6 +11,8 @@ import { FALLBACK_TIME_ZONE, hhmm } from './timezone.ts';
 export interface BoardEntry {
   id: string; name: string; title: string; symbol: string; team: string | null; team_kind: string | null; project: string | null;
   reports_to: string | null; lifecycle: string;
+  /** Its team's tone (org.yaml), for a task worker its project's; null = none set, the app draws slate. */
+  tone: Tone | null;
   status: DerivedStatus; status_symbol: string; blocked_on: string | null; live: boolean;
   /** machine: where it runs, this machine's hostname or a node's name (nodes.ts). */
   shift: { id: string; state: string; started_at: number; last_event_at: number | null; in_turn: boolean; machine: string } | null;
@@ -48,7 +50,8 @@ export function deriveStatus(i: IdentityRow, s: ShiftRow | undefined, f: {
   return { status: 'resting', blocked_on: null };
 }
 
-export function board(store: Store, unresponsiveAfterMs?: number, tz?: string): BoardEntry[] {
+export function board(store: Store, unresponsiveAfterMs?: number, tz?: string,
+  tones: { teams: Map<string, Tone>; projects: Map<string, Tone> } = { teams: new Map(), projects: new Map() }): BoardEntry[] {
   const now = store.now();
   const shiftQ = store.db.prepare(`SELECT * FROM shifts WHERE identity = ? ORDER BY shift_no DESC, started_at DESC LIMIT 2`);
   const askQ = store.db.prepare(`SELECT COUNT(*) n FROM asks WHERE from_identity = ? AND state IN ('open','escalated')`);
@@ -69,7 +72,9 @@ export function board(store: Store, unresponsiveAfterMs?: number, tz?: string): 
     const d = deriveStatus(i, live, { openAsks, taskState: task?.state ?? null, now, hadEarlierShift, unresponsiveAfterMs, tz });
     return {
       id: i.id, name: i.name, title: i.title, symbol: i.symbol, team: i.team, team_kind: i.team_kind, project: i.project,
-      reports_to: i.reports_to, lifecycle: i.lifecycle, status: d.status, status_symbol: STATUS_SYMBOL[d.status], blocked_on: d.blocked_on,
+      reports_to: i.reports_to, lifecycle: i.lifecycle,
+      tone: (i.team ? tones.teams.get(i.team) : undefined) ?? (i.project ? tones.projects.get(i.project) : undefined) ?? null,
+      status: d.status, status_symbol: STATUS_SYMBOL[d.status], blocked_on: d.blocked_on,
       live: !!live,
       shift: latest ? { id: latest.id, state: latest.state, started_at: latest.started_at, last_event_at: latest.last_event_at, in_turn: latest.in_turn === 1, machine: !latest.machine || latest.machine === 'local' ? hostname() : latest.machine } : null,
       task: task ?? null, current_task: (currentQ.get(i.id) as BoardEntry['current_task'] | undefined) ?? null,

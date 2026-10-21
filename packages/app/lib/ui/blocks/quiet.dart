@@ -9,9 +9,12 @@ import '../common.dart';
 import '../nav.dart';
 
 class QuietBlock extends StatelessWidget {
-  const QuietBlock({super.key, required this.projects, required this.data});
+  const QuietBlock({super.key, required this.projects, required this.data, this.color});
   final List<String> projects;
   final CompanyData data;
+
+  /// The ground it sits on: the card's surface, or (v2) the screen's paper.
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -20,7 +23,7 @@ class QuietBlock extends StatelessWidget {
     final known = {for (final x in data.projects) x.id: x};
     // Material, not a coloured Container: the names' ripple is drawn on it.
     return Material(
-      color: p.surface,
+      color: color ?? p.surface,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 12),

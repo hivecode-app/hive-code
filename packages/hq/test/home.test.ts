@@ -270,3 +270,27 @@ test('compose_home over MCP: only the composer and the manager; a bad recipe com
     assert.match(told.body, /המתכון לא נשמר: בלוק 1: סוג לא מוכר "chart"/);
   } finally { await env.cleanup(); }
 });
+
+test('waiting_changed_at: when what waits for him last came in, was answered or was put off, so a headline composed before it is not shown', async () => {
+  const env = await homeEnv();
+  try {
+    const { hq, clock } = env;
+    assert.equal(hq.home.current().waiting_changed_at, null, 'nothing ever waited');
+    const go = hq.inbox.add({ kind: 'go', title: 'GO: hq', from_identity: 'ac-ceo', blocking: true });
+    const added = clock.now();
+    assert.equal(hq.home.current().waiting_changed_at, added);
+    clock.advance(60_000);
+    hq.home.compose([{ type: 'headline', text: 'GO קטן אחד מחכה לך' }], 'ac-ceo');
+    assert.ok(hq.home.current().composed_at > hq.home.current().waiting_changed_at!, 'composed after it came in: the headline holds');
+    clock.advance(60_000);
+    hq.inbox.resolve(go.id);
+    assert.equal(hq.home.current().waiting_changed_at, clock.now(), 'answered after the headline: it is stale');
+    // Put off, then taken back: taking it back clears snoozed_at, and still counts.
+    const b = hq.inbox.add({ kind: 'go', title: 'GO: app', from_identity: 'ac-ceo', blocking: true });
+    clock.advance(60_000);
+    hq.inbox.snooze(b.id, true);
+    clock.advance(60_000);
+    hq.inbox.snooze(b.id, false);
+    assert.equal(hq.home.current().waiting_changed_at, clock.now(), 'taken back from "לא עכשיו"');
+  } finally { await env.cleanup(); }
+});

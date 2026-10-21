@@ -4,9 +4,9 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/store.ts';
-import { ensureRuntimeIdentity, listProjects, parseOrg, renameTaskWorkers, syncOrg, taskWorkerName } from '../src/org.ts';
+import { ensureRuntimeIdentity, listProjects, listTones, parseOrg, renameTaskWorkers, syncOrg, taskWorkerName } from '../src/org.ts';
 import { sessionIdFor, uuidv5 } from '../src/proc.ts';
-import { ORG_YAML } from './helpers.ts';
+import { ORG_YAML, makeEnv } from './helpers.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 // The example company (fixtures/README.md): a whole contract, as a company's own repo carries it.
@@ -115,6 +115,23 @@ test('projects for the board: org.yaml order and names, the charter\'s status wi
     writeFileSync(join(dir, 'org.yaml'), 'projects: [');
     assert.deepEqual(listProjects(dir), [], 'a broken org.yaml is an empty list, not a crash');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('tones: a team\'s tone is its workers\', a task worker takes its project\'s, none or an unknown one is null (language-v2 §3)', async () => {
+  const org = ORG_YAML
+    .replace('symbol: monitor_heart, lead: rotem', 'symbol: monitor_heart, tone: slate, lead: rotem')
+    .replace('symbol: group, lead: eli', 'symbol: group, tone: purple, lead: eli')
+    .replace('symbol: domain, lead: ac-ceo', 'symbol: domain, tone: blue, lead: ac-ceo')
+    + 'projects:\n  - {id: agent-company, team: agent-company}\n  - {id: shop, team: monitoring}\n';
+  const env = await makeEnv({ org });
+  try {
+    const t = listTones(env.cfg.companyDir);
+    assert.deepEqual([...t.teams], [['monitoring', 'slate'], ['agent-company', 'blue']], 'purple is not one of the eight');
+    assert.deepEqual([...t.projects], [['agent-company', 'blue'], ['shop', 'slate']]);
+    ensureRuntimeIdentity(env.hq.store, { id: 'agent-company-t7', name: 'דנה', title: 'מפתחת', project: 'agent-company', reports_to: 'ac-ceo' });
+    const tone = (id: string) => env.hq.board().find((b) => b.id === id)?.tone;
+    assert.deepEqual(['ac-ceo', 'agent-company-t7', 'rotem', 'eli', 'yoav'].map(tone), ['blue', 'blue', 'slate', null, null]);
+  } finally { await env.cleanup(); }
 });
 
 test('a whole contract lists its projects with their charter status (the example company)', () => {

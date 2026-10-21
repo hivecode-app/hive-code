@@ -37,6 +37,17 @@ test('the example company passes', () => {
   assert.equal(r.code, 0, r.out);
 });
 
+test('a team tone from the eight passes, though "blue" is a colour word', () => {
+  const dir = copy();
+  try {
+    edit(dir, 'company/org.yaml', '    symbol: tune\n', '    symbol: tune\n    tone: blue\n');
+    const r = run(dir);
+    assert.equal(r.code, 0, r.out);
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
+});
+
 const cases = [
   ['emoji symbol', 'is an emoji', (d) => edit(d, 'company/org.yaml', 'symbol: shield', 'symbol: "🛡️"')],
   ['colour word as symbol', 'is a colour', (d) => edit(d, 'company/org.yaml', 'symbol: tune', 'symbol: red')],
@@ -77,6 +88,8 @@ const cases = [
   ['unquoted ": " in a charter value (#70)', 'company/projects/shop.md:', (d) => edit(d, 'company/projects/shop.md', 'worktree_dir: .worktrees', 'worktree_dir: a: b')],
   ['charter YAML the subset accepts but yaml rejects', 'invalid YAML', (d) => edit(d, 'company/projects/shop.md', 'worktree_dir: .worktrees', 'worktree_dir: "a" b')],
   ['broken YAML in org.yaml', 'company/org.yaml:', (d) => edit(d, 'company/org.yaml', 'home: srv1', 'home: srv1: x')],
+  ['team tone outside the eight', 'tone "purple" is not one of', (d) => edit(d, 'company/org.yaml', '    symbol: tune\n', '    symbol: tune\n    tone: purple\n')],
+  ['tone on an identity, not its team', 'colour value', (d) => edit(d, 'company/org.yaml', '    symbol: shield\n', '    symbol: shield\n    tone: blue\n')],
   ['merge_instructions that is not text', 'must be a string or a list', (d) => edit(d, 'company/projects/engine.md', 'ci_check: engine-ci', 'ci_check: engine-ci\nmerge_instructions: [1, 2]')],
 ];
 

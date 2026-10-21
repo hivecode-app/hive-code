@@ -6,7 +6,7 @@ import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 import type { HqConfig } from './config.ts';
 import { Store } from './store.ts';
-import { syncOrg, getIdentity, listIdentities, listProjects, renameTaskWorkers } from './org.ts';
+import { syncOrg, getIdentity, listIdentities, listProjects, listTones, renameTaskWorkers } from './org.ts';
 import { Inbox } from './inbox.ts';
 import { Conversations } from './conversations.ts';
 import { AwaitingBoard } from './awaiting.ts';
@@ -160,7 +160,15 @@ export class Hq {
   /** For the app: the zone and its offset now. */
   clock() { return clockOf(this.timeZone(), this.store.now()); }
 
-  board() { return board(this.store, this.cfg.timers.livenessMs * 3, this.timeZone()); }
+  board() { return board(this.store, this.cfg.timers.livenessMs * 3, this.timeZone(), this.tones()); }
+
+  /** org.yaml's tones, read at most once a minute: the board is asked for on every refresh. */
+  private toneCache: { at: number; tones: ReturnType<typeof listTones> } | null = null;
+  private tones() {
+    const now = Date.now();
+    if (!this.toneCache || now - this.toneCache.at > 60_000) this.toneCache = { at: now, tones: listTones(this.cfg.companyDir) };
+    return this.toneCache.tones;
+  }
 
   /** "בעבודה ובתור" (#128): every task not done, with who opened it, who is on it and why it waits. */
   openTasks(b = this.board()) { return openTasks(this.store, this.scheduler, b); }
@@ -204,6 +212,7 @@ export class Hq {
 
   reloadContract(): void {
     syncOrg(this.store, this.cfg.companyDir, this.cfg.capacity.residents, this.cfg.managerId);
+    this.toneCache = null;
     renameTaskWorkers(this.store);
     this.probes.reload();
   }

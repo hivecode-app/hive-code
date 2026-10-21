@@ -16,6 +16,7 @@ import '../common.dart';
 import '../home/home_screen.dart';
 import '../blocks/blocks.dart';
 import '../nav.dart';
+import 'convs_v2.dart' show WordFit;
 
 /// One row of "בוער" or "מחכה לך".
 class HeadLine {
@@ -396,6 +397,10 @@ class _Face extends StatelessWidget {
     final who = d.who(id);
     final textScale = MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.3);
     final dim = 36.0 * textScale;
+    // The face in its project's tone (language-v2 §3); the badge stays the state, the name is beside it.
+    final (bg, fg) = id != kSystemId ? p.identity(d.teamOf(id)?.tone) : (p.surface3, p.text);
+    // The ring is the card's own surface (dark: the card is a step up).
+    final ring = p.dark ? p.surface2 : p.surface;
     return SizedBox(
       width: dim + 4,
       height: dim + 2,
@@ -404,10 +409,10 @@ class _Face extends StatelessWidget {
           width: dim,
           height: dim,
           alignment: Alignment.center,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: p.surface3),
+          decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
           child: id == kSystemId
-              ? Ic('dns', size: 18 * textScale, color: p.text)
-              : Text(who.initial, textScaler: TextScaler.noScaling, style: TextStyle(fontFamily: kFont, fontWeight: FontWeight.w700, fontSize: 15 * textScale, height: 1, color: p.text)),
+              ? Ic('dns', size: 18 * textScale, color: fg)
+              : Text(who.initial, textScaler: TextScaler.noScaling, style: TextStyle(fontFamily: kFont, fontWeight: FontWeight.w700, fontSize: 15 * textScale, height: 1, color: fg)),
         ),
         PositionedDirectional(
           bottom: -2,
@@ -417,7 +422,7 @@ class _Face extends StatelessWidget {
             height: 18,
             alignment: Alignment.center,
             // The ring is the card's own surface: the badge sits cut into the face.
-            decoration: BoxDecoration(shape: BoxShape.circle, color: p.surface, boxShadow: [BoxShadow(color: p.surface, spreadRadius: 1.5)]),
+            decoration: BoxDecoration(shape: BoxShape.circle, color: ring, boxShadow: [BoxShadow(color: ring, spreadRadius: 1.5)]),
             child: Ic(badge, size: 15, fill: true, weight: hot ? 600 : 400, color: p.text),
           ),
         ),
@@ -463,22 +468,17 @@ class _LineRow extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(children: [
-              _Face(id: l.from, badge: l.hot ? 'warning' : 'pause_circle', hot: l.hot),
+              _Face(id: l.from, badge: l.hot ? 'warning' : 'front_hand', hot: l.hot),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                  Rich(l.text, auto: true, maxLines: 1, style: T.body.copyWith(fontWeight: l.hot ? FontWeight.w700 : FontWeight.w500, color: p.text, height: 21 / 15.5)),
+                  Rich(l.text, auto: true, maxLines: 2, style: T.body.copyWith(fontWeight: l.hot ? FontWeight.w700 : FontWeight.w500, color: p.text, height: 21 / 15.5)),
                   const SizedBox(height: 2),
                   Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
                     Expanded(
-                      child: Text.rich(
-                        TextSpan(children: l.hot
-                            ? [TextSpan(text: l.word, style: const TextStyle(fontWeight: FontWeight.w700)), TextSpan(text: ' · $name')]
-                            : [TextSpan(text: name), if (l.word.isNotEmpty) TextSpan(text: ' · ${l.word}')]),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: second,
-                      ),
+                      child: l.hot
+                          ? WordFit(lead: '${l.word} ', leadStyle: const TextStyle(fontWeight: FontWeight.w700), text: '· $name', style: second)
+                          : WordFit(lead: '$name ', text: l.word.isEmpty ? ' ' : '· ${l.word}', style: second),
                     ),
                     if (time.isNotEmpty) ...[const SizedBox(width: 8), Text(time, style: second.copyWith(fontFeatures: _tabular))],
                   ]),

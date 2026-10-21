@@ -10,13 +10,14 @@ import '../common.dart';
 import '../entity_link.dart';
 import '../nav.dart';
 import '../blocks/tasks.dart';
-import '../system_bar.dart';
-import 'head.dart';
-import 'home_blocks.dart';
+import 'convs_v2.dart';
+import 'home_v2.dart';
 import 'kbd.dart';
 
+export 'convs_v2.dart';
 export 'head.dart';
 export 'home_blocks.dart';
+export 'home_v2.dart';
 export 'kbd.dart';
 
 class ConversationsScreen extends StatefulWidget {
@@ -33,37 +34,7 @@ class ConversationsScreen extends StatefulWidget {
 }
 
 class _ConversationsScreenState extends State<ConversationsScreen> {
-  bool searching = false;
   String q = '';
-
-  // Android back closes the search before it leaves the tab (Shell asks NavScope for this).
-  void _openSearch() {
-    setState(() => searching = true);
-    NavScope.read(context).setBackHandler(_closeSearch);
-  }
-
-  AppNav? _nav;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _nav = NavScope.read(context);
-  }
-
-  @override
-  void dispose() {
-    final nav = _nav;
-    if (nav != null && nav.backHandler == _closeSearch) nav.backHandler = null;
-    super.dispose();
-  }
-
-  void _closeSearch() {
-    setState(() {
-      searching = false;
-      q = '';
-    });
-    NavScope.read(context).setBackHandler(null);
-  }
 
   bool _match(CompanyData d, ConversationSummary c) {
     if (q.isEmpty) return true;
@@ -73,6 +44,8 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // The phone: one list by latest activity, the home its first item (convs_v2.dart, task 205).
+    if (!widget.compact) return const ConversationsV2();
     assert(() {
       ConversationsScreen.debugBuilds++;
       return true;
@@ -84,107 +57,30 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     final ordered = sortConversations(d, d.conversations, store.convSort).where((c) => _match(d, c));
     // Finished task workers go below every live conversation, whatever order the list came in (#40):
     // the order above is the data's, and this split is the last step, so any sort keeps them at the end.
-    final all = [...ordered.where((c) => !d.isDone(c.identityId)), ...ordered.where((c) => d.isDone(c.identityId))];
-    // Of those, the read ones fold (APP-SPEC §4.3); a search shows everything.
-    // Not folded: unread, the selected one, or anything in the desktop sidebar (no room for a toggle).
-    bool closed(ConversationSummary c) => d.isDone(c.identityId) && c.unread == 0 && c.identityId != store.selectedConversation;
-    final fold = q.isEmpty && !widget.compact;
-    final list = fold ? all.where((c) => !closed(c)).toList() : all;
-    final done = fold ? all.where(closed).toList() : const <ConversationSummary>[];
-
-    if (widget.compact) {
-      final opened = openedTasks(d);
-      return Container(
-        color: p.surface,
-        child: Column(children: [
-          TopBar(title: 'שיחות', actions: [IBtn('sort', tip: 'מיון', onTap: () => pickConvSort(context))]),
-          _QuickSwitch(onChanged: (v) => setState(() => q = v)),
-          Expanded(
-            child: ListView(padding: EdgeInsets.zero, children: [
-              for (final (i, c) in list.indexed) ...[
-                if (i > 0) Padding(padding: const EdgeInsetsDirectional.only(start: 62), child: Container(height: 1, color: p.line)),
-                ConversationRow(c: c, compact: true, selected: store.currentConversation == c.identityId, opened: opened[c.identityId] ?? const []),
-              ],
-            ]),
-          ),
-        ]),
-      );
-    }
-
-    return Stack(children: [
-      Column(children: [
-        searching
-            ? SizedBox(
-                height: 56,
-                child: Row(children: [
-                  IBtn('arrow_forward', tip: 'סגירת החיפוש', onTap: _closeSearch),
-                  Expanded(
-                    child: TextField(
-                      autofocus: true,
-                      onChanged: (v) => setState(() => q = v),
-                      style: T.body.copyWith(color: p.text),
-                      decoration: InputDecoration(border: InputBorder.none, hintText: 'חיפוש לפי שם, תואר, צוות או תוכן', hintStyle: T.body.copyWith(color: p.text3)),
-                    ),
-                  ),
-                ]),
-              )
-            : TopBar(title: 'שיחות', showLink: true, actions: [
-                IBtn('search', tip: 'חיפוש', onTap: _openSearch),
-              ]),
-        const SystemBar(),
-        Expanded(child: q.isNotEmpty ? _searchList(d, list, done) : _mainList(context, d, store)),
-      ]),
-      PositionedDirectional(
-        end: 16,
-        bottom: 16,
-        child: Fab(icon: 'edit_square', label: 'שיחה חדשה', onTap: () => _newChat(context, d)),
-      ),
-    ]);
-  }
-
-  /// A search shows every conversation that matches, task workers too.
-  Widget _searchList(CompanyData d, List<ConversationSummary> list, List<ConversationSummary> done) => ListView(padding: EdgeInsets.zero, children: [
-        ListBlock(top: false, children: [for (final c in [...list, ...done]) ConversationRow(c: c)]),
-        const SizedBox(height: 80),
-      ]);
-
-  /// The main screen: the card of what needs him (head.dart), Yoav pinned, then one list by latest; who
-  /// works now is marked in his own row. Task workers live in their project's screen; one with an unread
-  /// message still shows here, so nothing he hasn't read hides behind a count.
-  Widget _mainList(BuildContext context, CompanyData d, AppStore store) {
-    final shown = [for (final c in d.conversations) if (!d.who(c.identityId).temp || c.unread > 0) c];
-    final yoav = shown.where((c) => c.identityId == d.managerId).firstOrNull;
-    final working = nowWorking(d);
+    final list = [...ordered.where((c) => !d.isDone(c.identityId)), ...ordered.where((c) => d.isDone(c.identityId))];
     final opened = openedTasks(d);
-    final others = [
-      for (final c in shown)
-        if (c.identityId != d.managerId && (working.containsKey(c.identityId) || opened.containsKey(c.identityId) || c.lastLine.isNotEmpty || c.unread > 0)) c,
-    ];
-    // A finished task worker with unread lines goes below every live conversation (#40).
-    final rest = [...others.where((c) => !d.isDone(c.identityId)), ...others.where((c) => d.isDone(c.identityId))];
-    ConversationSummary conv(String id) => d.conversations.where((c) => c.identityId == id).firstOrNull ?? ConversationSummary(identityId: id, lastLine: '', time: '');
-    final now = CompanyTime.now();
-    final since = store.chatsSeenAt ?? dayStart(now);
-    final head = HeadData.of(d, since: since);
-    final listed = {for (final c in rest) c.identityId};
-    Widget row(ConversationSummary c) => working.containsKey(c.identityId)
-        ? WorkingRow(c: c, lines: working[c.identityId]!, opened: opened[c.identityId] ?? const [])
-        : ConversationRow(c: c, quiet: true, opened: opened[c.identityId] ?? const []);
-    final rows = <Widget>[
-      if (yoav != null) ConversationRow(c: yoav, pinned: true, quiet: true, opened: opened[yoav.identityId] ?? const []),
-      for (final id in {...working.keys, ...opened.keys})
-        if (!listed.contains(id) && id != yoav?.identityId) row(conv(id)),
-      for (final c in rest) row(c),
-    ];
-    return ListView(padding: EdgeInsets.zero, children: [
-      // hq's recipe when it has one (home_blocks.dart); an older hq: the card alone, as before.
-      if (d.home case final recipe?) HomeBlocks(recipe: recipe, data: d, now: now, since: since) else ChatsHead(data: head, since: since, now: now),
-      if (rows.isNotEmpty) ListBlock(top: false, children: rows),
-      const SizedBox(height: 80),
-    ]);
+    return Container(
+      color: p.surface,
+      child: Column(children: [
+        TopBar(title: 'שיחות', actions: [IBtn('sort', tip: 'מיון', onTap: () => pickConvSort(context))]),
+        _QuickSwitch(onChanged: (v) => setState(() => q = v)),
+        Expanded(
+          child: ListView(padding: EdgeInsets.zero, children: [
+            // v2: the home is the first row; it opens in the main column (desktop.dart).
+            if (kDesignV2 && q.isEmpty) ...[HomeEntryRow(selected: store.homeOpen), Container(height: 1, color: p.line)],
+            for (final (i, c) in list.indexed) ...[
+              if (i > 0) Padding(padding: const EdgeInsetsDirectional.only(start: 62), child: Container(height: 1, color: p.line)),
+              ConversationRow(c: c, compact: true, selected: !store.homeOpen && store.currentConversation == c.identityId, opened: opened[c.identityId] ?? const []),
+            ],
+          ]),
+        ),
+      ]),
+    );
   }
+}
 
-  void _newChat(BuildContext context, CompanyData d) {
+/// "שיחה חדשה": every worker and team, as a sheet.
+void newChat(BuildContext context, CompanyData d) {
     final p = context.p;
     showModalBottomSheet(
       context: context,
@@ -218,7 +114,6 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         ]),
       ),
     );
-  }
 }
 
 /// The list's order: pinned first, then by [sort]; ties keep the data's order (newest message first).
@@ -348,8 +243,9 @@ class Fab extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Color(0x1A000000), offset: Offset(0, 1), blurRadius: 3)]),
       child: Material(
-      color: p.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.line)),
+      // The one primary action carries the brand (M3 FAB on primary container, language-v2 §2).
+      color: p.accentSoft,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: onTap ?? () {},
@@ -358,9 +254,9 @@ class Fab extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Ic(icon, size: 22, color: p.text),
+              Ic(icon, size: 22, color: p.dark ? p.text : p.accent),
               const SizedBox(width: 8),
-              Text(label, style: TextStyle(fontFamily: kFont, fontSize: 14.5, fontWeight: FontWeight.w500, color: p.text)),
+              Text(label, style: TextStyle(fontFamily: kFont, fontSize: 14.5, fontWeight: FontWeight.w700, color: p.text)),
             ]),
           ),
         ),
@@ -439,8 +335,20 @@ class ConversationRow extends StatelessWidget {
                     if (pinned) ...[Ic('push_pin', size: 15, color: p.text3, semantic: 'מוצמד'), const SizedBox(width: 4)],
                     Text(c.time, style: T.meta.copyWith(color: unread && !c.muted ? p.text : p.text3, fontWeight: unread && !c.muted ? FontWeight.w700 : null)),
                   ]),
+                  // v2 desktop column: two lines, as on the phone (audit #27): what needs him, else the last
+                  // line, else the status. The open-tasks count lives in the project screen.
+                  if (compact && kDesignV2)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: !statusLoud(pr.status) && c.lastLine.isNotEmpty
+                          ? Row(children: [
+                              Expanded(child: Rich(c.lastLine, auto: true, maxLines: 1, style: T.small.copyWith(fontWeight: unread ? FontWeight.w500 : null, color: c.lastIsMine || unread ? p.text : p.text2))),
+                              if (pill != null) ...[const SizedBox(width: 8), pill],
+                            ])
+                          : status,
+                    )
                   // A draft left in the chat shows instead of the last line, as in WhatsApp.
-                  if (!compact && task != null && task.isNotEmpty)
+                  else if (!compact && task != null && task.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Rich(task, auto: true, maxLines: 1, style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text2)),
@@ -480,8 +388,8 @@ class ConversationRow extends StatelessWidget {
                         if (pill != null) ...[const SizedBox(width: 8), pill],
                       ]),
                     ),
-                  if (opened.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2), child: OpenTasksLine(identityId: c.identityId, tasks: opened)),
-                  if (!quiet || statusLoud(pr.status) || (pill != null && !lineShown)) Padding(padding: const EdgeInsets.only(top: 4), child: status),
+                  if (opened.isNotEmpty && !(compact && kDesignV2)) Padding(padding: const EdgeInsets.only(top: 2), child: OpenTasksLine(identityId: c.identityId, tasks: opened)),
+                  if (!(compact && kDesignV2) && (!quiet || statusLoud(pr.status) || (pill != null && !lineShown))) Padding(padding: const EdgeInsets.only(top: 4), child: status),
                 ]),
               ),
             ]),

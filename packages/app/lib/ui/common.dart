@@ -1,6 +1,5 @@
 // Shared building blocks, one per mockup CSS class: .ms (Ic), .av (Monogram), .st (StatusWord),
 // .badge (Badge), .btn (Btn), .sec (Section), .list/.row (ListBlock), and the markup text (Rich).
-import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -83,8 +82,13 @@ bool statusLoud(WorkerStatus s) => s == WorkerStatus.waiting || s == WorkerStatu
 enum AvSize { md, sm, xs }
 
 class Monogram extends StatelessWidget {
-  const Monogram({super.key, required this.letter, this.size = AvSize.md, this.temp = false, this.teamSymbol, this.ringColor, this.symbol});
+  const Monogram({super.key, required this.letter, this.size = AvSize.md, this.temp = false, this.teamSymbol, this.ringColor, this.symbol, this.tone, this.toned = false});
   final String letter;
+
+  /// The circle is filled with its team's identity tone (language-v2 §3), slate when [tone] is null.
+  /// Not toned: grey (the system sender).
+  final bool toned;
+  final String? tone;
 
   /// A symbol instead of the letter (the system sender, #55).
   final String? symbol;
@@ -98,33 +102,39 @@ class Monogram extends StatelessWidget {
   factory Monogram.of(CompanyData d, String identityId, {AvSize size = AvSize.md, Color? ring}) {
     final who = d.who(identityId);
     if (identityId == kSystemId) return Monogram(letter: '', symbol: 'dns', size: size);
-    return Monogram(letter: who.initial, size: size, temp: who.temp, teamSymbol: d.teamOf(identityId)?.symbol, ringColor: ring);
+    final team = d.teamOf(identityId);
+    // A task worker's team carries its project's tone (hq_backend), so a row shows at once which project it is.
+    return Monogram(letter: who.initial, size: size, temp: who.temp, teamSymbol: team?.symbol, ringColor: ring, tone: team?.tone, toned: true);
   }
 
   @override
   Widget build(BuildContext context) {
     final p = context.p;
     final (dim, font) = switch (size) { AvSize.md => (42.0, 17.0), AvSize.sm => (34.0, 14.5), AvSize.xs => (22.0, 11.0) };
+    final (bg, fg) = toned ? p.identity(tone) : (p.surface3, p.text);
     final circle = Container(
       width: dim,
       height: dim,
       alignment: Alignment.center,
-      decoration: BoxDecoration(shape: BoxShape.circle, color: temp ? null : p.surface3),
+      decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
       child: symbol != null
-          ? Ic(symbol!, size: font + 3, color: p.text)
-          : Text(letter, style: TextStyle(fontFamily: kFont, fontWeight: FontWeight.w700, fontSize: font, height: 1, color: p.text)),
+          ? Ic(symbol!, size: font + 3, color: fg)
+          : Text(letter, style: TextStyle(fontFamily: kFont, fontWeight: FontWeight.w700, fontSize: font, height: 1, color: fg)),
     );
-    final face = temp ? CustomPaint(painter: _DashedRing(p.text3), child: circle) : circle;
+    // A task worker is a full face in its team's tone too; a dashed ring read as "empty" (audit #28).
+    final face = circle;
     if (teamSymbol == null || size == AvSize.xs) return SizedBox(width: dim, height: dim, child: face);
-    final tm = size == AvSize.md ? 18.0 : 16.0;
+    // The project mark reads at a glance, 14px and up, and sits out in the corner, off the letter (#148 §11, audit #16).
+    final tm = size == AvSize.md ? 22.0 : 20.0;
+    final icon = size == AvSize.md ? 15.0 : 14.0;
     return SizedBox(
       width: dim,
       height: dim,
       child: Stack(clipBehavior: Clip.none, children: [
         face,
         PositionedDirectional(
-          bottom: -3,
-          end: -4,
+          bottom: -5,
+          end: -6,
           child: Container(
             width: tm,
             height: tm,
@@ -134,35 +144,12 @@ class Monogram extends StatelessWidget {
               color: p.surface,
               boxShadow: [BoxShadow(color: ringColor ?? p.bg, spreadRadius: 1.5)],
             ),
-            child: Ic(teamSymbol!, size: size == AvSize.md ? 12 : 11, fill: true, weight: 500, color: p.text2),
+            child: Ic(teamSymbol!, size: icon, fill: true, weight: 500, color: p.text2),
           ),
         ),
       ]),
     );
   }
-}
-
-class _DashedRing extends CustomPainter {
-  _DashedRing(this.color);
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-    final r = size.width / 2 - 0.75;
-    final c = Offset(size.width / 2, size.height / 2);
-    const dashes = 18;
-    const sweep = 2 * math.pi / dashes;
-    for (var i = 0; i < dashes; i++) {
-      canvas.drawArc(Rect.fromCircle(center: c, radius: r), i * sweep, sweep * 0.55, false, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashedRing old) => old.color != color;
 }
 
 // ───────────────────────────── status, badge ─────────────────────────────
@@ -529,6 +516,34 @@ class UndoLine extends StatelessWidget {
 
 // ───────────────────────────── markup text ─────────────────────────────
 
+/// [text] when it [fits], else cut after the most whole words that fit with "…" (T2): never inside a word,
+/// as Flutter's own ellipsis does. Only a first word longer than the room is cut inside, the most of it that
+/// fits. [head] goes before the text (a "…" when it starts mid-way); [close] mends what a cut leaves open.
+String fitWords(String text, bool Function(String) fits, {String head = '', String Function(String)? close}) {
+  if (fits('$head$text')) return '$head$text';
+  final words = text.split(' ');
+  String end(String t) => '$head${close?.call(t) ?? t}…';
+  int most(int n, String Function(int) cut) {
+    var (lo, hi) = (0, n);
+    while (lo < hi) {
+      final m = (lo + hi + 1) ~/ 2;
+      if (fits(cut(m))) {
+        lo = m;
+      } else {
+        hi = m - 1;
+      }
+    }
+    return lo;
+  }
+
+  String cut(int n) => end(words.take(n).join(' ').replaceFirst(RegExp(r'[\s·,.:;–-]+$'), ''));
+  final n = most(words.length - 1, cut);
+  if (n > 0) return cut(n);
+  final chars = words.first.characters.toList();
+  String part(int n) => end(chars.take(n).join());
+  return part(most(chars.length - 1, part));
+}
+
 /// Small inline markup used across the app (not full markdown):
 ///   `code`      → mono, isolated (chat.md §5), optionally boxed like the mockup's `.b code`
 ///   **x**       → bold, and the inside is markup too (`**השינויים ב-`main`:**`)
@@ -553,12 +568,39 @@ class Rich extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final base = style ?? DefaultTextStyle.of(context).style;
+    // Clamped, it is cut only between words (T2): Flutter's own ellipsis cuts inside one ("כב…"). An explicit
+    // [overflow] keeps Flutter's (a clamp under an IntrinsicWidth, where a LayoutBuilder can't measure).
+    if (maxLines == null || overflow != null) return _text(context, markup, base);
+    final dir = paragraphDirection(markup), scaler = MediaQuery.textScalerOf(context);
+    return LayoutBuilder(builder: (context, box) {
+      if (!box.maxWidth.isFinite) return _text(context, markup, base);
+      bool fits(String m) {
+        final tp = TextPainter(text: TextSpan(style: base, children: spans(context, m, base, codeBox: codeBox, links: false)), textDirection: dir, textScaler: scaler, maxLines: maxLines)
+          ..layout(maxWidth: box.maxWidth);
+        final over = tp.didExceedMaxLines;
+        tp.dispose();
+        return !over;
+      }
+
+      return _text(context, fitWords(markup, fits, close: _closeMarks), base);
+    });
+  }
+
+  /// A cut that left a `code` or a **bold** open closes it, so the marks don't show as text.
+  static String _closeMarks(String t) {
+    var out = t;
+    if ('`'.allMatches(t).length.isOdd) out = '$out`';
+    if ('**'.allMatches(t.replaceAll(RegExp('`[^`]*`?'), '')).length.isOdd) out = '$out**';
+    return out;
+  }
+
+  Widget _text(BuildContext context, String markup, TextStyle base) {
     return Text.rich(
       // Clamped lines are previews: the row's tap opens it, so links there don't take the tap.
       TextSpan(children: spans(context, markup, base, codeBox: codeBox, links: links ?? maxLines == null)),
       style: base,
       maxLines: maxLines,
-      overflow: overflow ?? (maxLines != null ? TextOverflow.ellipsis : null),
+      overflow: overflow ?? (maxLines != null ? TextOverflow.clip : null),
       // The text's own direction always, so an English title ends with its period on the
       // right. Lists and rows keep their RTL alignment unless [auto] asks for the text's own.
       textAlign: align ?? (auto ? TextAlign.start : (Directionality.of(context) == TextDirection.rtl ? TextAlign.right : TextAlign.left)),

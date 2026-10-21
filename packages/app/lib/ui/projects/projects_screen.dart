@@ -41,10 +41,13 @@ class ProjectsScreen extends StatelessWidget {
 
 /// The team's mark as the row's face: its symbol in the monogram circle.
 class TeamMark extends StatelessWidget {
-  const TeamMark(this.symbol, {super.key});
+  const TeamMark(this.symbol, {super.key, this.tone});
   final String symbol;
+
+  /// The team's identity tone (v2).
+  final String? tone;
   @override
-  Widget build(BuildContext context) => Monogram(letter: '', symbol: symbol);
+  Widget build(BuildContext context) => Monogram(letter: '', symbol: symbol, tone: tone, toned: true);
 }
 
 class ProjectRow extends StatelessWidget {
@@ -58,7 +61,7 @@ class ProjectRow extends StatelessWidget {
     final leadId = team?.leadId;
     final open = d.tickets.where((t) => t.project == project.id && t.group != TicketGroup.doneToday).length;
     return _Row(
-      face: TeamMark(team?.symbol ?? 'folder'),
+      face: TeamMark(team?.symbol ?? 'folder', tone: team?.tone),
       title: project.name,
       leadId: leadId,
       line: openTasksLineShort(open),
@@ -78,7 +81,7 @@ class TeamRow extends StatelessWidget {
     final d = StoreScope.of(context).data!;
     final n = d.identities.values.where((i) => i.teamId == team.id).length;
     return _Row(
-      face: TeamMark(team.symbol),
+      face: TeamMark(team.symbol, tone: team.tone),
       title: team.name,
       // A team without a lead (management: Yoav is resident) shows its first member.
       leadId: team.leadId ?? d.identities.values.where((i) => i.teamId == team.id).firstOrNull?.id,

@@ -14,7 +14,7 @@ export type MessageKind = 'tell' | 'ask' | 'answer' | 'system' | 'probe_anomaly'
 /** Derived (never stored) status per A.3 — computed at read time from facts (B.11). */
 export type DerivedStatus =
   | 'working'          // play_arrow
-  | 'waiting_for_you'  // pause_circle · open ask/GO on the owner
+  | 'waiting_for_you'  // front_hand · open ask/GO on the owner
   | 'blocked'          // block · on something else (named in `blocked_on`)
   | 'stuck'            // warning · alive, not progressing
   | 'restarting'       // autorenew
@@ -24,9 +24,14 @@ export type DerivedStatus =
 
 /** Material Symbols icon name per status (company.md, dir-0017): an icon from one set, never an emoji. */
 export const STATUS_SYMBOL: Record<DerivedStatus, string> = {
-  working: 'play_arrow', waiting_for_you: 'pause_circle', blocked: 'block', stuck: 'warning',
+  working: 'play_arrow', waiting_for_you: 'front_hand', blocked: 'block', stuck: 'warning',
   restarting: 'autorenew', free: 'radio_button_unchecked', resting: 'bedtime', done: 'check_circle',
 };
+
+/** A team's identity tone (org.yaml `teams[].tone`, docs/design/language-v2.md §3): one of eight muted hues on the
+ *  faces of its workers. Identity only, beside the name or the icon; a state is never told by it. None = slate. */
+export const TONES = ['blue', 'teal', 'clay', 'green', 'rose', 'sky', 'olive', 'slate'] as const;
+export type Tone = (typeof TONES)[number];
 
 export type ShiftState = 'starting' | 'live' | 'ended' | 'dead';
 

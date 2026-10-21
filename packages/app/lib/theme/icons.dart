@@ -100,9 +100,7 @@ const Map<String, IconData> kIcons = {
   'sort': Symbols.sort_rounded,
   'folder': Symbols.folder_rounded,
   'push_pin': Symbols.push_pin_rounded,
-  'pause_circle': Symbols.pause_circle_rounded,
   'chevron_right': Symbols.chevron_right_rounded,
-  'pause': Symbols.pause_rounded,
   'lightbulb': Symbols.lightbulb_rounded,
   'call': Symbols.call_rounded,
   'campaign': Symbols.campaign_rounded,
@@ -118,4 +116,5 @@ const Map<String, IconData> kIcons = {
   'route': Symbols.route_rounded,
   'smartphone': Symbols.smartphone_rounded,
   'animation': Symbols.animation_rounded,
+  'done': Symbols.done_rounded,
 };

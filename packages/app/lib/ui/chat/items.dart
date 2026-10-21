@@ -414,7 +414,7 @@ class QuoteStrip extends StatelessWidget {
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(quote.askId == null ? quote.author : (quote.go ? 'תשובה לבקשת GO של ${quote.author}' : 'תשובה לשאלה של ${quote.author}'), style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, fontWeight: FontWeight.w700, color: p.text)),
-            Rich(quote.text, maxLines: 2, auto: true, style: TextStyle(fontFamily: kFont, fontSize: 13, height: 1.4, color: p.text2)),
+            Rich(quote.text, maxLines: 2, overflow: TextOverflow.ellipsis, auto: true, style: TextStyle(fontFamily: kFont, fontSize: 13, height: 1.4, color: p.text2)),
           ]),
         ),
         if (onClose != null) IconButton(onPressed: onClose, tooltip: 'ביטול הציטוט', icon: Ic('close', size: 18, color: p.text2)),

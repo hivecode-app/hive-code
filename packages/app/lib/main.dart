@@ -212,8 +212,8 @@ class _Frame extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
         title: 'החברה',
         debugShowCheckedModeBanner: false,
-        theme: buildTheme(Palette.light),
-        darkTheme: buildTheme(Palette.darkPalette),
+        theme: buildTheme(Palette.of(Brightness.light)),
+        darkTheme: buildTheme(Palette.of(Brightness.dark)),
         locale: const Locale('he'),
         supportedLocales: const [Locale('he')],
         localizationsDelegates: const [
@@ -300,8 +300,8 @@ class _CompanyAppState extends State<CompanyApp> {
           navigatorKey: navigatorKey,
           title: 'החברה',
           debugShowCheckedModeBanner: false,
-          theme: buildTheme(Palette.light),
-          darkTheme: buildTheme(Palette.darkPalette),
+          theme: buildTheme(Palette.of(Brightness.light)),
+          darkTheme: buildTheme(Palette.of(Brightness.dark)),
           themeMode: widget.themeMode,
           locale: const Locale('he'),
           supportedLocales: const [Locale('he')],
@@ -314,7 +314,9 @@ class _CompanyAppState extends State<CompanyApp> {
             // Android font size is honoured up to 130% (APP-SPEC §7.3).
             final mq = MediaQuery.of(context);
             final scale = mq.textScaler.clamp(maxScaleFactor: 1.3);
-            return MediaQuery(data: mq.copyWith(textScaler: scale), child: child!);
+            final app = MediaQuery(data: mq.copyWith(textScaler: scale), child: child!);
+            // v2: the background a screen fades through between two screens (lib/theme/motion.dart).
+            return kDesignV2 ? ColoredBox(color: Theme.of(context).scaffoldBackgroundColor, child: app) : app;
           },
           home: widget.home ?? const StoreGate(child: Shell()),
         ),

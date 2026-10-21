@@ -68,6 +68,14 @@ export class Inbox {
     return rows.map(toDTO);
   }
 
+  /** When what waits for him last changed: an item came in, was answered or closed, or was put off (null: never). */
+  lastChange(): number | null {
+    const r = this.store.db.prepare('SELECT MAX(MAX(created_at, COALESCE(resolved_at, 0), COALESCE(snoozed_at, 0))) AS at FROM inbox').get() as { at: number | null };
+    const snooze = Number(this.store.getMeta('inbox.snooze_changed_at') ?? 0);
+    const at = Math.max(r.at ?? 0, snooze);
+    return at > 0 ? at : null;
+  }
+
   resolveByRef(kind: InboxKind, ref: string, state: 'resolved' | 'dismissed' = 'resolved'): void {
     const rows = this.store.db.prepare(`SELECT id FROM inbox WHERE kind = ? AND ref = ? AND state = 'open'`).all(kind, ref) as { id: number }[];
     for (const r of rows) this.resolve(r.id, state);
@@ -95,7 +103,11 @@ export class Inbox {
     const r = on
       ? this.store.db.prepare(`UPDATE inbox SET snoozed_at = COALESCE(snoozed_at, ?), acked_at = COALESCE(acked_at, ?) WHERE id = ? AND state = 'open'`).run(now, now, id)
       : this.store.db.prepare(`UPDATE inbox SET snoozed_at = NULL WHERE id = ? AND state = 'open'`).run(id);
-    if (r.changes) this.store.emit('inbox.snoozed', null, { id, on });
+    if (r.changes) {
+      // Taking it back clears snoozed_at: lastChange() reads this one.
+      this.store.setMeta('inbox.snooze_changed_at', String(now));
+      this.store.emit('inbox.snoozed', null, { id, on });
+    }
     return r.changes > 0;
   }
 

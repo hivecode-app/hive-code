@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../data/backend.dart';
 import '../data/store.dart';
+import '../theme/motion.dart';
 import '../theme/tokens.dart';
 import 'common.dart';
 import 'convs/conversations_screen.dart';
@@ -38,7 +39,7 @@ class Shell extends StatelessWidget {
           : Column(children: [
               Expanded(
                 // Only the tab on screen follows the store; the others catch up when shown.
-                child: IndexedStack(index: nav.tab.index, children: [
+                child: (kDesignV2 ? FadeThroughIndexedStack.new : _plainStack)(index: nav.tab.index, children: [
                   StoreGate(active: nav.tab == AppTab.chats, child: const ConversationsScreen()),
                   StoreGate(active: nav.tab == AppTab.status, child: const StatusScreen()),
                   StoreGate(active: nav.tab == AppTab.projects, child: const ProjectsScreen()),
@@ -73,6 +74,8 @@ class Shell extends StatelessWidget {
     });
   }
 }
+
+Widget _plainStack({required int index, required List<Widget> children}) => IndexedStack(index: index, children: children);
 
 /// Error as a bar with "הבנתי" (design-taste E16): it stays until dismissed.
 class _ErrorBar extends StatelessWidget {
@@ -177,10 +180,13 @@ class NavItem extends StatelessWidget {
             width: pillWidth,
             height: 30,
             child: Stack(clipBehavior: Clip.none, children: [
-              Container(
+              AnimatedContainer(
+                // v2: the indicator fades in with the tab (M3 navigation bar); v1 switched at once.
+                duration: kDesignV2 ? Mo.sm : Duration.zero,
+                curve: Mo.standard,
                 width: pillWidth,
                 height: 30,
-                decoration: BoxDecoration(color: on ? p.accentSoft : null, borderRadius: BorderRadius.circular(15)),
+                decoration: BoxDecoration(color: on ? p.accentSoft : p.accentSoft.withValues(alpha: 0), borderRadius: BorderRadius.circular(15)),
                 alignment: Alignment.center,
                 child: Ic(dest.icon, fill: on, color: color),
               ),
@@ -192,9 +198,10 @@ class NavItem extends StatelessWidget {
                     constraints: const BoxConstraints(minWidth: 18),
                     height: 18,
                     padding: const EdgeInsets.symmetric(horizontal: 5),
-                    decoration: BoxDecoration(color: p.text, borderRadius: BorderRadius.circular(9)),
+                    // The count in the brand, ringed by the bar so it sits on the icon cleanly (v2, audit #6).
+                    decoration: BoxDecoration(color: p.accent, borderRadius: BorderRadius.circular(9), border: Border.all(color: p.surface, width: 2)),
                     alignment: Alignment.center,
-                    child: Text('$count', style: TextStyle(fontFamily: kFont, fontSize: 11, height: 1, fontWeight: FontWeight.w700, color: p.surface)),
+                    child: Text('$count', style: TextStyle(fontFamily: kFont, fontSize: 11, height: 1, fontWeight: FontWeight.w700, color: p.onAccent)),
                   ),
                 ),
               if (dot)

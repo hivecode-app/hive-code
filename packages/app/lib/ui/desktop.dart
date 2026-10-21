@@ -82,6 +82,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
       final n = (i + (k == PhysicalKeyboardKey.keyJ ? 1 : -1)).clamp(0, list.length - 1);
       if (list.isNotEmpty) {
         store.selectedConversation = list[n];
+        store.homeOpen = false;
         store.touch();
       }
       return KeyEventResult.handled;
@@ -198,8 +199,9 @@ class _DesktopFrameState extends State<DesktopFrame> {
         side = _ContextColumn(identityId: selected, showWaiting: false);
       case AppTab.chats:
         list = const ConversationsScreen(compact: true);
-        main = ChatScreen(identityId: selected, embedded: true);
-        side = peekWaiting ? const _WaitingPeek() : _ContextColumn(identityId: selected);
+        // v2: the home is a place of its own in the main column, as wide as a chat (home_v2.dart).
+        main = store.homeOpen ? const HomeV2Page() : ChatScreen(identityId: selected, embedded: true);
+        side = peekWaiting ? const _WaitingPeek() : (store.homeOpen ? null : _ContextColumn(identityId: selected));
       case AppTab.settings:
         list = const SettingsScreen(tab: true);
         main = ChatScreen(identityId: selected, embedded: true);
@@ -234,7 +236,8 @@ class _DesktopFrameState extends State<DesktopFrame> {
               ]),
             ),
             Container(
-              width: nav.tab == AppTab.chats ? 300 : 380,
+              // v2: the chats column holds the home over two-line rows, and takes the projects column's width.
+              width: nav.tab == AppTab.chats && !kDesignV2 ? 300 : 380,
               decoration: BoxDecoration(color: p.bg, border: BorderDirectional(end: BorderSide(color: p.line))),
               child: list,
             ),

@@ -40,9 +40,12 @@ CompanyNames companyNames = CompanyNames.fallback;
 enum WorkerStatus { free, working, waiting, blocked, stuck, restarting, resting, done }
 
 class Team {
-  const Team({required this.id, required this.name, required this.symbol, this.leadId, this.permanent = true});
+  const Team({required this.id, required this.name, required this.symbol, this.leadId, this.permanent = true, this.tone});
   final String id;
   final String name;
+
+  /// org.yaml's `tone` (language-v2 §3), the hue on its workers' faces; null draws slate.
+  final String? tone;
 
   /// Material Symbols name (APP-SPEC §6.1 table), e.g. `local_shipping`.
   final String symbol;
@@ -245,10 +248,26 @@ class ConversationSummary {
     this.extra,
     this.pinned = false,
     this.muted = false,
+    this.at,
+    this.delivery,
+    this.text,
+    this.msgId,
   });
   final String identityId;
   final String lastLine;
   final String time;
+
+  /// When the last message was sent, his or theirs (v2: "שעה היום, אתמול, או תאריך"); null from older data.
+  final DateTime? at;
+
+  /// He wrote last: how far that message got (v2: `schedule`, `done`, `done_all` before "אתה: "). Null: they did.
+  final Delivery? delivery;
+
+  /// The last line without the "את/ה: " the v1 row puts before his own (v2 says it with the ticks).
+  final String? text;
+
+  /// hq's id of that message, so a later delivery state moves the ticks on the row too.
+  final String? msgId;
 
   /// The last line is from the worker (bold-ish) or the system (muted). Mockup: `.t2` vs `.t2.m`.
   final bool lastIsMine;
@@ -264,7 +283,7 @@ class ConversationSummary {
   /// Muted (hq `muted_until`): its count shows, but it alerts nothing and stays out of the total.
   final bool muted;
 
-  ConversationSummary copyWith({int? unread, bool? muted}) => ConversationSummary(
+  ConversationSummary copyWith({int? unread, bool? muted, Delivery? delivery}) => ConversationSummary(
         identityId: identityId,
         lastLine: lastLine,
         time: time,
@@ -274,6 +293,10 @@ class ConversationSummary {
         extra: extra,
         pinned: pinned,
         muted: muted ?? this.muted,
+        at: at,
+        delivery: delivery ?? this.delivery,
+        text: text,
+        msgId: msgId,
       );
 }
 

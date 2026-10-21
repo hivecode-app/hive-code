@@ -122,7 +122,7 @@ class _WaitLine extends StatelessWidget {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Row(children: [
-                    Ic(urgent ? 'warning' : 'pause_circle', size: 16, fill: true, color: urgent ? p.urgent : p.text),
+                    Ic(urgent ? 'warning' : 'front_hand', size: 16, fill: true, color: urgent ? p.urgent : p.text),
                     const SizedBox(width: 3),
                     Flexible(child: Rich(item.kicker, maxLines: 1, style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.45, fontWeight: FontWeight.w700, color: urgent ? p.urgent : p.text))),
                   ]),
@@ -209,7 +209,7 @@ class _ProjectNow extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.only(top: 2),
                   child: Row(children: [
-                    Ic(statusLoud(t.status) ? 'pause_circle' : 'play_arrow', size: 17, fill: true, color: p.text),
+                    Ic(statusLoud(t.status) ? statusIcon(t.status) : 'play_arrow', size: 17, fill: true, color: p.text),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Rich('${t.assignee}: ${plainTitle(t.title)}', auto: true, maxLines: 1, style: T.secondary.copyWith(color: p.text)),

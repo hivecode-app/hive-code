@@ -86,6 +86,9 @@ class CompanyData {
   /// The head of the conversations screen (GET /api/home); null from an hq without it (the screen draws hq's default shape itself).
   HomeRecipe? home;
 
+  /// His latest messages both ways (hq: the last 200), newest first: what v2's search reads for content.
+  List<RecentLine> recent = [];
+
   int get waitingCount => waiting.where((w) => w.state == WaitState.open || w.state == WaitState.pending).length;
 
   /// The number on "שיחות" and the app icon: unread messages, muted conversations left out (as in WhatsApp).
@@ -116,6 +119,9 @@ class CompanyData {
   /// A finished task worker (APP-SPEC §4.3): its conversation shows "הושלם" and goes below the live ones.
   bool isDone(String identityId) => who(identityId).temp && presence[identityId]?.status == WorkerStatus.done;
 }
+
+/// One message from [CompanyData.recent]: whose conversation, its first line, when, and whether he wrote it.
+typedef RecentLine = ({String id, String text, DateTime at, bool mine});
 
 /// Result of a command that reaches the server. Failure text is one plain sentence (design-taste §7).
 class CommandResult {

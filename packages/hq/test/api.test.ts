@@ -65,7 +65,7 @@ test('API: org/board with derived status, tell, asks/answer, toggles, tasks, inb
     assert.equal(ask.json.ask.state, 'open');
     const board = await call('GET', '/api/board');
     assert.equal(board.json.identities.find((i: { id: string }) => i.id === 'eli').status, 'waiting_for_you');
-    assert.equal(board.json.identities.find((i: { id: string }) => i.id === 'eli').status_symbol, 'pause_circle');
+    assert.equal(board.json.identities.find((i: { id: string }) => i.id === 'eli').status_symbol, 'front_hand');
     assert.equal(board.json.manager, 'yoav', 'the app pins the manager from hq (org.yaml `manager`), not a name in its code');
     const ans = await call('POST', '/api/asks/ask-api/answer', { answer: 'כן' });
     assert.equal(ans.json.ask.state, 'answered');
