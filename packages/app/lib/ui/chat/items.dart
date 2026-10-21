@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../../data/backend.dart';
 import '../../data/error_report.dart';
+import '../../data/engine_model.dart' show hebrewOrEmpty, toolHasDetail, toolLabel;
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
@@ -14,6 +15,7 @@ import '../common.dart';
 import '../decision.dart';
 import '../nav.dart';
 import 'markdown.dart';
+import 'tool_details.dart' show openInternalMessage, openToolDetails;
 
 const _fold = Duration(milliseconds: 150);
 
@@ -550,13 +552,111 @@ class ServiceLine extends StatelessWidget {
   }
 }
 
+// ───────────────────────────── internal messages ─────────────────────────────
+
+/// A message between two workers: one kind, a full-width line with no bubble and none of the colors of his or a
+/// worker's bubbles, so it never reads as a conversation with him. "יואב ← נועה" bold, one line of the message, the
+/// time. A tap opens it whole (the same screen as "שלח הודעה").
+class InternalMsgRow extends StatelessWidget {
+  const InternalMsgRow({super.key, required this.msg, this.inGroup = false});
+  final InternalMsg msg;
+
+  /// Inside an open group the row is indented under its header.
+  final bool inGroup;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final d = StoreScope.of(context).data;
+    if (d == null) return const SizedBox.shrink();
+    final from = d.who(msg.from).name, to = d.who(msg.to).name;
+    final line = msg.body.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final name = T.small.copyWith(color: p.text, fontWeight: FontWeight.w700);
+    return Semantics(
+      button: true,
+      hint: 'פתיחת ההודעה',
+      label: '$from ← $to: $line',
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: () => openInternalMessage(context, msg),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: EdgeInsetsDirectional.fromSTEB(inGroup ? 30 : 16, 8, 16, 8),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Padding(padding: const EdgeInsets.only(top: 1), child: Ic('forward_to_inbox', size: 18, color: p.text2)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    // The arrow is an icon: Heebo has no "←", and the fallback face differs by device.
+                    Flexible(child: Text(from, maxLines: 1, overflow: TextOverflow.ellipsis, style: name)),
+                    Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Ic('arrow_back', size: 15, color: p.text)),
+                    Flexible(child: Text(to, maxLines: 1, overflow: TextOverflow.ellipsis, style: name)),
+                    const SizedBox(width: 8),
+                    Text(hm(msg.ts), style: T.meta.copyWith(color: p.text3)),
+                  ]),
+                  Rich(line, maxLines: 1, style: T.row2.copyWith(color: p.text2)),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A run of messages between workers as one line, "4 הודעות בין העובדים", that opens in place.
+class InternalGroupRow extends StatelessWidget {
+  const InternalGroupRow({super.key, required this.count, required this.open, required this.onToggle, required this.children});
+  final int count;
+  final bool open;
+  final VoidCallback onToggle;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Semantics(
+        button: true,
+        expanded: open,
+        child: InkWell(
+          onTap: onToggle,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(children: [
+                Ic('forward_to_inbox', size: 18, color: p.text2),
+                const SizedBox(width: 10),
+                Expanded(child: Text('$count הודעות בין העובדים', style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w700))),
+                AnimatedRotation(turns: open ? 0.5 : 0, duration: _fold, child: Ic('expand_more', size: 20, color: p.text2)),
+              ]),
+            ),
+          ),
+        ),
+      ),
+      AnimatedSize(
+        duration: _fold,
+        alignment: Alignment.topCenter,
+        child: open ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children) : const SizedBox(width: double.infinity),
+      ),
+    ]);
+  }
+}
+
 // ───────────────────────────── tools (.tool) ─────────────────────────────
 
 String _outcomeIcon(Outcome o) => switch (o) { Outcome.ok => 'check', Outcome.error => 'error', Outcome.interrupted => 'stop_circle', Outcome.running => 'progress_activity' };
 
 class ToolGroupRow extends StatefulWidget {
-  const ToolGroupRow({super.key, required this.group, this.forceOpen = false});
+  const ToolGroupRow({super.key, required this.group, this.forceOpen = false, this.identityId});
   final ToolGroup group;
+
+  /// Whose tools: their gender says the Hebrew label, and a tap opens the details with their name.
+  final String? identityId;
   final bool forceOpen;
   @override
   State<ToolGroupRow> createState() => _ToolGroupRowState();
@@ -622,7 +722,7 @@ class _ToolGroupRowState extends State<ToolGroupRow> {
                 ? const SizedBox(width: double.infinity)
                 : Padding(
                     padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
-                    child: Column(children: [for (final t in g.tools) _ToolItem(t)]),
+                    child: Column(children: [for (final t in g.tools) _ToolItem(t, identityId: widget.identityId)]),
                   ),
           ),
         ]),
@@ -631,15 +731,19 @@ class _ToolGroupRowState extends State<ToolGroupRow> {
   }
 }
 
+/// One tool in an open group: the Hebrew label, then its LTR detail (a path, a command) when it has one.
+/// Never the tool's internal name (נועה, 22/10). A tap opens what it did (tool_details.dart).
 class _ToolItem extends StatelessWidget {
-  const _ToolItem(this.t);
+  const _ToolItem(this.t, {this.identityId});
   final ToolLine t;
+  final String? identityId;
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    return Tooltip(
-      message: t.label,
-      child: Container(
+    final name = t.name;
+    // Rows built without the event (the demo data) have no tool name: the detail alone, as before.
+    if (name == null) {
+      return Container(
         padding: const EdgeInsets.symmetric(vertical: 5),
         decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
         child: Row(children: [
@@ -647,16 +751,45 @@ class _ToolItem extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(t.label,
+                textDirection: TextDirection.ltr, textAlign: TextAlign.left, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.mono(11.5, lh: 16).copyWith(color: p.text)),
+          ),
+          if (t.trail != null) ...[const SizedBox(width: 8), Rich(ltr(t.trail!), style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: p.text2))],
+        ]),
+      );
+    }
+    final gender = identityId == null ? Gender.m : StoreScope.of(context).data?.who(identityId!).gender ?? Gender.m;
+    final detail = toolHasDetail(name) && name != 'Bash' ? t.label : (name == 'Task' || name == 'Agent') && t.label != 'עוזר' ? t.label : null;
+    // A command line says nothing to him: its Hebrew description, and without one only "הריץ פקודה" (נועה, 22/10).
+    final said = name == 'Bash' ? hebrewOrEmpty((t.call?.input['description'] ?? '').toString()) : '';
+    final err = t.outcome == Outcome.error;
+    final row = Container(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line))),
+      child: Row(children: [
+        Ic(t.icon, size: 16, color: err ? p.urgent : p.text2),
+        const SizedBox(width: 8),
+        Text(toolLabel(name, gender), style: TextStyle(fontFamily: kFont, fontSize: 13, height: 1.4, color: p.text2)),
+        if (detail != null && detail.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(detail,
                 textDirection: TextDirection.ltr,
                 textAlign: TextAlign.left,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: T.mono(11.5, lh: 16).copyWith(color: p.text)),
           ),
-          if (t.trail != null) ...[const SizedBox(width: 8), Rich(ltr(t.trail!), style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: p.text2))],
-        ]),
-      ),
+        ] else if (said.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          Expanded(child: Text(said, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontFamily: kFont, fontSize: 13, height: 1.4, color: p.text))),
+        ] else
+          const Spacer(),
+        if (t.trail != null) ...[const SizedBox(width: 8), Rich(ltr(t.trail!), style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: p.text2))],
+      ]),
     );
+    final call = t.call;
+    if (call == null || identityId == null) return row;
+    return InkWell(onTap: () => openToolDetails(context, identityId!, call), child: row);
   }
 }
 

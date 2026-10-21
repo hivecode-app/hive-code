@@ -759,6 +759,10 @@ class HqBackend extends Backend {
         if (chatId == null || _buffer(chatId, e)) return;
         final chat = d.chats[chatId];
         if (chat == null) return;
+        if (m['id'] is String && m['body'] is String && m['created_at'] is int) {
+          chat.refs[m['id'] as String] = RefMessage(
+              from: from, to: to, body: m['body'] as String, ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int));
+        }
         final item = _messageItem(m, d, chat.items);
         if (item != null && !chat.items.any((i) => i.id == item.id)) {
           chat.items.add(item);
@@ -796,13 +800,13 @@ class HqBackend extends Backend {
       if (streamed.attachments.isEmpty) streamed.attachments = attachmentsOf(m);
       return null;
     }
-    final body = withoutIds((m['body'] as String).replaceAll('\n', ' '));
-    return EventLine(
+    return InternalMsg(
       id: 'msg:${m['id']}',
       ts: ts,
-      icon: 'forward',
-      text: '${d.who(m['from_identity'] as String).name} ← ${d.who(m['to_identity'] as String).name}: ${body.length > 90 ? '${body.substring(0, 90)}…' : body}',
-      between: [m['from_identity'] as String, m['to_identity'] as String],
+      from: m['from_identity'] as String,
+      to: m['to_identity'] as String,
+      body: withoutIds(m['body'] as String),
+      ref: m['ref'] as String?,
     );
   }
 
@@ -1027,6 +1031,10 @@ class HqBackend extends Backend {
       // Answers typed on this device are merged back below: seen here, the server's copy of one is not shown twice.
       final typed = [for (final m in (old?.items ?? const <ChatItem>[]).whereType<UserMsg>()) if (m.replyTo?.askId != null) m];
       for (final m in (res[0]['messages'] as List).cast<Map<String, dynamic>>().reversed) {
+        if (m['id'] is String && m['body'] is String && m['created_at'] is int) {
+          chat.refs[m['id'] as String] = RefMessage(
+              from: m['from_identity'] as String? ?? '', to: m['to_identity'] as String? ?? '', body: m['body'] as String, ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int));
+        }
         final item = _messageItem(m, d, chat.items, typed: typed);
         if (item != null) chat.items.add(item);
         // He read it: mark it handled so the worker's mailbox closes the loop (B.4).

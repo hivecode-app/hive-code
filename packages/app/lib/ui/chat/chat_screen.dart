@@ -11,8 +11,6 @@ import '../../theme/tokens.dart';
 import '../common.dart';
 import '../selection.dart';
 import '../convs/conversations_screen.dart';
-import '../entity_link.dart';
-import '../nav.dart';
 import 'composer.dart';
 import 'items.dart';
 import 'markdown.dart';
@@ -33,6 +31,9 @@ class ChatScreen extends StatefulWidget {
 
   /// The start of that message, for when it is on screen under another id (an answer that streamed in).
   static final Map<String, String> pendingTargetText = {};
+
+  /// Conversations whose target is lit for a moment once it is on screen (a message reached from a tool's details).
+  static final Set<String> pendingFlash = {};
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -92,6 +93,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _target = target;
       _targetText = targetText;
       _targetTries = 0;
+      _flashNext = ChatScreen.pendingFlash.remove(widget.identityId);
     }
   }
 
@@ -109,10 +111,10 @@ class _ChatScreenState extends State<ChatScreen> {
     final start = _targetText == null ? null : _snippet(_targetText!);
     bool hit(ChatItem i) => switch (i) {
           AskCard() => i.askId == t || i.id == t,
-          UserMsg() || TextMsg() => i.id == t || i.id == 'msg:$t',
+          UserMsg() || TextMsg() || InternalMsg() => i.id == t || i.id == 'msg:$t',
           _ => false,
         };
-    bool byText(ChatItem i) => start != null && start.isNotEmpty && (i is TextMsg || i is UserMsg) && _snippet(_textOf(i)).startsWith(start);
+    bool byText(ChatItem i) => start != null && start.isNotEmpty && (i is TextMsg || i is UserMsg || i is InternalMsg) && _snippet(_textOf(i)).startsWith(start);
     return (chat.items.where(hit).lastOrNull ?? chat.items.where(byText).lastOrNull)?.id;
   }
 
@@ -264,7 +266,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  String _textOf(ChatItem it) => switch (it) { UserMsg() => it.text, TextMsg() => it.text, AskCard() => it.question, _ => '' };
+  String _textOf(ChatItem it) => switch (it) { UserMsg() => it.text, TextMsg() => it.text, AskCard() => it.question, InternalMsg() => it.body, _ => '' };
 
   @override
   Widget build(BuildContext context) {
@@ -301,6 +303,10 @@ class _ChatScreenState extends State<ChatScreen> {
     // Rows are built lazily: only what is on screen. With thousands of items, building every row
     // on each store change (every streaming token) was the main cost of a frame.
     final rows = _entries(chat);
+    // A message inside a folded run (the target of a tap, or a search hit) opens its run.
+    for (final id in [_targetId, hitId]) {
+      if (id != null && _groupOf[id] != null) _openGroups.add(_groupOf[id]!);
+    }
     _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, openAllTools, _targetId]);
     final selectedItem = selected == null ? null : chat.items.where((i) => i.id == selected).firstOrNull;
 
@@ -434,8 +440,25 @@ class _ChatScreenState extends State<ChatScreen> {
         // Unique even when items arrive out of order and a day shows up twice.
         out.add(_Entry('\u0000day:${dd.millisecondsSinceEpoch}:${it.id}', day: dd));
       }
+      if (it is InternalMsg) {
+        // A run of them folds into one line; a single one stays a line of its own.
+        final run = out.isEmpty ? null : out.last;
+        if (run != null && run.group != null) {
+          run.group!.add(it);
+          continue;
+        }
+        if (run != null && run.item is InternalMsg) {
+          out.removeLast();
+          out.add(_Entry('\u0000run:${run.item!.id}', group: [run.item as InternalMsg, it]));
+          continue;
+        }
+      }
       out.add(_Entry(it.id, item: it));
     }
+    _groupOf = {
+      for (final e in out)
+        if (e.group != null) for (final m in e.group!) m.id: e.key,
+    };
     out.add(const _Entry(_kLive));
     _entryItems = items;
     _entrySig = sig;
@@ -447,6 +470,10 @@ class _ChatScreenState extends State<ChatScreen> {
   Object? _entrySig;
   List<_Entry>? _entryCache;
   Map<String, int> _entryIndex = const {};
+
+  /// The folded run each message between workers is in, and the runs that are open.
+  Map<String, String> _groupOf = const {};
+  final _openGroups = <String>{};
   String? _scrolledToHit;
 
   // The last widget built for each text row, with what it was built from. A row whose message did
@@ -464,8 +491,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Object? _rowSig(ChatItem it, String? hitId) => switch (it) {
-        TextMsg() => (it.text, it.streaming, it.author, it.attachments.length, selected == it.id, hitId == it.id),
-        UserMsg() => (it.text, it.delivery, it.priority, it.waitingOn, it.replyTo?.text, selected == it.id, hitId == it.id),
+        TextMsg() => (it.text, it.streaming, it.author, it.attachments.length, selected == it.id, hitId == it.id, _flash == it.id),
+        UserMsg() => (it.text, it.delivery, it.priority, it.waitingOn, it.replyTo?.text, selected == it.id, hitId == it.id, _flash == it.id),
         _ => null,
       };
 
@@ -494,6 +521,14 @@ class _ChatScreenState extends State<ChatScreen> {
       return LiveIndicator(live: chat.live, name: who.name, gender: who.gender);
     }
     if (e.day != null) return ServiceLine(text: _dayLabel(e.day!));
+    if (e.group != null) {
+      return InternalGroupRow(
+        count: e.group!.length,
+        open: _openGroups.contains(e.key),
+        onToggle: () => setState(() => _openGroups.contains(e.key) ? _openGroups.remove(e.key) : _openGroups.add(e.key)),
+        children: [for (final m in e.group!) _decorate(m, InternalMsgRow(msg: m, inGroup: true), hitId, p)],
+      );
+    }
     final it = e.item!;
     Widget w = _item(context, it, chat, d, superseded);
     // A card quotes the same way as a message: a long press or a swipe, never a tap (#258).
@@ -505,7 +540,14 @@ class _ChatScreenState extends State<ChatScreen> {
         child: w,
       );
     }
+    return _decorate(it, w, hitId, p);
+  }
+
+  /// What marks a row as the one sought: the key the list scrolls to, the moment it is lit, a search hit.
+  Widget _decorate(ChatItem it, Widget w, String? hitId, Palette p) {
     if (it.id == _targetId) w = KeyedSubtree(key: targetKey, child: w);
+    // Cards light themselves (flash:); a message, or a line between workers, is lit here.
+    if (_flash == it.id && it is! AskCard) w = Container(color: p.accentSoft, child: w);
     if (it.id == hitId) {
       final k = GlobalKey();
       w = Container(key: k, color: p.accentSoft, child: w);
@@ -520,20 +562,6 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     }
     return w;
-  }
-
-  /// A message between two workers, in one's conversation: a tap opens the other's, where it happened too.
-  Widget _eventLine(EventLine it) {
-    final d = StoreScope.read(context).data;
-    final other = it.between.where((id) => id != widget.identityId).firstOrNull;
-    final to = d == null || other == null ? null : chatTargetOf(d, worker: other);
-    return ServiceLine(
-      text: it.text,
-      icon: it.icon,
-      strong: it.strong,
-      onTap: to == null ? null : () => Nav.chat(context, to),
-      tapHint: to == null ? null : 'שיחה עם ${d!.who(to).name}',
-    );
   }
 
   Widget _item(BuildContext context, ChatItem it, Conversation chat, CompanyData d, Set<String> superseded) {
@@ -553,7 +581,7 @@ class _ChatScreenState extends State<ChatScreen> {
           onRetry: () => store.resend(widget.identityId, it),
         ),
       TextMsg() => TextBubble(msg: it),
-      ToolGroup() => ToolGroupRow(group: it, forceOpen: openAllTools),
+      ToolGroup() => ToolGroupRow(group: it, forceOpen: openAllTools, identityId: widget.identityId),
       DiffCard() => DiffCardView(card: it),
       TestResultCard() => TestCardView(card: it),
       TerminalCard() => TerminalCardView(card: it),
@@ -574,7 +602,8 @@ class _ChatScreenState extends State<ChatScreen> {
           icon: 'autorenew',
           text: 'משמרת ${it.shift} · קיבלה העברה ממשמרת ${it.from} · ${hm(it.ts)}',
         ),
-      EventLine() => _eventLine(it),
+      EventLine() => ServiceLine(text: it.text, icon: it.icon, strong: it.strong),
+      InternalMsg() => InternalMsgRow(msg: it),
       HandoffCard() => HandoffCardView(card: it, from: widget.identityId),
       // A turn that ended in an error: hq caught it itself (turn.error, error-watch.ts).
       ErrorLine() => ServiceLine(text: ErrorReports.instance.active ? '${it.text} ${SentNote.text}.' : it.text, icon: 'error', iconColor: context.p.urgent),
@@ -934,8 +963,11 @@ const _kLive = '\u0000live';
 
 /// One row of the chat list: a day separator, an item, the empty-chat header or the live line.
 class _Entry {
-  const _Entry(this.key, {this.item, this.day});
+  const _Entry(this.key, {this.item, this.day, this.group});
   final String key;
+
+  /// A run of messages between workers, folded into one line.
+  final List<InternalMsg>? group;
   final ChatItem? item;
   final DateTime? day;
 }

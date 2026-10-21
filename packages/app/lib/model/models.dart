@@ -437,8 +437,26 @@ class TextMsg extends ChatItem {
   final String? author;
 }
 
+/// One tool call as it happened, for its details screen: what went in, what came back, when, and what the
+/// worker wrote just before it ("למה").
+class ToolCall {
+  const ToolCall({required this.name, this.input = const {}, required this.started, this.ended, this.preview, this.isError = false, this.why});
+  final String name;
+  final Map<String, dynamic> input;
+  final DateTime started;
+  final DateTime? ended;
+
+  /// The start of the result, as hq keeps it (the adapter's 400 characters, then "…").
+  final String? preview;
+  final bool isError;
+  final String? why;
+
+  ToolCall done({required DateTime at, String? preview, required bool isError}) =>
+      ToolCall(name: name, input: input, started: started, ended: at, preview: preview, isError: isError, why: why);
+}
+
 class ToolLine {
-  const ToolLine({required this.icon, required this.label, this.trail, this.outcome = Outcome.ok, this.name});
+  const ToolLine({required this.icon, required this.label, this.trail, this.outcome = Outcome.ok, this.name, this.call});
   final String icon;
 
   /// LTR detail: a path, a search, a command.
@@ -448,6 +466,9 @@ class ToolLine {
   final String? trail;
   final Outcome outcome;
   final String? name;
+
+  /// Null on rows built without the event (the demo data): those do not open.
+  final ToolCall? call;
 }
 
 class ToolGroup extends ChatItem {
@@ -629,15 +650,27 @@ class ShiftMarker extends ChatItem {
 }
 
 class EventLine extends ChatItem {
-  EventLine({required super.id, required super.ts, required this.text, this.icon, this.strong = false, this.between = const [], super.seq});
+  EventLine({required super.id, required super.ts, required this.text, this.icon, this.strong = false, super.seq});
   final String text;
   final String? icon;
 
-  /// A message between two workers: both identities. In one's conversation, a tap opens the other's.
-  final List<String> between;
-
   /// "2 הודעות חדשות" divider is strong.
   final bool strong;
+}
+
+/// A message from one worker to another, seen in either one's conversation (dir: "הודעות פנימיות"). Its own kind:
+/// a full-width line, never a bubble, so it does not read as a conversation with him. A tap opens it whole.
+class InternalMsg extends ChatItem {
+  InternalMsg({required super.id, required super.ts, required this.from, required this.to, required this.body, this.ref, super.seq});
+  final String from;
+  final String to;
+  final String body;
+
+  /// The message it answers, when it answers one.
+  final String? ref;
+
+  /// The id hq stores it by (the item's id without the "msg:" it carries in a conversation).
+  String get messageId => id.startsWith('msg:') ? id.substring(4) : id;
 }
 
 class HandoffCard extends ChatItem {
@@ -673,11 +706,22 @@ class LiveState {
 }
 
 class Conversation {
-  Conversation({required this.identityId, required this.items, this.live = const LiveState(), this.draft = ''});
+  Conversation({required this.identityId, required this.items, this.live = const LiveState(), this.draft = '', Map<String, RefMessage>? refs}) : refs = refs ?? {};
   final String identityId;
   final List<ChatItem> items;
+
+  /// The messages to and from this worker by id, so a `tell` with a `ref` can quote the one it answers.
+  final Map<String, RefMessage> refs;
   LiveState live;
   String draft;
+}
+
+class RefMessage {
+  const RefMessage({required this.from, this.to = '', required this.body, required this.ts});
+  final String from;
+  final String to;
+  final String body;
+  final DateTime ts;
 }
 
 // ───────────────────────────── board / ticket ─────────────────────────────

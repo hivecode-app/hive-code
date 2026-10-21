@@ -54,9 +54,19 @@ class NavScope extends InheritedNotifier<AppNav> {
 }
 
 class Nav {
-  static void chat(BuildContext context, String identityId, {Quote? quote, bool focus = false}) {
+  /// [message]: a message of that conversation to bring into view and light for a moment, by its id or, when the
+  /// id is not known, by the start of its text. [closeSheet]: the tap came from a sheet over the screen (the details
+  /// of a tool), which closes first.
+  static void chat(BuildContext context, String identityId, {Quote? quote, bool focus = false, ({String? id, String? text})? message, bool closeSheet = false}) {
     final nav = NavScope.read(context);
     final store = StoreScope.read(context);
+    final navigator = Navigator.of(context);
+    if (closeSheet) navigator.pop();
+    if (message != null) {
+      ChatScreen.pendingTarget[identityId] = message.id ?? 'text:${message.text}';
+      if (message.text != null) ChatScreen.pendingTargetText[identityId] = message.text!;
+      ChatScreen.pendingFlash.add(identityId);
+    }
     if (nav.wide) {
       store.selectedConversation = identityId;
       store.homeOpen = false;
@@ -66,7 +76,7 @@ class Nav {
       return;
     }
     if (quote != null || focus) ChatScreen.pendingQuote[identityId] = quote;
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(identityId: identityId)));
+    navigator.push(MaterialPageRoute(builder: (_) => ChatScreen(identityId: identityId)));
   }
 
   /// A real handoff (hq gave a link) opens the phone page in the browser, as the bet6 spike had it;

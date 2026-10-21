@@ -8,6 +8,7 @@ import '../model/models.dart';
 import '../theme/tokens.dart';
 import 'chat/chat_screen.dart';
 import 'chat/items.dart' show shortcutAsk, shortcutOptions;
+import 'chat/tool_details.dart';
 import 'common.dart';
 import 'convs/conversations_screen.dart';
 import 'home/home_screen.dart';
@@ -26,12 +27,22 @@ class DesktopFrame extends StatefulWidget {
 
 class _DesktopFrameState extends State<DesktopFrame> {
   final focus = FocusNode(debugLabel: 'desktop-shortcuts');
+  final tools = ToolPanel(); // a tool's details, in the side column (tool_details.dart)
+
+  @override
+  void initState() {
+    super.initState();
+    tools.addListener(_rebuild);
+  }
+
+  void _rebuild() => setState(() {});
   bool gPrefix = false;
   bool peekWaiting = false;
 
   @override
   void dispose() {
     focus.dispose();
+    tools.dispose();
     super.dispose();
   }
 
@@ -60,6 +71,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
       return KeyEventResult.handled;
     }
     if (k == PhysicalKeyboardKey.escape) {
+      tools.close();
       FocusManager.instance.primaryFocus?.unfocus();
       focus.requestFocus();
       setState(() => peekWaiting = false);
@@ -219,7 +231,11 @@ class _DesktopFrameState extends State<DesktopFrame> {
         side = _ContextColumn(identityId: selected, showWaiting: false);
     }
 
-    return Focus(
+    // A tool's details take the side column while its conversation is open; Esc or the X give it back.
+    final shown = tools.shown;
+    final toolSide = ctxCol && shown != null && shown.chat == selected && nav.tab != AppTab.settings && !(nav.tab == AppTab.chats && store.homeOpen);
+    if (toolSide) side = ToolDetails(key: ValueKey(shown.call), identityId: shown.identityId, call: shown.call, onClose: tools.close);
+    final frame = Focus(
       focusNode: focus,
       autofocus: true,
       onKeyEvent: _onKey,
@@ -254,12 +270,13 @@ class _DesktopFrameState extends State<DesktopFrame> {
                 child: main,
               ),
             ),
-            if (side != null && ctxCol) SizedBox(width: 330, child: Container(color: p.surface, child: side)),
+            if (side != null && ctxCol) SizedBox(width: toolSide ? 420 : 330, child: Container(color: p.surface, child: side)),
           ]),
         ),
         _KeyBar(chat: _chatShown(nav, store)),
       ]),
     );
+    return ctxCol ? ToolPanelScope(panel: tools, child: frame) : frame;
   }
 }
 

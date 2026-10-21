@@ -22,6 +22,7 @@ class EngineModel {
   final _hiddenTools = <String>{}; // toolUseIds with no row (hiddenTool)
   final _toolNames = <String, List<String>>{}; // group id -> tool names in order
   final _toolStarted = <String, DateTime>{};
+  String? _why; // the worker's last text in this turn: "למה" on the details of the tool it calls next
   int? _shiftNo;
   String? _runShift; // the shift of the last engine event that names one (deltas, live-only, don't)
   final _turnTexts = <TextMsg>[];
@@ -49,6 +50,7 @@ class EngineModel {
         }
         _streams.clear();
         _hiddenTools.clear();
+        _why = null;
         _closeGroup(Outcome.interrupted);
         onLive?.call(const LiveState());
       }
@@ -81,6 +83,7 @@ class EngineModel {
       case 'text':
         final mid = ev['messageId'] as String?;
         final text = ev['text'] as String? ?? '';
+        if (text.trim().isNotEmpty) _why = text;
         final live = mid == null ? null : _streams.remove(mid);
         if (live != null) {
           live
@@ -111,7 +114,8 @@ class EngineModel {
         _groupTools[id] = g.tools.length;
         _toolStarted[id] = ts;
         (_toolNames[g.id] ??= []).add(name);
-        g.tools.add(ToolLine(icon: toolIcon(name), label: toolDetail(name, input), name: name, outcome: Outcome.running));
+        g.tools.add(ToolLine(icon: toolIcon(name), label: toolDetail(name, input), name: name, outcome: Outcome.running,
+            call: ToolCall(name: name, input: input, started: ts, why: _why)));
         g.outcome = Outcome.running;
         g.liveLabel = liveLabel(name, input, gender);
         g.summary = summarizeTools(_toolNames[g.id]!.sublist(0, _toolNames[g.id]!.length - 1), gender, files: _files(g));
@@ -127,7 +131,8 @@ class EngineModel {
         if (g == null || i == null) return;
         final old = g.tools[i];
         final err = ev['isError'] == true;
-        g.tools[i] = ToolLine(icon: old.icon, label: old.label, name: old.name, trail: old.trail, outcome: err ? Outcome.error : Outcome.ok);
+        g.tools[i] = ToolLine(icon: old.icon, label: old.label, name: old.name, trail: old.trail, outcome: err ? Outcome.error : Outcome.ok,
+            call: old.call?.done(at: ts, preview: ev['preview'] as String?, isError: err));
         if (err) g.outcome = Outcome.error;
         final started = g.ts;
         final secs = ts.difference(started).inSeconds;
@@ -138,6 +143,7 @@ class EngineModel {
           s.streaming = false;
         }
         _streams.clear();
+        _why = null;
         // A turn the host cut on purpose (his message at `now`, a stop) ended `interrupted`: no error, nothing to show.
         final cut = ev['interrupted'] == true;
         final failed = ev['isError'] == true && !cut;
@@ -174,7 +180,7 @@ class EngineModel {
     if (g.outcome == Outcome.running) g.outcome = o;
     for (var i = 0; i < g.tools.length; i++) {
       final t = g.tools[i];
-      if (t.outcome == Outcome.running) g.tools[i] = ToolLine(icon: t.icon, label: t.label, name: t.name, trail: t.trail, outcome: Outcome.interrupted);
+      if (t.outcome == Outcome.running) g.tools[i] = ToolLine(icon: t.icon, label: t.label, name: t.name, trail: t.trail, outcome: Outcome.interrupted, call: t.call);
     }
     g.liveLabel = null;
     _group = null;
@@ -193,12 +199,48 @@ bool reachesOwner(String name, Object? input) =>
 String toolIcon(String name) => switch (name) {
       'Read' => 'description',
       'Grep' || 'Glob' || 'WebSearch' => 'search',
-      'Edit' || 'Write' || 'MultiEdit' => 'edit',
+      'WebFetch' => 'open_in_new',
+      'Edit' || 'Write' || 'MultiEdit' || 'NotebookEdit' => 'edit',
       'Bash' => 'terminal',
       'Task' || 'Agent' => 'person',
-      'WebFetch' => 'open_in_new',
+      'mcp__company__remember' => 'bookmark_add',
+      'mcp__company__recall' => 'manage_search',
+      'mcp__company__tell' => 'chat',
+      'mcp__company__ask' => 'help',
+      'mcp__company__open_team' => 'group_add',
+      'mcp__company__close_team' => 'task_alt',
+      'mcp__company__request_go' => 'front_hand',
+      'mcp__company__status' => 'flag',
+      'mcp__company__compose_home' => 'home',
       _ => 'build',
     };
+
+/// What a tool row says in Hebrew, past tense (נועה, 22/10): never the tool's internal name. A tool not on
+/// this list is "השתמש בכלי", and its name shows only on the details screen.
+String toolLabel(String name, Gender g) {
+  final f = g == Gender.f;
+  return switch (name) {
+    'mcp__company__remember' => f ? 'רשמה לזיכרון' : 'רשם לזיכרון',
+    'mcp__company__recall' => f ? 'חיפשה בזיכרון' : 'חיפש בזיכרון',
+    'mcp__company__tell' => f ? 'שלחה הודעה' : 'שלח הודעה',
+    'mcp__company__ask' => f ? 'שאלה אותך' : 'שאל אותך',
+    'mcp__company__open_team' => f ? 'פתחה משימה' : 'פתח משימה',
+    'mcp__company__close_team' => f ? 'סגרה משימה' : 'סגר משימה',
+    'mcp__company__request_go' => f ? 'ביקשה GO' : 'ביקש GO',
+    'mcp__company__status' => f ? 'עדכנה מצב' : 'עדכן מצב',
+    'mcp__company__compose_home' => f ? 'עדכנה את הבית' : 'עדכן את הבית',
+    'Bash' => f ? 'הריצה פקודה' : 'הריץ פקודה',
+    'Read' => f ? 'קראה קובץ' : 'קרא קובץ',
+    'Edit' || 'Write' || 'MultiEdit' || 'NotebookEdit' => f ? 'ערכה קובץ' : 'ערך קובץ',
+    'Grep' || 'Glob' => f ? 'חיפשה בקוד' : 'חיפש בקוד',
+    'WebSearch' || 'WebFetch' => f ? 'חיפשה ברשת' : 'חיפש ברשת',
+    'Task' || 'Agent' => 'עוזר',
+    _ => f ? 'השתמשה בכלי' : 'השתמש בכלי',
+  };
+}
+
+/// Tools with no LTR detail of their own (company tools, unknown ones): the row is the Hebrew label alone.
+bool toolHasDetail(String name) => const {'Read', 'Edit', 'Write', 'MultiEdit', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch'}.contains(name);
 
 /// The LTR detail line of one tool (chat.md §2.4 table, open state).
 String toolDetail(String name, Map<String, dynamic> input) {
