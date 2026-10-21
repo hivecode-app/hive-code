@@ -4,8 +4,10 @@
 import 'dart:async';
 
 import '../model/company_time.dart';
+import '../model/map_day.dart';
 import '../model/models.dart';
 import 'backend.dart';
+import 'demo_map.dart';
 
 class FakeBackend extends Backend {
   FakeBackend({this.simulate = true, DateTime? now}) : _now = now; // ignore: prefer_initializing_formals
@@ -24,6 +26,14 @@ class FakeBackend extends Backend {
 
   @override
   String get label => 'הדגמה';
+
+  @override
+  Future<MapDay?> companyDay(String date) async => demoMapDay(date, upTo: date == _ymdOf(_today) ? (_today.hour * 60 + _today.minute) * 60000 : kDayMs);
+
+  @override
+  Future<MapBody?> companyMessage(String id) async => demoMapBody(id);
+
+  static String _ymdOf(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   DateTime get _today => _now ?? CompanyTime.now();
   DateTime at(int h, int m) => DateTime(_today.year, _today.month, _today.day, h, m);

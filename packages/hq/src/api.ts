@@ -20,6 +20,8 @@ import { HomeError } from './home.ts';
 import { assetLinks, pairPage } from './pairing.ts';
 import { guarded, guardedUpgrade, rejectUpgrade, requestUrl } from './http-guard.ts';
 import { normalizePath } from './error-watch.ts';
+import { companyDay, dateOf, isDate, messageBody } from './company-day.ts';
+import { recordPrMerged } from './merged.ts';
 
 export function loadOrCreateToken(stateDir: string): string {
   if (process.env.HQ_TOKEN) return process.env.HQ_TOKEN;
@@ -320,6 +322,29 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     const kind = oneOf(q('kind'), ETA_KINDS, 'kind');
     return { estimates: hq.estimates.list({ project: q('project'), identity: q('identity'), kind, message_id: q('message_id'), task: count('task'),
       state: oneOf(q('state'), ['open', 'missed', 'done', 'cancelled'] as const, 'state'), since: when('since'), until: when('until'), limit: count('limit'), missed: q('missed') === '1' || undefined }) };
+  });
+
+  // The company map (company-day.ts): one day's lines and tables, without any message text; a line's text on its own.
+  route('GET', '/api/company-day', ({ url }) => {
+    const tz = hq.timeZone();
+    const date = url.searchParams.get('date') ?? dateOf(hq.store.now(), tz);
+    if (!isDate(date)) throw new HttpError(400, 'date must be YYYY-MM-DD');
+    return companyDay(hq.store, hq.cfg.companyDir, tz, date);
+  });
+  route('GET', '/api/company-day/messages/:id', ({ params }) => {
+    let id: string;
+    try { id = decodeURIComponent(params[0]!); } catch { throw new HttpError(400, 'bad message id'); }
+    const m = messageBody(hq.store, id);
+    if (!m) throw new HttpError(404, 'no such message');
+    return m;
+  });
+  // A PR merged by someone hq's spool did not see (the owner, a backfill): the same `pr.merged` event, once per PR.
+  route('POST', '/api/prs/merged', async ({ body }) => {
+    const b = await body();
+    const number = Number(b.number);
+    if (!Number.isInteger(number) || number <= 0) throw new HttpError(400, 'number must be a PR number');
+    return { recorded: recordPrMerged(hq.store, { repo: str(b.repo, 'repo', false) ?? null, number, title: str(b.title, 'title', false) ?? null,
+      project: str(b.project, 'project', false) ?? null, by: str(b.by, 'by', false) ?? null }) };
   });
 
   route('GET', '/api/tasks', () => ({ tasks: hq.scheduler.tasks(), queue: hq.scheduler.queue().map((t) => ({ id: t.id, bucket: t.bucket })) }));

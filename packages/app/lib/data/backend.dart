@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../model/home_recipe.dart';
 import '../model/models.dart';
 import '../theme/tokens.dart';
+import '../model/map_day.dart';
 
 class CompanyData {
   CompanyData({
@@ -261,6 +262,12 @@ abstract class Backend extends ChangeNotifier {
     }
     return const CommandResult.ok();
   }
+
+  /// One day of the company for the map ("2026-10-21"); null when it can't be had. Every message is a line without its text.
+  Future<MapDay?> companyDay(String date) async => null;
+
+  /// The text of one of that day's messages, when he touches its line.
+  Future<MapBody?> companyMessage(String id) async => null;
 
   /// "השתקה" for 8 hours, a week or always, or its undo; kept on the server, the same on every device.
   Future<CommandResult> mute(String identityId, MuteFor duration) async => const CommandResult.fail('השתקה לא זמינה כאן.');

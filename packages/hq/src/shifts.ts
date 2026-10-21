@@ -12,6 +12,7 @@ import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
 import { getIdentity, isStandingWorker, type IdentityRow } from './org.ts';
 import { buildSystemPrompt, writeSystemPrompt } from './system-prompt.ts';
+import { prMergedFrom, recordPrMerged } from './merged.ts';
 import { noWorkers, readCharter, Workspaces } from './workspace.ts';
 
 export type ShiftKind = 'work' | 'resident' | 'foreign';
@@ -681,7 +682,10 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       for (let i = 0; i < 10; i++) {
         const r = await c.readSpool(cursor);
         this.store.db.transaction(() => {
-          for (const e of r.entries) this.store.emit(`hook.${e.event}`, row.identity, { shift: id, ts: e.ts, payload: e.payload });
+          for (const e of r.entries) {
+            this.store.emit(`hook.${e.event}`, row.identity, { shift: id, ts: e.ts, payload: e.payload });
+            if (e.event === 'PostToolUse') this.noteMerge(row, e.payload);
+          }
           if (r.cursor && r.cursor !== cursor) this.patch(id, { spool_cursor: r.cursor });
         })();
         if (r.cursor && r.cursor !== cursor) {
@@ -699,6 +703,16 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     } finally {
       this.spooling.delete(id);
     }
+  }
+
+  /** A worker's `gh pr merge` that merged: the company map's `pr.merged`, with the project its task belongs to. */
+  private noteMerge(row: ShiftRow, payload: unknown): void {
+    try {
+      const m = prMergedFrom(payload);
+      if (!m) return;
+      const task = row.task_id == null ? undefined : this.store.db.prepare('SELECT project FROM tasks WHERE id = ?').get(row.task_id) as { project: string | null } | undefined;
+      recordPrMerged(this.store, { ...m, project: task?.project ?? getIdentity(this.store, row.identity)?.project ?? null, by: row.identity });
+    } catch { /* a merge we cannot read must not hold up the spool */ }
   }
 
   /** L0 + L1 from the contract, rewritten on every (re)start so a merged contract change applies at the next run. */

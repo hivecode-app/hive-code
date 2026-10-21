@@ -19,6 +19,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../model/company_time.dart' as company_time;
 import '../model/home_recipe.dart';
+import '../model/map_day.dart';
 import '../model/models.dart';
 import '../theme/icons.dart';
 import 'backend.dart';
@@ -273,6 +274,25 @@ class HqBackend extends Backend {
     }
     unawaited(_loadLastLines());
     unawaited(_loadSeen());
+  }
+
+  @override
+  Future<MapDay?> companyDay(String date) async {
+    try {
+      return MapDay.fromJson((await _get('/api/company-day?date=${Uri.encodeQueryComponent(date)}')) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<MapBody?> companyMessage(String id) async {
+    try {
+      final j = (await _get('/api/company-day/messages/${Uri.encodeComponent(id)}')) as Map<String, dynamic>;
+      return MapBody(id, j['body'] as String);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// The week's estimates by task (`GET /api/estimates`); empty from an hq without it.

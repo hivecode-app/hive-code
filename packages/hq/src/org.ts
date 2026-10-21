@@ -251,3 +251,25 @@ export function listProjects(companyDir: string): ProjectRow[] {
   }
   return out;
 }
+
+/** The teams of org.yaml as the company map draws them: name, symbol, lead, the project it works on, and its tone. */
+export interface MapTeamRow { id: string; name: string; symbol: string; lead: string | null; project: string | null; tone: Tone | null }
+
+export function listMapTeams(companyDir: string): MapTeamRow[] {
+  const file = join(companyDir, 'org.yaml');
+  if (!existsSync(file)) return [];
+  let org: { teams?: { id?: unknown; name?: unknown; symbol?: unknown; lead?: unknown; project?: unknown }[]; projects?: { id?: unknown; name?: unknown; team?: unknown }[] };
+  try { org = (parse(readFileSync(file, 'utf8')) ?? {}) as typeof org; } catch { return []; }
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+  const tones = listTones(companyDir).teams;
+  // The owner's name for a project is the name of its team (org.yaml `projects[].name`).
+  const projectName = new Map<string, string>();
+  for (const p of Array.isArray(org.projects) ? org.projects : []) if (str(p?.team) && str(p?.name)) projectName.set(str(p.team)!, str(p.name)!);
+  const out: MapTeamRow[] = [];
+  for (const t of Array.isArray(org.teams) ? org.teams : []) {
+    const id = str(t?.id);
+    if (!id) continue;
+    out.push({ id, name: projectName.get(id) ?? str(t.name) ?? id, symbol: str(t.symbol) ?? 'group', lead: str(t.lead), project: str(t.project), tone: tones.get(id) ?? null });
+  }
+  return out;
+}
