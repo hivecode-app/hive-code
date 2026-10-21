@@ -9,7 +9,7 @@ class HomeBlock {
   const HomeBlock({required this.type, this.emphasis = Emphasis.normal, this.text, this.icon, this.inbox = const [], this.shift, this.tasks = const [], this.allOpen = false, this.messages = const [],
       this.projects = const [], this.identities = const [], this.items = const [], this.note, this.caption});
 
-  static const types = {'headline', 'alert', 'waiting', 'asked', 'awaiting', 'tasks', 'lanes', 'project', 'people', 'since', 'note'};
+  static const types = {'headline', 'alert', 'waiting', 'asked', 'awaiting', 'tasks', 'lanes', 'project', 'quiet', 'people', 'since', 'note'};
 
   final String type;
   final Emphasis emphasis;
@@ -35,7 +35,7 @@ class HomeBlock {
   /// asked: his message ids (hq `asked[].id`).
   final List<String> messages;
 
-  /// lanes: project ids; project: one.
+  /// lanes and quiet: project ids; project: one.
   final List<String> projects;
   final List<String> identities;
 

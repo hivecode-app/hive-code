@@ -8,5 +8,6 @@ export 'note.dart';
 export 'parts.dart';
 export 'people.dart';
 export 'project.dart';
+export 'quiet.dart';
 export 'since.dart';
 export 'tasks.dart';

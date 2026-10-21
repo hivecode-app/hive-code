@@ -86,9 +86,8 @@ test('#128: home block tasks {tasks: [ids] | "open"}: validated, in the default,
     assert.throws(() => validateBlocks([{ type: 'tasks', tasks: 'all' }], refs), /open/);
     assert.throws(() => validateBlocks([{ type: 'tasks', tasks: [] }], refs), /open/);
 
-    assert.equal(hq.home.defaultRecipe().blocks.some((b) => b.type === 'tasks'), false, 'nothing open: no block');
     const t = hq.scheduler.addTask({ title: 'דחופה', project: 'agent-company', labels: ['opened-by:yoav'] });
-    assert.deepEqual(hq.home.defaultRecipe().blocks.find((b) => b.type === 'tasks'), { type: 'tasks', tasks: 'open' });
+    assert.equal(hq.home.defaultRecipe().blocks.some((b) => b.type === 'tasks'), false, 'the default leaves the list to the status screen');
 
     hq.home.compose([{ type: 'headline', text: 'משימה דחופה' }, { type: 'tasks', tasks: [t.id], emphasis: 'strong' }], 'yoav');
     assert.deepEqual(hq.home.current().blocks.find((b) => b.type === 'tasks'), { type: 'tasks', tasks: [t.id], emphasis: 'strong' });

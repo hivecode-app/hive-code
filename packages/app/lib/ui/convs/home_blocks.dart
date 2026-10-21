@@ -35,7 +35,7 @@ List<HomeBlock> liveBlocks(HomeRecipe recipe, CompanyData d) {
       case 'waiting':
         final ids = [for (final i in b.inbox) if (open.containsKey(i)) i];
         if (ids.isNotEmpty) out.add(b.copyWith(inbox: ids));
-      case 'lanes':
+      case 'lanes' || 'quiet':
         final ids = projects.isEmpty ? b.projects : [for (final p in b.projects) if (projects.contains(p)) p];
         if (ids.isNotEmpty) out.add(b.copyWith(projects: ids));
       case 'project':
@@ -207,7 +207,7 @@ class _GroupView {
           ]),
         );
       case 'since':
-        // hq's own "since" is live: what finished after his last visit, with who and when. A composer's is her
+        // hq's own "since" is live: what finished after his last visit (two of it), with who and when. A composer's is her
         // sentences, as of when she wrote them; one that names its task has the face, the time and the tap of it.
         final data = recipe.byAgent
             ? SinceData(since: since, items: [
@@ -219,7 +219,10 @@ class _GroupView {
               ])
             : SinceData.of(d, since: since);
         if (data.items.isEmpty) return null;
-        return BlockCard(label: 'מאז שהיית פה', child: SinceBlock(data: data, now: now, max: 3));
+        return BlockCard(label: 'מאז שהיית פה', child: SinceBlock(data: data, now: now, max: recipe.byAgent ? 3 : 2));
+      case 'quiet':
+        // No card: a quiet line at the end.
+        return QuietBlock(projects: b.projects, data: d);
       case 'note':
         return BlockCard(child: NoteBlock(data: NoteData(text: b.text ?? '', icon: b.icon, from: recipe.byAgent ? recipe.composedBy : null)));
       case 'tasks':
@@ -261,7 +264,7 @@ class Headline extends StatelessWidget {
         child: AnimatedSwitcher(
           duration: _kMotion,
           layoutBuilder: (cur, prev) => Stack(alignment: AlignmentDirectional.topStart, children: [...prev, ?cur]),
-          child: Rich(text, key: ValueKey('$text:${emphasis.name}'), auto: true, maxLines: 2, style: style),
+          child: Rich(text, key: ValueKey('$text:${emphasis.name}'), auto: true, style: style),
         ),
       ),
     );

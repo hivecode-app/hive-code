@@ -146,7 +146,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'headline {text} משפט אחד · alert {inbox: מספר} או {shift: מזהה משמרת} · waiting {inbox: [מספרים]} · asked {messages: [מזהי הודעות]} ביקשת, בקשות ' + G('שלו', 'שלה') + ' מעובדים שמחכות לתשובה או שהתשובה עליהן עוד לא נקראה, בדרך כלל אחרי waiting · awaiting {tasks: [מזהי משימות]} מה לבדוק, משימות שמחכות לפריסה או לבדיקה ' + G('שלו', 'שלה') + ' · '
       + 'tasks {tasks: [מזהי משימות] או "open"} בעבודה ובתור: משימות פתוחות עם מי פתח, מי עובד והמצב. "open" מציג את כולן, ורשימה מציגה משימה מסוימת (למשל דחופה) · '
       + 'lanes {projects: [ids]} פסי היום · '
-      + 'project {project, note?} שתי שורות · people {identities: [ids], caption?} · since {items: [עד 3: משפט, או {text, task: מזהה משימה}]}, עם task השורה מובילה לשיחה עם מי שעשה את המשימה · '
+      + 'project {project, note?} שתי שורות · quiet {projects: [ids]} שורה אחת בסוף, "שקט גם ב: …", לפרויקטים שלא זזו · people {identities: [ids], caption?} · since {items: [עד 3: משפט, או {text, task: מזהה משימה}]}, עם task השורה מובילה לשיחה עם מי שעשה את המשימה · '
       + 'note {text, icon} הערה שלך, icon הוא שם של Material Symbol. לכל בלוק אפשר emphasis: normal|quiet|strong (טיפוגרפיה בלבד). '
       + 'בלוק לא מוכר, שדה חסר או הפניה שלא קיימת נדחים עם הסיבה. מה שנסגר נעלם לבד, ומה שחוסם ' + G('עליו', 'עליה') + ' ולא שובץ מתווסף לבד. '
       + 'מתכון ישן מ-30 דקות מתחלף בברירת המחדל של hq. '

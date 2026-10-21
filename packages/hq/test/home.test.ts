@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, ORG_YAML, type TestEnv } from './helpers.ts';
-import { validateBlocks, HomeError, STALE_MS, WAKE_EVERY_MS, type HomeRefs } from '../src/home.ts';
+import { validateBlocks, headline, HomeError, STALE_MS, WAKE_EVERY_MS, type HomeRefs } from '../src/home.ts';
 
 const ORG = ORG_YAML.replace(
   '  - {id: ac-ceo, name: שירה, title: מנכ"לית agent-company, symbol: architecture, team: agent-company, reports_to: yoav, kind: project, lifecycle: always-on}',
@@ -39,6 +39,7 @@ test('validation: the whole vocabulary passes; anything off is a 400 with the re
     { type: 'awaiting', tasks: [12] },
     { type: 'lanes', projects: ['agent-company', 'lumo'] },
     { type: 'project', project: 'lumo', note: 'מחכה ל-GO' },
+    { type: 'quiet', projects: ['lumo'] },
     { type: 'people', identities: ['ac-ceo'], caption: 'עובדים עכשיו' },
     { type: 'since', items: ['התמונות עולות', 'הלילה עבר בשקט'] },
     { type: 'note', text: 'שווה לבדוק את הפריסה של 2.6.10', icon: 'rocket_launch', emphasis: 'quiet' },
@@ -47,7 +48,7 @@ test('validation: the whole vocabulary passes; anything off is a 400 with the re
   assert.equal(out.length, all.length);
   assert.deepEqual(out[3], { type: 'waiting', inbox: [7] }, 'duplicates folded');
   assert.equal(out[0]!.emphasis, 'strong');
-  assert.deepEqual(out[8], { type: 'since', items: [{ text: 'התמונות עולות' }, { text: 'הלילה עבר בשקט' }] }, 'a sentence is {text}');
+  assert.deepEqual(out[9], { type: 'since', items: [{ text: 'התמונות עולות' }, { text: 'הלילה עבר בשקט' }] }, 'a sentence is {text}');
 
   rejects([], /ריק/);
   rejects({}, /רשימה/);
@@ -64,6 +65,7 @@ test('validation: the whole vocabulary passes; anything off is a 400 with the re
   rejects([{ type: 'awaiting', tasks: [13] }], /לא ב"מה לבדוק"/);
   rejects([{ type: 'lanes', projects: ['nope'] }], /אין פרויקט "nope"/);
   rejects([{ type: 'project', project: 'nope' }], /אין פרויקט/);
+  rejects([{ type: 'quiet', projects: ['nope'] }], /אין פרויקט "nope"/);
   rejects([{ type: 'people', identities: ['ghost'] }], /אין עובד "ghost"/);
   rejects([{ type: 'since', items: ['א', 'ב', 'ג', 'ד'] }], /עד 3/);
   rejects([{ type: 'since', items: [{ text: 'א', task: 'x' }] }], /מזהה משימה/);
@@ -95,12 +97,12 @@ test('fallback: the default with no recipe, the agent one while fresh, the defau
     let cur = hq.home.current();
     assert.equal(cur.source, 'default');
     assert.equal(cur.fallback, 'none');
-    assert.deepEqual(cur.blocks.map((b) => b.type), ['waiting', 'lanes', 'project'], 'dormant lumo has no lane and no line');
-    assert.deepEqual(cur.blocks[0], { type: 'waiting', inbox: [go.id] });
-    // "מה לבדוק" comes right after what waits for him, when there is something in it.
+    assert.deepEqual(cur.blocks, [{ type: 'headline', text: 'דבר אחד מחכה לך.' }, { type: 'waiting', inbox: [go.id] }, { type: 'quiet', projects: ['agent-company'] }],
+      'the active project that did not move folds into the last line; dormant lumo is not in it');
+    // "מה לבדוק" is on the status screen: the default does not show it, a composed recipe still may.
     const t = hq.scheduler.addTask({ title: 'תמונות', project: 'agent-company' });
     hq.awaiting.mark(t.id, { awaiting: 'check', awaiting_note: 'לפתוח תמונה מהטלפון' }, 'ac-ceo');
-    assert.deepEqual(hq.home.current().blocks.slice(0, 2), [{ type: 'waiting', inbox: [go.id] }, { type: 'awaiting', tasks: [t.id] }]);
+    assert.equal(hq.home.current().blocks.some((b) => b.type === 'awaiting'), false);
     hq.home.compose([{ type: 'awaiting', tasks: [t.id] }], 'ac-ceo');
     hq.awaiting.clear(t.id, 'owner', 'checked');
     assert.deepEqual(hq.home.current().blocks.map((b) => b.type), ['waiting'], 'checked: gone from the recipe too');
@@ -129,6 +131,41 @@ test('fallback: the default with no recipe, the agent one while fresh, the defau
     hq.store.setToggle('ac-ceo/compose-home', false);
     assert.equal(hq.home.current().fallback, 'off', 'switched off: the default stays');
   } finally { await env.cleanup(); }
+});
+
+test('the default is short: a sentence, what waits, a line per project that moved today, two things that finished', async () => {
+  const env = await homeEnv();
+  try {
+    const { hq, clock } = env;
+    const old = hq.scheduler.addTask({ title: 'ישנה', project: 'lumo' });
+    hq.store.db.prepare(`UPDATE tasks SET state = 'done', summary = 'מלפני יומיים' WHERE id = ?`).run(old.id);
+    clock.advance(25 * 3_600_000);
+    assert.deepEqual(hq.home.defaultRecipe().blocks, [{ type: 'headline', text: 'שקט: אין מה שמחכה לך ואין משימות בעבודה.' }, { type: 'quiet', projects: ['agent-company'] }],
+      'nothing moved in a day: no project line, nothing since, the project is quiet');
+    hq.awaiting.mark(old.id, { awaiting: 'deploy', awaiting_note: 'לפרוס' }, 'ac-ceo');
+    const done = ['הראשונה הסתיימה', 'השנייה הסתיימה\nפרטים', 'השלישית הסתיימה'].map((summary) => {
+      const t = hq.scheduler.addTask({ title: summary, project: 'agent-company' });
+      clock.advance(1000);
+      hq.store.db.prepare(`UPDATE tasks SET state = 'done', summary = ?, updated_at = ? WHERE id = ?`).run(summary, hq.store.now(), t.id);
+      return t.id;
+    });
+    hq.scheduler.addTask({ title: 'עוד לא', project: 'agent-company' });
+    const run = hq.scheduler.addTask({ title: 'רצה בלומו', project: 'lumo' });
+    hq.store.db.prepare(`UPDATE tasks SET state = 'running', identity = 'ac-ceo', started_at = ?, updated_at = ? WHERE id = ?`).run(hq.store.now(), hq.store.now(), run.id);
+    const blocks = hq.home.defaultRecipe().blocks;
+    assert.deepEqual(blocks.map((b) => b.type), ['headline', 'project', 'project', 'since'], 'no tasks, lanes or awaiting; every active project moved: no quiet line');
+    assert.deepEqual(blocks[0], { type: 'headline', text: 'משימה אחת בעבודה ו-3 הסתיימו ביממה האחרונה.' });
+    assert.deepEqual(blocks[1], { type: 'project', project: 'lumo', note: 'רצה בלומו' }, 'nothing finished there: what runs');
+    assert.deepEqual(blocks[2], { type: 'project', project: 'agent-company', note: 'השלישית הסתיימה' });
+    assert.deepEqual(blocks[3], { type: 'since', items: [{ text: 'השלישית הסתיימה', task: done[2] }, { text: 'השנייה הסתיימה', task: done[1] }] });
+  } finally { await env.cleanup(); }
+});
+
+test('headline: one sentence from the numbers', () => {
+  assert.equal(headline(2, 1, 0), '2 דברים מחכים לך ומשימה אחת בעבודה.');
+  assert.equal(headline(0, 0, 3), '3 משימות הסתיימו ביממה האחרונה.');
+  assert.equal(headline(0, 0, 0, true), 'יש תקלה.', 'never "quiet" over an alert');
+  assert.equal(headline(1, 3, 5), 'דבר אחד מחכה לך, 3 משימות בעבודה ו-5 הסתיימו ביממה האחרונה.');
 });
 
 test('a block whose reference closed disappears; a list keeps what is still open', async () => {

@@ -114,25 +114,26 @@ List<Map<String, dynamic>> get _busyBlocks => [
       {'type': 'note', 'text': 'שווה לאשר את 2.6.10 לפני הלילה, כדי שהקנרי ירוץ עד הבוקר', 'icon': 'rocket_launch'},
     ];
 
-/// hq's own (home.ts defaultRecipe): alert, waiting, the lanes, a line per active project, since.
-HomeRecipe _default(CompanyData d) => HomeRecipe.fromJson({
+/// hq's own (home.ts defaultRecipe): a sentence, alert and waiting when there are, a line per project that moved today, since.
+HomeRecipe _default(CompanyData d, {bool quiet = true}) => HomeRecipe.fromJson({
       'version': 0,
       'composed_by': 'hq',
       'composed_at': _at.millisecondsSinceEpoch,
       'source': 'default',
       'fallback': 'none',
       'blocks': [
-        {'type': 'awaiting', 'tasks': [for (final t in d.awaiting) t.id]},
-        {'type': 'lanes', 'projects': [for (final p in d.projects) if (p.active) p.id]},
-        for (final p in d.projects)
-          if (p.active) {'type': 'project', 'project': p.id},
+        {'type': 'headline', 'text': 'משימה אחת בעבודה ו-3 הסתיימו ביממה האחרונה.'},
+        {'type': 'project', 'project': d.projects.firstWhere((p) => p.active).id, 'note': 'התמונות עולות גם מהטלפון'},
         {'type': 'since', 'items': ['x']},
+        if (quiet) {'type': 'quiet', 'projects': [for (final p in d.projects.where((p) => p.active).skip(1)) p.id]},
       ],
     });
 
-Future<AppStore> _pump(WidgetTester tester, CompanyData d, HomeRecipe? recipe, {Size size = const Size(342, 1500), bool dark = false}) async {
+Future<AppStore> _pump(WidgetTester tester, CompanyData d, HomeRecipe? recipe, {Size size = const Size(342, 1500), bool dark = false, double textScale = 1}) async {
   await loadFonts();
   Motion.frozen = true;
+  tester.platformDispatcher.textScaleFactorTestValue = textScale;
+  addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
   SharedPreferences.setMockInitialValues({});
   tester.view.physicalSize = size * 2;
   tester.view.devicePixelRatio = 2;
@@ -173,6 +174,7 @@ List<String> _order(WidgetTester tester) {
   add(find.byType(PeopleBlock), 'people');
   add(find.byType(SinceBlock), 'since');
   add(find.byType(NoteBlock), 'note');
+  add(find.byType(QuietBlock), 'quiet');
   out.sort((a, b) => a.$1.compareTo(b.$1));
   return [for (final x in out) x.$2];
 }
@@ -206,12 +208,28 @@ void main() {
   testWidgets('the default: hq\'s own shape, said quietly under it', (tester) async {
     final d = _data();
     await _pump(tester, d, _default(d), size: const Size(342, 1900));
-    expect(_order(tester).take(2), ['awaiting', 'lanes']);
-    expect(find.byType(ProjectBlock), findsNWidgets(d.projects.where((p) => p.active).length));
+    expect(_order(tester), ['headline', 'project', 'since', 'quiet']);
+    final quiet = d.projects.where((p) => p.active).skip(1).toList();
+    expect(find.text('שקט גם ב:'), findsOneWidget);
+    expect(find.bySemanticsLabel('פתיחת ${quiet.first.name}'), findsOneWidget);
+    expect(find.text(quiet.last.name), findsOneWidget, reason: 'the last name has no comma');
     expect(findShown('סדר קבוע'), findsOneWidget);
     // hq's "since" is live: what finished after his last visit (20:00), not the recipe's words.
     expect(findShown('מאז 20:00'), findsOneWidget);
     await _shot(tester, '0-default');
+  });
+
+  testWidgets('the default, every project moved today: no "quiet" line', (tester) async {
+    final d = _data();
+    await _pump(tester, d, _default(d, quiet: false), size: const Size(342, 1900));
+    expect(_order(tester), ['headline', 'project', 'since']);
+    expect(find.text('שקט גם ב:'), findsNothing);
+  });
+
+  testWidgets('the default at text scale 1.3: the quiet names wrap whole, right to left', (tester) async {
+    final d = _data();
+    await _pump(tester, d, _default(d), size: const Size(342, 1900), textScale: 1.3);
+    await _shot(tester, '0-default-text13');
   });
 
   testWidgets('a new recipe moves: what stays keeps its place, what goes folds up, what comes opens', (tester) async {

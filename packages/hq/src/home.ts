@@ -12,7 +12,7 @@ import type { Hq } from './hq.ts';
 import { hhmm, nextLocal } from './timezone.ts';
 import { askedList, type AskedItem } from './asked.ts';
 
-export const BLOCK_TYPES = ['headline', 'alert', 'waiting', 'asked', 'awaiting', 'tasks', 'lanes', 'project', 'people', 'since', 'note'] as const;
+export const BLOCK_TYPES = ['headline', 'alert', 'waiting', 'asked', 'awaiting', 'tasks', 'lanes', 'project', 'quiet', 'people', 'since', 'note'] as const;
 export type BlockType = (typeof BLOCK_TYPES)[number];
 export const EMPHASES = ['normal', 'quiet', 'strong'] as const;
 export type Emphasis = (typeof EMPHASES)[number];
@@ -26,6 +26,7 @@ export type Block = { type: BlockType; emphasis?: Emphasis } & (
   | { type: 'tasks'; tasks: number[] | 'open' }
   | { type: 'lanes'; projects: string[] }
   | { type: 'project'; project: string; note?: string }
+  | { type: 'quiet'; projects: string[] }
   | { type: 'people'; identities: string[]; caption?: string }
   | { type: 'since'; items: SinceItem[] }
   | { type: 'note'; text: string; icon: string }
@@ -50,6 +51,23 @@ export const STALE_MS = 30 * 60_000;
 export const WAKE_EVERY_MS = 3 * 60_000;
 export const MAX_BLOCKS = 12;
 export const AUTOMATION = 'compose-home';
+const DAY_MS = 24 * 3_600_000;
+
+const firstLine = (s: string, max: number): string => (s.split('\n').map((l) => l.trim()).find(Boolean) ?? '').slice(0, max);
+
+/** The default's one sentence, from the live numbers: an alert, what waits for him, what is running, what finished. */
+export function headline(waiting: number, running: number, done: number, alert = false): string {
+  const parts: string[] = [];
+  if (alert) parts.push('יש תקלה');
+  if (waiting) parts.push(waiting === 1 ? 'דבר אחד מחכה לך' : `${waiting} דברים מחכים לך`);
+  if (running) parts.push(running === 1 ? 'משימה אחת בעבודה' : `${running} משימות בעבודה`);
+  // After "בעבודה" the word "משימות" is understood, and the sentence stays within two lines on a phone.
+  if (done) parts.push(running ? (done === 1 ? 'אחת הסתיימה ביממה האחרונה' : `${done} הסתיימו ביממה האחרונה`)
+    : done === 1 ? 'משימה אחת הסתיימה ביממה האחרונה' : `${done} משימות הסתיימו ביממה האחרונה`);
+  if (!parts.length) return 'שקט: אין מה שמחכה לך ואין משימות בעבודה.';
+  const last = parts.pop()!;
+  return `${parts.length ? `${parts.join(', ')} ו${last.match(/^\d/) ? '-' : ''}${last}` : last}.`;
+}
 const MORNING = { h: 7, m: 0 };
 
 export class HomeError extends Error {
@@ -76,6 +94,7 @@ const FIELDS: Record<BlockType, { required: string[]; optional: string[] }> = {
   tasks: { required: ['tasks'], optional: [] },
   lanes: { required: ['projects'], optional: [] },
   project: { required: ['project'], optional: ['note'] },
+  quiet: { required: ['projects'], optional: [] },
   people: { required: ['identities'], optional: ['caption'] },
   since: { required: ['items'], optional: [] },
   note: { required: ['text', 'icon'], optional: [] },
@@ -178,6 +197,7 @@ export function validateBlocks(raw: unknown, refs: HomeRefs): Block[] {
         break;
       }
       case 'lanes': out.push({ type: t, projects: ids('projects', refs.projects, 'פרויקט'), ...base }); break;
+      case 'quiet': out.push({ type: t, projects: ids('projects', refs.projects, 'פרויקט'), ...base }); break;
       case 'project': {
         const p = text('project', 64);
         if (!refs.projects.has(p)) throw new HomeError(`${at} (project): אין פרויקט "${p}"`);
@@ -394,7 +414,7 @@ export class Home {
           if (tasks.length) out.push({ ...b, tasks });
           break;
         }
-        case 'lanes': {
+        case 'lanes': case 'quiet': {
           const projects = b.projects.filter((p) => refs.projects.has(p));
           if (projects.length) out.push({ ...b, projects });
           break;
@@ -436,31 +456,50 @@ export class Home {
     return out;
   }
 
-  /** hq's own recipe, from facts only: alert, waiting, lanes, a line per active project, what finished. */
+  /**
+   * hq's own recipe, from facts only, kept short (he said the full one was «בלאגן»): one sentence, the alert and
+   * what waits for him, a line per project something happened in over the last day, two things that finished,
+   * and the other active projects folded into one line at the end.
+   * The task lists, the lanes and "מה לבדוק" are on the status screen, not here.
+   */
   defaultRecipe(): HomeRecipe {
     const now = this.hq.store.now();
+    const dayAgo = now - DAY_MS;
     const blocks: Block[] = [];
     const open = this.hq.inbox.open().filter((i) => !i.snoozed_at);
     const incident = open.find((i) => i.kind === 'incident');
-    if (incident) blocks.push({ type: 'alert', inbox: incident.id });
+    let alert: Block | null = null;
+    if (incident) alert = { type: 'alert', inbox: incident.id };
     else {
       const stuck = this.db.prepare(`SELECT id FROM shifts WHERE state IN ('starting','live') AND stuck_since IS NOT NULL ORDER BY stuck_since LIMIT 1`).get() as { id: string } | undefined;
-      if (stuck) blocks.push({ type: 'alert', shift: stuck.id });
+      if (stuck) alert = { type: 'alert', shift: stuck.id };
     }
     const waiting = open.filter((i) => i.id !== incident?.id).map((i) => i.id);
+    const running = this.hq.openTasks().filter((t) => t.state === 'running');
+    const done = this.db.prepare(`SELECT id, project, summary FROM tasks WHERE state = 'done' AND summary IS NOT NULL AND summary != '' AND updated_at > ?
+      ORDER BY updated_at DESC, id DESC`).all(dayAgo) as { id: number; project: string | null; summary: string }[];
+    blocks.push({ type: 'headline', text: headline(waiting.length, running.length, done.length, !!alert) });
+    if (alert) blocks.push(alert);
     if (waiting.length) blocks.push({ type: 'waiting', inbox: waiting });
     const asked = this.asked().map((a) => a.id);
     if (asked.length) blocks.push({ type: 'asked', messages: asked });
-    const awaiting = this.awaitingIds();
-    if (awaiting.length) blocks.push({ type: 'awaiting', tasks: awaiting });
-    if (this.openIds().length) blocks.push({ type: 'tasks', tasks: 'open' });
-    const active = this.hq.projects().filter((p) => p.status === 'active').map((p) => p.id);
-    if (active.length) blocks.push({ type: 'lanes', projects: active });
-    for (const p of active) blocks.push({ type: 'project', project: p });
-    const done = this.db.prepare(`SELECT id, summary FROM tasks WHERE state = 'done' AND summary IS NOT NULL AND summary != '' AND updated_at > ?
-      ORDER BY updated_at DESC LIMIT 3`).all(now - 24 * 3_600_000) as { id: number; summary: string }[];
-    if (done.length) blocks.push({ type: 'since', items: done.map((d) => ({ text: d.summary.split('\n')[0]!.slice(0, 140), task: d.id })) });
-    return { version: 0, composed_by: 'hq', composed_at: now, reason: null, source: 'default', blocks: blocks.slice(0, MAX_BLOCKS) };
+    const known = new Set(this.hq.projects().map((p) => p.id));
+    const moved = (this.db.prepare(`SELECT project FROM tasks WHERE project IS NOT NULL AND updated_at > ? GROUP BY project ORDER BY MAX(updated_at) DESC`)
+      .all(dayAgo) as { project: string }[]).map((r) => r.project).filter((p) => known.has(p));
+    for (const p of moved) {
+      // What finished last there, else what is running there now.
+      const last = done.find((d) => d.project === p)?.summary ?? running.find((t) => t.project === p)?.title;
+      const note = last ? firstLine(last, 80) : '';
+      blocks.push({ type: 'project', project: p, ...(note ? { note } : {}) });
+    }
+    const since = done.map((d) => ({ text: firstLine(d.summary, 140), task: d.id })).filter((i) => i.text).slice(0, 2);
+    if (since.length) blocks.push({ type: 'since', items: since });
+    // The rest are not gone: one line at the end, "שקט גם ב: …", each name leads to its project.
+    const quiet = this.hq.projects().filter((p) => p.status === 'active' && !moved.includes(p.id)).map((p) => p.id);
+    // Over the cap, the quiet line stays and what is cut is before it.
+    const capped = blocks.slice(0, quiet.length ? MAX_BLOCKS - 1 : MAX_BLOCKS);
+    if (quiet.length) capped.push({ type: 'quiet', projects: quiet });
+    return { version: 0, composed_by: 'hq', composed_at: now, reason: null, source: 'default', blocks: capped };
   }
 
   // ── waking the composer ────────────────────────────────────────────────────
