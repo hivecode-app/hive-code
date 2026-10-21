@@ -1,21 +1,33 @@
 #!/usr/bin/env bash
 # The one way to put agent-company into production on hq-host (#54). Nothing is edited by hand on
-# the server: everything below comes from this repo at origin/main.
+# the server: everything below comes from this repo at origin/main (or a merged commit before it, --sha).
 #
 #   scripts/deploy.sh hq      hq + its user units, hq.env and hq.config.json, safe restart: live shifts survive
 #   scripts/deploy.sh app     the app: web at the appUrl of the company's hq.config.json (COMPANY_HOME), and the APK
 #   scripts/deploy.sh caddy   deploy/caddy/agent-company.caddy -> /etc/caddy/sites/, validate, reload
 #   scripts/deploy.sh all     hq, app, caddy, in that order
+#   scripts/deploy.sh <target> --sha <sha>   (or DEPLOY_SHA=<sha>) up to that merged commit only, not all of
+#                             origin/main: the PRs with a GO, without a later one still waiting (scripts/lib/deploy-sha.sh)
 #
 # Every run: refuses unless it runs from ~/projects/agent-company on a clean main that is (or
-# fast-forwards to) origin/main; runs the checks (contract, typecheck, tests; flutter analyze and
+# fast-forwards to) origin/main, or the requested sha; runs the checks (contract, typecheck, tests; flutter analyze and
 # tests for the app); builds; installs; then verifies production end to end (scripts/verify-prod.mjs).
 # Anything that fails rolls back what this run changed, and the exit code is non-zero. The last
 # line is a Hebrew summary (also in ~/.local/state/agent-company/deploy/last-summary.txt).
 set -Eeuo pipefail
 
+usage() { echo "usage: scripts/deploy.sh hq|app|caddy|all [--sha <sha>]" >&2; exit 2; }
 target="${1:-}"
-case "$target" in hq | app | caddy | all) ;; *) echo "usage: scripts/deploy.sh hq|app|caddy|all" >&2; exit 2 ;; esac
+case "$target" in hq | app | caddy | all) ;; *) usage ;; esac
+want_sha="${DEPLOY_SHA:-}"
+shift
+while (($#)); do
+  case "$1" in
+    --sha) [[ -n "${2:-}" ]] || usage; want_sha="$2"; shift 2 ;;
+    --sha=?*) want_sha="${1#--sha=}"; shift ;;
+    *) usage ;;
+  esac
+done
 
 PROD="$HOME/projects/agent-company"
 repo="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -49,7 +61,7 @@ say() { summary+=("$1"); echo "• $1"; }
 step() { echo; echo "── $1"; }
 
 # What this run changed, for the rollback.
-prev_sha=""; sha=""; moved_checkout=0; company_prev=""; moved_company=0; lock_changed=1; hq_restarted=0; app_swapped=0; prev_release=""; caddy_changed=0; config_changed=0
+prev_sha=""; sha=""; range_log=""; moved_checkout=0; company_prev=""; moved_company=0; lock_changed=1; hq_restarted=0; app_swapped=0; prev_release=""; caddy_changed=0; config_changed=0
 
 finish() {
   local rc=$1
@@ -57,6 +69,8 @@ finish() {
     echo
     if ((rc == 0)); then echo "פריסה ($target) של ${sha:0:7} הצליחה."; else echo "פריסה ($target) נכשלה (קוד $rc)."; fi
     for s in "${summary[@]}"; do echo "- $s"; done
+    # What this run brought, to check against the GOs (git log prev..sha).
+    if [[ -n "$range_log" ]]; then echo "הטווח שנפרס (${prev_sha:0:7}..${sha:0:7}):"; sed 's/^/  /' <<<"$range_log"; fi
   } | tee "$DSTATE/last-summary.txt"
 }
 
@@ -120,21 +134,24 @@ trap 'fail "פקודה נכשלה בשורה $LINENO: $BASH_COMMAND"' ERR
 # wait_health, active_shifts, hq_safe_restart: the same safe restart `company update` uses.
 # shellcheck source=lib/hq-restart.sh
 source "$repo/scripts/lib/hq-restart.sh"
+# shellcheck source=lib/deploy-sha.sh
+source "$repo/scripts/lib/deploy-sha.sh"
 
-# ── preflight: only the production checkout, clean main, at origin/main ──────
+# ── preflight: only the production checkout, clean main, at origin/main (or the sha asked for) ──
 step "בדיקה מקדימה"
 [[ "$repo" == "$(cd "$PROD" && pwd -P)" ]] || { echo "רק מ-$PROD (משם hq רץ). כאן: $repo" >&2; exit 1; }
 cd "$repo"
 [[ "$(git rev-parse --abbrev-ref HEAD)" == main ]] || { echo "ה-checkout לא על main." >&2; exit 1; }
 [[ -z "$(git status --porcelain)" ]] || { echo "ה-checkout לא נקי:" >&2; git status --short >&2; exit 1; }
 git fetch -q origin main
-prev_sha="$(git rev-parse HEAD)"
-if [[ "$prev_sha" != "$(git rev-parse origin/main)" ]]; then
-  git merge-base --is-ancestor HEAD origin/main || { echo "main המקומי התפצל מ-origin/main." >&2; exit 1; }
-  git merge -q --ff-only origin/main
-  moved_checkout=1
+deploy_sha_move "$want_sha" || { echo "$DEPLOY_SHA_ERR." >&2; exit 1; }
+prev_sha="$DEPLOY_PREV"; sha="$DEPLOY_SHA_TO"; moved_checkout="$DEPLOY_MOVED"
+range_log="$(git log --oneline "$prev_sha..$sha")"
+if [[ -n "$range_log" ]]; then echo "הטווח שנפרס (${prev_sha:0:7}..${sha:0:7}):"; sed 's/^/  /' <<<"$range_log"; fi
+if [[ -n "$want_sha" ]]; then
+  rest="$(git rev-list --count "$sha..origin/main")"
+  say "פריסה עד ${sha:0:7} (--sha); $rest commits ב-origin/main אחריו לא נפרסים בריצה הזו"
 fi
-sha="$(git rev-parse HEAD)"
 # npm ci only when package-lock.json differs from the one the last `npm ci` here installed.
 lock_hash="$(sha256sum package-lock.json | cut -c1-64)"
 if [[ -d node_modules && "$(cat "$DSTATE/npm-lock.sha256" 2>/dev/null)" == "$lock_hash" ]]; then lock_changed=0; fi
@@ -169,7 +186,7 @@ API_URL="$(cfg_get apiUrl)"
 # Memory registries (packages/hq/src/memory-registry.ts) land on main by themselves, also while a GO waits: they are
 # pulled with the rest, but they are memory, not what this deploy brings, so the summary leaves them out.
 code_subject="$(git log -n1 --format=%s --invert-grep -E --grep='^Company-Memory-Registry: ' "$prev_sha..$sha")"
-if [[ -n "$code_subject" ]]; then say "ה-checkout עודכן מ-${prev_sha:0:7} ל-${sha:0:7} ($(cut -c1-60 <<<"$code_subject"))"; else say "ה-checkout כבר ב-origin/main (${sha:0:7})"; fi
+if [[ -n "$code_subject" ]]; then say "ה-checkout עודכן מ-${prev_sha:0:7} ל-${sha:0:7} ($(cut -c1-60 <<<"$code_subject"))"; else say "ה-checkout כבר ב-${sha:0:7}, אין בו קוד חדש"; fi
 
 # ── checks ───────────────────────────────────────────────────────────────────
 # Before the first `all`, Caddy still has the hand-written blocks (open /dictate, old paths) and the

@@ -5,13 +5,14 @@
 ```bash
 cd ~/projects/agent-company
 scripts/deploy.sh all          # או hq | app | caddy
+scripts/deploy.sh hq --sha <sha>   # רק עד commit מסוים ב-main (או DEPLOY_SHA=<sha>)
 ```
 
 ספר ההפעלה: [docs/RUNBOOK.md](../docs/RUNBOOK.md).
 
 ## מה הסקריפט עושה
 
-1. **בדיקה מקדימה.** רץ רק מ-`~/projects/agent-company` (משם hq רץ), על `main` נקי. אם `origin/main` מקדים, הוא עושה fast-forward. אם הענף התפצל או שיש שינויים מקומיים, הוא נעצר. הפריסה הראשונה חייבת להיות `all`, כי היא זו שממירה את ה-Caddyfile הראשי. ‏`npm ci` רץ רק כש-`package-lock.json` השתנה, כדי לא להחליף את `node_modules` מתחת ל-hq שרץ.
+1. **בדיקה מקדימה.** רץ רק מ-`~/projects/agent-company` (משם hq רץ), על `main` נקי. אם `origin/main` מקדים, הוא עושה fast-forward. עם `--sha` הוא עושה fast-forward רק עד ה-commit הזה, שחייב להיות ב-`origin/main` ואחרי מה שכבר בפרודקשן, ומדפיס את הטווח שנכנס (`git log prev..sha`) כדי לבדוק אותו מול ה-GO-ים. אם הענף התפצל או שיש שינויים מקומיים, הוא נעצר. הפריסה הראשונה חייבת להיות `all`, כי היא זו שממירה את ה-Caddyfile הראשי. ‏`npm ci` רץ רק כש-`package-lock.json` השתנה, כדי לא להחליף את `node_modules` מתחת ל-hq שרץ.
 2. **בדיקות.** `npm ci`, ‏contract, ‏`test:deploy`, ‏typecheck ו-`npm test`. ל-`app` ול-`all` גם `flutter analyze` ו-`flutter test`.
 3. **פריסה** של היעד:
    - **`hq`:** כותב את `~/.config/agent-company/hq.env` (הרשאות 600) מתוך `.env` של dictate-server. מקשר ל-`~/.config/systemd/user` את `agent-company-hq`, ‏`actions-runner-company` ו-`agent-company-drift` (service ו-timer), ואחרי `daemon-reload` מריץ את השלבים המקומיים של החברה, אם יש (למטה. הם עושים `daemon-reload` משלהם אם הם מוסיפים יחידות). אחרי זה restart ל-hq. בסוף בודק ש-`/health` חזר, ושכל יחידות `company-shift@` שרצו לפני ה-restart עדיין רצות.
