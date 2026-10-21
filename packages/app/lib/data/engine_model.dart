@@ -23,6 +23,7 @@ class EngineModel {
   final _toolNames = <String, List<String>>{}; // group id -> tool names in order
   final _toolStarted = <String, DateTime>{};
   int? _shiftNo;
+  String? _runShift; // the shift of the last engine event that names one (deltas, live-only, don't)
   final _turnTexts = <TextMsg>[];
   bool _turnToldOwner = false;
 
@@ -36,10 +37,21 @@ class EngineModel {
     final data = (e['data'] as Map?)?.cast<String, dynamic>() ?? const {};
 
     if (type == 'shift.state') {
-      // A run that died mid-turn never sent `result`: its turn is over, nothing carries into the next one.
-      _turnTexts.clear();
-      _turnToldOwner = false;
       final id = data['id'] as String? ?? data['shift'] as String? ?? '';
+      // A run that ended, or a new one starting, means the last turn is over even if it never sent `result`:
+      // nothing carries into the next one, and a tool it was running stops spinning ("נקטע"). The `live` of
+      // the run whose events we are showing is not that (its first frames can come before it).
+      if (data['state'] != 'live' || id != _runShift) {
+        _turnTexts.clear();
+        _turnToldOwner = false;
+        for (final s in _streams.values) {
+          s.streaming = false;
+        }
+        _streams.clear();
+        _hiddenTools.clear();
+        _closeGroup(Outcome.interrupted);
+        onLive?.call(const LiveState());
+      }
       final n = int.tryParse(id.split('-').last);
       if (n != null && data['state'] == 'live' && _shiftNo != n) {
         if (_shiftNo != null) items.add(ShiftMarker(id: 'shift:$id', ts: ts, shift: n, from: _shiftNo!, seq: seq));
@@ -48,6 +60,7 @@ class EngineModel {
       return;
     }
     if (!type.startsWith('engine.')) return;
+    if (data['shift'] is String) _runShift = data['shift'] as String;
     final ev = (data['ev'] as Map?)?.cast<String, dynamic>() ?? data;
     final kind = ev['kind'] as String? ?? type.substring(7);
 

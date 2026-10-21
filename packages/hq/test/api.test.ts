@@ -6,6 +6,7 @@ import WebSocket from 'ws';
 import { ORG_YAML, makeEnv, until } from './helpers.ts';
 import { backupOnce } from '../src/backup.ts';
 import { Store } from '../src/store.ts';
+import { wsPing } from '../src/api.ts';
 
 async function apiEnv() {
   const env = await makeEnv({ noStart: true });
@@ -114,6 +115,21 @@ test('API: org/board with derived status, tell, asks/answer, toggles, tasks, inb
     assert.equal(stop.json.shift.end_reason, 'owner_stop');
     assert.equal((await call('GET', '/api/push/vapid')).json.publicKey.length > 20, true);
   } finally { await env.cleanup(); }
+});
+
+test('WS: says ping when nothing else happens, so a client can tell a dead link from a quiet one', async () => {
+  const env = await apiEnv();
+  const was = wsPing.ms;
+  wsPing.ms = 50;
+  try {
+    const { hq, token } = env;
+    const got: { type: string; seq: number }[] = [];
+    const ws = new WebSocket(`ws://127.0.0.1:${hq.port}/ws`, [`token.${token}`]);
+    ws.on('message', (d) => got.push(JSON.parse(String(d))));
+    await until(() => got.filter((e) => e.type === 'ping').length >= 2, 3000, 'pings');
+    assert.ok(got.filter((e) => e.type === 'ping').every((e) => e.seq === 0), 'not an event: no seq to resume from');
+    ws.close();
+  } finally { wsPing.ms = was; await env.cleanup(); }
 });
 
 test('WS: replays after seq, then streams live; rejects bad token', async () => {

@@ -55,6 +55,22 @@ class HqBackend extends Backend {
   Timer? _replayGuard;
   Timer? _onlineAgain;
 
+  /// hq says `{type:'ping'}` every 20 s. A phone that slept or changed networks keeps a socket that looks
+  /// open and carries nothing: the screen froze on old states with no "לא מחובר". Once hq is known to
+  /// ping, this long without a word means the link is dead, and it is replaced.
+  static const kSilence = Duration(seconds: 50);
+  @visibleForTesting
+  Duration silence = kSilence;
+  Timer? _silence;
+  bool _hqPings = false;
+  /// The next 'live' reloads the snapshot and the open conversation, as after a drop: set when the
+  /// link is replaced without having been seen down (back from the background, a silent socket).
+  bool _resync = false;
+  DateTime? _hiddenAt;
+  /// Every socket opened is a new generation; a retry from an older one does nothing.
+  int _linkGen = 0;
+  DateTime? _linkAt;
+
   @override
   void notifyListeners() {
     if (_holdRedraws || _disposed) return;
@@ -145,6 +161,7 @@ class HqBackend extends Backend {
     _homeTick?.cancel();
     _replayGuard?.cancel();
     _onlineAgain?.cancel();
+    _silence?.cancel();
     _saveTimer?.cancel();
     _heartbeat?.cancel();
     _convsSoon?.cancel();
@@ -171,8 +188,11 @@ class HqBackend extends Backend {
   void _scheduleRetry() {
     _retry?.cancel();
     if (_disposed || _unauthorized) return;
+    final gen = _linkGen;
     _retry = Timer(const Duration(seconds: 5), () async {
       if (_unauthorized) return;
+      // A socket opened while this waited on hq (back from the background) is the link now: never replace it.
+      bool stale() => _disposed || gen != _linkGen;
       try {
         // A refused WS handshake (device revoked while the link was down) looks like any network
         // error; one plain request tells them apart, and a 401 there sends the app to sign-in.
@@ -182,8 +202,10 @@ class HqBackend extends Backend {
         } else {
           await _get('/api/toggles');
         }
+        if (stale()) return;
         _connect();
       } catch (_) {
+        if (stale()) return;
         _scheduleRetry();
       }
       notifyListeners();
@@ -477,15 +499,19 @@ class HqBackend extends Backend {
 
   // ── live ─────────────────────────────────────────────────────────────────
 
-  void _connect() {
+  /// [quiet]: a link that looks fine is being replaced; the status stays as it is until it fails.
+  void _connect({bool quiet = false}) {
+    _linkGen++;
+    _linkAt = company_time.CompanyTime.now();
     _wsSub?.cancel();
+    _ws?.sink.close();
     final u = Uri.parse(baseUrl);
     // First connect: no cursor, so hq sends only its recent tail (the snapshot already has the
     // state). Sending after=0 made it replay its whole history, 6,000 events and growing, on every
     // start. A reconnect resumes from the last seq it saw, so nothing is lost.
     final first = !_connectedOnce;
     final ws = u.replace(scheme: u.scheme == 'https' ? 'wss' : 'ws', path: '${u.path}/ws', queryParameters: {if (!first) 'after': '$_seq', 'token': token});
-    _status = const SystemStatus(LinkState.connecting);
+    if (!quiet || _status.state != LinkState.online) _status = const SystemStatus(LinkState.connecting);
     _replayed = 0;
     _replaying = true;
     _holdRedraws = true;
@@ -505,15 +531,21 @@ class HqBackend extends Backend {
       _scheduleRetry();
       return;
     }
+    _heard();
     _wsSub = _ws!.stream.listen(
-      (raw) => _onEvent(jsonDecode(raw as String) as Map<String, dynamic>),
+      (raw) {
+        _heard();
+        _onEvent(jsonDecode(raw as String) as Map<String, dynamic>);
+      },
       onError: (_) {
+        _silence?.cancel();
         _setDown();
         notifyListeners();
         _scheduleRetry();
       },
       onDone: () {
         if (_disposed) return;
+        _silence?.cancel();
         if (_ws?.closeCode == 4401) return _refused(); // this device was revoked
         _setDown();
         notifyListeners();
@@ -522,8 +554,41 @@ class HqBackend extends Backend {
     );
   }
 
+  /// Something came over the socket: the silence clock starts again.
+  void _heard() {
+    _silence?.cancel();
+    if (!_hqPings || _disposed) return;
+    _silence = Timer(silence, () {
+      if (_disposed || _unauthorized) return;
+      // In the background nobody looks: replaced quietly, no "לא מחובר" for the moment he comes back to.
+      if (_visible) {
+        _setDown();
+        notifyListeners();
+      }
+      _replaceLink();
+    });
+  }
+
+  /// A new socket now, resuming from the last seq; the 'live' after it reloads what the screen shows.
+  void _replaceLink() {
+    _retry?.cancel();
+    _silence?.cancel();
+    _resync = true;
+    _connect(quiet: true);
+  }
+
+  @visibleForTesting
+  void debugReplaceLink() => _replaceLink();
+
   void _onEvent(Map<String, dynamic> e) {
     final type = e['type'] as String? ?? '';
+    if (type == 'ping') {
+      if (!_hqPings) {
+        _hqPings = true;
+        _heard();
+      }
+      return;
+    }
     if (type == 'live') {
       _replaying = false;
       _holdRedraws = false;
@@ -532,6 +597,8 @@ class HqBackend extends Backend {
       final liveSeq = (e['seq'] as num?)?.toInt() ?? 0;
       if (liveSeq > _seq) _seq = liveSeq;
       final wasDown = _downSince != null;
+      final resync = wasDown || _resync;
+      _resync = false;
       _downSince = null;
       _status = wasDown ? SystemStatus(LinkState.reconnected, updated: _replayed) : const SystemStatus(LinkState.online);
       if (wasDown) {
@@ -542,10 +609,12 @@ class HqBackend extends Backend {
             notifyListeners();
           }
         });
-        _refreshSoon();
       }
+      // What happened while the link was gone (a delivery, a shift that ended, a tool that finished) is
+      // in hq's state, not only in the replay: the board and the open conversation are fetched again.
+      if (resync) _refreshSoon();
       final open = openIdentity;
-      if (open != null && (wasDown || _openFailed.contains(open))) unawaited(openConversation(open));
+      if (open != null && (resync || _openFailed.contains(open))) unawaited(openConversation(open));
       notifyListeners();
       return;
     }
@@ -559,7 +628,9 @@ class HqBackend extends Backend {
     if (d == null) return;
 
     if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'task.new' || type == 'task.state' || type == 'toggle.changed' || type.startsWith('watchdog.')
-        || type == 'home.composed' || type == 'task.awaiting' || type == 'deploy.recorded' || type == 'asked.changed') {
+        || type == 'home.composed' || type == 'task.awaiting' || type == 'deploy.recorded' || type == 'asked.changed'
+        // A turn that ended: the header's "עובד"/"פנוי" comes from the board.
+        || type == 'engine.result') {
       _refreshSoon();
     }
     if (type == 'conv.read' || type == 'conv.muted') _refreshConvs();
@@ -576,7 +647,9 @@ class HqBackend extends Backend {
     }
     // The first replay is history the snapshot and openConversation already cover: building chats
     // from it only cost time at start.
-    if (_skipEngineReplay && _replaying && type.startsWith('engine.')) return;
+    // A conversation that is open or loading is not covered by it: its engine dedupes by seq, and a
+    // tool_result skipped here left "מריץ פקודה" spinning for good.
+    if (_skipEngineReplay && _replaying && type.startsWith('engine.') && !_engines.containsKey(identity) && !_midFetch.containsKey(identity)) return;
     if (identity != null && (type.startsWith('engine.') || type == 'shift.state') && _buffer(identity, e)) return;
     if (identity != null && (type.startsWith('engine.') || type == 'shift.state')) {
       final chat = d.chats.putIfAbsent(identity, () => Conversation(identityId: identity, items: []));
@@ -696,7 +769,14 @@ class HqBackend extends Backend {
   void setVisible(bool visible) {
     if (_visible == visible) return;
     _visible = visible;
+    if (!visible) _hiddenAt = company_time.CompanyTime.now();
+    final away = _hiddenAt == null ? Duration.zero : company_time.CompanyTime.now().difference(_hiddenAt!);
     if (visible && _data != null) unawaited(_loadHome(opened: true));
+    // Back from the background: the socket may have died without a word while the phone slept. A fresh
+    // one, and a reload, so he never looks at the states from before he left (a focus blink is not "away").
+    // (Not when one was just opened: the silence clock can fire as the phone wakes, before this is heard.)
+    final fresh = _linkAt != null && company_time.CompanyTime.now().difference(_linkAt!) < const Duration(seconds: 3);
+    if (visible && _data != null && _connectedOnce && !_unauthorized && !fresh && away >= const Duration(seconds: 10)) _replaceLink();
     _onScreenChanged();
   }
 

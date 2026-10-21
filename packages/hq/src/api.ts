@@ -545,6 +545,10 @@ function lastSeq(hq: Hq): number {
   return (hq.store.db.prepare('SELECT COALESCE(MAX(seq), 0) s FROM events').get() as { s: number }).s;
 }
 
+/** How often /ws says `{type:'ping'}` when nothing else is said (a test shortens it). */
+export const wsPing = { ms: 20_000 };
+const PING = JSON.stringify({ type: 'ping', seq: 0 });
+
 function streamEvents(hq: Hq, ws: WebSocket, url: URL): void {
   const identity = url.searchParams.get('identity') ?? undefined;
   let cursor = Number(url.searchParams.get('after') ?? 0);
@@ -558,8 +562,13 @@ function streamEvents(hq: Hq, ws: WebSocket, url: URL): void {
     if (replaying) buffered.push(e);
     else if (e.seq > cursor) { cursor = e.seq; ws.send(JSON.stringify(e)); }
   });
-  ws.on('close', off);
-  ws.on('error', off);
+  // A word every 20 s even when nothing happens: a phone whose socket died in its sleep (no close, no
+  // error) has nothing to tell it so otherwise; the app replaces a link that stays silent (hq_backend.dart).
+  const ping = setInterval(() => { if (ws.readyState === ws.OPEN) ws.send(PING); }, wsPing.ms);
+  ping.unref?.();
+  const stop = (): void => { off(); clearInterval(ping); };
+  ws.on('close', stop);
+  ws.on('error', stop);
   // Replay from the log, then hand over to the live listener without gaps or duplicates.
   for (;;) {
     const batch = hq.store.eventsAfter(cursor, 1000, identity);

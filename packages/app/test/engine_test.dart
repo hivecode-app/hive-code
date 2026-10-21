@@ -159,4 +159,61 @@ void main() {
     expect(mapStatus('free'), WorkerStatus.free);
     expect(mapStatus('resting'), WorkerStatus.resting);
   });
+
+  // #34 (company-engine): "מריץ פקודה" spun for good after shift 4 handed over to shift 5.
+  Map<String, dynamic> shift(int seq, String id, String state) =>
+      {'seq': seq, 'ts': 5000, 'type': 'shift.state', 'identity': 'ido', 'data': {'shift': id, 'state': state}};
+
+  test('a shift that ends or hands over mid-tool stops the row and the live line', () {
+    final items = <ChatItem>[];
+    LiveState? live;
+    final m = EngineModel(items: items, gender: Gender.m, onLive: (l) => live = l);
+    m.apply(ev(1, 'tool_use', {'toolUseId': 'b', 'name': 'Bash', 'input': {'command': 'npm test'}}));
+    expect(live?.busy, isTrue);
+    m.apply(shift(2, 'ido-2', 'ended'));
+    final g = items.single as ToolGroup;
+    expect(g.outcome, Outcome.interrupted);
+    expect(g.tools.single.outcome, Outcome.interrupted);
+    expect(g.liveLabel, isNull);
+    expect(live?.busy, isFalse);
+
+    // The next shift's `live` with no `ended` before it (hq restarted, the host died): the same.
+    final items2 = <ChatItem>[];
+    LiveState? live2;
+    final m2 = EngineModel(items: items2, gender: Gender.m, onLive: (l) => live2 = l);
+    m2.apply(shift(1, 'ido-2', 'live'));
+    m2.apply(ev(2, 'tool_use', {'toolUseId': 'b', 'name': 'Bash', 'input': {'command': 'ls'}}));
+    m2.apply(shift(3, 'ido-3', 'live'));
+    expect((items2.firstWhere((i) => i is ToolGroup) as ToolGroup).outcome, Outcome.interrupted);
+    expect(live2?.busy, isFalse);
+    expect(items2.whereType<ShiftMarker>().single.shift, 3);
+  });
+
+  test('the live of the shift whose tool is running does not stop it', () {
+    // A run's first frames can reach hq before it marks the shift live.
+    final items = <ChatItem>[];
+    LiveState? live;
+    final m = EngineModel(items: items, gender: Gender.m, onLive: (l) => live = l);
+    m.apply(shift(1, 'ido-2', 'starting'));
+    m.apply(ev(2, 'tool_use', {'toolUseId': 'b', 'name': 'Bash', 'input': {'command': 'ls'}}));
+    m.apply(shift(3, 'ido-2', 'live'));
+    expect((items.single as ToolGroup).outcome, Outcome.running);
+    expect(live?.busy, isTrue);
+    m.apply(ev(4, 'tool_result', {'toolUseId': 'b', 'isError': false}));
+    m.apply(ev(5, 'result', {'subtype': 'success', 'isError': false}));
+    expect((items.single as ToolGroup).outcome, Outcome.ok);
+    expect(live?.busy, isFalse);
+  });
+
+  test('a turn that ends mid-tool closes the row as stopped, not done', () {
+    final items = <ChatItem>[];
+    LiveState? live;
+    final m = EngineModel(items: items, gender: Gender.m, onLive: (l) => live = l);
+    m.apply(ev(1, 'tool_use', {'toolUseId': 'b', 'name': 'Bash', 'input': {'command': 'sleep 100'}}));
+    m.apply(ev(2, 'result', {'subtype': 'success', 'isError': false}));
+    final g = items.single as ToolGroup;
+    expect(g.tools.single.outcome, Outcome.interrupted);
+    expect(g.liveLabel, isNull);
+    expect(live?.busy, isFalse);
+  });
 }
