@@ -19,6 +19,7 @@ import { OWNER } from '@company/shared';
 import { HomeError } from './home.ts';
 import { assetLinks, pairPage } from './pairing.ts';
 import { guarded, guardedUpgrade, rejectUpgrade, requestUrl } from './http-guard.ts';
+import { normalizePath } from './error-watch.ts';
 
 export function loadOrCreateToken(stateDir: string): string {
   if (process.env.HQ_TOKEN) return process.env.HQ_TOKEN;
@@ -91,6 +92,9 @@ const hasFiles = (b: Record<string, unknown>): boolean => Array.isArray(b.attach
 const URGENCIES = ['urgent', 'normal', 'low'] as const;
 const PRIORITIES = ['now', 'next', 'later'] as const;
 const SEEN_SCREENS = ['chats'] as const;
+/** POST /api/client-errors: at most this many per device in CLIENT_ERRORS_PER_MS. */
+export const CLIENT_ERRORS_MAX = 30;
+const CLIENT_ERRORS_PER_MS = 60_000;
 
 export function health(hq: Hq) {
   const lastSweep = Number(hq.store.getMeta('last_sweep_at') ?? 0);
@@ -134,6 +138,23 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   });
 
   route('GET', '/api/inbox', () => ({ items: hq.inbox.open() }));
+  // error-catcher (error-watch.ts): an error the app showed him, or one it threw. One event; the watch groups them.
+  const clientErrors = new Map<string, number[]>();
+  route('POST', '/api/client-errors', async ({ body, caller }) => {
+    const key = caller.kind === 'device' ? `device:${caller.id}` : caller.kind;
+    const now = hq.store.now();
+    const recent = (clientErrors.get(key) ?? []).filter((t) => now - t < CLIENT_ERRORS_PER_MS);
+    if (recent.length >= CLIENT_ERRORS_MAX) throw new HttpError(429, 'too many client errors');
+    recent.push(now);
+    clientErrors.set(key, recent);
+    const b = await body();
+    const clip = (v: unknown, name: string, n: number, required = false) => str(v, name, required)?.slice(0, n);
+    const ev = hq.store.emit('client.error', null, {
+      kind: clip(b.kind, 'kind', 40) ?? 'error', message: clip(b.message, 'message', 1000, true), screen: clip(b.screen, 'screen', 80) ?? '',
+      app_version: clip(b.app_version, 'app_version', 40) ?? '', stack: clip(b.stack, 'stack', 4000) ?? '', shown: b.shown === true,
+    });
+    return { ok: true, seq: ev.seq };
+  });
   route('POST', '/api/inbox/:id/ack', ({ params }) => ({ ok: hq.inbox.ack(Number(params[0])) }));
   // "לא עכשיו" and its undo ({on:false}): kept here, so a refresh or another device doesn't bring the card back (#74).
   route('POST', '/api/inbox/:id/snooze', async ({ params, body }) => {
@@ -541,7 +562,14 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
     } catch (e) {
       const status = e instanceof HttpError || e instanceof AuthError || e instanceof UploadError ? e.status
         : e instanceof URIError || /required|invalid|must be/.test((e as Error).message) ? 400 : 500;
-      if (status === 500) console.error(`api: ${req.method} ${req.url} failed: ${(e as Error)?.stack ?? e}`);
+      if (status === 500) {
+        console.error(`api: ${req.method} ${req.url} failed: ${(e as Error)?.stack ?? e}`);
+        // error-watch.ts: a 5xx is an error he sees. The route without its ids, the first line of the stack.
+        try {
+          const stack = String((e as Error)?.stack ?? '').split('\n').slice(1).find((l) => l.trim())?.trim() ?? '';
+          hq.store.emit('api.5xx', null, { method: req.method, route: normalizePath(req.url ?? ''), error: String((e as Error)?.message ?? e).slice(0, 500), stack });
+        } catch { /* the answer goes out anyway */ }
+      }
       if (res.headersSent) return void res.destroy();
       return json(res, status, { error: (e as Error).message });
     }

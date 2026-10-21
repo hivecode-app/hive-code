@@ -26,6 +26,7 @@ import { openedBy, openTasks } from './open-tasks.ts';
 import { Home } from './home.ts';
 import { MemoryFiles, type Run } from './memory-files.ts';
 import { StallWatch, type OpenFilesReader } from './stall-watch.ts';
+import { ErrorWatch } from './error-watch.ts';
 import { startApi, loadOrCreateToken, health, type ApiServer } from './api.ts';
 import { Auth } from './auth.ts';
 import { Ingest, startIngestSocket, type Ticketer } from './ingest.ts';
@@ -96,6 +97,7 @@ export class Hq {
   readonly home: Home;
   readonly memoryFiles: MemoryFiles;
   readonly stallWatch: StallWatch;
+  readonly errorWatch: ErrorWatch;
   readonly nodes: Nodes;
   private tabServer: TabServer | null = null;
   private ingestServer: Server | null = null;
@@ -134,6 +136,7 @@ export class Hq {
     this.home = new Home(this);
     this.memoryFiles = new MemoryFiles(this, deps.memoryRun);
     this.stallWatch = new StallWatch(this, deps.openFiles);
+    this.errorWatch = new ErrorWatch(this);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
     this.awaiting = new AwaitingBoard(this.store, this.inbox);
@@ -279,6 +282,8 @@ export class Hq {
       this.every(10 * 60_000, 'memory-files', () => this.memoryFiles.sweep());
       // #153: a project standing still with work open wakes its lead, and then the manager.
       this.every(60_000, 'stall-watch', () => this.stallWatch.sweep());
+      // error-catcher: the errors he sees, one item each for him to approve (error-watch.ts).
+      this.every(30_000, 'error-catcher', () => this.errorWatch.sweep());
       this.every(T.backupMs, 'backup', async () => {
         if (!this.store.toggle('backup')) return;
         await backupOnce(this.store, join(this.cfg.stateDir, 'backups'), this.cfg.backupsKeep);

@@ -95,6 +95,8 @@ export interface AskRequest {
   options?: string[];
   blocking?: boolean;
   urgency?: Urgency;
+  /** The card's title; default "<name> שואל/ת". */
+  title?: string;
 }
 
 /** One row of the hq event stream (WS `/ws`, REST `/api/events`). seq is monotonic; clients resume with `after=seq`. */

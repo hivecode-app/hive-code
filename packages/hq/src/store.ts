@@ -448,6 +448,33 @@ const MIGRATIONS: string[] = [
   ALTER TABLE estimates ADD COLUMN escalated_at INTEGER;
   UPDATE estimates SET missed_at = due_at WHERE outcome = 'missed';
   `,
+  // v23: error-catcher (error-watch.ts): one row per error signature, sha1(type|component|normalized message).
+  `
+  CREATE TABLE error_signatures (
+    sig TEXT PRIMARY KEY,
+    type TEXT NOT NULL,                      -- the event: turn.error | message.undelivered | api.5xx | client.error | loop.error | …
+    component TEXT NOT NULL,                 -- identity / route / screen / loop
+    message TEXT NOT NULL,                   -- the first raw message
+    identity TEXT,
+    state TEXT NOT NULL,                     -- idle (under the threshold) | pending | asked | handling | done | muted | known
+    count INTEGER NOT NULL,                  -- every occurrence, ever
+    cycle_count INTEGER NOT NULL,            -- this round's (since it was last asked about): the number he sees
+    shown_count INTEGER NOT NULL DEFAULT 0,  -- the number his item shows now
+    first_seen INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL,
+    cycle_start INTEGER NOT NULL,            -- the first occurrence this round counts
+    pending_since INTEGER,
+    window_start INTEGER NOT NULL,
+    window_count INTEGER NOT NULL,
+    ask_id TEXT,                             -- his item (asks.id, from hq)
+    answer TEXT,
+    task_id INTEGER,                         -- the task "לטפל" opened
+    muted_until INTEGER,
+    returned INTEGER NOT NULL DEFAULT 0,     -- this round came after its task was done
+    examples TEXT NOT NULL DEFAULT '[]'      -- [{seq, ts, identity, data}]: the first ones and the latest
+  );
+  CREATE INDEX error_signatures_state ON error_signatures(state);
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

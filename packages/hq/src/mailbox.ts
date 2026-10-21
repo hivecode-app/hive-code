@@ -64,9 +64,16 @@ export class Mailbox {
     shifts.on('live', (row) => this.store.bg(this.flush(row.identity), 'mailbox.flush'));
     // `seen` comes only from the host's delivery frames (started/completed = dequeued into the
     // conversation). Assistant text is not proof: a `later` message can still be waiting behind the turn.
-    shifts.on('frame', (row, f) => {
+    shifts.on('frame', (row, f, live?: boolean) => {
       if (f.t === 'delivery') this.onDelivery(row, f.msgId, f.state, f.error);
-      if (f.t === 'event' && f.ev.kind === 'result') this.onTurnEnd(row, f.ev);
+      if (f.t === 'event' && f.ev.kind === 'result') {
+        // error-watch.ts: a turn that ended in an error he did not cause (a stop he pressed is `interrupted`, #177).
+        // Replayed frames (reattach after an hq restart) were caught the first time.
+        if (f.ev.isError && !f.ev.interrupted && live !== false) {
+          this.store.emit('turn.error', row.identity, { shift: row.id, identity: row.identity, subtype: f.ev.subtype, text: (f.ev.text ?? '').slice(0, 1000) });
+        }
+        this.onTurnEnd(row, f.ev);
+      }
     });
     shifts.on('ended', (row) => this.requeueUndelivered(row));
   }
@@ -452,6 +459,7 @@ export class Mailbox {
     if (m.kind === 'system' || m.from_identity === 'hq') return;
     if (this.fromInboxClose(m)) return;
     const title = `הודעה ל-${this.label(m.to_identity)} לא נמסרה: ${why}`;
+    this.store.emit('message.undelivered', m.to_identity, { id: m.id, from: m.from_identity, to: m.to_identity, why });
     if (m.from_identity === OWNER) {
       this.inbox.add({ kind: 'delivery_failure', title, body: m.body.slice(0, 400), from_identity: m.to_identity, urgency: 'normal',
         ref: m.id, dedupe_key: `delivery_failure:${m.id}` });
@@ -472,6 +480,7 @@ export class Mailbox {
   private fail(m: MessageRow): void {
     this.setState(m.id, 'failed');
     if (this.fromInboxClose(m)) return;
+    this.store.emit('message.undelivered', m.to_identity, { id: m.id, from: m.from_identity, to: m.to_identity, why: m.error ?? 'לא נמסרה בזמן' });
     const why = m.error ? ` (${m.error})` : '';
     const title = `הודעה ל-${this.label(m.to_identity)} לא נמסרה`;
     const body = `${m.body.slice(0, 400)}${why}`;
@@ -576,7 +585,7 @@ export class Mailbox {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, req.from, req.question, headline, JSON.stringify(req.options ?? []), req.blocking ? 1 : 0,
       req.urgency ?? 'normal', now);
     // He comes first, directly from whoever asks (A.4) — the inbox item, not a relay through the manager.
-    this.inbox.add({ kind: 'ask', title: `${this.label(req.from)} שואל/ת`, body: req.question, from_identity: req.from,
+    this.inbox.add({ kind: 'ask', title: req.title?.trim() || `${this.label(req.from)} שואל/ת`, body: req.question, from_identity: req.from,
       urgency: req.urgency ?? 'normal', blocking: !!req.blocking, ref: id, headline, dedupe_key: `ask:${id}` });
     const a = this.getAsk(id)!;
     this.store.emit('ask.new', req.from, a);
@@ -604,8 +613,10 @@ export class Mailbox {
     // hq's own asks (account login) carry a one-time code: it is handed over live only (never in asks,
     // events or backups), and hq has no mailbox to deliver an answer to.
     const fromHq = a.from_identity === 'hq';
+    // error-watch.ts reads its answers ("לטפל" / "לא עכשיו") from here: those carry no secret.
+    const secret = fromHq && !id.startsWith('err-');
     this.store.db.prepare(`UPDATE asks SET state = 'answered', answer = ?, answered_by = ?, answered_at = ? WHERE id = ?`)
-      .run(fromHq ? '(התקבל)' : answer, by, this.store.now(), id);
+      .run(secret ? '(התקבל)' : answer, by, this.store.now(), id);
     this.inbox.resolveByRef('ask', id);
     if (fromHq) this.onHqAnswer?.(id, answer);
     const from = by === 'owner' ? OWNER : this.cfg.managerId;
