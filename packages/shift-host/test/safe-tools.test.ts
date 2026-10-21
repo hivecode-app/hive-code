@@ -72,7 +72,7 @@ test('his `now` during a safe tool stops it and is read within a second', async 
     assert.equal(r.data.waitingOn, undefined);
     const started = await h.wait((f) => f.t === 'delivery' && f.msgId === 'his' && f.state === 'started');
     assert.ok(started.at - t0 < 1000, `read after ${started.at - t0}ms`);
-    assert.ok(h.frames.some((f) => f.t === 'event' && f.ev.kind === 'result' && f.ev.isError), 'the tool turn was cut');
+    assert.ok(h.frames.some((f) => f.t === 'event' && f.ev.kind === 'result' && f.ev.isError && f.ev.interrupted), 'the tool turn was cut, on purpose');
   } finally { await h.close(); }
 });
 
@@ -106,5 +106,31 @@ test('his `now` during an unsafe tool waits for that tool only, goes in before t
     assert.equal(rd.data.waitingOn, undefined);
     await h.wait((f) => f.t === 'delivery' && f.msgId === 'note' && f.state === 'started');
     assert.ok(!h.frames.some((f) => f.t === 'event' && f.ev.kind === 'result' && f.ev.isError), 'hq notes do not cut');
+  } finally { await h.close(); }
+});
+
+test('rotem 21/10: his answer at `now` mid-thinking ends the turn as cut, not failed, and the line it read stays', async () => {
+  const h = await hostWithClient();
+  try {
+    h.send({ t: 'send', id: 'a', msgId: 'yoav-note', text: 'THINK 5000', priority: 'next' });
+    await h.wait((f) => f.t === 'delivery' && f.msgId === 'yoav-note' && f.state === 'started');
+    h.send({ t: 'send', id: 'b', msgId: 'inbox-146-reply', text: 'כן', priority: 'now' });
+    const cut = await h.wait((f) => f.t === 'event' && f.ev.kind === 'result');
+    assert.equal(cut.ev.subtype, 'error_during_execution');
+    assert.equal(cut.ev.interrupted, true);
+    await h.wait((f) => f.t === 'delivery' && f.msgId === 'inbox-146-reply' && f.state === 'completed');
+    assert.ok(!h.frames.some((f) => f.t === 'delivery' && f.msgId === 'yoav-note' && f.state === 'failed'), 'the line it read is not lost');
+    assert.ok(h.frames.filter((f) => f.t === 'event' && f.ev.kind === 'result').every((f: any) => f.ev.interrupted || !f.ev.isError));
+  } finally { await h.close(); }
+});
+
+test('a turn that fails by itself is still a failure: no `interrupted`, its line failed', async () => {
+  const h = await hostWithClient();
+  try {
+    h.send({ t: 'send', id: 'a', msgId: 'm', text: 'FAIL', priority: 'next' });
+    const r = await h.wait((f) => f.t === 'event' && f.ev.kind === 'result');
+    assert.equal(r.ev.isError, true);
+    assert.equal(r.ev.interrupted, undefined);
+    await h.wait((f) => f.t === 'delivery' && f.msgId === 'm' && f.state === 'failed');
   } finally { await h.close(); }
 });

@@ -138,14 +138,17 @@ class EngineModel {
           s.streaming = false;
         }
         _streams.clear();
-        _closeGroup(ev['isError'] == true ? Outcome.error : Outcome.ok);
+        // A turn the host cut on purpose (his message at `now`, a stop) ended `interrupted`: no error, nothing to show.
+        final cut = ev['interrupted'] == true;
+        final failed = ev['isError'] == true && !cut;
+        _closeGroup(cut ? Outcome.interrupted : failed ? Outcome.error : Outcome.ok);
         if (_turnToldOwner) {
           final drop = _turnTexts.toSet();
           items.removeWhere(drop.contains);
         }
         _turnTexts.clear();
         _turnToldOwner = false;
-        if (ev['isError'] == true) {
+        if (failed) {
           items.add(ErrorLine(id: 'r:$seq', ts: ts, text: 'הסבב נגמר בשגיאה. ${gender == Gender.f ? 'היא תנסה' : 'הוא ינסה'} שוב בהודעה הבאה.', seq: seq));
         }
         onLive?.call(const LiveState());

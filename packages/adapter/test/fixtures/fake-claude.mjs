@@ -48,6 +48,22 @@ function runNext() {
     }, tool.ms ?? 50);
     return;
   }
+  // `THINK <ms>`: the model thinks for ms with no tool. As seen on rotem 21/10 (2.1.303), a `now` line meanwhile
+  // ends the turn at once with error_during_execution, and the line starts the next one.
+  // `FAIL`: the turn fails by itself (no one cut it).
+  if (content === 'FAIL') {
+    m.timer = setTimeout(() => {
+      out({ type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 1 });
+      busy = false; current = null;
+      runNext();
+    }, turnMs);
+    return;
+  }
+  if (content.startsWith('THINK ')) {
+    m.thinking = true;
+    m.timer = setTimeout(() => endTurn(m, text), Number(content.slice(6)) || 1000);
+    return;
+  }
   m.timer = setTimeout(() => {
     out({ type: 'assistant', message: { id: 'msg_' + m.uuid.slice(0, 8), role: 'assistant', content: [{ type: 'text', text }] } });
     out({ type: 'result', subtype: 'success', is_error: false, result: text, num_turns: 1, total_cost_usd: 0,
@@ -74,6 +90,11 @@ rl.on('line', (line) => {
   if (o.type === 'user') {
     out({ type: 'command_lifecycle', command_uuid: o.uuid, state: 'queued', uuid: randomUUID() });
     if (o.priority === 'now') queue.unshift(o); else queue.push(o);
+    if (o.priority === 'now' && current?.thinking) {
+      clearTimeout(current.timer);
+      out({ type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 1 });
+      busy = false; current = null;
+    }
     runNext();
   } else if (o.type === 'control_request') {
     const st = o.request?.subtype;

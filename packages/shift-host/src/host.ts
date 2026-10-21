@@ -59,6 +59,10 @@ export class ShiftHost {
   private readonly sockets = new Set<Socket>();
   private lockPath: string;
   private turnOpen = false;
+  /** This turn was cut on purpose (we interrupted it, or a `now` line is still waiting when it ends: the CLI takes
+   *  one by ending the turn): its `error_during_execution` is no failure, and the result says `interrupted`. */
+  private cutAsked = false;
+  private nowLines = new Set<string>();   // msgIds of `now` lines sent while this turn was open
   private sawInit = false;
   private exitDone: Promise<void> | null = null;          // a turn started and has not produced a result
   private closing = false;
@@ -125,11 +129,18 @@ export class ShiftHost {
       }
       case 'result':
         this.activeTools.clear(); this.turnOpen = false;
+        // A turn we cut ends `error_during_execution` (measured 21/10, rotem: his GO answer at `now` mid-thinking).
+        // That is the cut, not a failure: the result says so, and the lines it read stay in the conversation.
+        if (ev.isError && ev.subtype === 'error_during_execution' && (this.cutAsked
+          || [...this.nowLines].some((m) => ['written', 'delivered'].includes(this.deliveries.get(m)?.state ?? '')))) {
+          ev = { ...ev, interrupted: true };
+        }
+        this.cutAsked = false; this.nowLines.clear();
         // lifecycle `completed` may be missing (canary): the result closes every started
         // delivery; an error result is a failure, never an empty success (bet 1).
         for (const [mid, d] of this.deliveries) {
           if (d.state !== 'started') continue;
-          if (ev.isError) this.advance(mid, 'failed', `turn ended: ${ev.subtype}`);
+          if (ev.isError && !ev.interrupted) this.advance(mid, 'failed', `turn ended: ${ev.subtype}`);
           else this.advance(mid, 'completed');
         }
         break;
@@ -238,12 +249,13 @@ export class ShiftHost {
     const known = this.deliveries.get(msgId);
     if (!this.turnOpen || retry || known) return this.send(msgId, text, 'now', retry);
     const running = [...this.activeTools.values()];
-    // No tool running (the model is writing): nothing to stop for; the CLI takes the line at the end of this step.
+    // No tool running (the model is writing): nothing for us to stop. The CLI itself may end the turn for a `now` line
+    // (rotem 21/10, mid-thinking); send() marks that end as cut.
     if (!running.length) return this.send(msgId, text, 'now', retry);
     const blocking = running.filter((t) => !safeToInterrupt(t));
     if (!blocking.length) {
       try {
-        await this.need().interrupt();
+        await this.interrupt();
       } catch (e) {
         // The line still goes in, after the running step: late, never lost (journal: the unit's stderr).
         process.stderr.write(`shift-host: interrupt before ${msgId} failed: ${(e as Error).message}\n`);
@@ -261,6 +273,8 @@ export class ShiftHost {
     // retry only re-sends what never got accepted; anything accepted stays single.
     if (existing && !(retry && (existing.state === 'written' || existing.state === 'failed'))) return { ...existing };
     if (!this.claude || this.claude.exited) throw new HostError('not_running', 'claude is not running');
+    // The CLI takes a `now` line by ending the open turn (error_during_execution): that end is ours.
+    if (priority === 'now' && this.turnOpen) this.nowLines.add(msgId);
     const uuid = this.claude.sendUser(text, priority);
     if (existing) this.byUuid.delete(existing.uuid);
     this.deliveries.set(msgId, { uuid, state: 'written' });
@@ -397,7 +411,7 @@ export class ShiftHost {
         case 'send': this.reply(c, f.id, f.stopIfSafe === true && f.priority === 'now'
           ? await this.sendNow(f.msgId, f.text, f.retry === true)
           : this.send(f.msgId, f.text, f.priority, f.retry === true)); return;
-        case 'interrupt': this.reply(c, f.id, await this.need().interrupt()); return;
+        case 'interrupt': this.reply(c, f.id, await this.interrupt()); return;
         case 'usage': this.reply(c, f.id, toUsageReply(await this.need().usage())); return;
         case 'context': this.reply(c, f.id, toContextReply(await this.need().contextUsage())); return;
         case 'status': this.reply(c, f.id, this.info()); return;
@@ -418,6 +432,13 @@ export class ShiftHost {
       const he = e instanceof HostError ? e : null;
       this.replyErr(c, f.id, he?.code ?? (String(e).includes('timed out') ? 'timeout' : 'internal'), (e as Error).message);
     }
+  }
+
+  /** Every interrupt hq or the host asks for goes through here, so the turn's end reads as cut, not failed. */
+  private interrupt(): Promise<unknown> {
+    const c = this.need();
+    if (this.turnOpen) this.cutAsked = true;
+    return c.interrupt();
   }
 
   private need(): ClaudeProcess {

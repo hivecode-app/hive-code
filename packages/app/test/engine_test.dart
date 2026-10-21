@@ -61,6 +61,19 @@ void main() {
     expect(items.last, isA<ErrorLine>());
   });
 
+  test('a turn the host cut on purpose (his message mid-turn) is no error; a real failure still is', () {
+    // rotem, 21/10 23:54:52: his GO answer cut her turn, error_during_execution, and he saw "הסבב נגמר בשגיאה".
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.f);
+    m.apply(ev(1, 'tool_use', {'toolUseId': 'r', 'name': 'Read', 'input': {'file_path': 'a.md'}}));
+    m.apply(ev(2, 'result', {'subtype': 'error_during_execution', 'isError': true, 'interrupted': true}));
+    expect(items.whereType<ErrorLine>(), isEmpty);
+    expect((items.single as ToolGroup).outcome, Outcome.interrupted);
+    m.apply(ev(3, 'text', {'text': 'ממשיכה.', 'messageId': 'c'}));
+    m.apply(ev(4, 'result', {'subtype': 'error_during_execution', 'isError': true}));
+    expect(items.last, isA<ErrorLine>());
+  });
+
   test('hq snapshot maps to the app model', () {
     final d = mapSnapshot(
       board: [

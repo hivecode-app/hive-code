@@ -92,7 +92,8 @@ export type EngineEvent =
   | { kind: 'tool_result'; toolUseId: string; isError: boolean; preview: string }
   /** --replay-user-messages echo of a user line; basis of `delivered`. */
   | { kind: 'user_echo'; uuid: string; text: string }
-  | { kind: 'result'; subtype: string; isError: boolean; text?: string; numTurns?: number;
+  /** interrupted: the host cut this turn on purpose (interrupt, stop, a `now` line): not a failure. */
+  | { kind: 'result'; subtype: string; isError: boolean; interrupted?: boolean; text?: string; numTurns?: number;
       costUsd?: number; durationMs?: number; usage?: unknown; contextWindow?: number;
       permissionDenials?: unknown[] }
   | { kind: 'rate_limit'; status: string; rateLimitType?: string; resetsAt?: number;
