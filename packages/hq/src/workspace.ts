@@ -32,6 +32,7 @@ export interface Charter {
   ciCheck: string | null;
   mergeInstructions: string[] | null; // merge_instructions (a string, or one string per step): replaces the default review + merge steps in a task worker's prompt
   designReview: DesignReview | null;  // design_review: a second review, by a designer, for a PR that touches these paths
+  paused: string | null;  // paused: he put the project on hold (the reason, or "מושהה"). Workers still run; hq doesn't wake it (stall-watch.ts)
   error?: string;         // status "invalid": why the charter could not be read
 }
 
@@ -54,7 +55,7 @@ export function readCharter(companyDir: string, project: string): Charter | null
     const m = readFileSync(file, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
     fm = ((m ? parse(m[1]!) : {}) ?? {}) as Record<string, unknown>;
   } catch (e) {
-    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, designReview: null, error: (e as Error).message };
+    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, designReview: null, paused: null, error: (e as Error).message };
   }
   const s = (v: unknown) => (typeof v === 'string' && v ? v : null);
   const checkouts: Checkout[] = [];
@@ -71,6 +72,7 @@ export function readCharter(companyDir: string, project: string): Charter | null
     project, status: s(fm.status) ?? 'active', machine: s(fm.machine), checkouts,
     worktreeDir: s(fm.worktree_dir) ?? '.worktrees', commands, ciCheck: s(fm.ci_check),
     mergeInstructions: steps(fm.merge_instructions), designReview: designReview(fm.design_review),
+    paused: fm.paused === true ? 'מושהה' : s(fm.paused),
   };
 }
 

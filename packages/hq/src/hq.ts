@@ -24,6 +24,7 @@ import { board } from './board.ts';
 import { openTasks } from './open-tasks.ts';
 import { Home } from './home.ts';
 import { MemoryFiles, type Run } from './memory-files.ts';
+import { StallWatch, type OpenFilesReader } from './stall-watch.ts';
 import { startApi, loadOrCreateToken, health, type ApiServer } from './api.ts';
 import { Auth } from './auth.ts';
 import { Ingest, startIngestSocket, type Ticketer } from './ingest.ts';
@@ -48,6 +49,8 @@ export interface HqDeps {
   tabBrowser?: TabBrowser;
   /** git/gh runner for the rolling memory PR (memory-files.ts). */
   memoryRun?: Run;
+  /** The open-*.md of a project, for stall-watch.ts (default: the company repo). */
+  openFiles?: OpenFilesReader;
   now?: () => number;
 }
 
@@ -87,6 +90,7 @@ export class Hq {
   readonly tab: TabHandoffs;
   readonly home: Home;
   readonly memoryFiles: MemoryFiles;
+  readonly stallWatch: StallWatch;
   private tabServer: TabServer | null = null;
   private ingestServer: Server | null = null;
   private timers: NodeJS.Timeout[] = [];
@@ -115,6 +119,7 @@ export class Hq {
     this.ingest = new Ingest(this, deps.ticketer);
     this.home = new Home(this);
     this.memoryFiles = new MemoryFiles(this, deps.memoryRun);
+    this.stallWatch = new StallWatch(this, deps.openFiles);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
     this.awaiting = new AwaitingBoard(this.store);
@@ -222,6 +227,8 @@ export class Hq {
       });
       // #115: `remember` with `file` → the rolling memory PR (memory-files.ts), when enough waits or long enough.
       this.every(10 * 60_000, 'memory-files', () => this.memoryFiles.sweep());
+      // #153: a project standing still with work open wakes its lead, and then the manager.
+      this.every(60_000, 'stall-watch', () => this.stallWatch.sweep());
       this.every(T.backupMs, 'backup', async () => {
         if (!this.store.toggle('backup')) return;
         await backupOnce(this.store, join(this.cfg.stateDir, 'backups'), this.cfg.backupsKeep);

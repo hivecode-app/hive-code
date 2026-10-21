@@ -479,6 +479,8 @@ export function main() {
         if (!isObj(dr) || !Array.isArray(dr.paths) || !dr.paths.length || !dr.paths.every((v) => typeof v === 'string' && v)) err(`${rel(charter)}: design_review needs "paths", a list of paths`);
         for (const k of ['wait_minutes', 'small_lines']) if (isObj(dr) && dr[k] != null && !(Number.isInteger(dr[k]) && dr[k] > 0)) err(`${rel(charter)}: design_review "${k}" must be a positive whole number`);
       }
+      // paused: he put the project on hold. hq does not wake it when it stands with work open (stall-watch).
+      if (fm.paused != null && fm.paused !== true && !(typeof fm.paused === 'string' && fm.paused.trim())) err(`${rel(charter)}: "paused" must be true or the reason (a string)`);
       checkCharterPaths(charter, companyDir);
       if (fm.ci === 'required' && !fm.ci_check) err(`${rel(charter)}: ci: required needs "ci_check" (the check name a merge waits for)`);
     }
