@@ -488,6 +488,15 @@ export class Home {
       case 'hq.started': this.add({ kind: 'deploy', text: 'hq עלה מחדש (פריסה או אתחול)' }); return;
       case 'inbox.completed': {
         const item = typeof d.id === 'number' ? this.hq.inbox.get(d.id) : undefined;
+        // Closed for him by the worker who asked (withdraw_go): "אושר בשיחה" with his words, or "בוטל".
+        if (item?.kind === 'go' && d.how === 'chat') {
+          this.add({ kind: 'deploy', text: `אושר בשיחה: ${item.headline ?? item.title}${typeof d.quote === 'string' ? ` «${d.quote.slice(0, 120)}»` : ''}` });
+          return;
+        }
+        if (item?.kind === 'go' && d.how === 'withdrawn') {
+          this.add({ kind: 'deploy', text: `בוטל: ${item.headline ?? item.title}` });
+          return;
+        }
         if (item?.kind === 'go' && !d.declined) {
           const o = this.hq.mailbox.names.owner;
           this.add({ kind: 'deploy', text: `${o.name} ${g(o, 'אישר', 'אישרה')} GO: ${item.headline ?? item.title}` });

@@ -580,3 +580,22 @@ test('close_team on a task that ran and went back to the queue is finished, not 
     assert.ok(!isCancelled(hq.scheduler.task(t.id)!));
   } finally { await env.cleanup(); }
 });
+
+test('withdraw_go over the socket: a GO closed in chat keeps his quote and shows in the feed; a rejection reaches the worker (22/10)', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock, clock } = env;
+    await post(sock, '/v1/ops', entry('request_go', { headline: 'לתקן את התמונות', what: 'פריסה' }, 'eli-1:70'));
+    const go = hq.inbox.open().find((i) => i.kind === 'go' && i.ref === 'eli-1:70')!;
+    clock.advance(1000);
+    hq.mailbox.tell({ msg_id: 'o-70', from: 'owner', to: 'eli', body: 'יאללה נתקן' });
+    const bad = await post(sock, '/v1/ops', entry('withdraw_go', { ref: 'eli-1:70', outcome: 'approved_in_chat', message: 'nope' }, 'eli-1:71'));
+    assert.equal(bad.status, 400);
+    assert.equal(hq.inbox.get(go.id)!.state, 'open');
+    const ok = await post(sock, '/v1/ops', entry('withdraw_go', { ref: 'eli-1:70', outcome: 'approved_in_chat', message: 'o-70' }, 'eli-1:72'));
+    assert.equal(ok.status, 200);
+    assert.equal(ok.json.result.quote, 'יאללה נתקן');
+    assert.equal(hq.inbox.get(go.id)!.state, 'resolved');
+    assert.equal((await post(sock, '/v1/ops', entry('withdraw_go', { ref: 'eli-1:70', outcome: 'maybe' }, 'eli-1:73'))).status, 400);
+  } finally { await env.cleanup(); }
+});

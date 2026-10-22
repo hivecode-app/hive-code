@@ -792,6 +792,65 @@ export class Mailbox {
     return true;
   }
 
+  /**
+   * A worker (or its manager) closes a GO card whose decision was made another way. `chat`: he said yes in the conversation
+   * (his message, which hq reads itself, is kept as the evidence). `withdrawn`: no longer relevant, nothing is recorded as a GO.
+   * Never ran by his own close, so a card of request_access (whose yes runs a command) cannot be closed here.
+   */
+  closeGo(ref: string, outcome: 'approved_in_chat' | 'withdrawn', by: string, messageId?: string, note?: string): { item: NonNullable<ReturnType<Inbox['get']>>; already: boolean; quote: string | null } {
+    const fail = (status: number, why: string, he: string): never => { throw new GoCloseError(status, why, he); };
+    const num = /^inbox-(\d+)$/.exec(ref)?.[1] ?? (/^\d+$/.test(ref) ? ref : undefined);
+    const row = (num
+      ? this.store.db.prepare(`SELECT id FROM inbox WHERE kind = 'go' AND id = ?`).get(Number(num))
+      : this.store.db.prepare(`SELECT id FROM inbox WHERE kind = 'go' AND ref = ? ORDER BY id DESC LIMIT 1`).get(ref)) as { id: number } | undefined;
+    const item = row ? this.inbox.get(row.id) : undefined;
+    if (!item) return fail(404, `withdraw_go: no GO ${ref}`, `אין בקשת GO עם המזהה ${ref} (ה-ref שחזר מ-request_go, או inbox-<מספר>)`);
+    if (item.ref?.startsWith('acc-')) {
+      return fail(409, `withdraw_go: ${ref} is an access request`, 'זו בקשת גישה (request_access): היא נסגרת רק בהחלטה שלו בכרטיס, לא דרך withdraw_go');
+    }
+    const requester = item.from_identity;
+    const allowed = new Set([requester, this.cfg.managerId, requester ? getIdentity(this.store, requester)?.reports_to : null,
+      requester ? this.responsibleFor(requester) : null].filter((x): x is string => !!x && x !== OWNER && x !== 'hq'));
+    if (!allowed.has(by)) {
+      return fail(403, `withdraw_go: ${by} may not close GO ${ref}`, 'רק מי שפתח את בקשת ה-GO, המנהל שלו או המנהל של החברה יכולים לסגור אותה');
+    }
+    if (item.state !== 'open') return { item, already: true, quote: null };
+    let quote: string | null = null;
+    if (outcome === 'approved_in_chat') {
+      if (!messageId) return fail(400, 'withdraw_go: message is required for approved_in_chat', 'חסר `message`: ה-msg_id של ההודעה של רן שאישרה. בלי הודעה אמיתית שלו אי אפשר לאשר בשם שיחה');
+      const m = this.get(messageId);
+      if (!m || m.from_identity !== OWNER) {
+        return fail(400, `withdraw_go: ${messageId} is not a message from the owner`, `\`${messageId}\` היא לא הודעה של ${this.names.owner.name}. ה-msg_id הוא מה שבסוגריים בכותרת ההודעה שלו`);
+      }
+      // A message he wrote to this worker's conversation (or its responsible one's), as himself: not one hq wrote in his name.
+      if (m.kind !== 'tell' || ![requester, by, requester ? this.responsibleFor(requester) : null].includes(m.to_identity)) {
+        return fail(400, `withdraw_go: ${messageId} is not a message of his in this conversation`, `\`${messageId}\` לא נכתבה בשיחה הזו. צריך הודעה ישירה של ${this.names.owner.name} אליך`);
+      }
+      if (m.created_at < item.created_at) {
+        return fail(400, `withdraw_go: ${messageId} was written before the card opened`, 'ההודעה נכתבה לפני שהכרטיס נפתח, ולכן היא לא אישור שלו עליו');
+      }
+      quote = ownerWords(m.body);
+      if (!quote) return fail(400, `withdraw_go: ${messageId} has no text`, 'בהודעה אין טקסט שאפשר לצטט כראיה');
+      // The same bar as his own words on the card (reply): only a bare yes closes it, anything else stays open.
+      if (goVerdict(quote) !== 'yes') {
+        return fail(409, `withdraw_go: ${messageId} is not a clear yes`, `ההודעה «${quote.slice(0, 80)}» היא לא אישור ברור, ולכן הכרטיס נשאר פתוח. אם הוא התכוון לאשר, ${this.names.owner.name} יכול ללחוץ GO או לכתוב "אשר"`);
+      }
+    }
+    const approved = outcome === 'approved_in_chat';
+    this.inbox.resolve(item.id, approved ? 'resolved' : 'dismissed');
+    if (approved) {
+      this.store.db.prepare('UPDATE inbox SET body = ? WHERE id = ?').run(`${item.body}\nאושר בשיחה: «${quote}»`.trim(), item.id);
+    }
+    // `by` is never him: the card was closed for him, and what reads his own close (access.ts) must not mistake it for a click.
+    this.store.emit('inbox.completed', requester, { id: item.id, declined: !approved, by, how: approved ? 'chat' : 'withdrawn', message: messageId ?? null, quote, note: note ?? null });
+    // The asker hears it when someone else closed its card (a manager): it may be waiting on the answer.
+    if (requester && by !== requester && getIdentity(this.store, requester)) {
+      this.tell({ msg_id: `inbox-${item.id}-closed-by-${by}`, from: 'hq', to: requester, kind: 'tell', ref: item.ref ?? `inbox-${item.id}`, priority: 'next',
+        body: `${this.label(by)} סגר/ה את בקשת ה-GO "${item.headline ?? item.title}": ${approved ? `אושרה בשיחה («${quote}»)` : 'בוטלה'}.` });
+    }
+    return { item: this.inbox.get(item.id)!, already: false, quote };
+  }
+
   /** Scheduler code, not an LLM remembering to check (B.4): blocking ask unanswered → manager. */
   escalate(a: AskDTO, why: string): void {
     if (a.from_identity === this.cfg.managerId) return; // the manager's own questions wait for the owner
@@ -805,6 +864,19 @@ export class Mailbox {
       ].filter(Boolean).join('\n') });
     this.store.emit('ask.escalated', a.from_identity, { id: a.id, why });
   }
+}
+
+/** A rejected `withdraw_go`: a 4xx with the Hebrew reason (ingest.ts turns it into the IngestError the worker hears). */
+export class GoCloseError extends Error {
+  status: number;
+  he: string;
+  constructor(status: number, why: string, he: string) { super(why); this.status = status; this.he = he; }
+}
+
+/** What he actually wrote: a note hq wrapped around his words on a GO card ("כתב על בקשת ה-GO … : <text>") is stripped to them. */
+export function ownerWords(body: string): string {
+  const wrapped = /^[\s\S]*\(עדיין פתוחה, לא אושרה ולא נדחתה\): ([\s\S]*)$/.exec(body);
+  return (wrapped ? wrapped[1]! : body).trim();
 }
 
 function shiftOf(data: string): string | undefined {
@@ -828,7 +900,8 @@ export function waitingLine(msgs: Pick<MessageRow, 'body'>[], owner: string): st
  */
 const YES_WORDS = new Set(['go', 'ok', 'okay', 'yes', 'y', 'approve', 'approved', 'confirm', 'אשר', 'מאשר', 'מאושר', 'אישור', 'אושר', 'אשרתי',
   'כן', 'בסדר', 'סבבה', 'יאללה', 'תפרוס', 'תפרסו', 'פרוס', 'בצע', 'קדימה', 'שחרר']);
-const YES_FILLER = new Set(['עכשיו', 'תודה', 'לך', 'על', 'זה', 'please', 'now']);
+// "יאללה נתקן" (22/10): a yes word with a plain "let's do it" verb is still a bare yes. A verb alone, or any other word, is not.
+const YES_FILLER = new Set(['עכשיו', 'תודה', 'לך', 'על', 'זה', 'please', 'now', 'נתקן', 'תתקן', 'תתקנו', 'נפרוס', 'נשחרר', 'נעלה', 'נעשה', 'תעשה', 'תעשו', 'נמשיך', 'תמשיך']);
 export function goVerdict(text: string): 'yes' | 'no' | 'other' {
   const t = text.trim().toLowerCase().replace(/[.!,"'״]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t || /[?؟]/.test(text)) return 'other';

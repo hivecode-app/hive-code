@@ -212,8 +212,8 @@ test('free text on a GO that is neither a yes nor a no does not close it: it is 
 
 test('goVerdict: a yes is only approval words; a qualified yes, a question or "לא הבנתי" never closes a GO', async () => {
   const { goVerdict } = await import('../src/mailbox.ts');
-  for (const t of ['אשר', 'כן', 'GO', 'בסדר, תפרוס עכשיו', 'yes']) assert.equal(goVerdict(t), 'yes', t);
-  for (const t of ['בסדר אבל לא עכשיו', 'תפרוס רק אחרי 18:00', 'ok אבל מחר', 'תודה', 'עכשיו', 'זה', 'לא ממש הבנתי', 'לא כל כך ברור', 'no problem', 'no idea', 'כן, אבל רק אחרי 18:00', 'לא הבנתי מה הכוונה', 'למה?', 'תגיד אתה רציני מי צריך את זה']) {
+  for (const t of ['אשר', 'כן', 'GO', 'בסדר, תפרוס עכשיו', 'yes', 'יאללה נתקן', 'יאללה, נתקן!']) assert.equal(goVerdict(t), 'yes', t);
+  for (const t of ['בסדר אבל לא עכשיו', 'תפרוס רק אחרי 18:00', 'ok אבל מחר', 'תודה', 'עכשיו', 'זה', 'לא ממש הבנתי', 'לא כל כך ברור', 'no problem', 'no idea', 'כן, אבל רק אחרי 18:00', 'לא הבנתי מה הכוונה', 'למה?', 'תגיד אתה רציני מי צריך את זה', 'נתקן', 'תתקן', 'יאללה נתקן אחרי החג', 'יאללה נתקן? לא בטוח', 'יאללה נתקן רק את הראשון']) {
     assert.equal(goVerdict(t), 'other', t);
   }
   for (const t of ['לא', 'לא, בלי הבוטים', 'דחה']) assert.equal(goVerdict(t), 'no', t);
@@ -266,5 +266,69 @@ test('API: only a device token closes as the owner; the admin token closes in it
     const bare = await call(c.id, { kind: 'admin' }, {});
     assert.equal(bare.message, null);
     assert.equal(hq.inbox.get(c.id)!.state, 'resolved');
+  } finally { await env.cleanup(); }
+});
+
+test('closeGo: approved_in_chat needs his real message after the card opened; withdrawn records no GO; only the asker or a manager closes (22/10)', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, clock } = env;
+    const open = (ref: string, from = 'eli') => hq.inbox.add({ kind: 'go', from_identity: from, title: 'GO: תיקון', headline: 'להחליט אם לתקן', blocking: true, ref, dedupe_key: `op:${ref}` });
+    // Before the card: not evidence. A worker's message, or a no, is not either.
+    hq.mailbox.tell({ msg_id: 'o-old', from: 'owner', to: 'eli', body: 'יאללה נתקן' });
+    clock.advance(1000);
+    const go = open('eli-1:10');
+    clock.advance(1000);
+    hq.mailbox.tell({ msg_id: 'w-1', from: 'noa', to: 'eli', body: 'יאללה נתקן' });
+    hq.mailbox.tell({ msg_id: 'o-no', from: 'owner', to: 'eli', body: 'לא, עזוב' });
+    hq.mailbox.tell({ msg_id: 'o-ok', from: 'owner', to: 'eli', body: 'יאללה נתקן' });
+    hq.mailbox.tell({ msg_id: 'o-hold', from: 'owner', to: 'eli', body: 'חכה' });
+    hq.mailbox.tell({ msg_id: 'o-q', from: 'owner', to: 'eli', body: 'בסדר אבל לא עכשיו' });
+    hq.mailbox.tell({ msg_id: 'o-other', from: 'owner', to: 'noa', body: 'יאללה נתקן' });
+    hq.mailbox.tell({ msg_id: 'o-sys', from: 'owner', to: 'eli', kind: 'answer', body: 'רן סיים: משהו אחר' });
+    const close = (ref: string, outcome: 'approved_in_chat' | 'withdrawn', by: string, message?: string) => {
+      try { return hq.mailbox.closeGo(ref, outcome, by, message); } catch (e) { return (e as { status: number }).status; }
+    };
+    assert.equal(close('eli-1:10', 'approved_in_chat', 'eli'), 400, 'no message');
+    assert.equal(close('eli-1:10', 'approved_in_chat', 'eli', 'nope'), 400, 'unknown message');
+    assert.equal(close('eli-1:10', 'approved_in_chat', 'eli', 'w-1'), 400, 'not from him');
+    assert.equal(close('eli-1:10', 'approved_in_chat', 'eli', 'o-old'), 400, 'written before the card');
+    assert.equal(close('eli-1:10', 'approved_in_chat', 'eli', 'o-no'), 409, 'reads as a no');
+    assert.equal(close('eli-1:10', 'approved_in_chat', 'eli', 'o-hold'), 409, 'not a clear yes');
+    assert.equal(close('eli-1:10', 'approved_in_chat', 'eli', 'o-q'), 409, 'a qualified yes');
+    assert.equal(close('eli-1:10', 'approved_in_chat', 'eli', 'o-other'), 400, 'written to another worker');
+    assert.equal(close('eli-1:10', 'approved_in_chat', 'eli', 'o-sys'), 400, 'hq\'s own message in his name');
+    assert.equal(close('eli-1:10', 'approved_in_chat', 'noa', 'o-ok'), 403, 'not the asker');
+    assert.equal(hq.inbox.get(go.id)!.state, 'open');
+    const r = hq.mailbox.closeGo('eli-1:10', 'approved_in_chat', 'eli', 'o-ok') as { item: { state: string; body: string }; quote: string };
+    assert.equal(r.item.state, 'resolved');
+    assert.equal(r.quote, 'יאללה נתקן');
+    assert.match(r.item.body, /אושר בשיחה: «יאללה נתקן»/);
+    const ev = hq.store.db.prepare(`SELECT data FROM events WHERE type = 'inbox.completed' ORDER BY seq DESC LIMIT 1`).get() as { data: string };
+    assert.deepEqual({ how: JSON.parse(ev.data).how, by: JSON.parse(ev.data).by, message: JSON.parse(ev.data).message }, { how: 'chat', by: 'eli', message: 'o-ok' }, 'never recorded as his own click');
+    assert.equal((hq.mailbox.closeGo('eli-1:10', 'withdrawn', 'eli') as { already: boolean }).already, true, 'closed twice: nothing changes');
+
+    // Withdrawn: dismissed, by the asker's manager too, found by inbox-<id>.
+    const g2 = open('eli-1:11');
+    const w = hq.mailbox.closeGo(`inbox-${g2.id}`, 'withdrawn', 'yoav');
+    assert.equal(w.item.state, 'dismissed');
+    assert.equal(w.quote, null);
+
+    // His note on a GO card (hq wraps it) counts by his words; a manager closing it tells the asker.
+    const g3 = open('eli-1:12');
+    clock.advance(1000);
+    hq.mailbox.reply(g3.id, 'יאללה נתקן אחרי החג');
+    const wrapped = (hq.store.db.prepare(`SELECT id FROM messages WHERE id LIKE 'inbox-${g3.id}-note-%'`).get() as { id: string }).id;
+    assert.equal(close('eli-1:12', 'approved_in_chat', 'yoav', wrapped), 409, 'wrapper stripped, still not a yes');
+    clock.advance(1000);
+    hq.mailbox.tell({ msg_id: 'o-yoav', from: 'owner', to: 'yoav', body: 'יאללה נתקן' });
+    assert.equal(hq.mailbox.closeGo('eli-1:12', 'approved_in_chat', 'yoav', 'o-yoav').item.state, 'resolved', 'the manager closes with his message to the manager');
+    assert.match(hq.mailbox.get(`inbox-${g3.id}-closed-by-yoav`)!.body, /אושרה בשיחה/);
+
+    // A request_access card is closed only by his own decision.
+    const acc = hq.inbox.add({ kind: 'go', from_identity: 'eli', title: 'GO: kubectl', blocking: true, ref: 'acc-7' });
+    assert.equal(close('acc-7', 'withdrawn', 'eli'), 409);
+    assert.equal(hq.inbox.get(acc.id)!.state, 'open');
+    assert.equal(close('missing', 'withdrawn', 'eli'), 404);
   } finally { await env.cleanup(); }
 });

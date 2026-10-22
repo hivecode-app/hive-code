@@ -23,7 +23,7 @@ import { getIdentity, isStandingWorker } from './org.ts';
 import { prNumber } from './awaiting.ts';
 import { HandoffError } from './tab/handoffs.ts';
 import { HomeError } from './home.ts';
-import { waitingLine } from './mailbox.ts';
+import { GoCloseError, waitingLine } from './mailbox.ts';
 import { FILE_MODES, memoryFilePath } from './memory-files.ts';
 import { blobSha, MAX_TEXT_BYTES, secretIn } from './memory-registry.ts';
 import { guarded, requestUrl } from './http-guard.ts';
@@ -31,7 +31,7 @@ import { EstimateError, parseEta } from './estimates.ts';
 import { AccessError } from './access.ts';
 import { LeaseError } from './leases.ts';
 
-const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home', 'withdraw_ask']);
+const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home', 'withdraw_ask', 'withdraw_go']);
 
 export class IngestError extends Error {
   status: number;
@@ -140,6 +140,19 @@ export class Ingest {
         const ask = mailbox.getAsk(id);
         if (!ask || ask.from_identity !== e.identity) throw new IngestError(404, `withdraw_ask: no ask ${id} of ${e.identity}`, `אין שאלה פתוחה שלך עם המזהה ${id}`);
         return { ok: true, id: e.id, ref: id, result: { withdrawn: mailbox.withdraw(id, s(a.note)) } };
+      }
+      case 'withdraw_go': {
+        const outcome = need('outcome');
+        if (outcome !== 'approved_in_chat' && outcome !== 'withdrawn') {
+          throw new IngestError(400, `withdraw_go: unknown outcome ${outcome}`, 'ה-`outcome` הוא `approved_in_chat` או `withdrawn`');
+        }
+        try {
+          const r = mailbox.closeGo(need('ref'), outcome, e.identity, s(a.message), s(a.note));
+          return { ok: true, id: e.id, ref: `inbox-${r.item.id}`, result: { closed: !r.already, state: r.item.state, ...(r.quote ? { quote: r.quote } : {}) } };
+        } catch (err) {
+          if (err instanceof GoCloseError) throw new IngestError(err.status, err.message, err.he);
+          throw err;
+        }
       }
       case 'request_go': {
         const what = need('what');

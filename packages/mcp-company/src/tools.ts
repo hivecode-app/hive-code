@@ -157,8 +157,19 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       ask: s('מזהה השאלה (ה-ref שחזר מ-ask) / the ask id (the ref ask returned)'),
       note: s('למה נסגרה, שורה אחת בעברית / why it closed, one line in Hebrew'),
     }, ['ask']),
+    tool('withdraw_go', 'סגירת בקשת GO שלך שההחלטה בה כבר התקבלה, כדי שלא תישאר אצל ' + O + ' ב"מחכה לך". '
+      + 'approved_in_chat: ' + G('הוא אישר', 'היא אישרה') + ' בשיחה (למשל "יאללה נתקן") ואין צורך בלחיצה: חובה message, ה-msg_id של ההודעה ' + G('שלו', 'שלה') + ' שנכתבה אחרי שהכרטיס נפתח. '
+      + 'hq בודק שההודעה אכן ' + pre('מ', O) + ' ושומר את הציטוט שלה כראיה ל-GO; הודעה שנקראת כדחייה לא מאשרת. '
+      + 'withdrawn: הבקשה כבר לא רלוונטית, הכרטיס יורד ולא נרשם GO. רק מי שפתח את הבקשה, המנהל שלו או ' + n.manager.name + '. בקשת גישה (request_access) לא נסגרת כך. '
+      + 'Close a GO request of yours that was already decided. approved_in_chat needs message = the msg_id of ' + G('his', 'her') + ' own message written after the card opened; hq checks it is from ' + G('him', 'her')
+      + ' and keeps its quote as the evidence. withdrawn: no longer relevant, no GO is recorded.', {
+      ref: s('מזהה הבקשה (ה-ref שחזר מ-request_go, או inbox-<מספר>) / the GO id (the ref request_go returned, or inbox-<n>)'),
+      outcome: oneOf(['approved_in_chat', 'withdrawn'], 'approved_in_chat = אושר בשיחה, withdrawn = בוטל / approved in chat, or withdrawn'),
+      message: s('עם approved_in_chat: ה-msg_id של ההודעה של ' + O + ' (מה שבסוגריים בכותרת ההודעה שהגיעה אליך) / with approved_in_chat: the msg_id of the owner\'s message'),
+      note: s('למה, שורה אחת בעברית / why, one line in Hebrew'),
+    }, ['ref', 'outcome']),
     tool('request_go', 'בקשת אישור לפעולה. מופיעה ' + G('אצלו', 'אצלה') + ' כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. '
-      + 'אישור או דחייה ברורים בשיחה (או הכפתור) סוגרים את הבקשה; כל מה אחר ' + G('שהוא כותב', 'שהיא כותבת') + ' מגיע אליך כהודעה רגילה והבקשה נשארת פתוחה. לא סוגרים את המשימה כל עוד היא פתוחה. '
+      + 'אישור או דחייה ברורים בשיחה (או הכפתור) סוגרים את הבקשה; כל מה אחר ' + G('שהוא כותב', 'שהיא כותבת') + ' מגיע אליך כהודעה רגילה והבקשה נשארת פתוחה. אם ההחלטה כבר התקבלה בשיחה ' + G('והוא', 'והיא') + ' לא לחץ/לחצה על הכרטיס, סוגרים אותו ב-withdraw_go. לא סוגרים את המשימה כל עוד היא פתוחה. '
       + 'Request a go-ahead before acting. ' + G('He sees', 'She sees') + ' it as a message in ' + G('his', 'her') + ' chat with you with a GO button: the headline first, '
       + 'the details (what) folded. Only a clear yes or no closes it; anything else ' + G('he types', 'she types') + ' reaches you as an ordinary message and the request stays open. The task is not closed while it is open.', {
       headline: s('שורה ראשונה קצרה במילים ' + G('שלו', 'שלה') + ', בלי מונחים טכניים, שאומרת מה מבקשים ממנו: מתחילה ב"להחליט אם…", '
@@ -269,7 +280,7 @@ export function validateArgs(def: ToolDef, args: unknown): string | null {
 
 /** Everything a person reads goes out in Hebrew (dir-0002, #51): message text by line, titles whole. */
 const HEBREW_TEXT: Partial<Record<ToolDef['name'], string[]>> = {
-  tell: ['body'], ask: ['question'], withdraw_ask: ['note'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'], request_access: ['why'], reserve: ['note'],
+  tell: ['body'], ask: ['question'], withdraw_ask: ['note'], withdraw_go: ['note'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'], request_access: ['why'], reserve: ['note'],
 };
 const HEBREW_TITLE: Partial<Record<ToolDef['name'], string[]>> = {
   open_team: ['name'], open_ticket: ['title'], ask: ['headline'], request_go: ['headline'],

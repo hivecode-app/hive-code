@@ -21,7 +21,7 @@ export const COMPANY_API_VERSION = 1 as const;
 
 export type OpName =
   | 'tell' | 'ask' | 'remember' | 'handoff' | 'status'
-  | 'open_team' | 'close_team' | 'request_go' | 'open_ticket' | 'compose_home' | 'withdraw_ask';
+  | 'open_team' | 'close_team' | 'request_go' | 'open_ticket' | 'compose_home' | 'withdraw_ask' | 'withdraw_go';
 
 export interface WalEntry {
   id: string;              // `${shift}:${ulid-ish}`, unique, idempotency key

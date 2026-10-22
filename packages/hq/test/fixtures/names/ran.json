@@ -480,8 +480,42 @@
    }
   },
   {
+   "name": "withdraw_go",
+   "description": "סגירת בקשת GO שלך שההחלטה בה כבר התקבלה, כדי שלא תישאר אצל רן ב\"מחכה לך\". approved_in_chat: הוא אישר בשיחה (למשל \"יאללה נתקן\") ואין צורך בלחיצה: חובה message, ה-msg_id של ההודעה שלו שנכתבה אחרי שהכרטיס נפתח. hq בודק שההודעה אכן מרן ושומר את הציטוט שלה כראיה ל-GO; הודעה שנקראת כדחייה לא מאשרת. withdrawn: הבקשה כבר לא רלוונטית, הכרטיס יורד ולא נרשם GO. רק מי שפתח את הבקשה, המנהל שלו או יואב. בקשת גישה (request_access) לא נסגרת כך. Close a GO request of yours that was already decided. approved_in_chat needs message = the msg_id of his own message written after the card opened; hq checks it is from him and keeps its quote as the evidence. withdrawn: no longer relevant, no GO is recorded.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "ref": {
+      "type": "string",
+      "description": "מזהה הבקשה (ה-ref שחזר מ-request_go, או inbox-<מספר>) / the GO id (the ref request_go returned, or inbox-<n>)"
+     },
+     "outcome": {
+      "type": "string",
+      "enum": [
+       "approved_in_chat",
+       "withdrawn"
+      ],
+      "description": "approved_in_chat = אושר בשיחה, withdrawn = בוטל / approved in chat, or withdrawn"
+     },
+     "message": {
+      "type": "string",
+      "description": "עם approved_in_chat: ה-msg_id של ההודעה של רן (מה שבסוגריים בכותרת ההודעה שהגיעה אליך) / with approved_in_chat: the msg_id of the owner's message"
+     },
+     "note": {
+      "type": "string",
+      "description": "למה, שורה אחת בעברית / why, one line in Hebrew"
+     }
+    },
+    "required": [
+     "ref",
+     "outcome"
+    ],
+    "additionalProperties": false
+   }
+  },
+  {
    "name": "request_go",
-   "description": "בקשת אישור לפעולה. מופיעה אצלו כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. אישור או דחייה ברורים בשיחה (או הכפתור) סוגרים את הבקשה; כל מה אחר שהוא כותב מגיע אליך כהודעה רגילה והבקשה נשארת פתוחה. לא סוגרים את המשימה כל עוד היא פתוחה. Request a go-ahead before acting. He sees it as a message in his chat with you with a GO button: the headline first, the details (what) folded. Only a clear yes or no closes it; anything else he types reaches you as an ordinary message and the request stays open. The task is not closed while it is open.",
+   "description": "בקשת אישור לפעולה. מופיעה אצלו כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. אישור או דחייה ברורים בשיחה (או הכפתור) סוגרים את הבקשה; כל מה אחר שהוא כותב מגיע אליך כהודעה רגילה והבקשה נשארת פתוחה. אם ההחלטה כבר התקבלה בשיחה והוא לא לחץ/לחצה על הכרטיס, סוגרים אותו ב-withdraw_go. לא סוגרים את המשימה כל עוד היא פתוחה. Request a go-ahead before acting. He sees it as a message in his chat with you with a GO button: the headline first, the details (what) folded. Only a clear yes or no closes it; anything else he types reaches you as an ordinary message and the request stays open. The task is not closed while it is open.",
    "inputSchema": {
     "type": "object",
     "properties": {
