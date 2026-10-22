@@ -86,14 +86,29 @@ test('access: a read the charter allows runs at once, as a job, and comes back w
   } finally { await env.cleanup(); }
 });
 
-test('access: no grant → a GO card with the exact command; his yes runs it once; the worker comes back with the request', async () => {
+test('access: outside prod nothing is asked: a write in dev and a command on ci-host run at once, without a grant', async () => {
+  const { env, runner, ask, events } = await setup('');
+  try {
+    const w = await ask({ resource: 'kube:lumo-dev', argv: ['rollout', 'restart', 'deploy/api'], why: 'בדיקה' }) as any;
+    assert.equal(w.status, 'done');
+    const c = await ask({ resource: 'ssh:ci-host', argv: ['docker', 'images'] }) as any;
+    assert.equal(c.status, 'done');
+    assert.equal(runner.started.length, 2);
+    assert.equal(env.hq.inbox.open().filter((i) => i.kind === 'go').length, 0);
+    assert.deepEqual(events('access.granted').map((e) => e.by), ['auto:non-prod', 'auto:non-prod']);
+    // prod is still his: a read with no grant is a card
+    assert.equal(((await ask({ resource: 'kube:lumo-prod', argv: ['get', 'pods'] })) as any).status, 'pending');
+  } finally { await env.cleanup(); }
+});
+
+test('access: prod, no grant → a GO card with the exact command; his yes runs it once; the worker comes back with the request', async () => {
   const { env, runner, ask } = await setup('');
   try {
-    const first = await ask({ resource: 'kube:lumo-dev', argv: ['logs', 'deploy/api', '--tail=20'], why: 'חקירת תקלה' }) as any;
+    const first = await ask({ resource: 'kube:lumo-prod', argv: ['logs', 'deploy/api', '--tail=20'], why: 'חקירת תקלה' }) as any;
     assert.equal(first.status, 'pending');
     assert.equal(runner.started.length, 0);
     const card = env.hq.inbox.open().find((i) => i.kind === 'go')!;
-    assert.match(card.body, /kubectl -n lumo-dev logs deploy\/api --tail=20/);
+    assert.match(card.body, /kubectl -n lumo-prod logs deploy\/api --tail=20/);
     assert.match(card.body, /חקירת תקלה/);
     assert.equal(card.blocking, true);
     assert.match(card.headline ?? '', /^להחליט אם/);
@@ -114,11 +129,11 @@ test('access: no grant → a GO card with the exact command; his yes runs it onc
 test('access: his "no" (a declined close, or the word) ends the request as denied, and nothing runs', async () => {
   const { env, runner, ask, events } = await setup('');
   try {
-    const a = await ask({ resource: 'kube:lumo-dev', argv: ['get', 'pods'] }) as any;
+    const a = await ask({ resource: 'kube:lumo-prod', argv: ['get', 'pods'] }) as any;
     env.hq.mailbox.complete(env.hq.inbox.open().find((i) => i.kind === 'go')!.id, { declined: true });
     const r = await ask({ request: a.request }) as any;
     assert.equal(r.status, 'denied');
-    const b = await ask({ resource: 'kube:lumo-dev', argv: ['get', 'svc'] }) as any;
+    const b = await ask({ resource: 'kube:lumo-prod', argv: ['get', 'svc'] }) as any;
     env.hq.mailbox.reply(env.hq.inbox.open().find((i) => i.kind === 'go')!.id, 'לא');
     assert.equal(((await ask({ request: b.request })) as any).status, 'denied');
     assert.equal(runner.started.length, 0);
@@ -187,15 +202,15 @@ test('access: a failed command says so with its exit code; cancel stops a runnin
   const { env, runner, ask } = await setup(GRANT);
   try {
     runner.output = () => ({ text: 'Error from server (NotFound)', code: 1 });
-    const f = await ask({ resource: 'kube:lumo-dev', argv: ['get', 'pod/x'] }) as any;
+    const f = await ask({ resource: 'kube:lumo-prod', argv: ['get', 'pod/x'] }) as any;
     assert.equal(f.status, 'failed');
     assert.equal(f.exit_code, 1);
     runner.output = () => null;
-    const run = await ask({ resource: 'kube:lumo-dev', argv: ['rollout', 'status', 'deploy/api'], wait: 0 }) as any;
+    const run = await ask({ resource: 'kube:lumo-prod', argv: ['rollout', 'status', 'deploy/api'], wait: 0 }) as any;
     const c = await ask({ cancel: run.request }) as any;
     assert.equal(c.status, 'cancelled');
     assert.deepEqual(runner.stopped, [Number(run.request.slice(4))]);
-    const w = await ask({ resource: 'ssh:ci-host', argv: ['docker', 'images'] }) as any;
+    const w = await ask({ resource: 'kube:lumo-prod', argv: ['scale', 'deploy/api', '--replicas=2'] }) as any;
     assert.equal(w.status, 'pending');
     assert.equal(env.hq.inbox.open().filter((i) => i.kind === 'go').length, 1);
     await ask({ cancel: w.request });
@@ -255,14 +270,14 @@ test('access: POST /v1/access on the ingest socket gives the same answers', asyn
 test('access: two calls with the same request after his yes run the command once, and both get the answer', async () => {
   const { env, runner, ask } = await setup('');
   try {
-    const first = await ask({ resource: 'kube:lumo-dev', argv: ['rollout', 'restart', 'deploy/api'], wait: 0 }) as any;
+    const first = await ask({ resource: 'kube:lumo-prod', argv: ['rollout', 'restart', 'deploy/api'], wait: 0 }) as any;
     assert.equal(first.status, 'pending');
     env.hq.mailbox.complete(env.hq.inbox.open().find((i) => i.kind === 'go')!.id, {});
     const [a, b] = await Promise.all([ask({ request: first.request }), ask({ request: first.request })]) as any[];
     assert.equal(runner.started.length, 1, 'one run');
     assert.deepEqual([a.status, b.status].sort(), ['done', 'done']);
     // a cancel that came in while another call waited is not undone by it
-    const w = await ask({ resource: 'ssh:ci-host', argv: ['docker', 'images'], wait: 0 }) as any;
+    const w = await ask({ resource: 'kube:lumo-prod', argv: ['scale', 'deploy/api', '--replicas=2'], wait: 0 }) as any;
     const waiting = ask({ request: w.request, wait: 3 });
     await ask({ cancel: w.request });
     assert.equal(((await waiting) as any).status, 'cancelled');
@@ -273,7 +288,7 @@ test('access: two calls with the same request after his yes run the command once
 test('access: a card closed by anyone but him is not an approval', async () => {
   const { env, runner, ask } = await setup('');
   try {
-    const a = await ask({ resource: 'kube:lumo-dev', argv: ['get', 'pods'], wait: 0 }) as any;
+    const a = await ask({ resource: 'kube:lumo-prod', argv: ['get', 'pods'], wait: 0 }) as any;
     env.hq.mailbox.complete(env.hq.inbox.open().find((i) => i.kind === 'go')!.id, { by: 'hq', note: 'נסגר' });
     assert.equal(((await ask({ request: a.request })) as any).status, 'denied');
     assert.equal(runner.started.length, 0);
@@ -283,7 +298,7 @@ test('access: a card closed by anyone but him is not an approval', async () => {
 test('access: the card shows the command as it runs: a word with a space is quoted', async () => {
   const { env, ask } = await setup('');
   try {
-    await ask({ resource: 'kube:lumo-dev', argv: ['exec', 'deploy/api', '--', 'sh', '-c', 'rm -rf /'], wait: 0 });
+    await ask({ resource: 'kube:lumo-prod', argv: ['exec', 'deploy/api', '--', 'sh', '-c', 'rm -rf /'], wait: 0 });
     const card = env.hq.inbox.open().find((i) => i.kind === 'go')!;
     assert.match(card.body, /exec deploy\/api -- sh -c "rm -rf \/"/);
     assert.match(card.body, /הרצת פקודה בתוך ה-pod/);
