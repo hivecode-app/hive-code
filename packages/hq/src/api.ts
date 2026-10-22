@@ -22,6 +22,7 @@ import { guarded, guardedUpgrade, rejectUpgrade, requestUrl } from './http-guard
 import { normalizePath } from './error-watch.ts';
 import { companyDay, dateOf, isDate, messageBody } from './company-day.ts';
 import { recordPrMerged } from './merged.ts';
+import { isCancelled, type TaskRow } from './scheduler.ts';
 
 export function loadOrCreateToken(stateDir: string): string {
   if (process.env.HQ_TOKEN) return process.env.HQ_TOKEN;
@@ -98,6 +99,11 @@ const SEEN_SCREENS = ['chats'] as const;
 export const CLIENT_ERRORS_MAX = 30;
 const CLIENT_ERRORS_PER_MS = 60_000;
 
+/** The app shows `done` as finished by us and hides `closed` ("nobody works on it"): a task cancelled before it started goes out as the latter. */
+export function forApp(tasks: TaskRow[]): TaskRow[] {
+  return tasks.map((t) => (t.state === 'done' && isCancelled(t) ? { ...t, state: 'closed' } : t));
+}
+
 export function health(hq: Hq) {
   const lastSweep = Number(hq.store.getMeta('last_sweep_at') ?? 0);
   const age = lastSweep ? hq.store.now() - lastSweep : null;
@@ -118,7 +124,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   // open_tasks: "בעבודה ובתור" (#128), every task not done, queued ones too, with its opener, worker, state and place in line.
   route('GET', '/api/board', () => {
     const identities = hq.board();
-    return { identities, tasks: hq.scheduler.tasks(), open_tasks: hq.openTasks(identities), awaiting: hq.awaiting.list(), asked: hq.home.asked(),
+    return { identities, tasks: forApp(hq.scheduler.tasks()), open_tasks: hq.openTasks(identities), awaiting: hq.awaiting.list(), asked: hq.home.asked(),
       projects: hq.projects(), slots: { ...hq.scheduler.slots(), nodes: hq.scheduler.nodeSlots() }, probes: hq.probes.summary(), timezone: hq.clock(), manager: hq.cfg.managerId,
       names: hq.mailbox.names };
   });
@@ -354,7 +360,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
       project: str(b.project, 'project', false) ?? null, by: str(b.by, 'by', false) ?? null }) };
   });
 
-  route('GET', '/api/tasks', () => ({ tasks: hq.scheduler.tasks(), queue: hq.scheduler.queue().map((t) => ({ id: t.id, bucket: t.bucket })) }));
+  route('GET', '/api/tasks', () => ({ tasks: forApp(hq.scheduler.tasks()), queue: hq.scheduler.queue().map((t) => ({ id: t.id, bucket: t.bucket })) }));
   route('POST', '/api/tasks', async ({ body }) => {
     const b = await body();
     return { task: hq.scheduler.addTask({

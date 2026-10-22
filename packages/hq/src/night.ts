@@ -12,7 +12,7 @@ import { parse } from 'yaml';
 import { OWNER, pre } from '@company/shared';
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
-import { BUSY_REASON, type Scheduler, type TaskRow } from './scheduler.ts';
+import { BUSY_REASON, isCancelled, type Scheduler, type TaskRow } from './scheduler.ts';
 import type { Mailbox, MessageRow } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
 import { hhmm as localHHMM, nextLocal, readTimeZone } from './timezone.ts';
@@ -373,7 +373,7 @@ export class Night {
     };
     const byProject = new Map<string, NightSummary['done'][number]['tasks']>();
     for (const t of tasks) {
-      if (t.state !== 'done' || !doneIds.has(t.id)) continue;
+      if (t.state !== 'done' || !doneIds.has(t.id) || isCancelled(t)) continue;
       const p = t.project ?? 'company';
       if (!byProject.has(p)) byProject.set(p, []);
       byProject.get(p)!.push({ id: t.id, ref: t.ref, title: t.title, note: noteOf(t.identity) });

@@ -171,7 +171,11 @@ export class Ingest {
           if (t && taskSummary(a.summary)) this.hq.store.db.prepare('UPDATE tasks SET summary = ? WHERE id = ?').run(taskSummary(a.summary), t.id);
           // After its turn ends, and only if he isn't waiting for an answer from it (#118): else it stays open and hears why.
           if (t) this.hq.store.bg(this.hq.scheduler.finishByWorker(t.id, e.identity, e.id, () => { this.hq.awaiting.mark(t.id, a, e.identity); this.hq.estimates.close(e.identity, { all: true }); }), 'task.complete');
-          if (!t) this.hq.estimates.close(e.identity, { all: true });
+          if (!t) {
+            this.hq.estimates.close(e.identity, { all: true });
+            // A standing worker with no task open: done means "I am finished", so its shift rests now (not a manager or a resident).
+            this.hq.store.bg(this.hq.scheduler.restIdle(e.identity), 'worker.rest_on_done');
+          }
           return { ok: true, id: e.id, result: { stored: true, task_done: t?.id ?? null, ...(estimate ? { estimate } : {}) } };
         }
         return { ok: true, id: e.id, result: { stored: true, ...(estimate ? { estimate } : {}) } };
@@ -279,6 +283,8 @@ export class Ingest {
                   : `הצוות נסגר על ידי ${mailbox.label(e.identity)}: ${reason}\nהמשמרת נעצרת עכשיו.` });
             } catch { /* best effort */ }
           }
+          // Closed before it started: cancelled or handed over, not finished.
+          this.hq.scheduler.markCancelled(t!.id);
           this.hq.store.bg(this.hq.scheduler.completeTask(t!.id), 'task.close');
         });
         return { ok: true, id: e.id, ref: `task-${t!.id}`, result: { task: t!.id, state: 'closing' } };

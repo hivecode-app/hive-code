@@ -2,6 +2,7 @@
 // when, no text), the day's marks (a task done, a PR merged, a deploy) and the tables under the map. The text of
 // a message is not here: the app asks for it (`messageBody`) when he touches the line. Times are milliseconds
 // from the start of the day in the company's time zone. Derived at read time from hq.db, nothing kept.
+import { isCancelled } from './scheduler.ts';
 import { OWNER } from '@company/shared';
 import { listIdentities, listMapTeams, type IdentityRow } from './org.ts';
 import type { Store } from './store.ts';
@@ -84,7 +85,7 @@ export function companyDay(store: Store, companyDir: string, tz: string, date: s
 
   // Marks: a task done, a PR merged, a deploy.
   const evs = q<{ ts: number; type: string; data: string }>(`SELECT ts, type, data FROM events WHERE ts >= ? AND ts < ? AND type IN ('task.new', 'task.state', 'deploy.recorded', 'pr.merged') ORDER BY ts, seq`, start, end);
-  const tasks = new Map(q<{ id: number; project: string | null; title: string }>('SELECT id, project, title FROM tasks').map((r) => [r.id, r]));
+  const tasks = new Map(q<{ id: number; project: string | null; title: string; labels: string }>('SELECT id, project, title, labels FROM tasks').map((r) => [r.id, r]));
   const marks: { t: number; k: string; label: string; project: string | null; repo?: string | null }[] = [];
   const opened: Record<string, number> = {};
   const done: Record<string, number> = {};
@@ -96,6 +97,7 @@ export function companyDay(store: Store, companyDir: string, tz: string, date: s
     if (e.type === 'task.new' && typeof d.project === 'string') bump(opened, d.project);
     else if (e.type === 'task.state' && (d.state === 'done' || d.state === 'closed')) {
       const task = tasks.get(Number(d.id));
+      if (task && isCancelled(task)) continue;
       if (task?.project) bump(done, task.project);
       marks.push({ t, k: 'task', project: task?.project ?? null, label: task?.title ?? `משימה ${String(d.id)}` });
     } else if (e.type === 'deploy.recorded') {

@@ -83,6 +83,16 @@ const PENDING = `SELECT 1 FROM messages m WHERE m.to_identity = s.identity AND (
 /** #175: how many times hq wakes one task whose worker rested before it leaves it for a message. */
 const REST_WAKES = 6;
 
+/**
+ * Label on a task closed before it started (close_team on one still waiting): its state is `done` like any closed
+ * task, so every query that skips done tasks keeps working, but it was cancelled or handed over, not finished.
+ */
+export const CANCELLED = 'cancelled';
+export const CANCELLED_SQL = `labels LIKE '%"${CANCELLED}"%'`;
+export function isCancelled(t: Pick<TaskRow, 'labels'>): boolean {
+  try { return (JSON.parse(t.labels || '[]') as string[]).includes(CANCELLED); } catch { return false; }
+}
+
 /** Label on a standing worker's task that close_team is closing: the time it was asked for its handoff. */
 const CLOSING = 'closing-at:';
 
@@ -982,6 +992,41 @@ export class Scheduler {
       await this.completeTask(id);
       return 'done';
     } finally { this.finishing.delete(id); }
+  }
+
+  /** close_team on a task that never started: it ends as `done` with the `cancelled` label, so the board and the feed say "בוטלה". */
+  markCancelled(id: number): void {
+    const t = this.task(id);
+    if (!t || t.state === 'done' || t.started_at != null) return;
+    const labels = JSON.parse(t.labels || '[]') as string[];
+    if (labels.includes(CANCELLED)) return;
+    this.store.db.prepare('UPDATE tasks SET labels = ? WHERE id = ?').run(JSON.stringify([...labels, CANCELLED]), id);
+  }
+
+  /**
+   * status done from a standing worker with no task open (a lead or a worker between tasks, not the manager or a
+   * resident): its shift rests now, session kept, and a message wakes it as always. Waits for its turn to end first
+   * (the text it is still writing may be a reply), and does not rest it with mail on the way.
+   */
+  async restIdle(identity: string): Promise<boolean> {
+    // Same set as STANDING_SHIFT: a lead or a standing worker; not a task worker, a resident or the manager.
+    const me = getIdentity(this.store, identity);
+    if (!me || me.source !== 'org' || !me.active || me.team_kind === 'task' || me.lifecycle === 'resident' || me.id === this.cfg.managerId) return false;
+    const cur = this.shifts.current(identity);
+    if (!cur || cur.kind !== 'work' || cur.task_id != null) return false;
+    await this.shifts.waitTurnEnd(cur.id, this.cfg.timers.turnEndWaitMs);
+    const now = this.shifts.get(cur.id);
+    if (!now || now.state !== 'live' || now.started_at !== cur.started_at || now.task_id != null || this.taskOf(identity)) return false;
+    if (this.store.db.prepare(`SELECT 1 FROM shifts s WHERE s.id = ? AND EXISTS (${PENDING})`).get(cur.id)) return false;
+    await this.shifts.stop(cur.id, 'rest', cur.started_at);
+    this.store.emit('scheduler.rest_on_done', identity, { shift: cur.id });
+    return true;
+  }
+
+  /** The task a standing worker is on now (running, resting, or started and interrupted), if any. */
+  private taskOf(identity: string): { id: number } | undefined {
+    return this.store.db.prepare(`SELECT t.id FROM tasks t JOIN identities i ON i.id = t.identity WHERE t.identity = @id AND ${STANDING_TASK} LIMIT 1`)
+      .get({ id: identity, mgr: this.cfg.managerId }) as { id: number } | undefined;
   }
 
   /** The worker (status op state=done) or the owner closed the task: end its shift with task_done. */

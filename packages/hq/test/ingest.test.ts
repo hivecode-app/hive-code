@@ -5,6 +5,8 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WalEntry } from '@company/shared';
 import { makeEnv, until } from './helpers.ts';
+import { forApp } from '../src/api.ts';
+import { isCancelled } from '../src/scheduler.ts';
 
 function post(socketPath: string, path: string, body: unknown): Promise<{ status: number; json: any }> {
   return new Promise((resolve, reject) => {
@@ -483,5 +485,62 @@ test('a task with an open GO is not closed: status done waits, close_team is ref
     const answer = hq.mailbox.reply(go.id, 'כן');
     assert.equal(answer.message!.to_identity, 'eli', 'his answer is not lost on the closed worker');
     assert.equal(hq.inbox.get(go.id)!.state, 'resolved');
+  } finally { await env.cleanup(); }
+});
+
+test('status done from a standing worker with no task rests its shift now; a message wakes it; the manager stays', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock } = env;
+    hq.store.setToggle('scheduler', false);
+    await hq.scheduler.ensureResidents();
+    hq.mailbox.tell({ msg_id: 'rd-1', to: 'eli', body: 'שלום' });
+    await until(() => hq.mailbox.get('rd-1')!.state === 'delivered', 5000, 'eli up');
+    hq.mailbox.markHandled('rd-1');
+    await until(() => !hq.shifts.get('eli-1')!.in_turn, 5000, 'eli idle');
+    const r = await post(sock, '/v1/ops', entry('status', { state: 'done', summary: 'סיימתי' }, 'eli-1:60'));
+    assert.equal(r.json.result.task_done, null);
+    await until(() => hq.shifts.get('eli-1')!.state === 'ended', 5000, 'eli rested');
+    assert.equal(hq.shifts.get('eli-1')!.end_reason, 'rest');
+
+    // The manager is a resident: done does not rest it.
+    await post(sock, '/v1/ops', entry('status', { state: 'done' }, 'yoav-1:60', 'yoav'));
+    await new Promise((res) => setTimeout(res, 300));
+    assert.equal(hq.shifts.get('yoav-1')!.state, 'live');
+
+    // Mail on the way: it stays up (the message is its work).
+    hq.mailbox.tell({ msg_id: 'rd-2', to: 'ac-ceo', body: 'שלום' });
+    await until(() => hq.mailbox.get('rd-2')!.state === 'delivered', 5000, 'ac-ceo up');
+    hq.mailbox.markHandled('rd-2');
+    await until(() => !hq.shifts.get('ac-ceo-1')!.in_turn, 5000, 'ac-ceo idle');
+    hq.mailbox.tell({ msg_id: 'rd-3', to: 'ac-ceo', body: 'עוד משהו' });
+    await post(sock, '/v1/ops', entry('status', { state: 'done' }, 'ac-ceo-1:60', 'ac-ceo'));
+    await new Promise((res) => setTimeout(res, 300));
+    assert.equal(hq.shifts.get('ac-ceo-1')!.state, 'live');
+  } finally { await env.cleanup(); }
+});
+
+test('close_team on a task that never started marks it cancelled; one that ran is finished', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock } = env;
+    hq.store.setToggle('scheduler', false);
+    const waiting = hq.scheduler.addTask({ title: 'לא התחילה', project: 'agent-company', labels: ['opened-by:eli'] });
+    assert.equal(waiting.started_at, null);
+    const r = await post(sock, '/v1/ops', entry('close_team', { team: `t${waiting.id}`, reason: 'הועברה לעובד אחר' }, 'eli-1:61'));
+    assert.equal(r.status, 200);
+    await until(() => hq.scheduler.task(waiting.id)!.state === 'done', 3000, 'closed');
+    const row = hq.scheduler.task(waiting.id)!;
+    assert.ok(isCancelled(row));
+    assert.deepEqual(forApp([row]).map((t) => t.state), ['closed'], 'the app hides it instead of showing it finished');
+    assert.ok(!hq.openTasks().some((t) => t.id === waiting.id));
+
+    const ran = hq.scheduler.addTask({ title: 'רצה', project: 'agent-company', labels: ['opened-by:eli'] });
+    hq.store.db.prepare(`UPDATE tasks SET started_at = ?, state = 'running' WHERE id = ?`).run(hq.store.now(), ran.id);
+    await post(sock, '/v1/ops', entry('close_team', { team: `t${ran.id}` }, 'eli-1:62'));
+    await until(() => hq.scheduler.task(ran.id)!.state === 'done', 3000, 'closed');
+    const done = hq.scheduler.task(ran.id)!;
+    assert.ok(!isCancelled(done));
+    assert.deepEqual(forApp([done]).map((t) => t.state), ['done']);
   } finally { await env.cleanup(); }
 });

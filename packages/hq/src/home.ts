@@ -9,6 +9,7 @@
 // "waiting for you", the rest is kept for one composition in the morning (07:00, or when he opens the app).
 import { g, OWNER, pre, type HqEvent } from '@company/shared';
 import type { Hq } from './hq.ts';
+import { CANCELLED_SQL, isCancelled } from './scheduler.ts';
 import { hhmm, nextLocal } from './timezone.ts';
 import { askedList, type AskedItem } from './asked.ts';
 
@@ -418,7 +419,7 @@ export class Home {
       if (stuck) alert = { type: 'alert', shift: stuck.id };
     }
     const running = this.hq.openTasks().filter((t) => t.state === 'running');
-    const done = this.db.prepare(`SELECT id, project, summary FROM tasks WHERE state = 'done' AND summary IS NOT NULL AND summary != '' AND updated_at > ?
+    const done = this.db.prepare(`SELECT id, project, summary FROM tasks WHERE state = 'done' AND NOT ${CANCELLED_SQL} AND summary IS NOT NULL AND summary != '' AND updated_at > ?
       ORDER BY updated_at DESC, id DESC`).all(dayAgo) as { id: number; project: string | null; summary: string }[];
     blocks.push({ type: 'headline', text: headline(running.length, done.length, !!alert) });
     if (alert) blocks.push(alert);
@@ -453,9 +454,9 @@ export class Home {
     this.setPending([...this.pending(), { ...e, at: this.hq.store.now(), urgent: URGENT_KINDS.has(e.kind) }]);
   }
 
-  private taskLine(id: number): { title: string; summary: string | null; who: string | null } | undefined {
-    const t = this.db.prepare('SELECT title, summary, identity FROM tasks WHERE id = ?').get(id) as { title: string; summary: string | null; identity: string | null } | undefined;
-    return t ? { title: t.title, summary: t.summary, who: t.identity ? this.hq.mailbox.label(t.identity) : null } : undefined;
+  private taskLine(id: number): { title: string; summary: string | null; who: string | null; cancelled: boolean } | undefined {
+    const t = this.db.prepare('SELECT title, summary, identity, labels FROM tasks WHERE id = ?').get(id) as { title: string; summary: string | null; identity: string | null; labels: string } | undefined;
+    return t ? { title: t.title, summary: t.summary, who: t.identity ? this.hq.mailbox.label(t.identity) : null, cancelled: isCancelled(t) } : undefined;
   }
 
   /** The events that matter, turned into lines for the composer. Night: a task that started is not one. */
@@ -472,7 +473,7 @@ export class Home {
           if (this.quiet()) return;
           this.add({ kind: 'task_started', text: `משימה התחילה: ${t.title}${t.who ? ` (${t.who})` : ''}` });
         } else if (d.state === 'done') {
-          this.add({ kind: 'task_done', text: `משימה הסתיימה: ${t.summary ?? t.title}${t.who ? ` (${t.who})` : ''}` });
+          this.add({ kind: 'task_done', text: t.cancelled ? `משימה בוטלה: ${t.title}${t.who ? ` (${t.who})` : ''}` : `משימה הסתיימה: ${t.summary ?? t.title}${t.who ? ` (${t.who})` : ''}` });
         }
         return;
       }
