@@ -74,6 +74,48 @@ void main() {
     expect(q.done, isEmpty);
   });
 
+  test('"ביטול" after "לא עכשיו": hq\'s answer that says "put off" arriving after the undo keeps the item in its place', () {
+    final a = item('a', WaitKind.go, from: 'adi'), b = item('b', WaitKind.go, from: 'eli'), c = item('c', WaitKind.go, from: 'gil');
+    final d = data([a, b, c]);
+    final q = DecisionQueue();
+    q.sync(d);
+    expect(q.order, ['a', 'b', 'c']);
+    // "לא עכשיו" on a: shown at once, the next comes in.
+    a.state = WaitState.notNow;
+    q.decided(a, 'לא עכשיו', undo: () => a.state = WaitState.open);
+    q.sync(d);
+    expect(q.current, 'b');
+    // "ביטול": open again, a is the one on screen.
+    q.undoLast();
+    a.state = WaitState.open;
+    q.sync(d); // a build between the undo and hq's answer
+    expect(q.current, 'a');
+    // hq's update to the snooze arrives after that: a is put off in it.
+    final late = item('a', WaitKind.go, from: 'adi')..state = WaitState.notNow;
+    final stale = data([late, b, c]);
+    q.sync(stale);
+    expect(q.current, 'a', reason: 'the same one, on the screen');
+    expect(q.order, ['a', 'b', 'c'], reason: 'in the same place');
+    // and the update for the resume: open, nothing moves.
+    q.sync(data([item('a', WaitKind.go, from: 'adi'), b, c]));
+    expect(q.current, 'a');
+    expect(q.order, ['a', 'b', 'c']);
+  });
+
+  test('taken back, then closed elsewhere: it leaves the queue', () {
+    final a = item('a', WaitKind.go, from: 'adi'), b = item('b', WaitKind.go, from: 'eli');
+    final q = DecisionQueue();
+    q.sync(data([a, b]));
+    a.state = WaitState.notNow;
+    q.decided(a, 'לא עכשיו', undo: () => a.state = WaitState.open);
+    q.undoLast();
+    a.state = WaitState.open;
+    q.sync(data([a, b]));
+    q.sync(data([b]));
+    expect(q.order, ['b']);
+    expect(q.current, 'b');
+  });
+
   test('the last one decided leaves the queue empty; an item closed elsewhere leaves it', () {
     final a = item('a', WaitKind.go);
     final d = data([a]);
@@ -457,6 +499,23 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/decisions_tab/desktop-$look.png'));
+    });
+  }
+
+  for (final (look, dark) in [('light', false), ('dark', true)]) {
+    testWidgets('desktop: nothing to decide - the middle says it, the list says nothing, and no keys that do nothing ($look)', (tester) async {
+      await pumpApp(tester, dark: dark, size: const Size(1440, 860));
+      final store = StoreScope.read(tester.element(find.byType(Scaffold).first));
+      store.data!.waiting.clear();
+      resetQueue();
+      NavScope.read(tester.element(find.byType(Scaffold).first)).go(AppTab.decisions);
+      store.touch();
+      await tester.pumpAndSettle();
+      expect(find.text('אין החלטות. הכול רץ.'), findsOneWidget);
+      expect(find.text('אין החלטות פתוחות'), findsNothing);
+      expect(find.text('תשובה'), findsNothing);
+      expect(find.text('הבאה, הקודמת'), findsNothing);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/decisions_tab/desktop-empty-$look.png'));
     });
   }
 

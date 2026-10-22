@@ -320,14 +320,17 @@ class _KeyBar extends StatelessWidget {
           for (final k in keys) ...[Kbd(k), const SizedBox(width: 4)],
           Text(label, style: T.meta.copyWith(color: p.text2)),
         ]);
-    return Container(
+    return ListenableBuilder(listenable: decisionQueue, builder: (context, _) => Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(color: p.surface, border: Border(top: BorderSide(color: p.line))),
       child: Wrap(spacing: 18, runSpacing: 6, children: [
         if (NavScope.of(context).tab == AppTab.decisions) ...[
-          item(['1', '4'], 'תשובה'),
-          item(['J', 'K'], 'הבאה, הקודמת'),
+          // Keys that do nothing are not listed: with nothing to decide, 1-4 and J K have no effect.
+          if (decisionQueue.remaining > 0) ...[
+            item(['1', '4'], 'תשובה'),
+            item(['J', 'K'], 'הבאה, הקודמת'),
+          ],
           item(['G', 'C'], 'שיחות'),
           item(['?'], 'כל הקיצורים'),
         ] else ...[
@@ -341,7 +344,7 @@ class _KeyBar extends StatelessWidget {
           item(['?'], 'כל הקיצורים'),
         ],
       ]),
-    );
+    ));
   }
 }
 

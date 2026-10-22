@@ -47,6 +47,11 @@ class DecisionQueue extends ChangeNotifier {
   VoidCallback? _undo;
   Timer? _lastTimer;
 
+  /// Taken back with "ביטול" a moment ago. hq's answer to the "לא עכשיו" can still be on its way and say "put off", and
+  /// that must not take the item out of its place (22/10: it came back at the end of the queue, not on the screen).
+  final Map<String, DateTime> _takenBack = {};
+  static const _takenBackFor = Duration(seconds: 30);
+
   /// The way the next one comes in: forward after a decision or a skip, back after "ביטול" or K.
   bool forward = true;
 
@@ -56,7 +61,10 @@ class DecisionQueue extends ChangeNotifier {
   /// elsewhere out. Called on every build; changes nothing that is on screen.
   List<WaitItem> sync(CompanyData d) {
     final byId = {for (final w in d.waiting) w.id: w};
-    order.removeWhere((id) => !done.containsKey(id) && !(byId[id] != null && open(d, byId[id]!)));
+    final now = DateTime.now();
+    // Held for the time hq's answer can take, also after it looked open again (the build after "ביטול"); gone when the item is.
+    _takenBack.removeWhere((id, at) => now.difference(at) > _takenBackFor || byId[id] == null);
+    order.removeWhere((id) => !done.containsKey(id) && !_takenBack.containsKey(id) && !(byId[id] != null && open(d, byId[id]!)));
     final fresh = [for (final w in d.waiting) if (open(d, w) && !order.contains(w.id)) w]..sort((a, b) => _rank(a).compareTo(_rank(b)));
     order.addAll(fresh.map((w) => w.id));
     if (current != null && (!order.contains(current) || (done.containsKey(current) && lastId != current))) current = null;
@@ -124,6 +132,7 @@ class DecisionQueue extends ChangeNotifier {
     _undo?.call();
     _lastTimer?.cancel();
     done.remove(id);
+    _takenBack[id] = DateTime.now();
     lastId = null;
     _undo = null;
     forward = false;
@@ -588,6 +597,7 @@ class DecisionsDesktop extends StatelessWidget {
               ]),
               Container(height: 1, color: p.line),
               Expanded(
+                // Nothing to decide: the middle says it ("אין החלטות. הכול רץ."), the list says nothing more.
                 child: ListView(children: [
                   for (final w in items) _ListRow(item: w, selected: w.id == decisionQueue.current),
                 ]),
