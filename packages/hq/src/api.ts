@@ -141,6 +141,8 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
 
   route('GET', '/api/inbox', () => ({ items: hq.inbox.open() }));
   // request_access (access.ts): what workers asked hq to run in their name, the last days (the log he reads, and the weekly count of `unfit`).
+  // resources: what each machine holds, by project, and who waits for room (resources.ts).
+  route('GET', '/api/resources', () => hq.resources.view());
   route('GET', '/api/access', ({ url }) => ({ requests: hq.access.list(Math.min(30, Math.max(1, Number(url.searchParams.get('days')) || 7))) }));
   // error-catcher (error-watch.ts): an error the app showed him, or one it threw. One event; the watch groups them.
   const clientErrors = new Map<string, number[]>();

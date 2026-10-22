@@ -6,7 +6,7 @@ import type { CompanyNames, OpName } from '@company/shared';
 type Schema = Record<string, unknown>;
 
 export interface ToolDef {
-  name: OpName | 'recall' | 'request_access';
+  name: OpName | 'recall' | 'request_access' | 'resources';
   description: string;
   inputSchema: { type: 'object'; properties: Record<string, Schema>; required: string[]; additionalProperties: boolean };
 }
@@ -197,6 +197,9 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       cancel: s('acc-N: מבטלים בקשה שמחכה או רצה / cancel a request that waits or runs'),
       wait: { type: 'number', description: 'כמה שניות להמתין לתוצאה או לאישור, עד 100 (ברירת מחדל 90) / seconds to wait for the result or approval, up to 100 (default 90)' },
     }, []),
+    tool('resources', 'מצב המשאבים של השרתים, קריאה בלבד: בכל מכונה זיכרון, עומס ודיסק, מי מחזיק בהם לפי פרויקט (כולל "לא מזוהה" עם שם ה-cgroup או הקונטיינר), ומי מחכה למקום. '
+      + 'קוראים לפני build מלא, `flutter test` מלא, docker או smoke, ואחרי שמשהו נתקע על "השרת עמוס". חלק שלא נמדד כתוב "לא נמדד", ואין לקרוא אותו כתקין. הזיכרון לפי פרויקט הוא `memory.current` של ה-cgroup וכולל page cache, ולכן הסכום יכול לעבור את "בשימוש". '
+      + 'Read-only: per machine memory, load and disk, who holds them by project (unidentified ones with their cgroup/container name), and who waits for room. Call before a heavy build, full test run, docker or smoke.', {}, []),
     tool('open_ticket', 'פתיחת כרטיס ב-repo. Open an issue in a repo.', {
       repo: s('owner/repo'),
       title: s('כותרת / title'),

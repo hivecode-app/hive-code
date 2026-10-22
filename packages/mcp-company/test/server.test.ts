@@ -67,7 +67,7 @@ test('handshake, tools/list, write tools queue to WAL while hq is down', async (
 
     const list = await c.call('tools/list');
     const names = list.result.tools.map((t: { name: string }) => t.name).sort();
-    assert.deepEqual(names, ['ask', 'close_team', 'compose_home', 'handoff', 'open_team', 'open_ticket', 'recall', 'remember', 'request_access', 'request_go', 'status', 'tell', 'withdraw_ask']);
+    assert.deepEqual(names, ['ask', 'close_team', 'compose_home', 'handoff', 'open_team', 'open_ticket', 'recall', 'remember', 'request_access', 'request_go', 'resources', 'status', 'tell', 'withdraw_ask']);
     for (const t of list.result.tools) assert.equal(t.inputSchema.type, 'object');
 
     const tell = await c.call('tools/call', { name: 'tell', arguments: { to: 'dana', body: 'שלום', urgency: 'now' } });
@@ -283,4 +283,32 @@ test('request_access goes to hq /v1/access with the shift, and its answer is the
     assert.equal(denied.result.isError, true);
     assert.match(denied.result.content[0].text, /no live shift/);
   } finally { await d.close(); hq.close(); }
+});
+
+test('resources: the tool is read-only, answers with hq\'s text, and says so when hq does not answer', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mcp-res-'));
+  let up = true;
+  const seen: string[] = [];
+  const hq = createHttpServer((req, res) => {
+    seen.push(String(req.url));
+    res.writeHead(up ? 200 : 500, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(up ? { text: 'hq-host: דיסק 80%' } : { ok: false }));
+    req.resume();
+  });
+  await new Promise<void>((r) => hq.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${(hq.address() as { port: number }).port}`;
+  const c = new Client({ COMPANY_STATE_DIR: root, COMPANY_SHIFT: 'x-1', COMPANY_IDENTITY: 'lumo-t9', COMPANY_HQ_URL: url, COMPANY_REPO: root });
+  try {
+    await c.call('initialize', { protocolVersion: '2025-06-18', capabilities: {} });
+    const ok = await c.call('tools/call', { name: 'resources', arguments: {} });
+    assert.equal(ok.result.content[0].text, 'hq-host: דיסק 80%');
+    assert.deepEqual(seen, ['/v1/resources']);
+    up = false;
+    const bad = await c.call('tools/call', { name: 'resources', arguments: {} });
+    assert.equal(bad.result.isError, true);
+    assert.match(bad.result.content[0].text, /resources נכשל/);
+  } finally {
+    await c.close();
+    hq.close();
+  }
 });

@@ -35,6 +35,11 @@ const server = createServer({
   ctx: { identity, shift, sessionId: env[ENV.sessionId] || null },
   // The names in the tool descriptions (the owner, the manager) come from the company's org.yaml.
   tools: buildTools(loadNames(join(repo, 'company'))),
+  resources: async () => {
+    const r = await postJson(target, '/v1/resources', {}, 20_000);
+    if (r.status >= 200 && r.status < 300) return String((r.body as { text?: unknown }).text ?? '');
+    throw new Error(`HTTP ${r.status}`);
+  },
   access: async (req) => {
     // Long: hq may wait for the owner's card or for a job (about 100s), and a worker must hear the verdict in this call.
     const r = await postJson(target, '/v1/access', req, ACCESS_TIMEOUT_MS);

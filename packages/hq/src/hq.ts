@@ -29,6 +29,7 @@ import { Home } from './home.ts';
 import { MemoryFiles, type Run } from './memory-files.ts';
 import { PressureWatch } from './pressure-watch.ts';
 import { DiskWatch } from './disk-watch.ts';
+import { Resources, SAMPLE_EVERY_MS } from './resources.ts';
 import { StallWatch, type OpenFilesReader } from './stall-watch.ts';
 import { ErrorWatch } from './error-watch.ts';
 import { startApi, loadOrCreateToken, health, type ApiServer } from './api.ts';
@@ -107,6 +108,7 @@ export class Hq {
   readonly errorWatch: ErrorWatch;
   readonly pressureWatch: PressureWatch;
   readonly diskWatch: DiskWatch;
+  readonly resources: Resources;
   readonly nodes: Nodes;
   private tabServer: TabServer | null = null;
   private ingestServer: Server | null = null;
@@ -148,6 +150,7 @@ export class Hq {
     this.errorWatch = new ErrorWatch(this);
     this.pressureWatch = new PressureWatch(this);
     this.diskWatch = new DiskWatch(this);
+    this.resources = new Resources(this);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
     this.awaiting = new AwaitingBoard(this.store, this.inbox);
@@ -227,7 +230,7 @@ export class Hq {
 
   /** org.yaml is read at most once a minute for names: a list of every conversation asks once per row. */
   private projectNames: { at: number; names: Map<string, string | null> } | null = null;
-  private projectName(id: string): string {
+  projectName(id: string): string {
     const now = Date.now();
     if (!this.projectNames || now - this.projectNames.at > 60_000) {
       this.projectNames = { at: now, names: new Map(this.projects().map((p) => [p.id, p.name])) };
@@ -302,6 +305,8 @@ export class Hq {
       this.every(30_000, 'pressure-watch', () => this.pressureWatch.sweep());
       // task-382: the disk at 85% → scripts/disk-clean.mjs now; at 92% after it → one urgent item with the biggest consumers.
       this.every(5 * 60_000, 'disk-watch', () => this.diskWatch.sweep());
+      // resources stage 1: disk, memory, cgroups and docker of each machine, by project (reads a node only while its poll says it is up).
+      this.every(SAMPLE_EVERY_MS, 'resources', () => this.resources.sample());
       this.every(T.backupMs, 'backup', async () => {
         if (!this.store.toggle('backup')) return;
         await backupOnce(this.store, join(this.cfg.stateDir, 'backups'), this.cfg.backupsKeep);

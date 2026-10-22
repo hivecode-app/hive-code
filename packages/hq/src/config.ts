@@ -95,6 +95,8 @@ export interface HqConfig {
   nodes: NodeDef[];
   /** A second vantage point for probes (probes.ts): ssh target that runs curl. null = no second check. */
   probeWitness: { ssh: string; identityFile: string | null } | null;
+  /** resources.ts: `map` sends an exact cgroup, container or compose-project name to a project id; what it and the defaults miss is shown as לא מזוהה. */
+  resources: { map: Record<string, string> };
 }
 
 export interface AccountDef {
@@ -213,6 +215,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     memoryImport: [],
     nodes: [],
     probeWitness: { ssh: 'root@203.0.113.11', identityFile: '~/.ssh/ci2_ed25519' },
+    resources: { map: {} },
   };
   const cfg: HqConfig = {
     ...base, ...fromFile, ...overrides,
@@ -221,6 +224,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     auth: { ...base.auth, ...fromFile.auth, ...overrides.auth },
     tab: { ...base.tab, ...fromFile.tab, ...overrides.tab },
     dictate: { ...base.dictate, ...fromFile.dictate, ...overrides.dictate },
+    resources: { map: { ...base.resources.map, ...fromFile.resources?.map, ...overrides.resources?.map } },
   };
   cfg.nodes = (cfg.nodes ?? []).map((n) => ({ ...n, projects: n.projects ?? [], maxSlots: n.maxSlots ?? 8, maxLoad: n.maxLoad ?? 0.85,
     identityFile: n.identityFile ? expandHome(n.identityFile) : null }));

@@ -29,6 +29,8 @@ export interface ServerDeps {
   recall: (req: RecallQuery) => Promise<RecallResult>;
   /** request_access: hq answers in the same call (it may wait for the owner's card or for a job, up to ~100s). */
   access?: (req: Record<string, unknown>) => Promise<unknown>;
+  /** resources: hq's read-only picture of the machines, as text. */
+  resources?: () => Promise<string>;
   now?: () => Date;
   log?: (msg: string) => void;
   /** tools/list: the catalogue with this company's names (buildTools). Default: TOOLS. */
@@ -76,6 +78,12 @@ export function createServer(deps: ServerDeps) {
         ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
       });
       return text(res);
+    }
+
+    if (def.name === 'resources') {
+      if (!deps.resources) return text('resources לא זמין בשרת ה-MCP הזה', true);
+      try { return text(await deps.resources()); }
+      catch (e) { return text(`resources נכשל: ${e instanceof Error ? e.message : String(e)}. hq לא ענה; אפשר לנסות שוב, ובינתיים ממשיכים כמו היום.`, true); }
     }
 
     if (def.name === 'request_access') {

@@ -517,6 +517,30 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS access_requests_state ON access_requests(state, created_at);
   CREATE INDEX IF NOT EXISTS access_requests_identity ON access_requests(identity, id);
   `,
+  // v27: resources (resources.ts): a rolling few hours of what each machine holds, by project. "unmeasured" = parts that could not be read.
+  `
+  CREATE TABLE IF NOT EXISTS resource_machine (
+    at INTEGER NOT NULL,
+    machine TEXT NOT NULL,
+    error TEXT,
+    mem_total_mb INTEGER, mem_avail_mb INTEGER, load1 REAL, cpus INTEGER,
+    disk_pct INTEGER, disk_free_mb INTEGER,
+    unmeasured TEXT NOT NULL DEFAULT '[]',
+    docker_df TEXT,
+    PRIMARY KEY (machine, at)
+  );
+  CREATE TABLE IF NOT EXISTS resource_usage (
+    at INTEGER NOT NULL,
+    machine TEXT NOT NULL,
+    kind TEXT NOT NULL,                      -- shift | ci | docker | other
+    project TEXT,                            -- NULL = לא מזוהה
+    task INTEGER,
+    name TEXT NOT NULL,                      -- the cgroup or container
+    mem_mb REAL,
+    cpu_pct REAL
+  );
+  CREATE INDEX IF NOT EXISTS resource_usage_at ON resource_usage(machine, at);
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */
