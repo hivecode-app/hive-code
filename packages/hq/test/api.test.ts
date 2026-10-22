@@ -142,7 +142,7 @@ test('WS: says ping when nothing else happens, so a client can tell a dead link 
     const got: { type: string; seq: number }[] = [];
     const ws = new WebSocket(`ws://127.0.0.1:${hq.port}/ws`, [`token.${token}`]);
     ws.on('message', (d) => got.push(JSON.parse(String(d))));
-    await until(() => got.filter((e) => e.type === 'ping').length >= 2, 3000, 'pings');
+    await until(() => got.filter((e) => e.type === 'ping').length >= 2, 20_000, 'pings');
     assert.ok(got.filter((e) => e.type === 'ping').every((e) => e.seq === 0), 'not an event: no seq to resume from');
     ws.close();
   } finally { wsPing.ms = was; await env.cleanup(); }

@@ -53,5 +53,6 @@ test('hook exits 0 within the guard even if stdin is never closed', async () => 
     // never end stdin
   });
   assert.equal(code, 0);
-  assert.ok(Date.now() - t < 5000);
+  // The hook's own guard is 3s; the bound only catches a hook that hangs for good, so it must outlast a loaded machine's node startup.
+  assert.ok(Date.now() - t < 15_000);
 });

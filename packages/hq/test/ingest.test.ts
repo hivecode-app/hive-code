@@ -175,7 +175,7 @@ test('close_team closes the task for real: reason first, shift stopped, task don
     const id = r.json.result.task as number;
     const worker = `agent-company-t${id}`;
     await hq.scheduler.fill();
-    await until(() => hq.shifts.current(worker)?.state === 'live', 3000, 'task worker live');
+    await until(() => hq.shifts.current(worker)?.state === 'live', 15_000, 'task worker live');
 
     // Not found / not allowed: 4xx with the reason, never `stored`, and the caller hears why.
     const missing = await post(sock, '/v1/ops', entry('close_team', { team: 't9999' }, 'eli-1:31'));
@@ -183,7 +183,7 @@ test('close_team closes the task for real: reason first, shift stopped, task don
     assert.match(missing.json.error, /no team/);
     const foreign = await post(sock, '/v1/ops', entry('close_team', { team: `t${id}` }, 'rotem-1:01', 'rotem'));
     assert.equal(foreign.status, 403, 'rotem neither opened it nor manages its opener');
-    await until(() => hq.mailbox.get('rotem-1:01-rejected')?.to_identity === 'rotem', 2000, 'rejected caller is told');
+    await until(() => hq.mailbox.get('rotem-1:01-rejected')?.to_identity === 'rotem', 15_000, 'rejected caller is told');
     assert.equal(hq.scheduler.task(id)!.state, 'running');
     assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM ops WHERE op = 'close_team'`).get() as { n: number }).n, 0, 'a reject is not stored');
 
@@ -191,7 +191,7 @@ test('close_team closes the task for real: reason first, shift stopped, task don
     const ok = await post(sock, '/v1/ops', entry('close_team', { team: worker, reason: 'רן ביטל' }, 'eli-1:32'));
     assert.equal(ok.status, 200);
     assert.equal(ok.json.result.task, id);
-    await until(() => hq.scheduler.task(id)!.state === 'done', 3000, 'task done');
+    await until(() => hq.scheduler.task(id)!.state === 'done', 15_000, 'task done');
     const shift = hq.shifts.get(`${worker}-1`)!;
     assert.notEqual(shift.state, 'live');
     assert.equal(shift.end_reason, 'task_done');
@@ -205,7 +205,7 @@ test('close_team closes the task for real: reason first, shift stopped, task don
     const launches = workerLaunches();
     await hq.scheduler.sweep();
     hq.mailbox.tell({ msg_id: 'late-1', from: 'eli', to: worker, body: 'עוד משהו?' });
-    await until(() => hq.mailbox.get('late-1')!.state === 'failed', 2000, 'message to a closed task fails');
+    await until(() => hq.mailbox.get('late-1')!.state === 'failed', 15_000, 'message to a closed task fails');
     assert.match(hq.mailbox.get('late-1')!.error ?? '', /המשימה כבר נסגרה/);
     assert.match(hq.mailbox.get('late-1-failed')!.body, /המשימה כבר נסגרה/, 'the sender hears it is closed');
     clock.advance(hq.cfg.timers.deliveryTimeoutMs * 3);

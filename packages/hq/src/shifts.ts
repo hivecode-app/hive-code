@@ -466,7 +466,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       this.heldExits.delete(id);
       for (const f of held) {
         const r = this.get(id);
-        if (r && (r.run_start_seq == null || f.seq > r.run_start_seq)) this.markEnded(id, 'ended', exitReason(f), r.started_at);
+        if (r && (r.run_start_seq == null || f.seq > r.run_start_seq)) this.markEnded(id, 'ended', this.stopping.get(id) ?? exitReason(f), r.started_at);
       }
       const row = this.get(id);
       if (!row || (row.state !== 'starting' && row.state !== 'live')) return;
@@ -538,7 +538,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
         for (const m of f.heldByCli) mark.run(m);
       }
       if (f.state === 'exited' && ours) {
-        if (live) this.markEnded(id, 'ended', exitReason(f), row.started_at);
+        if (live) this.markEnded(id, 'ended', this.stopping.get(id) ?? exitReason(f), row.started_at);
         else this.heldExits.set(id, [...(this.heldExits.get(id) ?? []), f]); // decided at `live`
       }
       this.emit('frame', this.get(id)!, f, live);
@@ -611,12 +611,18 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     const c = this.connection(id);
     let stopped = false;
     if (c) {
+      // The host's `exited` frame can land before c.stop resolves: it ends the shift with the reason we are stopping for.
+      this.stopping.set(id, reason);
       try { await c.stop(reason); stopped = true; } catch { /* host may already be gone */ }
+      finally { this.stopping.delete(id); }
     }
     // Not reachable over the socket (still booting, wedged): stop the unit so no orphan keeps running.
     if (!stopped && row.kind !== 'foreign') await this.launcher.kill(id, row.unit, row.machine).catch(() => {});
     this.markEnded(id, 'ended', reason, row.started_at);
   }
+
+  /** Shifts being stopped on purpose (id → reason), so an exit frame racing the stop keeps the stop's reason. */
+  private stopping = new Map<string, string>();
 
   async interrupt(id: string): Promise<void> {
     const c = this.connection(id);
