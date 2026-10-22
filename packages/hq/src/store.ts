@@ -505,7 +505,7 @@ const MIGRATIONS: string[] = [
     why TEXT NOT NULL DEFAULT '',
     class TEXT,                              -- read | write | exec; NULL = never planned (unfit, denied)
     state TEXT NOT NULL,                     -- pending | running | done | failed | denied | unfit | cancelled
-    approved_by TEXT,                        -- auto:grant | auto:non-prod | owner
+    approved_by TEXT,                        -- auto:read | auto:grant | auto:non-prod | owner
     inbox_id INTEGER,
     exit_code INTEGER,
     note TEXT,

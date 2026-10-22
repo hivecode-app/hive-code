@@ -297,7 +297,7 @@ function sshAllowed(res: SshResource): string {
 
 /** What a resource offers, in one line: shown when a worker asks for a name that is not there, so the next call fits. */
 export function describeResource(name: string, res: Resource): string {
-  const env = res.env === undefined || res.env === 'prod' ? 'פרודקשן: קריאה לפי grant, שינוי בכרטיס GO' : `${res.env}: רץ מיד`;
+  const env = res.env === undefined || res.env === 'prod' ? 'פרודקשן: קריאה רצה מיד, שינוי בכרטיס GO' : `${res.env}: רץ מיד`;
   switch (res.type) {
     case 'kube': return `\`${name}\` (${env}): kubectl ב-namespace \`${res.namespace}\`, בלי \`kubectl\` ובלי \`-n\` ב-argv: get, describe, logs --tail, top pods, rollout status|history|restart|undo, set image, scale, delete pod/<name>, exec <pod> -- <פקודה>`;
     case 'ssh': {

@@ -37,6 +37,7 @@ const CATALOG = {
     'kube:lumo-prod': { type: 'kube', namespace: 'lumo-prod', kubeconfig: '/k/prod.yaml', env: 'prod' },
     'ssh:ci-host': { type: 'ssh', host: 'ci-host.example', user: 'root', env: 'ci', allow: [{ argv: ['docker', 'images'] }] },
     'hq:query': { type: 'hq-query', env: 'internal' },
+    'ssh:prod-box': { type: 'ssh', host: 'prod.example', user: 'root', env: 'prod', allow: [{ argv: ['docker', 'ps'] }, { argv: ['docker', 'exec', '*', 'node', '-v'], class: 'read' }, { argv: ['docker', 'restart', '*'], class: 'write' }, { argv: ['docker', 'exec', '*', '**'], class: 'exec' }] },
     'build:hq-host': { type: 'build', registry: 'ghcr.io/hive-owner/', env: 'registry', script: '/engine/scripts/access-build.sh' },
     'kube:other': { type: 'kube', namespace: 'other', env: 'dev', projects: ['someone-else'] },
   },
@@ -99,19 +100,21 @@ test('access: outside prod nothing is asked: a write in dev and a command on ci-
     assert.equal(runner.started.length, 2);
     assert.equal(env.hq.inbox.open().filter((i) => i.kind === 'go').length, 0);
     assert.deepEqual(events('access.granted').map((e) => e.by), ['auto:non-prod', 'auto:non-prod']);
-    // prod is still his: a read with no grant is a card
-    assert.equal(((await ask({ resource: 'kube:lumo-prod', argv: ['get', 'pods'] })) as any).status, 'pending');
+    // prod reads run too, with no grant (his word, 22/10: «לא להקשות»); a prod write is still his
+    assert.equal(((await ask({ resource: 'kube:lumo-prod', argv: ['get', 'pods'] })) as any).status, 'done');
+    assert.equal(events('access.granted')[2].by, 'auto:read');
+    assert.equal(((await ask({ resource: 'kube:lumo-prod', argv: ['rollout', 'restart', 'deploy/api'] })) as any).status, 'pending');
   } finally { await env.cleanup(); }
 });
 
-test('access: prod, no grant → a GO card with the exact command; his yes runs it once; the worker comes back with the request', async () => {
+test('access: a write in prod → a GO card with the exact command; his yes runs it once; the worker comes back with the request', async () => {
   const { env, runner, ask } = await setup('');
   try {
-    const first = await ask({ resource: 'kube:lumo-prod', argv: ['logs', 'deploy/api', '--tail=20'], why: 'חקירת תקלה' }) as any;
+    const first = await ask({ resource: 'kube:lumo-prod', argv: ['set', 'image', 'deploy/api', 'api=ghcr.io/x/api:2'], why: 'חקירת תקלה' }) as any;
     assert.equal(first.status, 'pending');
     assert.equal(runner.started.length, 0);
     const card = env.hq.inbox.open().find((i) => i.kind === 'go')!;
-    assert.match(card.body, /kubectl -n lumo-prod logs deploy\/api --tail=20/);
+    assert.match(card.body, /kubectl -n lumo-prod set image deploy\/api api=ghcr.io\/x\/api:2/);
     assert.match(card.body, /חקירת תקלה/);
     assert.equal(card.blocking, true);
     assert.match(card.headline ?? '', /^להחליט אם/);
@@ -132,12 +135,12 @@ test('access: prod, no grant → a GO card with the exact command; his yes runs 
 test('access: his "no" (a declined close, or the word) ends the request as denied, and nothing runs', async () => {
   const { env, runner, ask, events } = await setup('');
   try {
-    const a = await ask({ resource: 'kube:lumo-prod', argv: ['get', 'pods'] }) as any;
+    const a = await ask({ resource: 'kube:lumo-prod', argv: ['rollout', 'restart', 'deploy/api'] }) as any;
     env.hq.mailbox.complete(env.hq.inbox.open().find((i) => i.kind === 'go')!.id, { declined: true });
     const r = await ask({ request: a.request }) as any;
     assert.equal(r.status, 'denied');
     assert.equal(r.message, 'רן דחה');
-    const b = await ask({ resource: 'kube:lumo-prod', argv: ['get', 'svc'] }) as any;
+    const b = await ask({ resource: 'kube:lumo-prod', argv: ['rollout', 'undo', 'deploy/api'] }) as any;
     env.hq.mailbox.reply(env.hq.inbox.open().find((i) => i.kind === 'go')!.id, 'לא');
     assert.equal(((await ask({ request: b.request })) as any).status, 'denied');
     assert.equal(runner.started.length, 0);
@@ -298,7 +301,7 @@ test('access: two calls with the same request after his yes run the command once
 test('access: a card closed by anyone but him is not an approval', async () => {
   const { env, runner, ask } = await setup('');
   try {
-    const a = await ask({ resource: 'kube:lumo-prod', argv: ['get', 'pods'], wait: 0 }) as any;
+    const a = await ask({ resource: 'kube:lumo-prod', argv: ['rollout', 'restart', 'deploy/api'], wait: 0 }) as any;
     env.hq.mailbox.complete(env.hq.inbox.open().find((i) => i.kind === 'go')!.id, { by: 'hq', note: 'נסגר' });
     const r = await ask({ request: a.request }) as any;
     assert.equal(r.status, 'denied');
@@ -384,5 +387,18 @@ test('access: a build of a repo or a tag that is not ours is refused before it a
     assert.equal(r2.status, 'denied');
     assert.equal(runner.started.length, 0);
     assert.equal(env.hq.leases.list().length, 0);
+  } finally { await env.cleanup(); }
+});
+
+test('access: an ssh resource in prod: its read patterns run at once with no grant, its write and exec patterns are a card', async () => {
+  const { env, runner, ask, events } = await setup('');
+  try {
+    assert.equal(((await ask({ resource: 'ssh:prod-box', argv: ['docker', 'ps'] })) as any).status, 'done');
+    assert.equal(((await ask({ resource: 'ssh:prod-box', argv: ['docker', 'exec', 'app', 'node', '-v'] })) as any).status, 'done');
+    assert.deepEqual(events('access.granted').map((e) => e.by), ['auto:read', 'auto:read']);
+    assert.equal(((await ask({ resource: 'ssh:prod-box', argv: ['docker', 'restart', 'app'], wait: 0 })) as any).status, 'pending');
+    assert.equal(((await ask({ resource: 'ssh:prod-box', argv: ['docker', 'exec', 'app', 'ls'], wait: 0 })) as any).status, 'pending');
+    assert.equal(runner.started.length, 2);
+    assert.equal(env.hq.inbox.open().filter((i) => i.kind === 'go').length, 2);
   } finally { await env.cleanup(); }
 });

@@ -2,9 +2,8 @@
 // main server; a worker on the second one asks for `{resource, argv}` and gets the output back. hq builds the command
 // itself from closed lists (access-policy.ts), decides who approves, runs it as a detached job and keeps a log.
 //   outside prod (dev, ci, hq's own db)       → runs at once, read or write (approved_by auto:non-prod): the two servers are one to him
-//   read in prod, with a grant in the charter → runs at once (approved_by auto:grant)
-//   anything else in prod                     → a GO card with the exact command, the worker comes back with `request`
-//   write or exec in prod, whatever grants    → always a card, every time
+//   read in prod                              → runs at once (approved_by auto:read, or auto:grant when the charter has one)
+//   write or exec in prod, whatever grants    → a GO card with the exact command, every time; the worker comes back with `request`
 //   not in the lists                         → `unfit` (an event, counted after a week), with a hint
 // Nothing here copies a secret anywhere: the catalog (<state>/access/catalog.json) only points at what is already on this machine.
 import { execFile, spawn } from 'node:child_process';
@@ -207,10 +206,10 @@ export class Access {
     const plan = verdict.plan;
     const prod = res.env === undefined || res.env === 'prod';
     const grant = who.project ? readCharter(this.hq.cfg.companyDir, who.project)?.access.find((g) => g.resource === resource && g.verbs.includes(plan.class)) : undefined;
-    // Outside prod nothing is asked (his word, 22/10: no difference between the servers). Write or exec in prod is his every time,
-    // whatever the charter says, and a prod read needs its grant.
-    const auto = !prod || (!!grant && plan.class === 'read');
-    const by = grant && (prod || grant.verbs.includes(plan.class)) ? 'auto:grant' : 'auto:non-prod';
+    // His word, 22/10: «אין שום הבדל בין השרתים… לא להקשות». Outside prod nothing is asked, a read in prod runs at once on every
+    // resource in the catalog, with or without a grant, and a write or exec in prod is his every time, whatever the charter says.
+    const auto = !prod || plan.class === 'read';
+    const by = grant ? 'auto:grant' : prod ? 'auto:read' : 'auto:non-prod';
     const id = insert('pending', plan.class, plan.shown, null);
     this.hq.store.emit('access.requested', identity, { request: id, resource, argv, class: plan.class, project: who.project, shown: plan.shown, why });
     const row = this.row(id)!;

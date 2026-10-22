@@ -35,7 +35,7 @@ export interface Charter {
   ciCheck: string | null;
   mergeInstructions: string[] | null; // merge_instructions (a string, or one string per step): replaces the default review + merge steps in a task worker's prompt
   designReview: DesignReview | null;  // design_review: a second review, by a designer, for a PR that touches these paths
-  /** `access:` — what request_access may run without asking him each time: a resource, the verb classes, his quote and the date (A.7). */
+  /** `access:` — his past words on request_access: a resource, the verb classes, his quote and the date (A.7). A prod read runs without it and a prod write asks with it; a matching one only records `auto:grant` and the quote. */
   access: AccessGrant[];
   /** `heavy:` — what is heavy in this project (reserve): classes that replace the company's of the same name (heavy.ts). */
   heavy: HeavyClass[];
