@@ -90,6 +90,9 @@ const cases = [
   ['broken YAML in org.yaml', 'company/org.yaml:', (d) => edit(d, 'company/org.yaml', 'home: srv1', 'home: srv1: x')],
   ['team tone outside the eight', 'tone "purple" is not one of', (d) => edit(d, 'company/org.yaml', '    symbol: tune\n', '    symbol: tune\n    tone: purple\n')],
   ['tone on an identity, not its team', 'colour value', (d) => edit(d, 'company/org.yaml', '    symbol: shield\n', '    symbol: shield\n    tone: blue\n')],
+  ['access grant without a quote', 'access grant is missing "quote"', (d) => edit(d, 'company/projects/shop.md', 'grants: []', "grants: []\naccess:\n  - resource: kube:shop-dev\n    date: '2026-10-22'")],
+  ['access grant on a resource that is not ours', 'is not kube:<name>', (d) => edit(d, 'company/projects/shop.md', 'grants: []', "grants: []\naccess:\n  - resource: env:shop\n    quote: x\n    date: '2026-10-22'")],
+  ['access grant with a verb outside read|write|exec', 'verbs must be a list of read|write|exec', (d) => edit(d, 'company/projects/shop.md', 'grants: []', "grants: []\naccess:\n  - resource: kube:shop-dev\n    verbs: [admin]\n    quote: x\n    date: '2026-10-22'")],
   ['merge_instructions that is not text', 'must be a string or a list', (d) => edit(d, 'company/projects/engine.md', 'ci_check: engine-ci', 'ci_check: engine-ci\nmerge_instructions: [1, 2]')],
 ];
 

@@ -1216,8 +1216,9 @@ function worktreeNote(path: string, ch: ReturnType<typeof readCharter>, branch?:
 /** A task on a node: what is not there, and how it moves to the main server when it needs that (moveLocal). */
 function nodeNote(machine?: string | null): string {
   if (!machine || machine === LOCAL) return '';
-  return `\n**רץ בשרת השני (\`${machine}\`).** יש בו את ה-checkouts וה-toolchains, אבל אין בו מפתחות ssh, \`.env\`, kubectl, סודות של hq-host, דפדפן או סימולטור. `
-    + 'כשהמשימה צריכה אחד מהם: קודם `commit` למה שיש (גם WIP), ואז `status` עם `state: "needs-local"` ו-`note` שאומר מה חסר. המשמרת כאן נגמרת, והמשימה ממשיכה בשרת הראשי מהענף שלך.';
+  return `\n**רץ בשרת השני (\`${machine}\`).** יש בו את ה-checkouts וה-toolchains. אין בו מפתחות ssh, \`.env\`, kubectl וסודות של hq-host: את מה שהם נותנים מבקשים מ-hq עם \`request_access\`, והוא מריץ בשמך ומחזיר לך את הפלט. `
+    + 'דוגמאות: `resource: "kube:lumo-dev", argv: ["rollout","status","deploy/api"]` · `resource: "ssh:ci-host"` עם פקודה מהרשימה · `resource: "hq:query", argv: ["select …"]`. הרשימות סגורות: מה שלא ברשימה חוזר עם `unfit` והצעה, ושינוי בפרודקשן מגיע לרן ככרטיס בכל פעם (ממשיכים במה שלא תלוי בו וחוזרים עם `request`). '
+    + 'מה שנשאר רק בשרת הראשי: דפדפן, סימולטור, flutter, קובץ מקומי, וסוד שנמצא בקובץ (`.env`). כשהמשימה צריכה אחד מהם, או ש-`request_access` אומר שאין חלופה: קודם `commit` למה שיש (גם WIP), ואז `status` עם `state: "needs-local"` ו-`note` שאומר מה חסר. המשמרת כאן נגמרת, והמשימה ממשיכה בשרת הראשי מהענף שלך.';
 }
 
 /** A task that started on a node and came back (unpin): where its work from there is now (fetched back on close). */

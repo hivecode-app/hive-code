@@ -1,6 +1,7 @@
 // Server side of the mcp-company / hooks ingest API (packages/shared/src/company-api.ts, engine lane).
 //   POST /v1/ops     WalEntry → OpAck   (idempotent on entry.id; 4xx = permanent reject, 5xx = retry)
 //   POST /v1/recall  RecallRequest → RecallResponse
+//   POST /v1/access  {identity, shift, resource, argv, why?, wait?} | {identity, shift, request|cancel} → AccessReply (access.ts: hq runs it in the worker's name)
 //   POST /v1/handoffs              {identity, target?, url?, what?, need?, ttl_min?} → {handoff, link, inbox_id} | 409 {busy}
 //   GET  /v1/handoffs/<id>?wait=ms  long-poll until it ends (browser_ask_user's wake-up, B.9)
 //   POST /v1/handoffs/<id>/end     {state: done|cancelled, final_url?}  (the worker's page watcher saw it done)
@@ -25,6 +26,7 @@ import { FILE_MODES, memoryFilePath } from './memory-files.ts';
 import { blobSha, MAX_TEXT_BYTES, secretIn } from './memory-registry.ts';
 import { guarded, requestUrl } from './http-guard.ts';
 import { EstimateError, parseEta } from './estimates.ts';
+import { AccessError } from './access.ts';
 
 const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home', 'withdraw_ask']);
 
@@ -521,7 +523,7 @@ export class Ingest {
     if (!url) return false;
     const path = url.pathname;
     const handoff = /^\/v1\/handoffs(?:\/(h-[0-9a-f]+)(\/end)?)?$/.exec(path);
-    if (!handoff && (req.method !== 'POST' || (path !== '/v1/ops' && path !== '/v1/recall'))) return false;
+    if (!handoff && (req.method !== 'POST' || (path !== '/v1/ops' && path !== '/v1/recall' && path !== '/v1/access'))) return false;
     let status = 200, out: unknown;
     try {
       if (handoff) {
@@ -532,10 +534,10 @@ export class Ingest {
       }
       else {
         const body = await readBody();
-        out = path === '/v1/ops' ? this.op(body) : await this.recallWithFiles(body);
+        out = path === '/v1/ops' ? this.op(body) : path === '/v1/access' ? await this.hq.access.request(body) : await this.recallWithFiles(body);
       }
     } catch (e) {
-      status = e instanceof IngestError || e instanceof HandoffError ? e.status : (e as { status?: number }).status ?? 500;
+      status = e instanceof IngestError || e instanceof HandoffError || e instanceof AccessError ? e.status : (e as { status?: number }).status ?? 500;
       out = { ok: false, error: (e as Error).message, ...(e instanceof IngestError && e.he ? { reason: e.he } : {}),
         ...(e instanceof HandoffError && e.busy ? { busy: e.busy } : {}) };
     }

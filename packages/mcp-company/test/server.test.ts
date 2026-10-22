@@ -67,7 +67,7 @@ test('handshake, tools/list, write tools queue to WAL while hq is down', async (
 
     const list = await c.call('tools/list');
     const names = list.result.tools.map((t: { name: string }) => t.name).sort();
-    assert.deepEqual(names, ['ask', 'close_team', 'compose_home', 'handoff', 'open_team', 'open_ticket', 'recall', 'remember', 'request_go', 'status', 'tell', 'withdraw_ask']);
+    assert.deepEqual(names, ['ask', 'close_team', 'compose_home', 'handoff', 'open_team', 'open_ticket', 'recall', 'remember', 'request_access', 'request_go', 'status', 'tell', 'withdraw_ask']);
     for (const t of list.result.tools) assert.equal(t.inputSchema.type, 'object');
 
     const tell = await c.call('tools/call', { name: 'tell', arguments: { to: 'dana', body: 'שלום', urgency: 'now' } });
@@ -239,4 +239,48 @@ test('recall reads memory from COMPANY_HOME, not from COMPANY_REPO (the engine c
     assert.ok(items.every((i) => !i.text.includes('engine repo')), JSON.stringify(items));
     assert.ok(items[0]!.text.includes('company home'));
   } finally { await c.close(); }
+});
+
+test('request_access goes to hq /v1/access with the shift, and its answer is the tool result; hq down is an error, not a queued op', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mcp-acc-'));
+  const seen: any[] = [];
+  const hq = createHttpServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (d: Buffer) => chunks.push(d));
+    req.on('end', () => {
+      seen.push({ path: req.url, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+      const body = seen.at(-1).body;
+      res.writeHead(body.shift === 'x-1' ? 200 : 403, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(body.shift === 'x-1' ? { status: 'done', request: 'acc-1', output: 'pods', exit_code: 0, message: 'הסתיים' } : { ok: false, error: 'no live shift' }));
+    });
+  });
+  await new Promise<void>((r) => hq.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${(hq.address() as { port: number }).port}`;
+  const env = (shift: string) => ({ COMPANY_STATE_DIR: root, COMPANY_SHIFT: shift, COMPANY_IDENTITY: 'lumo-t9', COMPANY_HQ_URL: url, COMPANY_REPO: root });
+  const c = new Client(env('x-1'));
+  try {
+    await c.call('initialize', { protocolVersion: '2025-06-18', capabilities: {} });
+    const r = await c.call('tools/call', { name: 'request_access', arguments: { resource: 'kube:lumo-dev', argv: ['get', 'pods'], why: 'בודק את הפריסה' } });
+    assert.equal(r.result.isError, undefined);
+    assert.deepEqual(JSON.parse(r.result.content[0].text), { status: 'done', request: 'acc-1', output: 'pods', exit_code: 0, message: 'הסתיים' });
+    assert.equal(seen[0].path, '/v1/access');
+    assert.deepEqual(seen[0].body, { resource: 'kube:lumo-dev', argv: ['get', 'pods'], why: 'בודק את הפריסה', identity: 'lumo-t9', shift: 'x-1' });
+    const cont = await c.call('tools/call', { name: 'request_access', arguments: { request: 'acc-1', wait: 5 } });
+    assert.equal(cont.result.isError, undefined);
+    assert.equal(seen[1].body.request, 'acc-1');
+    const empty = await c.call('tools/call', { name: 'request_access', arguments: { resource: 'kube:lumo-dev' } });
+    assert.equal(empty.result.isError, true);
+    const en = await c.call('tools/call', { name: 'request_access', arguments: { resource: 'kube:lumo-dev', argv: ['get', 'pods'], why: 'Checking the rollout of the new image on dev please' } });
+    assert.equal(en.result.isError, true);
+    assert.match(en.result.content[0].text, /בעברית/);
+    assert.equal(seen.length, 2, 'the last two never reached hq');
+    assert.equal(walLines(root, 'x-1', 'wal.ndjson').length, 0, 'not a WAL op');
+  } finally { await c.close(); }
+  const d = new Client(env('y-2'));
+  try {
+    await d.call('initialize', { protocolVersion: '2025-06-18', capabilities: {} });
+    const denied = await d.call('tools/call', { name: 'request_access', arguments: { resource: 'kube:lumo-dev', argv: ['get', 'pods'] } });
+    assert.equal(denied.result.isError, true);
+    assert.match(denied.result.content[0].text, /no live shift/);
+  } finally { await d.close(); hq.close(); }
 });

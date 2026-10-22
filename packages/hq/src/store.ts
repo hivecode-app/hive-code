@@ -491,6 +491,32 @@ const MIGRATIONS: string[] = [
   UPDATE asks SET state = 'escalated', manager_note = answer, answer = NULL, answered_by = NULL, answered_at = NULL WHERE id IN (SELECT id FROM repair_escalated);
   DROP TABLE repair_escalated;
   `,
+  // v26: request_access (access.ts): what a worker asked hq to run in its name, how it was decided and how it ended.
+  `
+  CREATE TABLE IF NOT EXISTS access_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    identity TEXT NOT NULL,
+    shift TEXT,
+    task INTEGER,
+    project TEXT,
+    resource TEXT NOT NULL,
+    argv TEXT NOT NULL,                      -- JSON array, as the worker gave it
+    shown TEXT NOT NULL,                     -- the exact command, as the card shows it
+    why TEXT NOT NULL DEFAULT '',
+    class TEXT,                              -- read | write | exec; NULL = never planned (unfit, denied)
+    state TEXT NOT NULL,                     -- pending | running | done | failed | denied | unfit | cancelled
+    approved_by TEXT,                        -- auto:grant | owner
+    inbox_id INTEGER,
+    exit_code INTEGER,
+    note TEXT,
+    created_at INTEGER NOT NULL,
+    decided_at INTEGER,
+    started_at INTEGER,
+    finished_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS access_requests_state ON access_requests(state, created_at);
+  CREATE INDEX IF NOT EXISTS access_requests_identity ON access_requests(identity, id);
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

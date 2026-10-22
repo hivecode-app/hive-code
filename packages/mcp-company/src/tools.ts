@@ -6,7 +6,7 @@ import type { CompanyNames, OpName } from '@company/shared';
 type Schema = Record<string, unknown>;
 
 export interface ToolDef {
-  name: OpName | 'recall';
+  name: OpName | 'recall' | 'request_access';
   description: string;
   inputSchema: { type: 'object'; properties: Record<string, Schema>; required: string[]; additionalProperties: boolean };
 }
@@ -183,6 +183,19 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       blocks: { type: 'array', items: { type: 'object' }, description: 'הבלוקים לפי הסדר / the blocks, in order' },
       reason: s('למה ההרכבה הזו, בשורה / why this composition, one line'),
     }, ['blocks']),
+    tool('request_access', 'הרצת פקודה על שרת, קלאסטר או מסד של החברה בשמך, בלי שיהיו לך המפתחות. hq בונה את הפקודה בעצמו מרשימות סגורות, מריץ אותה ומחזיר את הפלט. '
+      + 'resource: `kube:<שם>` (kubectl ב-namespace כפוי), `ssh:<שם>` (פקודה מרשימה) או `hq:query` (SELECT על hq.db). argv: המילים של הפקודה, בלי הקידומת (`["get","pods"]`, לא `kubectl get pods`). '
+      + 'מותר: get, describe, logs --tail, rollout status|history|restart|undo, set image, scale, delete pod/<name>, exec <pod> -- <פקודה>. לא נתמך: `-f`, port-forward, apply, מעטפת אינטראקטיבית. הדגלים --kubeconfig, --token, --as ו-`-n` של namespace אחר נדחים תמיד. '
+      + 'קריאה שיש עליה אישור קבוע באמנה רצה מיד. כל השאר, וכל שינוי בפרודקשן בכל פעם, מגיעים ' + pre('ל', O) + ' ככרטיס עם הפקודה המדויקת: התשובה היא status pending, ממשיכים במה שלא תלוי בה, וחוזרים עם request. '
+      + 'פקודה ארוכה חוזרת אחרי עד 90 שניות עם status running ו-request, וממשיכים לקרוא באותו request (הפלט נשמר). פקודה שלא ברשימה חוזרת עם unfit והצעה: לא מנסים לעקוף, ואם אין חלופה, `status` עם needs-local. '
+      + 'Run a command on a company server, cluster or database in your name, without holding the keys. hq builds it from closed lists and returns the output. Pending approval or a long run: come back with `request`.', {
+      resource: s('kube:<name> | ssh:<name> | hq:query'),
+      argv: strs('מילות הפקודה בלי הקידומת, למשל ["rollout","status","deploy/api","--timeout=5m"]; ב-hq:query מחרוזת SQL אחת / the words of the command without the prefix; for hq:query one SQL string'),
+      why: s('למה, שורה בעברית: ' + G('הוא', 'היא') + ' רואה את זה בכרטיס / why, one line in Hebrew'),
+      request: s('acc-N: ממשיכים בקשה שחזרה pending או running / continue a request that came back pending or running'),
+      cancel: s('acc-N: מבטלים בקשה שמחכה או רצה / cancel a request that waits or runs'),
+      wait: { type: 'number', description: 'כמה שניות להמתין לתוצאה או לאישור, עד 100 (ברירת מחדל 90) / seconds to wait for the result or approval, up to 100 (default 90)' },
+    }, []),
     tool('open_ticket', 'פתיחת כרטיס ב-repo. Open an issue in a repo.', {
       repo: s('owner/repo'),
       title: s('כותרת / title'),
@@ -233,7 +246,7 @@ export function validateArgs(def: ToolDef, args: unknown): string | null {
 
 /** Everything a person reads goes out in Hebrew (dir-0002, #51): message text by line, titles whole. */
 const HEBREW_TEXT: Partial<Record<ToolDef['name'], string[]>> = {
-  tell: ['body'], ask: ['question'], withdraw_ask: ['note'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'],
+  tell: ['body'], ask: ['question'], withdraw_ask: ['note'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'], request_access: ['why'],
 };
 const HEBREW_TITLE: Partial<Record<ToolDef['name'], string[]>> = {
   open_team: ['name'], open_ticket: ['title'], ask: ['headline'], request_go: ['headline'],

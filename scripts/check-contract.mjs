@@ -451,6 +451,15 @@ export function main() {
       if (fm.status !== pr.status) err(`${rel(charter)}: status "${fm.status}" differs from org.yaml "${pr.status}"`);
       for (const f of ['deviations', 'monitoring', 'grants']) if (!Array.isArray(fm[f])) err(`${rel(charter)}: "${f}" must be a list`);
       for (const g of Array.isArray(fm.grants) ? fm.grants : []) for (const f of ['team', 'action', 'quote', 'date']) if (!g?.[f]) err(`${rel(charter)}: grant is missing "${f}"`);
+      // request_access (hq access.ts): a standing approval for a resource names the verbs, and carries his quote and a date, like every grant (A.7).
+      if (fm.access != null) {
+        if (!Array.isArray(fm.access)) err(`${rel(charter)}: "access" must be a list`);
+        else for (const g of fm.access) {
+          for (const f of ['resource', 'quote', 'date']) if (!g?.[f]) err(`${rel(charter)}: access grant is missing "${f}"`);
+          if (g?.resource && !/^(kube:[a-z0-9-]+|ssh:[a-z0-9-]+|hq:query)$/.test(g.resource)) err(`${rel(charter)}: access grant resource "${g.resource}" is not kube:<name>, ssh:<name> or hq:query`);
+          if (g?.verbs != null && (!Array.isArray(g.verbs) || !g.verbs.length || g.verbs.some((v) => !['read', 'write', 'exec'].includes(v)))) err(`${rel(charter)}: access grant verbs must be a list of read|write|exec`);
+        }
+      }
       for (const d of Array.isArray(fm.deviations) ? fm.deviations : []) if (!d?.reason) err(`${rel(charter)}: every deviation needs a reason`);
       if (pr.status === 'active' && !identityIds.has(fm.ceo)) err(`${rel(charter)}: ceo "${fm.ceo}" is not an identity`);
       // B.5: where workers run. hq makes <path>/<worktree_dir>/<task> per task in the first checkout.

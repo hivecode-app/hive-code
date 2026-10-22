@@ -27,6 +27,8 @@ export interface ServerDeps {
   /** How long a synchronous op waits for hq before answering {queued:true}. */
   syncTimeoutMs?: number;
   recall: (req: RecallQuery) => Promise<RecallResult>;
+  /** request_access: hq answers in the same call (it may wait for the owner's card or for a job, up to ~100s). */
+  access?: (req: Record<string, unknown>) => Promise<unknown>;
   now?: () => Date;
   log?: (msg: string) => void;
   /** tools/list: the catalogue with this company's names (buildTools). Default: TOOLS. */
@@ -74,6 +76,16 @@ export function createServer(deps: ServerDeps) {
         ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
       });
       return text(res);
+    }
+
+    if (def.name === 'request_access') {
+      if (!deps.access) return text('request_access לא זמין בשרת ה-MCP הזה', true);
+      if (!args.request && !args.cancel && (!args.resource || !Array.isArray(args.argv) || !args.argv.length)) return text('invalid arguments: pass resource and argv, or request/cancel', true);
+      try {
+        return text(await deps.access({ ...args, identity: deps.ctx.identity, shift: deps.ctx.shift }));
+      } catch (e) {
+        return text(`request_access נכשל: ${e instanceof Error ? e.message : String(e)}. ייתכן שהבקשה הגיעה ל-hq ורצה: אם יש לך מזהה acc-N מקריאה קודמת, בדוק אותו עם request; אחרת אפשר לנסות שוב. אם זה נמשך, status עם needs-local.`, true);
+      }
     }
 
     const t = now();

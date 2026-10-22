@@ -621,13 +621,13 @@ export class Mailbox {
     // A delivery failure's "requester" is the worker that never got the message: telling it would fail again into a new
     // delivery_failure, on every "סיימתי" (21/10).
     if (item.kind === 'delivery_failure') {
-      this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, message: null });
+      this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, by, message: null });
       return { item: this.inbox.get(itemId), message: null };
     }
     // The worker's task closed since: its GO and the answer on it go to whoever is responsible for the task.
     const target = this.responsibleFor(requester);
     if (!target) {
-      this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, message: null });
+      this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, by, message: null });
       return { item: this.inbox.get(itemId), message: null };
     }
     const o = this.names.owner;
@@ -641,7 +641,7 @@ export class Mailbox {
     } else {
       // Someone else closed it: nothing to tell unless they wrote something, and then it carries their name.
       if (!opts.note || by === target) {
-        this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, message: null });
+        this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, by, message: null });
         return { item: this.inbox.get(itemId), message: null };
       }
       body = `${this.label(by)} סגר/ה: ${item.title}`;
@@ -651,7 +651,7 @@ export class Mailbox {
       ref: item.ref ?? `inbox-${itemId}`, priority: 'now', urgency: item.urgency,
       body: `${target === requester ? '' : `${this.closedNote(requester)}\n`}${body}${opts.note ? `\n${opts.note}` : ''}`,
     });
-    this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, message: message.id });
+    this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, by, message: message.id });
     return { item: this.inbox.get(itemId), message };
   }
 
@@ -698,7 +698,7 @@ export class Mailbox {
       priority: 'now', urgency: item.urgency, attachments,
       body: `${lead}תשובה של ${this.names.owner.name} ${what} "${item.headline ?? item.title}": ${text}`,
     });
-    this.store.emit('inbox.completed', requester, { id: itemId, declined: item.kind === 'go' && goVerdict(text) === 'no', message: message.id });
+    this.store.emit('inbox.completed', requester, { id: itemId, declined: item.kind === 'go' && goVerdict(text) === 'no', by: OWNER, message: message.id });
     return { item: this.inbox.get(itemId), message };
   }
 

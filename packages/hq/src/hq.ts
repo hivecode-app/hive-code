@@ -12,6 +12,7 @@ import { Inbox } from './inbox.ts';
 import { Conversations } from './conversations.ts';
 import { AwaitingBoard } from './awaiting.ts';
 import { Estimates } from './estimates.ts';
+import { Access, type JobRunner } from './access.ts';
 import { ShiftManager, TemplateLauncher, type Launcher, type ConnectionFactory } from './shifts.ts';
 import { Mailbox, noForeignInjector, type ForeignInjector } from './mailbox.ts';
 import { Uploads } from './uploads.ts';
@@ -58,6 +59,8 @@ export interface HqDeps {
   openFiles?: OpenFilesReader;
   /** ssh for the nodes (nodes.ts). */
   ssh?: SshRun;
+  /** Starts the jobs of request_access (access.ts). */
+  accessRunner?: JobRunner;
   now?: () => number;
 }
 
@@ -84,6 +87,7 @@ export class Hq {
   readonly conversations: Conversations;
   readonly awaiting: AwaitingBoard;
   readonly estimates: Estimates;
+  readonly access: Access;
   readonly shifts: ShiftManager;
   readonly mailbox: Mailbox;
   readonly uploads: Uploads;
@@ -160,6 +164,7 @@ export class Hq {
         body: `${o.name} ${g(o, 'סימן', 'סימנה')} "נכשל" על משימה ${t.id} (${t.title}): ${what}\nאם יש פרטים, הם יגיעו ${g(o, 'ממנו', 'ממנה')} בהודעה נפרדת. המשימה ירדה מ"מחכה לך".` });
     };
     this.estimates = new Estimates(this.store);
+    this.access = new Access(this, deps.accessRunner);
     this.night.estimates = this.estimates;
     this.scheduler.onTaskDone = (id) => this.estimates.cancelForTask(id);
     this.scheduler.onSweep = () => {

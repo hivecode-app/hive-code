@@ -12,6 +12,7 @@ import { buildTools } from './tools.ts';
 import { Wal } from './wal.ts';
 
 const OPS_TIMEOUT_MS = 10_000;
+const ACCESS_TIMEOUT_MS = 130_000;
 const env = process.env;
 const log = (msg: string) => { process.stderr.write(`[company-mcp] ${msg}\n`); };
 
@@ -34,6 +35,13 @@ const server = createServer({
   ctx: { identity, shift, sessionId: env[ENV.sessionId] || null },
   // The names in the tool descriptions (the owner, the manager) come from the company's org.yaml.
   tools: buildTools(loadNames(join(repo, 'company'))),
+  access: async (req) => {
+    // Long: hq may wait for the owner's card or for a job (about 100s), and a worker must hear the verdict in this call.
+    const r = await postJson(target, '/v1/access', req, ACCESS_TIMEOUT_MS);
+    if (r.status >= 200 && r.status < 300) return r.body;
+    const b = (r.body ?? {}) as { error?: unknown };
+    throw new Error(typeof b.error === 'string' ? b.error : `HTTP ${r.status}`);
+  },
   append: (e) => wal.append(e),
   waitSettled: (id, ms) => wal.waitSettled(id, ms),
   recall: (req) => recall(req, {

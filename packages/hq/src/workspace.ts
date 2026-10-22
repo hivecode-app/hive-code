@@ -22,6 +22,8 @@ export interface Checkout {
  */
 export interface DesignReview { reviewer: string; paths: string[]; waitMinutes: number; smallLines: number }
 
+export interface AccessGrant { resource: string; verbs: ('read' | 'write' | 'exec')[]; quote: string; date: string }
+
 export interface Charter {
   project: string;
   status: string;         // active | dormant | …
@@ -32,6 +34,8 @@ export interface Charter {
   ciCheck: string | null;
   mergeInstructions: string[] | null; // merge_instructions (a string, or one string per step): replaces the default review + merge steps in a task worker's prompt
   designReview: DesignReview | null;  // design_review: a second review, by a designer, for a PR that touches these paths
+  /** `access:` — what request_access may run without asking him each time: a resource, the verb classes, his quote and the date (A.7). */
+  access: AccessGrant[];
   paused: string | null;  // paused: he put the project on hold (the reason, or "מושהה"). Workers still run; hq doesn't wake it (stall-watch.ts)
   error?: string;         // status "invalid": why the charter could not be read
 }
@@ -67,7 +71,7 @@ export function readCharter(companyDir: string, project: string): Charter | null
     const m = readFileSync(file, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
     fm = ((m ? parse(m[1]!) : {}) ?? {}) as Record<string, unknown>;
   } catch (e) {
-    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, designReview: null, paused: null, error: (e as Error).message };
+    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, designReview: null, access: [], paused: null, error: (e as Error).message };
   }
   const s = (v: unknown) => (typeof v === 'string' && v ? v : null);
   const checkouts: Checkout[] = [];
@@ -83,9 +87,22 @@ export function readCharter(companyDir: string, project: string): Charter | null
   return {
     project, status: s(fm.status) ?? 'active', machine: s(fm.machine), checkouts,
     worktreeDir: s(fm.worktree_dir) ?? '.worktrees', commands, ciCheck: s(fm.ci_check),
-    mergeInstructions: steps(fm.merge_instructions), designReview: designReview(fm.design_review),
+    mergeInstructions: steps(fm.merge_instructions), designReview: designReview(fm.design_review), access: accessGrants(fm.access),
     paused: fm.paused === true ? 'מושהה' : s(fm.paused),
   };
+}
+
+/** Only a whole grant counts: a resource, a quote of his and a date. Verbs default to read. */
+function accessGrants(v: unknown): AccessGrant[] {
+  const s = (x: unknown) => (typeof x === 'string' && x ? x : null);
+  return (Array.isArray(v) ? v : []).flatMap((x): AccessGrant[] => {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const resource = s(o.resource), quote = s(o.quote);
+    const date = o.date instanceof Date ? o.date.toISOString().slice(0, 10) : s(o.date);
+    if (!resource || !quote || !date) return [];
+    const verbs = (Array.isArray(o.verbs) ? o.verbs : ['read']).filter((w): w is 'read' | 'write' | 'exec' => w === 'read' || w === 'write' || w === 'exec');
+    return verbs.length ? [{ resource, verbs, quote, date }] : [];
+  });
 }
 
 function designReview(v: unknown): DesignReview | null {
