@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { makeEnv, until } from './helpers.ts';
-import { loadProbes, parseCharterProbes, parseDuration, runHttpProbe, runDiskProbe, sshWitness } from '../src/probes.ts';
+import { loadProbes, parseCharterProbes, parseDuration, runHttpProbe, runDiskProbe, runLatencyProbe, parsePing, pingBreaches, sshWitness } from '../src/probes.ts';
 
 // The example company (fixtures/README.md): its charters declare probes the way a real company's do.
 const COMPANY = join(import.meta.dirname, '..', '..', '..', 'fixtures', 'company-home', 'company');
@@ -290,5 +290,109 @@ test('disk probe: unknown never counts toward fail_after; over the threshold twi
     assert.match(anomalies()[0]!.body, /96% בשימוש ב-\//);
     await step(); // 50 → recovered
     assert.ok((hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'system'`).all() as { body: string }[]).some((m) => /kafka-disk חזר לתקין \(50%/.test(m.body)));
+  } finally { await env.cleanup(); }
+});
+
+// The real output from hq-host on 22/10: vmi1000011 with jitter, a healthy node, and the master that drops ICMP.
+const PING_JITTER = `PING 203.0.113.31 (203.0.113.31) 56(84) bytes of data.
+
+--- 203.0.113.31 ping statistics ---
+20 packets transmitted, 20 received, 0% packet loss, time 3839ms
+rtt min/avg/max/mdev = 0.419/82.263/199.829/64.863 ms, pipe 2
+`;
+const PING_OK = `--- 203.0.113.37 ping statistics ---
+20 packets transmitted, 20 received, 0% packet loss, time 3923ms
+rtt min/avg/max/mdev = 0.271/0.390/1.066/0.165 ms
+`;
+const PING_LOSS = `--- 10.0.0.9 ping statistics ---
+20 packets transmitted, 18 received, +2 errors, 10% packet loss, time 3901ms
+rtt min/avg/max/mdev = 0.300/0.400/0.900/0.100 ms
+`;
+const PING_NONE = `--- 203.0.113.13 ping statistics ---
+20 packets transmitted, 0 received, 100% packet loss, time 3946ms
+`;
+
+test('ping parser: iputils and busybox summaries; no reply or garbage → null', () => {
+  assert.deepEqual(parsePing(PING_JITTER), { transmitted: 20, received: 20, lossPercent: 0, min: 0.419, avg: 82.263, max: 199.829, mdev: 64.863 });
+  assert.deepEqual(parsePing(PING_LOSS), { transmitted: 20, received: 18, lossPercent: 10, min: 0.3, avg: 0.4, max: 0.9, mdev: 0.1 });
+  const bb = parsePing('20 packets transmitted, 19 packets received, 5% packet loss\nround-trip min/avg/max = 0.3/0.5/1.2 ms\n');
+  assert.equal(bb!.received, 19);
+  assert.equal(bb!.avg, 0.5);
+  assert.equal(bb!.mdev, null, 'busybox has no mdev');
+  assert.deepEqual(parsePing(PING_NONE), { transmitted: 20, received: 0, lossPercent: 100, min: null, avg: null, max: null, mdev: null });
+  assert.equal(parsePing('20 packets transmitted, 20 received, 0% packet loss\n'), null, 'replies without an rtt line is not ping output we know');
+  assert.equal(parsePing(''), null);
+  assert.equal(parsePing('ping: unknown host'), null);
+});
+
+test('ping thresholds: avg, mdev and loss each fail on their own; at the threshold is not over it', () => {
+  const t = { maxAvgMs: 10, maxMdevMs: 20, maxLossPercent: 5 };
+  const s = { transmitted: 20, received: 20, lossPercent: 0, min: 0.3, avg: 0.4, max: 1, mdev: 0.1 };
+  assert.deepEqual(pingBreaches(s, t), []);
+  assert.deepEqual(pingBreaches({ ...s, avg: 10, mdev: 20, lossPercent: 5 }, t), []);
+  assert.deepEqual(pingBreaches({ ...s, avg: 10.1 }, t), ['avg מעל 10ms']);
+  assert.deepEqual(pingBreaches({ ...s, mdev: 21 }, t), ['mdev מעל 20ms']);
+  assert.deepEqual(pingBreaches({ ...s, lossPercent: 10 }, t), ['אובדן מעל 5%']);
+  assert.equal(pingBreaches(parsePing(PING_JITTER)!, t).length, 2);
+  assert.deepEqual(pingBreaches(parsePing(PING_NONE)!, t), ['אובדן מעל 5%']);
+  assert.deepEqual(pingBreaches({ ...s, mdev: null }, t), [], 'no mdev is not a breach');
+});
+
+const LATENCY = `# tiki-bot-go
+
+\`\`\`yaml
+probes:
+  - {id: net-vmi1000011, latency: 203.0.113.31, every: 5m, fail_after: 2}
+  - {id: net-custom, latency: 203.0.113.37, max_avg_ms: 0.2, max_mdev_ms: 5, max_loss_percent: 0}
+  - {id: bad, latency: '-f 1.2.3.4'}
+  - {id: bad-threshold, latency: 1.2.3.4, max_avg_ms: 10ms}
+\`\`\`
+`;
+
+test('latency probe: parsing, defaults, evidence; no reply at all fails; ping error / garbage = unknown', async () => {
+  const [j, c, bad, badT] = parseCharterProbes('tiki-bot-go', LATENCY);
+  assert.deepEqual([j!.kind, c!.kind, bad!.kind, badT!.kind], ['latency', 'latency', 'unsupported', 'unsupported']);
+  assert.deepEqual(j!.latency, { host: '203.0.113.31', maxAvgMs: 10, maxMdevMs: 20, maxLossPercent: 5 });
+  assert.deepEqual(c!.latency, { host: '203.0.113.37', maxAvgMs: 0.2, maxMdevMs: 5, maxLossPercent: 0 });
+  assert.equal(j!.timeoutMs, 20_000, 'latency default timeout outlasts ping itself');
+  const hosts: string[] = [];
+  const mk = (out: string | Error) => async (h: string) => { hosts.push(h); if (out instanceof Error) throw out; return out; };
+  const o = await runLatencyProbe(j!, mk(PING_JITTER));
+  assert.equal(o.ok, false);
+  assert.equal(o.unknown, undefined);
+  assert.equal(o.latencyMs, 82);
+  assert.match(o.error!, /^203\.0\.113\.31: min\/avg\/max\/mdev 0\.419\/82\.263\/199\.829\/64\.863ms, אובדן 0% \(avg מעל 10ms, mdev מעל 20ms\)$/);
+  assert.equal((await runLatencyProbe(j!, mk(PING_OK))).ok, true);
+  assert.match((await runLatencyProbe(j!, mk(PING_LOSS))).error!, /אובדן מעל 5%/);
+  assert.equal((await runLatencyProbe(c!, mk(PING_OK))).ok, false, 'charter thresholds win');
+  const none = await runLatencyProbe(j!, mk(PING_NONE));
+  assert.equal(none.unknown, undefined);
+  assert.equal(none.ok, false);
+  assert.equal(none.latencyMs, null);
+  assert.match(none.error!, /^203\.0\.113\.31: אין אף תשובה, אובדן 100% \(אובדן מעל 5%\)$/);
+  assert.equal((await runLatencyProbe(j!, mk(new Error('spawn ping ENOENT')))).unknown, true);
+  assert.equal((await runLatencyProbe(j!, mk('garbage'))).unknown, true);
+  assert.deepEqual([...new Set(hosts)], ['203.0.113.31', '203.0.113.37']);
+});
+
+test('latency probe: fail_after crossed → anomaly with the ping evidence and no witness; recovery note', async () => {
+  const env = await makeEnv({ projects: { 'tiki-bot-go': LATENCY } });
+  try {
+    const { hq, clock } = env;
+    const seq = [PING_JITTER, 'garbage', PING_JITTER, PING_OK];
+    hq.probes.probes = hq.probes.probes.filter((p) => p.id === 'net-vmi1000011');
+    hq.probes.run = (p) => runLatencyProbe(p, async () => seq.shift()!);
+    hq.probes.witness = async () => { throw new Error('latency must not be verified from ci-host'); };
+    const anomalies = () => hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'probe_anomaly'`).all() as { body: string }[];
+    const step = async () => { await hq.probes.tick(); clock.advance(5 * 60_000 + 1000); };
+    await step(); await step(); // jitter, then unreadable output (unknown: the streak stays at 1)
+    assert.equal(anomalies().length, 0);
+    await step(); // jitter again → fail_after=2
+    assert.equal(anomalies().length, 1);
+    assert.match(anomalies()[0]!.body, /jitter ברשת אל 203\.0\.113\.31: הספים avg 10ms, mdev 20ms, אובדן 5%/);
+    assert.match(anomalies()[0]!.body, /min\/avg\/max\/mdev 0\.419\/82\.263\/199\.829\/64\.863ms/);
+    await step(); // healthy
+    assert.ok((hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'system'`).all() as { body: string }[])
+      .some((m) => /net-vmi1000011 חזר לתקין \(203\.0\.113\.31: min\/avg\/max\/mdev 0\.271\/0\.39\/1\.066\/0\.165ms/.test(m.body)));
   } finally { await env.cleanup(); }
 });
