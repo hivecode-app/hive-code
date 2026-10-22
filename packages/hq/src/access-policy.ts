@@ -262,10 +262,49 @@ export function planSsh(res: SshResource, argv: string[]): Verdict {
   const bad = argv.find((a) => !SAFE_ARG.test(a));
   if (bad !== undefined) return unfit(`המילה \`${bad}\` מכילה תו שלא מותר (אותיות, ספרות ו-\`._:/=@,+%-\` בלבד)`, 'פקודה עם צינור, מרכאות או משתנה לא מוגשת. אפשר סקריפט שכבר נמצא בשרת');
   const hit = res.allow.find((r) => matchPattern(r.argv, argv));
-  if (!hit) return unfit(`הפקודה \`${argv.join(' ')}\` לא ברשימה המותרת של המשאב`, res.allow.length ? `מותר: ${res.allow.slice(0, 6).map((r) => r.argv.join(' ')).join(' · ')}` : 'לרשימה של המשאב אין עדיין פקודות');
+  if (!hit) return unfit(`הפקודה \`${argv.join(' ')}\` לא ברשימה המותרת של המשאב`, res.allow.length ? `מותר: ${sshAllowed(res)}` : 'לרשימה של המשאב אין עדיין פקודות');
   const target = `${res.user ? `${res.user}@` : ''}${res.host}`;
   const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(res.key ? ['-i', res.key, '-o', 'IdentitiesOnly=yes'] : []), ...(res.port ? ['-p', String(res.port)] : []), target, '--', ...argv];
   return { ok: true, plan: { kind: 'process', cmd: 'ssh', args, class: hit.class ?? 'read', shown: `ssh ${target} ${show(argv)}` } };
+}
+
+/** The allowlist in a few lines, so a worker reads what fits instead of guessing: one group per command head, its tails in braces. */
+function sshAllowed(res: SshResource): string {
+  const prod = res.env === undefined || res.env === 'prod';
+  const groups = new Map<string, string[]>();
+  for (const r of res.allow) {
+    const cut = Math.max(1, Math.min(4, r.argv.length - 1));
+    const key = r.argv.slice(0, cut).join(' ') + (prod && r.class !== 'read' && r.class !== undefined ? '\u0000GO' : '');
+    const tail = r.argv.slice(cut).join(' ');
+    const g = groups.get(key) ?? [];
+    if (!g.includes(tail)) g.push(tail);
+    groups.set(key, g);
+  }
+  return [...groups].map(([key, tails]) => {
+    // Too many tails to read: numbers become N ("--tail=N"), and if that is still too many, their first words only ("get {pods|deploy|…}").
+    const numbered = tails.length > 10 ? [...new Set(tails.map((t) => t.replace(/\d+/g, 'N')))] : tails;
+    const shown = numbered.length > 10 ? [...new Set(tails.map((t) => t.split(' ')[0]!))] : numbered;
+    const words = shown.length > 16 ? [...shown.slice(0, 16), '…'] : shown;
+    const [head, go] = key.split('\u0000');
+    const rest = words.filter((w) => w !== '');
+    // A bare command next to its longer forms reads "df · df {-h}", not "df {|-h}".
+    const out = [...(words.includes('') ? [head] : []), ...(rest.length ? [`${head} {${rest.join('|')}}`] : [])].join(' · ');
+    return go ? `${out} (GO)` : out;
+  }).join(' · ');
+}
+
+/** What a resource offers, in one line: shown when a worker asks for a name that is not there, so the next call fits. */
+export function describeResource(name: string, res: Resource): string {
+  const env = res.env === undefined || res.env === 'prod' ? 'פרודקשן: קריאה לפי grant, שינוי בכרטיס GO' : `${res.env}: רץ מיד`;
+  switch (res.type) {
+    case 'kube': return `\`${name}\` (${env}): kubectl ב-namespace \`${res.namespace}\`, בלי \`kubectl\` ובלי \`-n\` ב-argv: get, describe, logs --tail, top pods, rollout status|history|restart|undo, set image, scale, delete pod/<name>, exec <pod> -- <פקודה>`;
+    case 'ssh': {
+      if (!res.allow.length) return `\`${name}\` (${env}): לרשימה של המשאב אין עדיין פקודות`;
+      const example = res.allow.find((r) => !r.argv.some((w) => w.includes('*')));
+      return `\`${name}\` (${env}): argv מלא${example ? `, למשל \`${example.argv.join(' ')}\`` : ''}. מותר: ${sshAllowed(res)}`;
+    }
+    case 'hq-query': return `\`${name}\` (${env}): SELECT אחד על hq.db, ב-argv מחרוזת אחת`;
+  }
 }
 
 // ── hq.db, read only ───────────────────────────────────────────────────────

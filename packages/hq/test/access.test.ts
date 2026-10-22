@@ -133,6 +133,7 @@ test('access: his "no" (a declined close, or the word) ends the request as denie
     env.hq.mailbox.complete(env.hq.inbox.open().find((i) => i.kind === 'go')!.id, { declined: true });
     const r = await ask({ request: a.request }) as any;
     assert.equal(r.status, 'denied');
+    assert.equal(r.message, 'רן דחה');
     const b = await ask({ resource: 'kube:lumo-prod', argv: ['get', 'svc'] }) as any;
     env.hq.mailbox.reply(env.hq.inbox.open().find((i) => i.kind === 'go')!.id, 'לא');
     assert.equal(((await ask({ request: b.request })) as any).status, 'denied');
@@ -175,7 +176,13 @@ test('access: what is not in the lists is refused and counted (unfit / denied), 
     assert.equal(runner.started.length, 0);
     assert.equal(events('access.unfit').length, 3);
     assert.equal(events('access.denied').length, 2);
-    assert.match((await ask({ resource: 'kube:nope', argv: ['x'] }) as any).hint, /kube:lumo-dev/);
+    const guess = (await ask({ resource: 'kube:nope', argv: ['x'] }) as any).hint as string;
+    assert.match(guess, /kube:lumo-dev/);
+    assert.match(guess, /`ssh:ci-host` \(ci: רץ מיד\).*docker images/, 'each resource with what it allows, so the next call fits');
+    assert.doesNotMatch(guess, /kube:other/, 'not a resource closed to this project');
+    const there = (await ask({ resource: 'ssh:ci-host', argv: ['get', 'pods'] }) as any).hint as string;
+    assert.match(there, /מותרת ב-`kube:lumo-dev`, `kube:lumo-prod` \(פרודקשן\)/, 'the words fit another resource: say which, and that prod is prod');
+    assert.doesNotMatch(there, /kube:other/);
   } finally { await env.cleanup(); }
 });
 
@@ -290,7 +297,10 @@ test('access: a card closed by anyone but him is not an approval', async () => {
   try {
     const a = await ask({ resource: 'kube:lumo-prod', argv: ['get', 'pods'], wait: 0 }) as any;
     env.hq.mailbox.complete(env.hq.inbox.open().find((i) => i.kind === 'go')!.id, { by: 'hq', note: 'נסגר' });
-    assert.equal(((await ask({ request: a.request })) as any).status, 'denied');
+    const r = await ask({ request: a.request }) as any;
+    assert.equal(r.status, 'denied');
+    assert.match(r.message, /נסגר בלי אישור של רן/);
+    assert.doesNotMatch(r.message, /רן דחה/, 'not his no: the worker should not read it as one');
     assert.equal(runner.started.length, 0);
   } finally { await env.cleanup(); }
 });

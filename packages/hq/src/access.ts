@@ -15,7 +15,7 @@ import { OWNER } from '@company/shared';
 import type { Hq } from './hq.ts';
 import { getIdentity } from './org.ts';
 import { readCharter } from './workspace.ts';
-import { parseCatalog, planAccess, redact, type AccessClass, type Catalog, type Plan, type Resource } from './access-policy.ts';
+import { describeResource, parseCatalog, planAccess, redact, type AccessClass, type Catalog, type Plan, type Resource } from './access-policy.ts';
 
 /** At most this many at once: the runs are only a relay (ssh, kubectl), but the server is shared. */
 export const MAX_RUNNING = 6;
@@ -175,16 +175,26 @@ export class Access {
     const refused = (kind: 'unfit' | 'denied', why2: string, hint?: string): AccessReply => {
       const id = insert(kind, null, `${resource} ${argv.join(' ')}`.slice(0, 500), why2);
       this.hq.store.emit(kind === 'unfit' ? 'access.unfit' : 'access.denied', identity, { request: id, resource, argv, project: who.project, why: why2 });
-      return { status: kind, request: `acc-${id}`, message: `${kind === 'unfit' ? 'לא מתאים לרשימה' : 'נדחה'}: ${why2}`, ...(hint ? { hint } : {}) };
+      // The hint quotes the catalog's allowlists: a line in it that looks like a secret is taken out, like any output.
+      return { status: kind, request: `acc-${id}`, message: `${kind === 'unfit' ? 'לא מתאים לרשימה' : 'נדחה'}: ${why2}`, ...(hint ? { hint: redact(hint) } : {}) };
     };
 
     if (!res) {
-      const names = Object.entries(catalog).filter(([, r]) => !r.projects || (who.project && r.projects.includes(who.project))).map(([n]) => n);
-      return refused('unfit', `אין משאב בשם \`${resource}\` בקטלוג`, names.length ? `משאבים שזמינים למשימה הזו: ${names.join(', ')}` : 'הקטלוג ריק או לא נטען. המשימה תמשיך בשרת הראשי');
+      const open = Object.entries(catalog).filter(([, r]) => !r.projects || (who.project && r.projects.includes(who.project)));
+      return refused('unfit', `אין משאב בשם \`${resource}\` בקטלוג`, open.length
+        ? `משאבים שזמינים למשימה הזו:\n${open.map(([n, r]) => `- ${describeResource(n, r)}`).join('\n')}`
+        : 'הקטלוג ריק או לא נטען. המשימה תמשיך בשרת הראשי');
     }
     if (res.projects && !(who.project && res.projects.includes(who.project))) return refused('denied', `המשאב \`${resource}\` לא פתוח לפרויקט ${who.project ?? '(בלי פרויקט)'}`);
     const verdict = planAccess(resource, res, argv);
-    if (!verdict.ok) return refused(verdict.kind === 'deny' ? 'denied' : 'unfit', verdict.why, verdict.hint);
+    if (!verdict.ok) {
+      // The same words may fit another resource of this task ("kubectl top nodes" is in ssh:k3s-prod, not ssh:k3s): say where.
+      const elsewhere = verdict.kind === 'deny' ? [] : Object.entries(catalog)
+        .filter(([n, r]) => n !== resource && (!r.projects || (who.project && r.projects.includes(who.project))) && planAccess(n, r, argv).ok)
+        .map(([n, r]) => `\`${n}\`${r.env === undefined || r.env === 'prod' ? ' (פרודקשן)' : ''}`);
+      const hint = [elsewhere.length ? `הפקודה הזו מותרת ב-${elsewhere.join(', ')}` : '', verdict.hint ?? ''].filter(Boolean).join('\n');
+      return refused(verdict.kind === 'deny' ? 'denied' : 'unfit', verdict.why, hint || undefined);
+    }
 
     const plan = verdict.plan;
     const prod = res.env === undefined || res.env === 'prod';
@@ -219,10 +229,12 @@ export class Access {
     while (r.state === 'pending') {
       const d = this.decision(r);
       if (d === 'yes') return this.start(r, plan ?? this.replan(r), Math.max(0, (until - Date.now()) / 1000), r.approved_by ? undefined : 'owner');
-      if (d === 'no') {
+      if (d === 'no' || d === 'closed') {
+        // Only his own no is "he declined": a card someone else closed ran nothing, and the worker should not read it as his answer.
+        const note = d === 'no' ? 'רן דחה' : 'הכרטיס נסגר בלי אישור של רן, והפקודה לא רצה. אם עדיין צריך אותה, בקשה חדשה פותחת כרטיס חדש';
         const res = this.db.prepare(`UPDATE access_requests SET state = 'denied', decided_at = ?, note = ? WHERE id = ? AND state = 'pending'`)
-          .run(this.now(), 'רן דחה, או שהכרטיס נסגר בלי אישור שלו', r.id);
-        if (res.changes) this.hq.store.emit('access.denied', r.identity, { request: r.id, by: 'owner' });
+          .run(this.now(), note, r.id);
+        if (res.changes) this.hq.store.emit('access.denied', r.identity, { request: r.id, by: d === 'no' ? 'owner' : 'closed' });
         r = this.row(r.id)!;
         continue;
       }
@@ -238,16 +250,15 @@ export class Access {
   }
 
   /** His verdict on the card: yes, no, or still open. Yes is his own close (mailbox.complete / reply record who closed it and whether he declined); a card closed by anyone else is not an approval. */
-  private decision(r: AccessRow): 'yes' | 'no' | 'open' {
+  private decision(r: AccessRow): 'yes' | 'no' | 'closed' | 'open' {
     if (r.approved_by) return 'yes'; // approved by a grant, and waiting only for a free place to run
     const item = r.inbox_id ? this.hq.inbox.get(r.inbox_id) : undefined;
-    if (!item) return 'no';
+    if (!item) return 'closed';
     if (item.state === 'open') return 'open';
-    if (item.state === 'dismissed') return 'no';
     const ev = this.db.prepare(`SELECT data FROM events WHERE type = 'inbox.completed' AND json_extract(data, '$.id') = ? ORDER BY seq DESC LIMIT 1`).get(item.id) as { data: string } | undefined;
-    if (!ev) return 'no';
-    const d = JSON.parse(ev.data) as { declined?: boolean; by?: string };
-    return d.by === OWNER && !d.declined ? 'yes' : 'no';
+    const d = (ev ? JSON.parse(ev.data) : {}) as { declined?: boolean; by?: string };
+    if (d.by !== OWNER) return 'closed';
+    return d.declined || item.state === 'dismissed' ? 'no' : 'yes';
   }
 
   private replan(r: AccessRow): Plan {

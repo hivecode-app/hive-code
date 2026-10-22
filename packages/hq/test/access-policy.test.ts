@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { matchPattern, parseCatalog, planAccess, planKube, planQuery, planSsh, redact, type KubeResource, type SshResource } from '../src/access-policy.ts';
+import { describeResource, matchPattern, parseCatalog, planAccess, planKube, planQuery, planSsh, redact, type KubeResource, type SshResource } from '../src/access-policy.ts';
 
 const dev: KubeResource = { type: 'kube', namespace: 'lumo-dev', kubeconfig: '/k/dev.yaml', env: 'dev' };
 const plan = (argv: string[], res: KubeResource = dev) => planKube(res, argv);
@@ -150,4 +150,22 @@ test('redact replaces a line that looks like a secret and leaves the rest', () =
   assert.match(out, /^ok line\n\[שורה הוסתרה/);
   assert.match(out, /\nlast$/);
   assert.ok(!out.includes('ghp_'));
+});
+
+test('describeResource: an ssh allowlist reads as groups, and a change in prod is marked GO', () => {
+  const k3s: SshResource = { type: 'ssh', host: 'h', env: 'prod', allow: [
+    ...['pods', 'deploy', 'svc'].map((t) => ({ argv: ['kubectl', '-n', 'p', 'get', t], class: 'read' as const })),
+    { argv: ['kubectl', '-n', 'p', 'get', 'pods', '-o', 'wide'], class: 'read' },
+    { argv: ['kubectl', '-n', 'p', 'rollout', 'restart', 'deploy/*'], class: 'write' },
+    { argv: ['kubectl', 'top', 'nodes'], class: 'read' },
+  ] };
+  const d = describeResource('ssh:k3s-prod', k3s);
+  assert.match(d, /^`ssh:k3s-prod` \(פרודקשן/);
+  assert.match(d, /kubectl -n p get \{pods\|deploy\|svc\|pods -o wide\}/);
+  assert.match(d, /kubectl -n p rollout \{restart deploy\/\*\} \(GO\)/);
+  assert.match(d, /למשל `kubectl -n p get pods`/, 'the example is a command that runs as is');
+  const ci: SshResource = { type: 'ssh', host: 'h', env: 'ci', allow: [{ argv: ['df'] }, { argv: ['df', '-h'] }] };
+  assert.match(describeResource('ssh:ci', ci), /מותר: df · df \{-h\}$/);
+  assert.match(describeResource('ssh:none', { type: 'ssh', host: 'h', env: 'ci', allow: [] }), /אין עדיין פקודות/);
+  assert.match(d, /kubectl top \{nodes\}/);
 });
