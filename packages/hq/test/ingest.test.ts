@@ -117,6 +117,28 @@ test('handoff feeds prime.json of the next shift; open_ticket reports back; reca
   } finally { await env.cleanup(); }
 });
 
+test('open_team priority: explicit field, p0/p1 from the title, explicit beats the title', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock } = env;
+    const open = async (name: string, extra: Record<string, unknown>, id: string) => {
+      const r = await post(sock, '/v1/ops', entry('open_team', { name, purpose: 'y', project: 'agent-company', ...extra }, id, 'yoav'));
+      return { r, pr: r.status === 200 ? hq.scheduler.task(r.json.result.task as number)!.priority : undefined };
+    };
+    assert.equal((await open('משימה רגילה', {}, 'yoav-p:1')).pr, 2, 'default unchanged');
+    assert.equal((await open('משימה דחופה', { priority: 1 }, 'yoav-p:2')).pr, 1, 'explicit field');
+    assert.equal((await open('p0 תיקון פרצה', {}, 'yoav-p:3')).pr, 0);
+    assert.equal((await open('P0: תיקון פרצה', {}, 'yoav-p:4')).pr, 0);
+    assert.equal((await open('  [p0] תיקון', {}, 'yoav-p:5')).pr, 0);
+    assert.equal((await open('(P1) תיקון', {}, 'yoav-p:6')).pr, 1);
+    assert.equal((await open('p1: תיקון', {}, 'yoav-p:7')).pr, 1);
+    assert.equal((await open('p2: תיקון', {}, 'yoav-p:8')).pr, 2, 'only p0 and p1 are read');
+    assert.equal((await open('p05 משהו', {}, 'yoav-p:9')).pr, 2, 'p0 must stand alone');
+    assert.equal((await open('p0: תיקון', { priority: 3 }, 'yoav-p:10')).pr, 3, 'explicit beats the title');
+    assert.equal((await open('x', { priority: 4 }, 'yoav-p:11')).r.status, 400, 'out of range');
+  } finally { await env.cleanup(); }
+});
+
 test('open_team opens a task: queued under the project, the worker hears the task from the opener', async () => {
   const env = await ingestEnv();
   try {

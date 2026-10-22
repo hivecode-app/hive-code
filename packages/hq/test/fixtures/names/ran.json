@@ -358,7 +358,7 @@
   },
   {
    "name": "open_team",
-   "description": "פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. עם assignee המשימה הולכת לעובד הקבוע שהתחום שלו: worktree משלה ו-session נקי, ואם הוא באמצע משימה אחרת היא מחכה בתור שלו. אם hq דוחה (למשל פרויקט רדום או assignee לא חוקי), הדחייה והסיבה חוזרות כשגיאה. משימה שהיא חלק ממאמץ גדול: name מתחיל בשם המאמץ, e.g. \"מוצר גנרי, שלב 4: אפליקציה אחת לכל שרת\". המאמץ שייך לך, והשיחה איתך היא הבית שלו. Open a task team: queued; a fresh worker starts in a free slot and reports back to you when done. With assignee it goes to that standing worker (own worktree, fresh session, one task at a time). A rejection by hq comes back as an error with the reason. A task that is part of a larger effort starts its name with the effort's name.",
+   "description": "פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. עם assignee המשימה הולכת לעובד הקבוע שהתחום שלו: worktree משלה ו-session נקי, ואם הוא באמצע משימה אחרת היא מחכה בתור שלו. אם hq דוחה (למשל פרויקט רדום או assignee לא חוקי), הדחייה והסיבה חוזרות כשגיאה. משימה שהיא חלק ממאמץ גדול: name מתחיל בשם המאמץ, e.g. \"מוצר גנרי, שלב 4: אפליקציה אחת לכל שרת\". המאמץ שייך לך, והשיחה איתך היא הבית שלו. Open a task team: queued; a fresh worker starts in a free slot and reports back to you when done. With assignee it goes to that standing worker (own worktree, fresh session, one task at a time). A rejection by hq comes back as an error with the reason. A task that is part of a larger effort starts its name with the effort's name. עדיפות: priority 0-3 (0 הכי דחוף, ברירת מחדל 2). בלי priority, כותרת שמתחילה ב-p0 או p1 (גם p0: או אחרי רווח או סוגריים) מקבלת אותה עדיפות. Priority: priority 0-3 (0 most urgent, default 2). Without priority, a name starting with p0 or p1 (also \"p0:\", after a space or bracket) gets that priority.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -369,6 +369,12 @@
      "purpose": {
       "type": "string",
       "description": "מה בדיוק לעשות ואיך יודעים שזה גמור / what to do and the definition of done"
+     },
+     "priority": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3,
+      "description": "עדיפות 0-3, 0 הכי דחוף, ברירת מחדל 2. גובר על p0/p1 בכותרת / priority 0-3, 0 most urgent, default 2; overrides a p0/p1 title prefix"
      },
      "project": {
       "type": "string",

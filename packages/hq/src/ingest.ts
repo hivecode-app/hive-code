@@ -41,6 +41,11 @@ export class IngestError extends Error {
 }
 
 const s = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
+/** Priority from a title like "p0: …", "P1 …" or "[p0] …" (after spaces or brackets). Only p0 and p1: the levels a lead writes to jump the queue. */
+export const titlePriority = (title: string): number | undefined => {
+  const m = /^[\s([{]*p([01])(?![0-9A-Za-z])/i.exec(title);
+  return m ? Number(m[1]) : undefined;
+};
 const strList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 /** Opens a GitHub issue for open_ticket. Injected in tests; default is the gh CLI. */
@@ -209,8 +214,13 @@ export class Ingest {
           .get(base, `${base.replace(/[\\%_]/g, (c) => `\\${c}`)} · %`) as { ref: string } | undefined;
         const taken = !open && db.prepare('SELECT 1 FROM tasks WHERE ref = ?').get(base);
         const ref = open?.ref ?? (taken ? `${base} · ${e.id}` : base);
+        // priority: explicit 0..3 wins; else p0/p1 at the start of the title; else the scheduler's default.
+        if (a.priority != null && (!Number.isInteger(a.priority) || (a.priority as number) < 0 || (a.priority as number) > 3)) {
+          throw new IngestError(400, 'open_team: priority must be an integer 0..3', 'ה-`priority` חייב להיות מספר שלם בין 0 ל-3');
+        }
+        const priority = a.priority != null ? (a.priority as number) : titlePriority(need('name'));
         const task = this.hq.scheduler.addTask({
-          title: need('name'), body: need('purpose'), project, ref, labels: [`opened-by:${e.identity}`, ...(s(a.repo) ? [`repo:${s(a.repo)}`] : []),
+          title: need('name'), body: need('purpose'), project, ref, priority, labels: [`opened-by:${e.identity}`, ...(s(a.repo) ? [`repo:${s(a.repo)}`] : []),
             // Needs what exists only here: stays here (nodes.ts NEEDS_LOCAL). Default: wherever there is room.
             // `remote` (before 22/10) is ignored: every task may go to a node now.
             ...(a.local === true ? ['needs-local'] : [])],

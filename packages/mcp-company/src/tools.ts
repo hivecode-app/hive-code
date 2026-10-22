@@ -125,9 +125,12 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'משימה שהיא חלק ממאמץ גדול: name מתחיל בשם המאמץ, e.g. "מוצר גנרי, שלב 4: אפליקציה אחת לכל שרת". המאמץ שייך לך, והשיחה איתך היא הבית שלו. '
       + 'Open a task team: queued; a fresh worker starts in a free slot and reports back to you when done. With assignee it goes to that standing '
       + 'worker (own worktree, fresh session, one task at a time). A rejection by hq comes back as an error with the reason. '
-      + 'A task that is part of a larger effort starts its name with the effort\'s name.', {
+      + 'A task that is part of a larger effort starts its name with the effort\'s name. '
+      + 'עדיפות: priority 0-3 (0 הכי דחוף, ברירת מחדל 2). בלי priority, כותרת שמתחילה ב-p0 או p1 (גם p0: או אחרי רווח או סוגריים) מקבלת אותה עדיפות. '
+      + 'Priority: priority 0-3 (0 most urgent, default 2). Without priority, a name starting with p0 or p1 (also "p0:", after a space or bracket) gets that priority.', {
       name: s('כותרת המשימה. חלק ממאמץ גדול: שם המאמץ קודם, e.g. "מוצר גנרי, שלב 4: …" / task title; part of a larger effort: the effort\'s name first'),
       purpose: s('מה בדיוק לעשות ואיך יודעים שזה גמור / what to do and the definition of done'),
+      priority: { type: 'integer', minimum: 0, maximum: 3, description: 'עדיפות 0-3, 0 הכי דחוף, ברירת מחדל 2. גובר על p0/p1 בכותרת / priority 0-3, 0 most urgent, default 2; overrides a p0/p1 title prefix' },
       project: s('הפרויקט, e.g. agent-company (ברירת מחדל: הפרויקט שלך) / project (default: yours)'),
       ref: s('טיקט, e.g. hivecode-app/hive-code#11 / issue reference'),
       repo: s('ה-checkout מהאמנה (name), אם יש בפרויקט יותר מאחד. ברירת מחדל: הראשון / charter checkout name, default the first'),
