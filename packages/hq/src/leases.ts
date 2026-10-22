@@ -52,6 +52,18 @@ export interface LeaseReply {
   alternative?: string;
 }
 
+/** A lease as the app shows it. */
+export interface LeaseView {
+  id: string; machine: string; class: string; state: 'queued' | 'granted'; task: number | null; identity: string;
+  project: string | null; project_name: string | null; mem_mb: number; note: string | null;
+  /** granted: since it was given · queued: since it asked */
+  age_min: number;
+  /** granted: until its expected end · queued: until its turn */
+  eta_min: number | null;
+  /** queued: the lease it waits for, as a phrase ("build של לומו (משימה 351)"); null when it waits for the queue before it */
+  waiting_for: string | null;
+}
+
 /** What company-run takes when it attaches: the ceiling of the scope and the environment of the command. */
 export interface RunPlan {
   lease: string; class: string; memoryMax: string; cpuWeight: number; env: Record<string, string>; remainingMs: number;
@@ -86,6 +98,34 @@ export class Leases {
   /** Open leases (queued and granted), the oldest first. */
   list(): LeaseRow[] {
     return this.db.prepare(`SELECT * FROM leases WHERE state != 'released' ORDER BY created_at, id`).all() as LeaseRow[];
+  }
+
+  /** The open leases of the screen "משאבים": who holds or waits for what, how long, and for the queued, when and behind whom. */
+  active(): LeaseView[] {
+    const rows = this.list();
+    return rows.map((r): LeaseView => {
+      const base = {
+        id: leaseName(r.id), machine: r.machine, class: r.class, state: r.state as 'queued' | 'granted', task: r.task, identity: r.identity,
+        project: r.project, project_name: r.project ? this.hq.projectName(r.project) : null, mem_mb: r.mem_mb, note: r.note,
+      };
+      if (r.state === 'granted') {
+        const since = r.granted_at ?? r.created_at;
+        return { ...base, age_min: Math.max(0, Math.floor((this.now() - since) / 60_000)), eta_min: mins(Math.max(0, this.endsAt(r) - this.now())), waiting_for: null };
+      }
+      const rep = this.reply(r);
+      const by = this.blockedBy(r, this.granted(r.machine));
+      // Who holds the room, in a phrase the screen can put in a sentence: "build של לומו (משימה 351)".
+      const who = by && by !== 'budget' ? `${by.class} של ${by.project ? this.hq.projectName(by.project) : by.identity}${by.task ? ` (משימה ${by.task})` : ''}` : null;
+      return { ...base, age_min: Math.max(0, Math.floor((this.now() - r.created_at) / 60_000)), eta_min: rep.eta_min ?? null, waiting_for: who };
+    });
+  }
+
+  /** In how many minutes the first granted lease of a machine is expected to end, and whose it is; null when nothing is held. */
+  nextFree(machine: string): { eta_min: number; holder: string; project: string | null } | null {
+    const held = this.granted(machine);
+    if (!held.length) return null;
+    const first = [...held].sort((a, b) => this.endsAt(a) - this.endsAt(b))[0]!;
+    return { eta_min: mins(Math.max(0, this.endsAt(first) - this.now())), holder: this.holderText(first), project: first.project };
   }
 
   private idOf(v: unknown): number {

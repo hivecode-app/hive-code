@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv } from './helpers.ts';
+import { DEFAULT_HEAVY } from '../src/heavy.ts';
 import { attribute, parseRaw, sections, type AttrCtx, type Machine } from '../src/resources.ts';
 
 const FAST_OUT = `##memory
@@ -133,6 +134,7 @@ identities:
     resident: true
     automations:
       - {id: pressure-watch, what: משימה דחופה שמחכה בגלל זיכרון, enabled: true}
+      - {id: unidentified-watch, what: צרכן לא מזוהה שמחזיק זיכרון שעה, enabled: true}
 `;
 
 test('דגימה ל-DB, GET /api/resources והכלי: לפי פרויקט, "לא מזוהה" ו"לא נמדד" גלויים; הטבלה מתגלגלת', async () => {
@@ -180,5 +182,85 @@ test('pressure-watch: ההודעה אומרת מי מחזיק לפי פרויק�
   await hq.pressureWatch.sweep();
   const item = hq.inbox.open().find((i) => i.kind === 'incident')!;
   assert.match(item.body, /מי מחזיק, לפי פרויקט: .*לא מזוהה/);
+  await env.cleanup();
+});
+
+test('unidentified-watch: צרכן לא מזוהה גדול שעה ברצף הוא פריט אחד; קטן, או שנעלם באמצע, לא', async () => {
+  const env = await makeEnv({ org: ORG, noStart: false });
+  const { hq, clock } = env;
+  let out = FAST_OUT;
+  hq.resources.machines = () => [{ name: 'local', run: async (s) => (s.includes('docker-ps') ? DOCKER_OUT : out) }];
+  const tick = async (min: number) => { clock.t += min * 60_000; await hq.resources.sample(); hq.unidentifiedWatch.sweep(); };
+  const items = () => hq.inbox.open().filter((i) => i.kind === 'incident' && /לא מזוהה/.test(i.title) && /gradle/.test(i.body));
+  await hq.resources.sample();
+  hq.unidentifiedWatch.sweep();
+  await tick(30);
+  assert.equal(items().length, 0, 'half an hour is not yet');
+  // it goes away for one reading: the hour starts again
+  out = FAST_OUT.replace('system.slice/gradle.service\t7516192768', 'system.slice/gradle.service\t1048576');
+  await tick(20);
+  out = FAST_OUT;
+  await tick(10);
+  await tick(45);
+  assert.equal(items().length, 0, 'the clock restarted');
+  await tick(20);
+  assert.equal(items().length, 1);
+  assert.match(items()[0]!.title, /7\.0GB.*דקות/);
+  assert.match(items()[0]!.body, /gradle/);
+  await tick(10);
+  assert.equal(items().length, 1, 'one item per incident');
+  await env.cleanup();
+});
+
+test('unidentified-watch: כבויה (או בלי אוטומציה) לא שומרת שעון ולא מתריעה', async () => {
+  const env = await makeEnv({ org: ORG.replace('unidentified-watch', 'something-else'), noStart: false });
+  const { hq, clock } = env;
+  hq.resources.machines = () => [{ name: 'local', run: async (s) => (s.includes('docker-ps') ? DOCKER_OUT : FAST_OUT) }];
+  await hq.resources.sample();
+  hq.unidentifiedWatch.sweep();
+  clock.t += 2 * 3600_000;
+  await hq.resources.sample();
+  hq.unidentifiedWatch.sweep();
+  assert.equal(hq.inbox.open().filter((i) => i.kind === 'incident').length, 0);
+  assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM meta WHERE key LIKE 'unidentified_watch.%'`).get() as any).n, 0);
+  await env.cleanup();
+});
+
+test('מסך המשאבים: הזמנות פעילות ותור, ומשימה שמחכה אומרת למי ובכמה זמן', async () => {
+  const env = await makeEnv({ org: ORG, noStart: false, cfg: { heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: { local: { memMb: 10_000 } } } } });
+  const { hq, clock } = env;
+  hq.resources.machines = () => [{ name: 'local', run: async (s) => (s.includes('docker-ps') ? DOCKER_OUT : FAST_OUT) }];
+  await hq.resources.sample();
+  const db = hq.store.db;
+  const ins = db.prepare(`INSERT INTO leases (identity, shift, task, project, class, machine, note, priority, mem_mb, cpu, exclusive, timeout_ms, state, created_at, polled_at, granted_at)
+    VALUES ('eli', 'c-1', 7, 'agent-company', 'build', 'local', 'APK', 2, 8192, 4, NULL, 1800000, ?, ?, ?, ?)`);
+  ins.run('granted', clock.t - 5 * 60_000, clock.t, clock.t - 5 * 60_000);
+  ins.run('queued', clock.t - 60_000, clock.t, null);
+  const v = hq.resources.view();
+  assert.deepEqual(v.leases.map((l) => [l.state, l.class, l.project_name !== null, l.age_min]), [['granted', 'build', true, 5], ['queued', 'build', true, 1]]);
+  assert.ok(v.leases[0]!.eta_min! >= 1);
+  assert.match(v.leases[1]!.waiting_for ?? '', /build/);
+  // a task held back for memory: who holds, and when a lease is expected to end
+  hq.scheduler.memInfo = () => ({ totalMb: 23_000, availableMb: 3_500 });
+  hq.scheduler.loadInfo = () => ({ load1: 0.5, cpus: 8 });
+  const t = hq.scheduler.addTask({ title: 'משימה שמחכה', project: 'agent-company' });
+  const w = hq.resources.view().waiting.find((x) => x.task === t.id)!;
+  assert.match(w.waiting_for ?? '', /לא מזוהה מחזיק \d+\.\dGB/);
+  assert.equal(w.eta_min, null, 'an unidentified holder has no lease: no honest estimate');
+  assert.match(hq.openTasks().find((x) => x.id === t.id)!.reason!, /^מחכה לזיכרון: צרכן לא מזוהה מחזיק \d+\.\dGB$/);
+  // the biggest holder is a project that holds a lease: its lease's end is the estimate
+  hq.cfg.resources.map['gradle.service'] = 'agent-company';
+  const onlyGradle = FAST_OUT.split('\n').filter((l) => !/ci-|ghost|t394|docker-|tiny/.test(l)).join('\n');
+  hq.resources.machines = () => [{ name: 'local', run: async (sc) => (sc.includes('docker-ps') ? `##docker-ps\n##rc docker-ps 127\n##docker\n##rc docker 127\n` : onlyGradle) }];
+  clock.t += 30_000;
+  await hq.resources.sample();
+  assert.equal(hq.resources.view().waiting.find((x) => x.task === t.id)!.eta_min, v.leases[0]!.eta_min);
+  assert.match(hq.openTasks().find((x) => x.id === t.id)!.reason!, /^מחכה לזיכרון: .* מחזיק \d+\.\dGB · כ-\d+ דקות$/);
+  // too loaded rather than short of memory: it says so, who uses the CPU, and no estimate
+  hq.scheduler.memInfo = () => ({ totalMb: 23_000, availableMb: 20_000 });
+  hq.scheduler.loadInfo = () => ({ load1: 40, cpus: 8 });
+  const lo = hq.openTasks().find((x) => x.id === t.id)!.reason!;
+  assert.match(lo, /^מחכה שהעומס יירד/);
+  assert.doesNotMatch(lo, /דקות/);
   await env.cleanup();
 });

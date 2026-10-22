@@ -29,6 +29,7 @@ import { openedBy, openTasks } from './open-tasks.ts';
 import { Home } from './home.ts';
 import { MemoryFiles, type Run } from './memory-files.ts';
 import { PressureWatch } from './pressure-watch.ts';
+import { UnidentifiedWatch } from './unidentified-watch.ts';
 import { DiskWatch } from './disk-watch.ts';
 import { Resources, SAMPLE_EVERY_MS } from './resources.ts';
 import { StallWatch, type OpenFilesReader } from './stall-watch.ts';
@@ -109,6 +110,7 @@ export class Hq {
   readonly stallWatch: StallWatch;
   readonly errorWatch: ErrorWatch;
   readonly pressureWatch: PressureWatch;
+  readonly unidentifiedWatch: UnidentifiedWatch;
   readonly diskWatch: DiskWatch;
   readonly resources: Resources;
   readonly nodes: Nodes;
@@ -151,6 +153,7 @@ export class Hq {
     this.stallWatch = new StallWatch(this, deps.openFiles);
     this.errorWatch = new ErrorWatch(this);
     this.pressureWatch = new PressureWatch(this);
+    this.unidentifiedWatch = new UnidentifiedWatch(this);
     this.diskWatch = new DiskWatch(this);
     this.resources = new Resources(this);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
@@ -208,7 +211,7 @@ export class Hq {
   }
 
   /** "בעבודה ובתור" (#128): every task not done, with who opened it, who is on it and why it waits. */
-  openTasks(b = this.board()) { return openTasks(this.store, this.scheduler, b); }
+  openTasks(b = this.board()) { return openTasks(this.store, this.scheduler, b, () => this.resources.busy()); }
 
   teams() {
     // A project's team shows the owner's name for the project (org.yaml `projects[].name`), or null.
@@ -309,6 +312,8 @@ export class Hq {
       this.every(30_000, 'error-catcher', () => this.errorWatch.sweep());
       // task-297: a p0 task held back for memory or load for 10 minutes → one incident for him, with the top processes.
       this.every(30_000, 'pressure-watch', () => this.pressureWatch.sweep());
+      // resources stage 3: a consumer no project owns holding a lot of memory for an hour → one item for him.
+      this.every(60_000, 'unidentified-watch', () => this.unidentifiedWatch.sweep());
       // task-382: the disk at 85% → scripts/disk-clean.mjs now; at 92% after it → one urgent item with the biggest consumers.
       this.every(5 * 60_000, 'disk-watch', () => this.diskWatch.sweep());
       // resources stage 1: disk, memory, cgroups and docker of each machine, by project (reads a node only while its poll says it is up).

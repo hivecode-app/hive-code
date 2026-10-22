@@ -14,6 +14,7 @@ import type { Hq } from './hq.ts';
 import { q } from './nodes.ts';
 import { parseBytes } from './disk-watch.ts';
 import { BUSY_REASON } from './scheduler.ts';
+import type { LeaseView } from './leases.ts';
 
 export const SAMPLE_EVERY_MS = 30_000;
 export const KEEP_MS = 6 * 3600_000;
@@ -246,7 +247,9 @@ export interface MachineView {
   unidentified: { kind: Kind; name: string; mem_mb: number }[];
 }
 
-export interface ResourcesView { at: number; machines: MachineView[]; waiting: { task: number; ref: string | null; title: string; project: string | null; waiting_min: number }[] }
+/** A task held back for the machine: for whom it waits (a sentence) and in how many minutes it is expected to start; null = not known. */
+export interface WaitingTask { task: number; ref: string | null; title: string; project: string | null; waiting_min: number; waiting_for: string | null; eta_min: number | null }
+export interface ResourcesView { at: number; machines: MachineView[]; waiting: WaitingTask[]; leases: LeaseView[] }
 
 export class Resources {
   private hq: Hq;
@@ -361,9 +364,29 @@ export class Resources {
     });
     const { scheduler } = this.hq;
     const slots = scheduler.slots();
+    const busy = this.busy(machines.find((m) => m.name === 'local'));
     const waiting = scheduler.queue().filter((t) => scheduler.waitReason(t, slots) === BUSY_REASON)
-      .map((t) => ({ task: t.id, ref: t.ref ?? null, title: t.title, project: t.project ?? null, waiting_min: Math.max(0, Math.round((now - (t.created_at ?? now)) / 60_000)) }));
-    return { at: now, machines, waiting };
+      .map((t): WaitingTask => ({ task: t.id, ref: t.ref ?? null, title: t.title, project: t.project ?? null, waiting_min: Math.max(0, Math.round((now - (t.created_at ?? now)) / 60_000)), waiting_for: busy.waiting_for, eta_min: busy.eta_min }));
+    return { at: now, machines, waiting, leases: this.hq.leases.active() };
+  }
+
+  /**
+   * What a task held back for the machine waits for, in his words. Memory: who holds the most. Load: who uses the most CPU, and no
+   * estimate. An estimate only when the holder is a project that holds a lease on the machine: the lease's expected end is then
+   * that holder's; for an unidentified one, or any other, hq has no honest estimate and says none.
+   */
+  busy(local: MachineView | undefined = this.view().machines.find((m) => m.name === 'local')): { reason: 'memory' | 'load'; waiting_for: string | null; eta_min: number | null } {
+    const gb = (mb: number) => `${(mb / 1024).toFixed(1)}GB`;
+    const load = this.hq.scheduler.slots().pressure === 'load';
+    const holders = local?.measured ? local.holders : [];
+    if (load) {
+      const top = [...holders].filter((h) => h.cpu_pct != null).sort((a, b) => b.cpu_pct! - a.cpu_pct!)[0];
+      return { reason: 'load', waiting_for: top ? `${top.project ? top.name : 'צרכן לא מזוהה'} משתמש ב-${Math.round(top.cpu_pct!)}% מעבד` : null, eta_min: null };
+    }
+    const top = holders[0];
+    const next = this.hq.leases.nextFree('local');
+    const who = top ? (top.project ? `${top.name} מחזיק ${gb(top.mem_mb)}` : `צרכן לא מזוהה מחזיק ${gb(top.mem_mb)}`) : null;
+    return { reason: 'memory', waiting_for: who, eta_min: next && top?.project && next.project === top.project ? next.eta_min : null };
   }
 
   /** "מי מחזיק" in a line, for the machine `local`: `לומו 6.1GB · החברה 9GB · לא מזוהה 3GB (name)`. null = nothing read. */

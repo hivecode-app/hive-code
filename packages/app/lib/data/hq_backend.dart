@@ -20,6 +20,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../model/company_time.dart' as company_time;
 import '../model/home_recipe.dart';
 import '../model/map_day.dart';
+import '../model/resources.dart';
 import '../model/models.dart';
 import '../theme/icons.dart';
 import 'backend.dart';
@@ -280,6 +281,15 @@ class HqBackend extends Backend {
   Future<MapDay?> companyDay(String date) async {
     try {
       return MapDay.fromJson((await _get('/api/company-day?date=${Uri.encodeQueryComponent(date)}')) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<ResourcesView?> resources() async {
+    try {
+      return ResourcesView.fromJson((await _get('/api/resources')) as Map<String, dynamic>);
     } catch (_) {
       return null;
     }

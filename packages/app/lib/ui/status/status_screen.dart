@@ -12,6 +12,7 @@ import '../common.dart';
 import '../company_map/map_screen.dart';
 import '../entity_link.dart';
 import '../nav.dart';
+import '../resources/resources_screen.dart';
 import '../system_bar.dart';
 
 class StatusScreen extends StatelessWidget {
@@ -31,6 +32,7 @@ class StatusScreen extends StatelessWidget {
     final done = [for (final t in d.tickets) if (t.doneAt != null && t.assigneeId != null && t.doneAt!.isAfter(since)) t]..sort((a, b) => b.doneAt!.compareTo(a.doneAt!));
     return Column(children: [
       TopBar(title: 'סטטוס', showLink: true, actions: [
+        IBtn('dns', tip: 'משאבים', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ResourcesPage()))),
         IBtn('hub', tip: 'המפה של החברה', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CompanyMapPage()))),
       ]),
       const SystemBar(),

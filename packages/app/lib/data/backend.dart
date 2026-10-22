@@ -7,6 +7,7 @@ import '../model/home_recipe.dart';
 import '../model/models.dart';
 import '../theme/tokens.dart';
 import '../model/map_day.dart';
+import '../model/resources.dart';
 
 class CompanyData {
   CompanyData({
@@ -265,6 +266,9 @@ abstract class Backend extends ChangeNotifier {
 
   /// One day of the company for the map ("2026-10-21"); null when it can't be had. Every message is a line without its text.
   Future<MapDay?> companyDay(String date) async => null;
+
+  /// The machines, who holds them by project and who waits for room (`GET /api/resources`); null when it can't be had.
+  Future<ResourcesView?> resources() async => null;
 
   /// The text of one of that day's messages, when he touches its line.
   Future<MapBody?> companyMessage(String id) async => null;

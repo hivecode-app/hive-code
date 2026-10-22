@@ -4,7 +4,7 @@
 // `tasks {tasks: [ids] | "open"}`. Derived at read time from the tasks, the queue and the board, nothing kept.
 import type { BoardEntry } from './board.ts';
 import { projectLead } from './org.ts';
-import type { Scheduler, TaskRow } from './scheduler.ts';
+import { BUSY_REASON, type Scheduler, type TaskRow } from './scheduler.ts';
 import type { Store } from './store.ts';
 
 /** running: a worker is on it · queued: waits its turn · waiting_for_you: its worker waits for him · blocked: waits for a decision. */
@@ -44,13 +44,14 @@ export function openedBy(t: Pick<TaskRow, 'labels'>): string | null {
 }
 
 /** Running first (oldest start first), then what waits for him, then the queue in its order, then the blocked. */
-export function openTasks(store: Store, scheduler: Scheduler, board: BoardEntry[]): OpenTask[] {
+export function openTasks(store: Store, scheduler: Scheduler, board: BoardEntry[], busy?: () => { reason: 'memory' | 'load'; waiting_for: string | null; eta_min: number | null }): OpenTask[] {
   const tasks = store.db.prepare(`SELECT * FROM tasks WHERE state NOT IN ('done','closed') ORDER BY created_at, id`).all() as TaskRow[];
   if (!tasks.length) return [];
   const queue = scheduler.queue().map((t) => t.id);
   const slots = scheduler.slots();
   const byId = new Map(board.map((b) => [b.id, b]));
   const askSince = store.db.prepare(`SELECT MIN(created_at) t FROM asks WHERE from_identity = ? AND state IN ('open','escalated')`);
+  let busyNow: { reason: 'memory' | 'load'; waiting_for: string | null; eta_min: number | null } | undefined;
   const leads = new Map<string, string | null>();
   const lead = (p: string) => { if (!leads.has(p)) leads.set(p, projectLead(store, p) ?? null); return leads.get(p)!; };
   const out = tasks.map((t): OpenTask => {
@@ -77,6 +78,11 @@ export function openTasks(store: Store, scheduler: Scheduler, board: BoardEntry[
     } else if (pos >= 0) {
       state = 'queued';
       reason = scheduler.waitReason(t, slots);
+      // "השרת עמוס" says nothing: who holds the machine, and when it is expected to free (resources-design.md §2).
+      if (reason === BUSY_REASON && busy) {
+        const b = (busyNow ??= busy());
+        reason = `${b.reason === 'load' ? 'מחכה שהעומס יירד' : 'מחכה לזיכרון'}${b.waiting_for ? `: ${b.waiting_for}` : ''}${b.eta_min != null ? ` · כ-${b.eta_min} דקות` : ''}`;
+      }
     } else {
       // Out of the queue: a decision it waits for, or night mode keeps it for the day.
       const decision = t.state === 'parked' || t.state === 'needs_decision' || labels.includes('needs-decision');

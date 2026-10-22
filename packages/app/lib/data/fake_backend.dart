@@ -5,6 +5,7 @@ import 'dart:async';
 
 import '../model/company_time.dart';
 import '../model/map_day.dart';
+import '../model/resources.dart';
 import '../model/models.dart';
 import 'backend.dart';
 import 'demo_map.dart';
@@ -29,6 +30,9 @@ class FakeBackend extends Backend {
 
   @override
   Future<MapDay?> companyDay(String date) async => demoMapDay(date, upTo: date == _ymdOf(_today) ? (_today.hour * 60 + _today.minute) * 60000 : kDayMs);
+
+  @override
+  Future<ResourcesView?> resources() async => demoResources();
 
   @override
   Future<MapBody?> companyMessage(String id) async => demoMapBody(id);
@@ -583,3 +587,43 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
     ],
   );
 }
+
+
+/// The demo's machines: one busy, with a task waiting for it, one quiet, one that could not be read.
+ResourcesView demoResources() => ResourcesView.fromJson({
+      'machines': [
+        {
+          'name': 'local', 'label': 'hq-host', 'measured': true, 'unmeasured': <String>[],
+          'mem': {'total_mb': 23437, 'avail_mb': 6000, 'used_mb': 17437}, 'load1': 3.2, 'cpus': 8,
+          'disk': {'pct': 71, 'free_mb': 120000},
+          'holders': [
+            {'project': 'lumo', 'name': 'לומו', 'mem_mb': 6246, 'cpu_pct': 41.5, 'count': 3},
+            {'project': 'agent-company', 'name': 'החברה', 'mem_mb': 9216, 'cpu_pct': 12.0, 'count': 5},
+            {'project': null, 'name': 'לא מזוהה', 'mem_mb': 7168, 'cpu_pct': null, 'count': 1},
+          ],
+          'unidentified': [
+            {'kind': 'other', 'name': 'system.slice/gradle.service', 'mem_mb': 7168},
+          ],
+        },
+        {
+          'name': 'ci-host', 'label': 'ci-host', 'measured': true, 'unmeasured': ['docker'],
+          'mem': {'total_mb': 15000, 'avail_mb': 12000, 'used_mb': 3000}, 'load1': 0.2, 'cpus': 4,
+          'disk': {'pct': 88, 'free_mb': 20000},
+          'holders': [
+            {'project': 'lumo', 'name': 'לומו', 'mem_mb': 2048, 'cpu_pct': 5.0, 'count': 1},
+          ],
+          'unidentified': <Object>[],
+        },
+        {
+          'name': 'srv1000001', 'label': 'srv1000001', 'measured': false, 'error': 'ssh timeout', 'unmeasured': ['memory', 'disk', 'cgroups', 'docker'],
+          'holders': <Object>[], 'unidentified': <Object>[],
+        },
+      ],
+      'waiting': [
+        {'task': 292, 'ref': null, 'title': 'תיקון דחוף בשרת', 'project': 'agent-company', 'waiting_min': 4, 'waiting_for': 'צרכן לא מזוהה מחזיק 7.0GB', 'eta_min': 12},
+      ],
+      'leases': [
+        {'id': 'lease-11', 'machine': 'local', 'class': 'build', 'state': 'granted', 'task': 351, 'project': 'lumo', 'project_name': 'לומו', 'mem_mb': 8192, 'note': 'APK', 'age_min': 12, 'eta_min': 14},
+        {'id': 'lease-12', 'machine': 'local', 'class': 'build', 'state': 'queued', 'task': 400, 'project': 'agent-company', 'project_name': 'החברה', 'mem_mb': 8192, 'note': null, 'age_min': 3, 'eta_min': 14, 'waiting_for': 'build של לומו (משימה 351)'},
+      ],
+    });
