@@ -527,8 +527,13 @@ List<DecisionButton> answersOf(BuildContext context, WaitItem item, {bool keys =
 /// The foot line after a decision, for 5 seconds: what was done, and "ביטול" that brings it back.
 class _LastLine extends StatelessWidget {
   const _LastLine();
+
+  // Its own listener: it is const under the screen's builder, which does not rebuild it, and after "לא עכשיו" no
+  // change in the store comes when the 5 seconds end (22/10: the line stayed, with a "ביטול" that did nothing).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(listenable: decisionQueue, builder: (context, _) => _line(context));
+
+  Widget _line(BuildContext context) {
     final p = context.p;
     final d = StoreScope.of(context).data;
     final id = decisionQueue.lastId;

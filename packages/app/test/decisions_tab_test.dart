@@ -246,6 +246,24 @@ void main() {
     await tester.pump(const Duration(seconds: 6));
   });
 
+  // 22/10, on the live build: "לא עכשיו" is sent at once, so no store change comes 5 seconds later to rebuild the
+  // line, and it stayed with a "ביטול" that did nothing.
+  testWidgets('the line after "לא עכשיו" leaves after 5 seconds, on the phone and on the desktop', (tester) async {
+    for (final size in [kPhone, const Size(1440, 900)]) {
+      final store = await tab(tester, [go(from: 'dana'), go(from: 'eli')], size: size);
+      if (size != kPhone) {
+        await tester.pumpWidget(CompanyApp(store: store, home: const Scaffold(body: DecisionsDesktop())));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.text('לא עכשיו'));
+      await tester.pump();
+      expect(find.text('ביטול'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+      expect(find.text('ביטול'), findsNothing, reason: '$size');
+    }
+  });
+
   testWidgets('"אחר כך" sends the decision to the end and the next comes in; the count does not move', (tester) async {
     await tab(tester, [go(from: 'dana'), ask()]);
     expect(find.text('1 מתוך 2'), findsOneWidget);
