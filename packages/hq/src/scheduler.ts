@@ -72,8 +72,13 @@ const STANDING_TASK = `(i.source = 'org' AND i.active = 1 AND i.team_kind != 'ta
  */
 const STANDING_SHIFT = `(i.source = 'org' AND i.active = 1 AND COALESCE(i.team_kind, '') != 'task' AND i.lifecycle != 'resident' AND i.id != @mgr)`;
 
-/** SQL over shifts s: a message to its identity not yet handled. */
-const PENDING = `SELECT 1 FROM messages m WHERE m.to_identity = s.identity AND m.state IN ('queued','delivered')`;
+/**
+ * SQL over shifts s: a message to its identity not yet handled. A `delivered` one counts only while this shift has not
+ * moved on since it took it in: one left `delivered` by an earlier shift (closed before it saw it) is not work waiting
+ * here, and would keep an idle standing worker up for good.
+ */
+const PENDING = `SELECT 1 FROM messages m WHERE m.to_identity = s.identity AND (m.state = 'queued'
+  OR (m.state = 'delivered' AND m.shift_id = s.id AND m.delivered_at >= COALESCE(s.last_event_at, s.started_at)))`;
 
 /** #175: how many times hq wakes one task whose worker rested before it leaves it for a message. */
 const REST_WAKES = 6;

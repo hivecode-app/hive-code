@@ -327,6 +327,28 @@ test('#128: idle leads hold no work slot; with a task waiting they rest after 5 
   } finally { await env.cleanup(); }
 });
 
+test('#128: a message left delivered by an earlier shift does not keep an idle standing worker up', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, clock } = env;
+    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 3 * 450 + 2 * 2500 + 100, availableMb: 4096 + 2 * 2500 + 100 });
+    hq.store.setToggle('scheduler', false);
+    await hq.scheduler.ensureResidents();
+    for (const [id, to] of [['o-1', 'eli'], ['o-2', 'ac-ceo']]) hq.mailbox.tell({ msg_id: id, to, body: 'שלום' });
+    await until(() => ['o-1', 'o-2'].every((m) => hq.mailbox.get(m)!.state === 'delivered'), 3000, 'leads up');
+    await until(() => !hq.shifts.get('eli-1')!.in_turn && !hq.shifts.get('ac-ceo-1')!.in_turn && hq.shifts.get('yoav-1')?.state === 'live', 3000, 'idle');
+    // eli's message was taken by a shift that closed before it saw it: delivered, from another shift.
+    hq.store.db.prepare(`UPDATE messages SET shift_id = 'eli-0' WHERE id = 'o-1'`).run();
+    hq.mailbox.markHandled('o-2');
+    hq.store.setToggle('scheduler', true);
+    for (const n of ['א', 'ב', 'ג']) hq.scheduler.addTask({ title: n, project: 'agent-company' });
+    await until(() => hq.scheduler.queue().length > 0 && hq.scheduler.slots().free === 0, 3000, 'queue waits for a slot');
+    clock.advance(10 * 60_000);
+    for (const id of ['eli-1', 'ac-ceo-1']) hq.shifts.setFields(id, { last_event_at: hq.store.now() - 6 * 60_000 });
+    assert.deepEqual((await hq.scheduler.restOnPressure()).sort(), ['ac-ceo-1', 'eli-1']);
+  } finally { await env.cleanup(); }
+});
+
 test('#128: no pressure (empty queue) → idle leads stay up; a lead in a turn holds a slot', async () => {
   const env = await makeEnv();
   try {
