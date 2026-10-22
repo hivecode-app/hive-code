@@ -13,6 +13,7 @@ import 'package:agent_company/ui/convs/home_v2.dart' show HomeV2, fullSentence, 
 import 'package:agent_company/main.dart';
 import 'package:agent_company/ui/shell.dart' show BottomNav;
 import 'package:flutter/services.dart';
+import 'package:agent_company/ui/common.dart';
 import 'package:agent_company/ui/decisions/decisions_screen.dart';
 import 'package:agent_company/ui/decisions/decisions_strip.dart';
 import 'package:agent_company/ui/nav.dart';
@@ -198,6 +199,34 @@ void main() {
     expect(tester.takeException(), isNull);
     return store;
   }
+
+  testWidgets('an escalated ask shows the manager\'s note as its own line, under the asker\'s card', (tester) async {
+    final w = WaitItem(id: 'n', kind: WaitKind.blockingAsk, from: 'dana', time: '04:00', kicker: 'חוסם', body: 'באיזה צבע?', managerNote: 'את זה אני לא יכול לענות במקומו', managerNoteBy: 'yoav');
+    await tab(tester, [w]);
+    expect(find.textContaining('את זה אני לא יכול לענות במקומו'), findsOneWidget);
+    expect(find.textContaining('באיזה צבע?'), findsOneWidget);
+    expect(find.textContaining('דנה'), findsWidgets);
+  });
+
+  testWidgets('at text 1.3 the long note scrolls above the answers', (tester) async {
+    final w = WaitItem(id: 'n', askId: 'ask-1', kind: WaitKind.blockingAsk, from: 'dana', time: '04:00', kicker: 'חוסם', body: 'באיזה צבע לעשות את הכפתור הראשי?',
+        options: const [AskOption(id: 'a', label: 'כחול'), AskOption(id: 'b', label: 'ירוק')],
+        managerNote: 'את זה אני לא יכול להחליט במקומו, כי זו שאלת מוצר. כדאי לשאול אותו ישירות, והשאלה כבר מחכה לו בטאב ההחלטות. אם לא יענה היום, אמשיך עם הכחול.', managerNoteBy: 'yoav');
+    await tab(tester, [w], scale: 1.3);
+    // The details scroll above the answers: dragging moves the note, and the answers stay.
+    final note = find.textContaining('אמשיך עם הכחול', findRichText: true);
+    final before = tester.getBottomLeft(note).dy, foot = tester.getTopLeft(find.text('כחול')).dy;
+    await tester.drag(find.byType(ListView).first, const Offset(0, -150));
+    await tester.pumpAndSettle();
+    expect(tester.getBottomLeft(note).dy, lessThan(before));
+    expect(tester.getTopLeft(find.text('כחול')).dy, foot);
+  });
+
+  testWidgets('without a note there is no line', (tester) async {
+    await tab(tester, [item('n', WaitKind.blockingAsk)]);
+    expect(find.byWidgetPredicate((w) => w is Ic && w.name == 'forward_to_inbox'), findsNothing);
+    expect(find.textContaining('במקומו'), findsNothing);
+  });
 
   WaitItem go({List<WaitLink> links = const [], String from = 'dana'}) => WaitItem(
         id: 'g-$from',
@@ -472,6 +501,13 @@ void main() {
     testWidgets('phone: a question, all of one weight ($look)', (tester) async {
       await tab(tester, [ask(), go()], dark: dark, scale: scale);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/decisions_tab/phone-ask-$look.png'));
+    });
+    testWidgets('phone: an escalated question with the manager\'s note ($look)', (tester) async {
+      final w = WaitItem(id: 'n', askId: 'ask-1', kind: WaitKind.blockingAsk, from: 'dana', time: '04:00', kicker: 'חוסם', body: 'באיזה צבע לעשות את הכפתור הראשי?', headline: 'באיזה צבע הכפתור הראשי?',
+          options: const [AskOption(id: 'a', label: 'כחול'), AskOption(id: 'b', label: 'ירוק')],
+          managerNote: 'את זה אני לא יכול להחליט במקומו, כי זו שאלת מוצר. כדאי לשאול אותו ישירות, והשאלה כבר מחכה לו בטאב ההחלטות. אם לא יענה היום, אמשיך עם הכחול.', managerNoteBy: 'yoav');
+      await tab(tester, [w], dark: dark, scale: scale);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/decisions_tab/phone-ask-note-$look.png'));
     });
     testWidgets('phone: a check ($look)', (tester) async {
       await tab(tester, [check()], dark: dark, scale: scale);

@@ -427,10 +427,39 @@ class _Body extends StatelessWidget {
         const SizedBox(height: 14),
         CopySelectionArea(child: Rich(t.details, auto: true, style: T.body.copyWith(color: p.text, height: 25 / 15.5))),
       ],
+      if (item.managerNote case final note?) ...[
+        const SizedBox(height: 16),
+        _ManagerNote(by: d.who(item.managerNoteBy ?? '').name, note: note),
+      ],
       if (links.isNotEmpty) ...[
         const SizedBox(height: 20),
         Wrap(spacing: 8, runSpacing: 8, children: links),
       ],
+    ]);
+  }
+}
+
+/// The manager's note on an escalated ask: a small line of its own, under the details. The card stays the asker's.
+class _ManagerNote extends StatelessWidget {
+  const _ManagerNote({required this.by, required this.note});
+  final String by;
+  final String note;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(padding: const EdgeInsets.only(top: 2), child: Ic('forward_to_inbox', size: 18, color: p.text2)),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text.rich(
+          TextSpan(children: [
+            TextSpan(text: '$by: ', style: const TextStyle(fontWeight: FontWeight.w700)),
+            TextSpan(text: note),
+          ]),
+          style: T.secondary.copyWith(color: p.text2),
+        ),
+      ),
     ]);
   }
 }

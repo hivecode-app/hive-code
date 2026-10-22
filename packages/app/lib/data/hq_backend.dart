@@ -1568,6 +1568,12 @@ CompanyData mapSnapshot({
   }
 
   final askById = {for (final a in asks) a['id'] as String: a};
+  // Only an escalated ask carries the note (an answered one is done, and has no card).
+  String? noteOf(Map<String, dynamic>? ask) {
+    final n = ask?['state'] == 'escalated' ? (ask?['manager_note'] as String?)?.trim() : null;
+    return n == null || n.isEmpty ? null : n;
+  }
+
   final waiting = <WaitItem>[];
   for (final i in inbox) {
     if (i['state'] != 'open') continue;
@@ -1596,6 +1602,8 @@ CompanyData mapSnapshot({
       askId: ask != null ? ask['id'] as String : (kind == WaitKind.go ? 'inbox:${i['id']}' : null),
       headline: headline == null || headline.isEmpty ? null : headline,
       ref: i['ref'] as String?,
+      managerNote: noteOf(ask),
+      managerNoteBy: noteOf(ask) == null ? null : manager,
       kind: kind,
       from: (i['from_identity'] as String?) ?? manager,
       time: _hm(i['created_at'] as int),

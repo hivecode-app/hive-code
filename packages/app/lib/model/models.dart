@@ -185,12 +185,19 @@ class WaitItem {
     this.createdAt,
     this.headline,
     this.ref,
+    this.managerNote,
+    this.managerNoteBy,
     String? short,
   }) : short = short ?? kicker;
 
   /// The first line in his words ("עדכון לאפליקציה: תמונות בצ'אט"); [body] is the details under it.
   /// Null on items from before workers gave one: the body is all there is.
   final String? headline;
+
+  /// The manager's note on an escalated ask (hq's `manager_note`): its own line under the card, which stays the asker's.
+  /// Null when there is none, and from an hq before the field.
+  final String? managerNote;
+  final String? managerNoteBy;
 
   /// hq's ref of the inbox item (the ask id, or the request_go op id): his answer message carries it.
   final String? ref;
