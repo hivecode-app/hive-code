@@ -28,6 +28,7 @@ import { openedBy, openTasks } from './open-tasks.ts';
 import { Home } from './home.ts';
 import { MemoryFiles, type Run } from './memory-files.ts';
 import { PressureWatch } from './pressure-watch.ts';
+import { DiskWatch } from './disk-watch.ts';
 import { StallWatch, type OpenFilesReader } from './stall-watch.ts';
 import { ErrorWatch } from './error-watch.ts';
 import { startApi, loadOrCreateToken, health, type ApiServer } from './api.ts';
@@ -105,6 +106,7 @@ export class Hq {
   readonly stallWatch: StallWatch;
   readonly errorWatch: ErrorWatch;
   readonly pressureWatch: PressureWatch;
+  readonly diskWatch: DiskWatch;
   readonly nodes: Nodes;
   private tabServer: TabServer | null = null;
   private ingestServer: Server | null = null;
@@ -145,6 +147,7 @@ export class Hq {
     this.stallWatch = new StallWatch(this, deps.openFiles);
     this.errorWatch = new ErrorWatch(this);
     this.pressureWatch = new PressureWatch(this);
+    this.diskWatch = new DiskWatch(this);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
     this.awaiting = new AwaitingBoard(this.store, this.inbox);
@@ -297,6 +300,8 @@ export class Hq {
       this.every(30_000, 'error-catcher', () => this.errorWatch.sweep());
       // task-297: a p0 task held back for memory or load for 10 minutes → one incident for him, with the top processes.
       this.every(30_000, 'pressure-watch', () => this.pressureWatch.sweep());
+      // task-382: the disk at 85% → scripts/disk-clean.mjs now; at 92% after it → one urgent item with the biggest consumers.
+      this.every(5 * 60_000, 'disk-watch', () => this.diskWatch.sweep());
       this.every(T.backupMs, 'backup', async () => {
         if (!this.store.toggle('backup')) return;
         await backupOnce(this.store, join(this.cfg.stateDir, 'backups'), this.cfg.backupsKeep);

@@ -241,7 +241,7 @@ deploy_hq() {
 
   # User units: symlinks to this checkout, so there is one copy and nothing to drift.
   mkdir -p "$UNITS"
-  for u in agent-company-hq.service agent-company-drift.service agent-company-drift.timer; do
+  for u in agent-company-hq.service agent-company-drift.service agent-company-drift.timer agent-company-disk-clean.service agent-company-disk-clean.timer; do
     [[ "$(readlink "$UNITS/$u" || true)" == "$repo/deploy/$u" ]] || { ln -sfn "$repo/deploy/$u" "$UNITS/$u"; say "יחידה $u מקושרת ל-repo"; }
   done
   # company-ci moved to ci-host (deploy/ci-host/): the old runner unit here goes, link and all.
@@ -253,6 +253,7 @@ deploy_hq() {
   systemctl --user daemon-reload
   systemctl --user enable -q agent-company-hq
   systemctl --user enable -q --now agent-company-drift.timer
+  systemctl --user enable -q --now agent-company-disk-clean.timer
   # This machine's own steps (not the engine's): <COMPANY_HOME>/company/local/deploy-hq.sh, when the company has one.
   local hook="$CHOME/company/local/deploy-hq.sh" out
   if [[ -f "$hook" ]]; then

@@ -1,0 +1,12 @@
+# Disk cleaning (task 382): docker build cache and images, npm cache, journal, /tmp of closed tasks. Installed by
+# `scripts/deploy.sh hq`; the timer runs it daily, and hq runs the same script when the disk passes 85% (disk-watch.ts).
+[Unit]
+Description=agent-company disk clean (docker, caches, /tmp of closed tasks)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/agent-company
+ExecStart=/usr/bin/node %h/projects/agent-company/scripts/disk-clean.mjs
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=30min

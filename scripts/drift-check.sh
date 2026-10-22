@@ -68,10 +68,11 @@ if [[ -n "$until_date" ]] && grep -q '/[0-9a-f]\{32\}/hq/\*' /etc/caddy/sites/ag
 fi
 
 # ── units, hq.env, leftovers ─────────────────────────────────────────────────
-for u in agent-company-hq.service agent-company-drift.service agent-company-drift.timer; do
+for u in agent-company-hq.service agent-company-drift.service agent-company-drift.timer agent-company-disk-clean.service agent-company-disk-clean.timer; do
   [[ "$(readlink "$UNITS/$u")" == "$PROD/deploy/$u" ]] || d "היחידה $u לא מקושרת ל-$PROD/deploy/$u" "שירות של החברה בשרת לא מחובר למה שנפרס"
 done
 systemctl --user is-enabled -q agent-company-drift.timer || d "agent-company-drift.timer לא מופעל" "בדיקת הסטייה הלילית כבויה"
+systemctl --user is-enabled -q agent-company-disk-clean.timer || d "agent-company-disk-clean.timer לא מופעל" "הניקוי היומי של הדיסק כבוי"
 # The company (COMPANY_HOME, scripts/company-home.mjs): this checkout, or its own checkout after the split.
 chome="$(node scripts/company-home.mjs "$STATE")"
 if [[ "$chome" == "$(pwd -P)" ]]; then
