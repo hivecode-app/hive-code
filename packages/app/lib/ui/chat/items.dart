@@ -221,6 +221,7 @@ class _AttachmentImageState extends State<AttachmentImage> {
             : _fetch(StoreScope.read(context).backend, a.id!));
   }
 
+  /// The fetch gives up after 30s and reports itself, so the stuck watch waits past that: a slow link is not a fault.
   /// An image that did not load while hq is reachable is an error shown (error_report.dart); without a
   /// link it is not a fault, only no signal.
   Future<Uint8List?> _fetch(Backend b, String id) async {
@@ -252,7 +253,7 @@ class _AttachmentImageState extends State<AttachmentImage> {
                     Ic('image', size: 32, color: p.text3, semantic: 'התמונה לא נטענה'),
                     if (_reported) const SentNote(),
                   ])
-                : LoadingWatch(screen: 'תמונה בשיחה', child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: p.text3))),
+                : LoadingWatch(screen: 'תמונה בשיחה', after: const Duration(seconds: 40), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: p.text3))),
           ),
         );
       },
