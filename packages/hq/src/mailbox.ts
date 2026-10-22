@@ -51,7 +51,16 @@ export function neverRan(ev: { subtype: string; text?: string; numTurns?: number
   return ev.subtype === 'error_during_execution' && !ev.text && ev.numTurns === 0 && ev.durationMs === 0;
 }
 
+/** A `result` error that never reached the model: no text and no token in or out (the API refused or dropped the request). */
+export function tokenless(ev: { text?: string; usage?: unknown }): boolean {
+  if (ev.text) return false;
+  const u = (ev.usage ?? {}) as Record<string, unknown>;
+  return !(Number(u.input_tokens) > 0) && !(Number(u.output_tokens) > 0);
+}
+
 export class Mailbox {
+  /** #237: tokenless error results held for `retryGraceMs`, per shift: a fresh `init` of the same shift cancels them. */
+  private heldErrors = new Map<string, { timer: NodeJS.Timeout; identity: string; err: Record<string, unknown> }>();
   private store: Store;
   private cfg: HqConfig;
   private shifts: ShiftManager;
@@ -71,18 +80,40 @@ export class Mailbox {
     // conversation). Assistant text is not proof: a `later` message can still be waiting behind the turn.
     shifts.on('frame', (row, f, live?: boolean) => {
       if (f.t === 'delivery') this.onDelivery(row, f.msgId, f.state, f.error);
+      // The CLI retries a request that failed before a token (adi-1 22/10 06:45: error after 2s, a new `init` at once, the
+      // message answered): that error is no failure of the turn. A held one is raised only if no new turn begins.
+      if (f.t === 'event' && f.ev.kind === 'init' && live !== false) this.dropHeld(row.id);
       if (f.t === 'event' && f.ev.kind === 'result') {
         // error-watch.ts: a turn that ended in an error he did not cause (a stop he pressed is `interrupted`, #177).
         // `neverRan`: a resume the CLI refused (no transcript) answers so; the shift ends as `resume_rejected` and the next
         // run is a new shift (shifts.ts), so there was no turn to fail.
         // Replayed frames (reattach after an hq restart) were caught the first time.
-        if (f.ev.isError && !f.ev.interrupted && !f.ev.stray && !neverRan(f.ev) && live !== false) {
-          this.store.emit('turn.error', row.identity, { shift: row.id, identity: row.identity, subtype: f.ev.subtype, text: (f.ev.text ?? '').slice(0, 1000) });
+        if (f.ev.isError && !f.ev.interrupted && !neverRan(f.ev) && live !== false) {
+          const err = { shift: row.id, identity: row.identity, subtype: f.ev.subtype, text: (f.ev.text ?? '').slice(0, 1000) };
+          if (f.ev.subtype === 'error_during_execution' && tokenless(f.ev)) {
+            this.raiseHeld(row.id);
+            const timer = setTimeout(() => this.raiseHeld(row.id), this.cfg.timers.retryGraceMs);
+            timer.unref();
+            this.heldErrors.set(row.id, { timer, identity: row.identity, err });
+          } else this.store.emit('turn.error', row.identity, err);
         }
         this.onTurnEnd(row, f.ev);
       }
     });
-    shifts.on('ended', (row) => this.requeueUndelivered(row));
+    shifts.on('ended', (row) => { this.raiseHeld(row.id); this.requeueUndelivered(row); });
+  }
+
+  /** A new turn began: the held error was the CLI's own retry, nothing to raise. */
+  private dropHeld(shift: string): void {
+    const h = this.heldErrors.get(shift);
+    if (h) { clearTimeout(h.timer); this.heldErrors.delete(shift); }
+  }
+  /** The grace ended (or the shift did, or another error came): the held error is real. */
+  private raiseHeld(shift: string): void {
+    const h = this.heldErrors.get(shift);
+    if (!h) return;
+    clearTimeout(h.timer); this.heldErrors.delete(shift);
+    this.store.emit('turn.error', h.identity, h.err);
   }
 
   /** hq's own asks (account login): the answer goes straight here, in process: never the store, never the WS. */

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, until } from './helpers.ts';
-import { neverRan } from '../src/mailbox.ts';
+import { neverRan, tokenless } from '../src/mailbox.ts';
 
 test('tell to a resting identity wakes a shift, delivers, then seen → handled on reply', async () => {
   const env = await makeEnv();
@@ -222,18 +222,36 @@ test('neverRan: רק result של חידוש שנדחה, לא כשל ביצוע �
   assert.equal(neverRan({ ...ev, text: 'boom' }), false);
 });
 
-test('company#237: result `stray` is no turn.error, a real error result still is', async () => {
+test('company#237: a tokenless error result is held; a new init of the shift drops it, otherwise it is raised', async () => {
   const env = await makeEnv();
   try {
-    const { hq } = env;
+    const { hq, cfg } = env;
+    (cfg.timers as { retryGraceMs: number }).retryGraceMs = 150;
     hq.mailbox.tell({ msg_id: 's-1', to: 'eli', body: 'א' });
     await until(() => hq.mailbox.get('s-1')!.state === 'delivered');
     const row = hq.shifts.get('eli-1')!;
     const errs = () => (hq.store.db.prepare(`SELECT COUNT(*) n FROM events WHERE type = 'turn.error'`).get() as { n: number }).n;
+    const fr = (ev: object) => ({ t: 'event', seq: 999, ts: '', ev }) as any;
+    const bad = { kind: 'result', subtype: 'error_during_execution', isError: true, numTurns: 1, durationMs: 2148,
+      usage: { input_tokens: 0, output_tokens: 0 } };
     const before = errs();
-    hq.shifts.emit('frame', row, { t: 'event', seq: 999, ts: '', ev: { kind: 'result', subtype: 'error_during_execution', isError: true, stray: true } }, true);
-    assert.equal(errs(), before);
-    hq.shifts.emit('frame', row, { t: 'event', seq: 999, ts: '', ev: { kind: 'result', subtype: 'error_during_execution', isError: true } }, true);
-    assert.equal(errs(), before + 1);
+    hq.shifts.emit('frame', row, fr(bad), true);
+    hq.shifts.emit('frame', row, fr({ kind: 'init', sessionId: 's', model: 'm', cwd: '/', tools: [] }), true);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(errs(), before, 'the CLI retried: no error');
+    hq.shifts.emit('frame', row, fr(bad), true);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(errs(), before + 1, 'no new turn: the error is raised');
+    hq.shifts.emit('frame', row, fr({ ...bad, usage: { input_tokens: 5, output_tokens: 0 } }), true);
+    assert.equal(errs(), before + 2, 'an error after tokens is raised at once');
+    hq.shifts.emit('frame', row, fr({ ...bad, text: 'boom' }), true);
+    assert.equal(errs(), before + 3, 'an error with text is raised at once');
   } finally { await env.cleanup(); }
+});
+
+test('tokenless: no text and no tokens in or out', () => {
+  assert.equal(tokenless({ usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 } }), true);
+  assert.equal(tokenless({}), true);
+  assert.equal(tokenless({ text: 'x' }), false);
+  assert.equal(tokenless({ usage: { output_tokens: 3 } }), false);
 });

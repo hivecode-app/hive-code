@@ -31,6 +31,7 @@ export interface HqConfig {
   healthListen: string | null;
   morningFromHour: number;       // night mode ends on his first message from this hour (org.yaml `timezone`)
   timers: {
+    retryGraceMs: number;        // #237: an empty zero-token error result waits this long for a new `init` of the same shift (the CLI's own retry)
     deliveryTimeoutMs: number;   // B.4: 60s without `delivered` → retry with resurrection → visible failure
     watchdogMs: number;          // B.5: 15s
     schedulerMs: number;         // B.16: sweep every minute (also runs on slot-free)
@@ -169,6 +170,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     healthListen: null,
     morningFromHour: 5,
     timers: {
+      retryGraceMs: 8_000,
       deliveryTimeoutMs: 60_000,
       watchdogMs: 15_000,
       schedulerMs: 60_000,

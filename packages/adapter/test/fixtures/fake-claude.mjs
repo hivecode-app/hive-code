@@ -59,17 +59,6 @@ function runNext() {
     }, turnMs);
     return;
   }
-  // `STRAY`: a good turn, then 100ms later a bare error result with no turn behind it (company#237, adi-1 22/10 06:45).
-  if (content === 'STRAY') {
-    m.timer = setTimeout(() => {
-      out({ type: 'result', subtype: 'success', is_error: false, result: 'done', num_turns: 1, total_cost_usd: 0,
-        modelUsage: { 'fake-haiku': { contextWindow: 200000 } } });
-      out({ type: 'command_lifecycle', command_uuid: m.uuid, state: 'completed', uuid: randomUUID() });
-      busy = false; current = null;
-      setTimeout(() => out({ type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 1 }), 100);
-    }, turnMs);
-    return;
-  }
   if (content.startsWith('THINK ')) {
     m.thinking = true;
     m.timer = setTimeout(() => endTurn(m, text), Number(content.slice(6)) || 1000);

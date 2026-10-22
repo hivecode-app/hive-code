@@ -108,8 +108,6 @@ export class ShiftHost {
 
   private onEngineEvent(ev: EngineEvent): void {
     this.lastEventAt = new Date().toISOString();
-    // Any sign of work means a turn is open, also one the CLI began itself (a background task follow-up): see `stray`.
-    if (['text_delta', 'thinking_delta', 'text', 'tool_use', 'tool_result'].includes(ev.kind)) this.turnOpen = true;
     if (ev.kind === 'text_delta' || ev.kind === 'thinking_delta') { this.sendLive({ t: 'delta', ev }); return; }
     switch (ev.kind) {
       case 'init': this.claudeVersion = ev.version ?? this.claudeVersion; this.setState('busy'); this.turnOpen = true; break;
@@ -129,14 +127,8 @@ export class ShiftHost {
         }
         break;
       }
-      case 'result': {
-        const hadTurn = this.turnOpen;
+      case 'result':
         this.activeTools.clear(); this.turnOpen = false;
-        // company#237 (adi-1 22/10 06:45): an empty `error_during_execution` 3s after a good result, with no turn opened
-        // between. Nothing ran, so nothing failed: the result says `stray` and hq does not raise it as a turn error.
-        if (!hadTurn && ev.isError && ev.subtype === 'error_during_execution' && !ev.text && ![...this.deliveries.values()].some((d) => ['written', 'delivered', 'started'].includes(d.state))) {
-          ev = { ...ev, stray: true };
-        }
         // A turn we cut ends `error_during_execution` (measured 21/10, rotem: his GO answer at `now` mid-thinking).
         // That is the cut, not a failure: the result says so, and the lines it read stay in the conversation.
         if (ev.isError && ev.subtype === 'error_during_execution' && (this.cutAsked
@@ -152,7 +144,6 @@ export class ShiftHost {
           else this.advance(mid, 'completed');
         }
         break;
-      }
     }
     this.record({ t: 'event', ev });
     if (ev.kind === 'result') this.setState('idle');
