@@ -179,13 +179,16 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
       urgency: oneOf(b.urgency, URGENCIES, 'urgency'), blocking: b.blocking !== false, ref: str(b.ref, 'ref', false),
       headline: str(b.headline, 'headline', false), dedupe_key: key ? `api:${key}` : null }) };
   });
+  // Only a device (the app) is him (#208). hq's admin token is a worker or a script: it closes in the name it gives
+  // in `from`, or as hq, and its words never reach the requester as his.
+  const closer = (caller: Caller, b: Record<string, unknown>) => caller.kind === 'device' ? OWNER : (f => f && f !== OWNER ? f : 'hq')(str(b.from, 'from', false));
   // He finished it ("סיימתי") or declined: the requester hears it now, through its mailbox.
-  route('POST', '/api/inbox/:id/done', async ({ params, body }) => {
+  route('POST', '/api/inbox/:id/done', async ({ params, body, caller }) => {
     const b = await body();
     // A tab handoff ends as one: the view is released, the link burnt, the requester woken (tab/handoffs.ts).
-    if (await hq.tab.fromInbox(Number(params[0]), false)) return { item: hq.inbox.get(Number(params[0])), message: null };
+    if (await hq.tab.fromInbox(Number(params[0]), false, closer(caller, b))) return { item: hq.inbox.get(Number(params[0])), message: null };
     if (hq.inbox.get(Number(params[0]))?.kind === 'awaiting') return awaitingOutcome(Number(params[0]), 'done');
-    try { return hq.mailbox.complete(Number(params[0]), { note: str(b.note, 'note', false) }); }
+    try { return hq.mailbox.complete(Number(params[0]), { note: str(b.note, 'note', false), by: closer(caller, b) }); }
     catch (e) { throw new HttpError(404, (e as Error).message); }
   });
   // His own words on an open question or GO, typed in the conversation: the item closes with them.
@@ -207,11 +210,11 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     if (item.state !== 'open') throw new HttpError(409, `inbox item ${id} is already handled`);
     return { task: hq.awaiting.outcome(id, outcome), item: hq.inbox.get(id) };
   }
-  route('POST', '/api/inbox/:id/dismiss', async ({ params, body }) => {
+  route('POST', '/api/inbox/:id/dismiss', async ({ params, body, caller }) => {
     const b = await body();
     if (hq.inbox.get(Number(params[0]))?.kind === 'awaiting') throw new HttpError(409, 'a task card closes with done or failed');
-    if (await hq.tab.fromInbox(Number(params[0]), true)) return { item: hq.inbox.get(Number(params[0])), message: null };
-    try { return hq.mailbox.complete(Number(params[0]), { note: str(b.note, 'note', false), declined: true }); }
+    if (await hq.tab.fromInbox(Number(params[0]), true, closer(caller, b))) return { item: hq.inbox.get(Number(params[0])), message: null };
+    try { return hq.mailbox.complete(Number(params[0]), { note: str(b.note, 'note', false), declined: true, by: closer(caller, b) }); }
     catch (e) { throw new HttpError(404, (e as Error).message); }
   });
 

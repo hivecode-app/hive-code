@@ -280,7 +280,12 @@ test('API: "לא עכשיו" and closing a card are kept by hq, so a refresh doe
     assert.ok((await items()).find((i) => i.id === go.json.item.id)!.snoozed_at);
 
     // Closing: gone from the inbox for good, the question cancelled, the asker told which one.
-    assert.equal((await call('POST', `/api/inbox/${ask.id}/dismiss`, {})).status, 200);
+    // Only the app's device token is him (#208).
+    const code = (await call('POST', '/api/devices/pair', {})).json.code;
+    const paired = await fetch(`${env.base}/api/auth/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, name: 'טלפון' }) });
+    const device = ((await paired.json()) as { token: string }).token;
+    const dismissed = await fetch(`${env.base}/api/inbox/${ask.id}/dismiss`, { method: 'POST', headers: { authorization: `Bearer ${device}`, 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(dismissed.status, 200);
     assert.ok(!(await items()).some((i) => i.id === ask.id), 'does not come back');
     assert.equal(hq.inbox.get(ask.id)!.state, 'dismissed');
     assert.equal(hq.mailbox.getAsk('ask-74')!.state, 'cancelled');

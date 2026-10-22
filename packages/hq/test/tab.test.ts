@@ -24,7 +24,18 @@ async function tabEnv() {
     return { status: res.status, json: (await res.json()) as Record<string, any> };
   };
   const phonePath = (link: string) => new URL(link).pathname;
-  return { ...env, call, pub, phonePath };
+  // The app's device token: the only caller that is him (#208).
+  let device = '';
+  const callAsOwner = async (method: string, path: string, body?: unknown) => {
+    if (!device) {
+      const code = (await call('POST', '/api/devices/pair', {})).json.code;
+      const paired = await fetch(`${api}/api/auth/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, name: 'טלפון' }) });
+      device = ((await paired.json()) as { token: string }).token;
+    }
+    const res = await fetch(api + path, { method, headers: { authorization: `Bearer ${device}`, 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+    return { status: res.status, json: (await res.json()) as Record<string, any> };
+  };
+  return { ...env, call, callAsOwner, pub, phonePath };
 }
 
 /** Plain node:http, not fetch: fetch sets its own sec-fetch-mode (cors), which is what the page refuses. */
@@ -134,7 +145,7 @@ test('handoff: "סיימתי" in the app with nothing waiting wakes the worker b
   const env = await tabEnv();
   try {
     const r = await env.call('POST', '/v1/handoffs', { identity: 'amit', url: 'https://mercury.com/login', what: 'קוד' });
-    const done = await env.call('POST', `/api/inbox/${r.json.inbox_id}/done`, { note: 'done' });
+    const done = await env.callAsOwner('POST', `/api/inbox/${r.json.inbox_id}/done`, { note: 'done' });
     assert.equal(done.status, 200);
     assert.equal(env.hq.tab.get(r.json.handoff.id)!.state, 'done');
     const msg = env.hq.mailbox.list('amit').find((m) => m.from_identity === OWNER);
@@ -144,6 +155,22 @@ test('handoff: "סיימתי" in the app with nothing waiting wakes the worker b
     assert.deepEqual(env.tabBrowser.closed, ['win-1'], 'the window hq opened is closed');
     assert.equal(env.tabBrowser.released.at(-1)!.tell, 'finished');
     assert.equal(env.hq.inbox.get(r.json.inbox_id)!.link, null, 'a spent link does not stay in the store');
+  } finally { await env.cleanup(); }
+});
+
+test('handoff: a worker closing the handoff item is not told on as "רן סיים" (#208)', async () => {
+  const env = await tabEnv();
+  try {
+    const r = await env.call('POST', '/v1/handoffs', { identity: 'amit', url: 'https://mercury.com/login', what: 'קוד' });
+    assert.equal((await env.call('POST', `/api/inbox/${r.json.inbox_id}/done`, { note: 'עשיתי', from: 'eli' })).status, 200);
+    assert.equal(env.hq.tab.get(r.json.handoff.id)!.state, 'done');
+    const mails = env.hq.mailbox.list('amit');
+    assert.ok(!mails.some((m) => m.from_identity === OWNER), 'nothing written as him');
+    assert.ok(!mails.some((m) => /רן (סיים|דחה)/.test(m.body)));
+    // A declined handoff closed by a worker: told in the worker's name, never his.
+    const b = await env.call('POST', '/v1/handoffs', { identity: 'eli', url: 'https://github.com/login' });
+    assert.equal((await env.call('POST', `/api/inbox/${b.json.inbox_id}/dismiss`, { from: 'adi' })).status, 200);
+    assert.ok(!env.hq.mailbox.list('eli').some((m) => m.from_identity === OWNER || /רן (סיים|דחה)/.test(m.body)));
   } finally { await env.cleanup(); }
 });
 
@@ -179,7 +206,7 @@ test('handoff: "לא עכשיו"/dismiss and expiry with nothing waiting still r
   const env = await tabEnv();
   try {
     const a = await env.call('POST', '/v1/handoffs', { identity: 'amit', target: 'agent-tab', url: 'https://github.com/login' });
-    assert.equal((await env.call('POST', `/api/inbox/${a.json.inbox_id}/dismiss`, {})).status, 200);
+    assert.equal((await env.callAsOwner('POST', `/api/inbox/${a.json.inbox_id}/dismiss`, {})).status, 200);
     assert.equal(env.hq.tab.get(a.json.handoff.id)!.state, 'cancelled');
     assert.equal(env.hq.inbox.get(a.json.inbox_id)!.state, 'dismissed');
     assert.ok(env.hq.mailbox.list('amit').some((m) => m.from_identity === OWNER && /דחה/.test(m.body)), 'declined, said so');
@@ -206,7 +233,7 @@ test('handoff: a long-poll whose caller went away is not a waiter (the worker ge
     ac.abort();
     await poll;
     await new Promise((r) => setTimeout(r, 100));
-    await env.call('POST', `/api/inbox/${a.json.inbox_id}/done`, {});
+    await env.callAsOwner('POST', `/api/inbox/${a.json.inbox_id}/done`, {});
     assert.ok(env.hq.mailbox.list('amit').some((m) => m.from_identity === OWNER), 'mail, since nobody waits any more');
   } finally { await env.cleanup(); }
 });

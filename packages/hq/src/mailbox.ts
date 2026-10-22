@@ -551,10 +551,14 @@ export class Mailbox {
    * immediately through its mailbox with priority `now` — that wakes it if it rests — and the item
    * closes. Polling is never the only path (finding from 20/10: "סיימתי" on a tab handoff reached no one).
    */
-  complete(itemId: number, opts: { note?: string; declined?: boolean } = {}): { item: ReturnType<Inbox['get']>; message: MessageRow | null } {
+  complete(itemId: number, opts: { note?: string; declined?: boolean; by?: string } = {}): { item: ReturnType<Inbox['get']>; message: MessageRow | null } {
     const item = this.inbox.get(itemId);
     if (!item) throw new Error(`no inbox item ${itemId}`);
-    if (item.kind === 'ask' && item.ref && !opts.declined) {
+    // Only his own close speaks as him (#208). A worker or script closing the item is told in its own name, and its
+    // words never appear as his.
+    const by = opts.by ?? OWNER;
+    const byOwner = by === OWNER;
+    if (byOwner && item.kind === 'ask' && item.ref && !opts.declined) {
       const a = this.getAsk(item.ref);
       if (a && (a.state === 'open' || a.state === 'escalated')) {
         this.answer(a.id, opts.note ?? 'סיימתי');
@@ -581,13 +585,23 @@ export class Mailbox {
       return { item: this.inbox.get(itemId), message: null };
     }
     const o = this.names.owner;
-    const verb = opts.declined ? g(o, 'דחה', 'דחתה') : g(o, 'סיים', 'סיימה');
-    // A question he closed (#74): the asker hears which one, and that no answer is coming.
-    const body = opts.declined && item.kind === 'ask'
-      ? `${o.name} ${g(o, 'סגר', 'סגרה')} את השאלה בלי תשובה: ${item.headline ?? item.body}`
-      : `${o.name} ${verb}: ${item.title}`;
+    let body: string;
+    if (byOwner) {
+      const verb = opts.declined ? g(o, 'דחה', 'דחתה') : g(o, 'סיים', 'סיימה');
+      // A question he closed (#74): the asker hears which one, and that no answer is coming.
+      body = opts.declined && item.kind === 'ask'
+        ? `${o.name} ${g(o, 'סגר', 'סגרה')} את השאלה בלי תשובה: ${item.headline ?? item.body}`
+        : `${o.name} ${verb}: ${item.title}`;
+    } else {
+      // Someone else closed it: nothing to tell unless they wrote something, and then it carries their name.
+      if (!opts.note || by === target) {
+        this.store.emit('inbox.completed', requester, { id: itemId, declined: !!opts.declined, message: null });
+        return { item: this.inbox.get(itemId), message: null };
+      }
+      body = `${this.label(by)} סגר/ה: ${item.title}`;
+    }
     const message = this.tell({
-      msg_id: `inbox-${itemId}-${opts.declined ? 'declined' : 'done'}`, from: OWNER, to: target, kind: 'answer',
+      msg_id: `inbox-${itemId}-${opts.declined ? 'declined' : 'done'}`, from: by, to: target, kind: 'answer',
       ref: item.ref ?? `inbox-${itemId}`, priority: 'now', urgency: item.urgency,
       body: `${target === requester ? '' : `${this.closedNote(requester)}\n`}${body}${opts.note ? `\n${opts.note}` : ''}`,
     });

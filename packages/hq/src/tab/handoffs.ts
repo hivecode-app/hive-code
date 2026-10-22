@@ -219,7 +219,7 @@ export class TabHandoffs {
    * Ends a handoff once. `done` = he finished (phone "סיימתי", the app, or the worker's page watcher saw it).
    * A waiting tool call is the wake-up; with nothing waiting, the requester gets a `now` message instead.
    */
-  end(id: string, state: Exclude<HandoffState, 'live'>, by: string, finalUrl?: string): HandoffView | undefined {
+  end(id: string, state: Exclude<HandoffState, 'live'>, by: string, finalUrl?: string, closer?: string): HandoffView | undefined {
     const now = this.store.now();
     const r = this.row(id);
     if (!r) return undefined;
@@ -235,7 +235,7 @@ export class TabHandoffs {
       this.store.db.prepare('UPDATE inbox SET link = NULL WHERE id = ?').run(r.inbox_id);
       // The worker closing its own tab is the one ending it already knows about.
       const ownDoing = by === 'worker' || (state === 'closed' && by === 'tab-closed' && !r.own_window);
-      if (!waiting?.size && !ownDoing) this.mailRequester(r, v);
+      if (!waiting?.size && !ownDoing) this.mailRequester(r, v, closer);
       else this.inbox.resolve(r.inbox_id, state === 'done' ? 'resolved' : 'dismissed');
     }
     for (const w of [...(waiting ?? [])]) w(v);
@@ -253,12 +253,12 @@ export class TabHandoffs {
    * Nobody is blocked in browser_ask_user any more (its wait timed out, and it told the worker a message
    * would come): every ending he caused, or the clock did, reaches the worker by mail.
    */
-  private mailRequester(r: HandoffRow, v: HandoffView): void {
+  private mailRequester(r: HandoffRow, v: HandoffView, closer?: string): void {
     const itemId = r.inbox_id!;
     if (v.state === 'done') {
-      this.mailbox.complete(itemId, { note: v.final_url ? `הדף עכשיו: ${v.final_url}` : undefined });
+      this.mailbox.complete(itemId, { note: v.final_url ? `הדף עכשיו: ${v.final_url}` : undefined, by: closer });
     } else if (v.state === 'cancelled') {
-      this.mailbox.complete(itemId, { declined: true });
+      this.mailbox.complete(itemId, { declined: true, by: closer });
     } else {
       this.inbox.resolve(itemId, 'dismissed');
       if (!r.from_identity || !getIdentity(this.store, r.from_identity)) return;
@@ -272,10 +272,10 @@ export class TabHandoffs {
   }
 
   /** "סיימתי" / "לא עכשיו" in the app on the handoff's inbox item. True if the item was a handoff. */
-  async fromInbox(itemId: number, declined: boolean): Promise<boolean> {
+  async fromInbox(itemId: number, declined: boolean, closer?: string): Promise<boolean> {
     const r = this.store.db.prepare(`SELECT * FROM tab_handoffs WHERE inbox_id = ?`).get(itemId) as HandoffRow | undefined;
     if (!r) return false;
-    if (r.state === 'live') this.end(r.id, declined ? 'cancelled' : 'done', declined ? 'owner-declined' : 'app');
+    if (r.state === 'live') this.end(r.id, declined ? 'cancelled' : 'done', declined ? 'owner-declined' : 'app', undefined, closer);
     return true;
   }
 

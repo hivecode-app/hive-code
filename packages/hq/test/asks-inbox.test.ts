@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, until } from './helpers.ts';
 import { pushWorthy } from '../src/inbox.ts';
+import { buildRoutes } from '../src/api.ts';
 
 test('blocking ask: owner first, pushed, escalated to יואב after 10 min, manager decision is a note', async () => {
   const env = await makeEnv();
@@ -216,4 +217,54 @@ test('goVerdict: a yes is only approval words; a qualified yes, a question or "�
     assert.equal(goVerdict(t), 'other', t);
   }
   for (const t of ['לא', 'לא, בלי הבוטים', 'דחה']) assert.equal(goVerdict(t), 'no', t);
+});
+
+test('a worker closing an inbox item is not "רן סיים" (#208)', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    const withNote = hq.inbox.add({ kind: 'login', from_identity: 'eli', title: 'כניסה ל-Cloudflare', blocking: true, ref: 'tab-1' });
+    const { message } = hq.mailbox.complete(withNote.id, { note: 'טופל כבר', by: 'noga' });
+    assert.ok(message);
+    assert.equal(message!.from_identity, 'noga');
+    assert.equal(message!.to_identity, 'eli');
+    assert.match(message!.body, /^noga סגר\/ה: כניסה ל-Cloudflare\nטופל כבר$/);
+    assert.doesNotMatch(message!.body, /רן/);
+    assert.equal(hq.inbox.get(withNote.id)!.state, 'resolved');
+
+    // No words, nothing to say: the item closes and no message goes out.
+    const bare = hq.inbox.add({ kind: 'login', from_identity: 'eli', title: 'כניסה ל-GitHub', blocking: true, ref: 'tab-2' });
+    assert.equal(hq.mailbox.complete(bare.id, { by: 'adi' }).message, null);
+    assert.equal(hq.inbox.get(bare.id)!.state, 'resolved');
+    assert.equal(hq.mailbox.get(`inbox-${bare.id}-done`), undefined);
+
+    // A question closed by someone else is not answered in his name.
+    const ask = hq.mailbox.ask({ msg_id: 'ask-w', from: 'eli', question: 'GO?', blocking: true });
+    const askItem = hq.inbox.open().find((i) => i.ref === ask.id)!;
+    hq.mailbox.complete(askItem.id, { note: 'כן', by: 'adi' });
+    assert.notEqual(hq.mailbox.getAsk('ask-w')!.state, 'answered');
+    assert.equal(hq.mailbox.get('ask-w-answer'), undefined);
+  } finally { await env.cleanup(); }
+});
+
+test('API: only a device token closes as the owner; the admin token closes in its own name (#208)', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    const route = buildRoutes(hq).find(([m, re]) => m === 'POST' && re.test('/api/inbox/1/done'))!;
+    const call = async (id: number, caller: any, b: Record<string, unknown>) =>
+      (await route[2]({ req: null as any, url: new URL('http://x/'), params: [String(id)], body: async () => b, caller })) as any;
+    const a = hq.inbox.add({ kind: 'login', from_identity: 'eli', title: 'כניסה א', blocking: true, ref: 'login-a' });
+    const b = hq.inbox.add({ kind: 'login', from_identity: 'eli', title: 'כניסה ב', blocking: true, ref: 'login-b' });
+    const c = hq.inbox.add({ kind: 'login', from_identity: 'eli', title: 'כניסה ג', blocking: true, ref: 'login-c' });
+    const byDevice = await call(a.id, { kind: 'device' }, { note: 'סיימתי' });
+    assert.equal(byDevice.message.from_identity, 'owner');
+    assert.match(byDevice.message.body, /רן סיים: כניסה א\nסיימתי/);
+    const byWorker = await call(b.id, { kind: 'admin' }, { note: 'עשיתי', from: 'noga' });
+    assert.equal(byWorker.message.from_identity, 'noga');
+    assert.doesNotMatch(byWorker.message.body, /רן/);
+    const bare = await call(c.id, { kind: 'admin' }, {});
+    assert.equal(bare.message, null);
+    assert.equal(hq.inbox.get(c.id)!.state, 'resolved');
+  } finally { await env.cleanup(); }
 });
