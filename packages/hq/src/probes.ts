@@ -2,11 +2,14 @@
 // charter (company/projects/<p>.md) as a fenced ```yaml block with a top-level `probes:` list
 // (frontmatter `monitoring:` from the B.17 example is accepted too). Phase 1 runs `http` probes;
 // other kinds are listed as unsupported, never silently dropped.
+// `disk` (monitoring-spec §3.2 step 4) is the first ssh-shaped probe: read-only `df`, measured from hq-host only.
+// No answer (timeout, ssh failed, garbage output) is "unknown": not a failure, never counted toward fail_after.
 // `fail_after` consecutive failures → one `now` message to רותם with the evidence; recovery → one note.
 import { pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { loadavg, cpus } from 'node:os';
+import { loadavg, cpus, homedir } from 'node:os';
+import { execFile } from 'node:child_process';
 import { memInfoMb } from './proc.ts';
 import { runSsh, q, type SshRun } from './nodes.ts';
 import { parse } from 'yaml';
@@ -18,8 +21,9 @@ export interface ProbeSpec {
   key: string;              // <project>/<id>
   project: string;
   id: string;
-  kind: 'http' | 'unsupported';
+  kind: 'http' | 'disk' | 'unsupported';
   url?: string;
+  disk?: { target: string; host: string | null; path: string; identityFile: string | null; maxPercent: number };  // host null = local
   method: string;
   expect: number[];
   maxLatencyMs: number | null;
@@ -36,6 +40,15 @@ export function parseDuration(v: unknown, dflt: number): number {
   if (!m) return dflt;
   const n = Number(m[1]);
   return n * ({ ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[m[2] ?? 's'] ?? 1000);
+}
+
+/** `root@host:/path` or `local:/path`. null when it isn't one. */
+export function parseDiskTarget(s: string): { host: string | null; path: string } | null {
+  const i = s.indexOf(':');
+  if (i <= 0) return null;
+  const host = s.slice(0, i).trim(), path = s.slice(i + 1).trim();
+  if (!path.startsWith('/') || host.startsWith('-') || /[\s\0]/.test(host)) return null;  // `-…` would reach ssh as an option
+  return { host: host === 'local' ? null : host, path };
 }
 
 /** Extract probe declarations from a project charter. */
@@ -61,10 +74,17 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     const id = String(r.id ?? '');
     if (!id) continue;
     const exp = r.expect ?? 200;
+    const dt = typeof r.disk === 'string' ? parseDiskTarget(r.disk) : null;
+    const maxPct = Number(r.max_percent);
+    const disk = dt && Number.isFinite(maxPct) && maxPct > 0 && maxPct <= 100
+      ? { target: String(r.disk), host: dt.host, path: dt.path, maxPercent: maxPct,
+          identityFile: typeof r.identity === 'string' ? r.identity.replace(/^~(?=\/|$)/, homedir()) : null }
+      : undefined;
     out.push({
       key: `${project}/${id}`, project, id,
-      kind: typeof r.http === 'string' ? 'http' : 'unsupported',
+      kind: typeof r.http === 'string' ? 'http' : disk ? 'disk' : 'unsupported',
       url: typeof r.http === 'string' ? r.http : undefined,
+      disk,
       // Observe-only: a probe may only read. Anything but GET/HEAD in a charter is ignored.
       method: typeof r.method === 'string' && r.method.toUpperCase() === 'HEAD' ? 'HEAD' : 'GET',
       expect: (Array.isArray(exp) ? exp : [exp]).map(Number),
@@ -85,7 +105,30 @@ export function loadProbes(companyDir: string): ProbeSpec[] {
     .flatMap((f) => parseCharterProbes(basename(f, '.md'), readFileSync(join(dir, f), 'utf8')));
 }
 
-export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null }
+/** `unknown`: no answer came back. Not a failure (ok is meaningless then); the runner doesn't count it. */
+export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; percent?: number }
+
+export type LocalDf = (path: string, timeoutMs: number) => Promise<string>;
+const localDf: LocalDf = (path, timeoutMs) => new Promise((res, rej) =>
+  execFile('df', ['--output=pcent', '--', path], { timeout: timeoutMs }, (e, out) => e ? rej(e) : res(out)));
+
+/** Read-only `df` on the server named in the charter (or here for `local:`). Only a returned value can fail. */
+export async function runDiskProbe(p: ProbeSpec, run: SshRun = runSsh, local: LocalDf = localDf): Promise<ProbeOutcome> {
+  const d = p.disk!;
+  const t0 = performance.now();
+  const lat = () => Math.round(performance.now() - t0);
+  let out: string;
+  try {
+    out = d.host === null ? await local(d.path, p.timeoutMs)
+      : await run(['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10',
+          ...(d.identityFile ? ['-i', d.identityFile] : []), d.host, `df --output=pcent -- ${q(d.path)} | tail -1`], undefined, p.timeoutMs);
+  } catch (e) { return { ok: false, unknown: true, status: null, latencyMs: lat(), error: (e as Error).message }; }
+  const m = /^\s*(\d{1,3})%\s*$/.exec(out.trim().split('\n').pop() ?? '');
+  if (!m || Number(m[1]) > 100) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: `פלט df לא מובן: ${out.trim().slice(0, 80) || '(ריק)'}` };
+  const percent = Number(m[1]);
+  return { ok: percent <= d.maxPercent, percent, status: percent, latencyMs: lat(),
+    error: percent > d.maxPercent ? `${percent}% בשימוש ב-${d.path} על ${d.host ?? 'local'}, הסף ${d.maxPercent}%` : null };
+}
 
 export async function runHttpProbe(p: ProbeSpec): Promise<ProbeOutcome> {
   const t0 = performance.now();
@@ -138,7 +181,7 @@ interface ProbeStateRow { probe_id: string; consecutive_failures: number; anomal
 
 export class ProbeRunner {
   probes: ProbeSpec[] = [];
-  run: (p: ProbeSpec) => Promise<ProbeOutcome> = runHttpProbe;
+  run: (p: ProbeSpec) => Promise<ProbeOutcome> = (p) => p.kind === 'disk' ? runDiskProbe(p) : runHttpProbe(p);
   /** Second vantage point, asked before an anomaly wakes רותם. null = none configured. */
   witness: Witness | null;
   host: () => { load1: number; cpus: number; freeMb: number } = hostLoad;
@@ -173,7 +216,7 @@ export class ProbeRunner {
     // A.6: an automation that isn't written in its team's contract doesn't exist. The switch is rotem/prod-probes.
     if (!this.store.toggle(this.toggleKey)) return;
     const now = this.store.now();
-    const due = this.probes.filter((p) => p.kind === 'http' && !this.inflight.has(p.key))
+    const due = this.probes.filter((p) => (p.kind === 'http' || p.kind === 'disk') && !this.inflight.has(p.key))
       .filter((p) => { const s = this.state(p.key); return !s?.last_run_at || now - s.last_run_at >= p.everyMs; });
     const crossed: ProbeSpec[] = [];
     await Promise.all(due.map(async (p) => {
@@ -192,8 +235,13 @@ export class ProbeRunner {
   }
 
   /** Probes that reached fail_after: ask the second vantage point before waking anyone. */
-  private async confirm(crossed: ProbeSpec[]): Promise<void> {
+  private async confirm(crossedAll: ProbeSpec[]): Promise<void> {
+    let crossed = crossedAll;
     const majority = this.majorityFailing();
+    // Disk is measured from hq-host only: nothing to verify from ci-host.
+    for (const p of crossed.filter((c) => c.kind === 'disk')) this.openAnomaly(p);
+    crossed = crossed.filter((c) => c.kind !== 'disk');
+    if (!crossed.length) return;
     const verdicts = await Promise.all(crossed.map(async (p) => ({ p, w: this.witness ? await this.witness(p) : { unavailable: 'לא הוגדרה נקודה שנייה' } as WitnessOutcome })));
     const measurer: typeof verdicts = [];
     for (const { p, w } of verdicts) {
@@ -234,6 +282,13 @@ export class ProbeRunner {
   record(p: ProbeSpec, o: ProbeOutcome, defer = false): 'crossed' | undefined {
     const now = this.store.now();
     const prev = this.state(p.key);
+    if (o.unknown) {
+      // No answer is not a failure: the streak and any open anomaly stay as they were; only the attempt is noted.
+      this.store.db.prepare(`INSERT INTO probe_state (probe_id, project, last_run_at, last_error) VALUES (?, ?, ?, ?)
+        ON CONFLICT(probe_id) DO UPDATE SET last_run_at = excluded.last_run_at, last_error = excluded.last_error`).run(p.key, p.project, now, o.error);
+      this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: o.error });
+      return undefined;
+    }
     const fails = o.ok ? 0 : (prev?.consecutive_failures ?? 0) + 1;
     this.store.db.prepare(`INSERT INTO probe_results (probe_id, ok, status, latency_ms, error, ts) VALUES (?, ?, ?, ?, ?, ?)`)
       .run(p.key, o.ok ? 1 : 0, o.status, o.latencyMs, o.error, now);
@@ -251,7 +306,7 @@ export class ProbeRunner {
     } else if (o.ok && open) {
       this.store.db.prepare('UPDATE probe_state SET anomaly_open = 0 WHERE probe_id = ?').run(p.key);
       this.mailbox.tell({ msg_id: `probe-${p.key}-recovered-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system',
-        priority: 'next', body: `${p.key} חזר לתקין (status=${o.status}, ${o.latencyMs}ms).` });
+        priority: 'next', body: p.kind === 'disk' ? `${p.key} חזר לתקין (${o.percent}% ב-${p.disk!.path} על ${p.disk!.host ?? 'local'}).` : `${p.key} חזר לתקין (status=${o.status}, ${o.latencyMs}ms).` });
       this.store.emit('probe.recovered', this.cfg.monitoringLeadId, { probe: p.key });
     }
     return undefined;
@@ -267,18 +322,19 @@ export class ProbeRunner {
     const lastOk = st?.last_ok_at ? new Date(st.last_ok_at).toISOString() : 'אף פעם (מאז שהתחלנו לבדוק)';
     this.mailbox.tell({ msg_id: `probe-${p.key}-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'probe_anomaly',
       urgency: 'urgent', priority: 'now', body: [
-        `חריגה בפרודקשן: ${p.key} (${p.method} ${p.url})`,
+        p.kind === 'disk' ? `חריגה בפרודקשן: ${p.key} (דיסק ${p.disk!.path} על ${p.disk!.host ?? 'local'}, הסף ${p.disk!.maxPercent}%)` : `חריגה בפרודקשן: ${p.key} (${p.method} ${p.url})`,
         `${fails} כישלונות ברצף (fail_after=${p.failAfter}). תקין לאחרונה: ${lastOk}.`,
         ...(verification ? [verification] : []),
         'ראיות:',
-        ...recent.map((r) => `- ${new Date(r.ts).toISOString()} status=${r.status ?? '—'} latency=${r.latency_ms ?? '—'}ms ${r.error ?? ''}`.trim()),
+        ...recent.map((r) => p.kind === 'disk' ? `- ${new Date(r.ts).toISOString()} ${r.error ?? ''}`.trim()
+          : `- ${new Date(r.ts).toISOString()} status=${r.status ?? '—'} latency=${r.latency_ms ?? '—'}ms ${r.error ?? ''}`.trim()),
         `שלב 1: observe-only. חקרי, ושלחי ${pre('ל', this.mailbox.names.owner.name)} ask דחוף עם השערה והצעה. פעולה על הפרודקשן רק עם grant באמנה.`,
       ].join('\n') });
     this.store.emit('probe.anomaly', this.cfg.monitoringLeadId, { probe: p.key, fails });
   }
 
   summary() {
-    return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, every_ms: p.everyMs, ...(this.state(p.key) ?? {}) }));
+    return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), every_ms: p.everyMs, ...(this.state(p.key) ?? {}) }));
   }
 
   prune(olderThanMs = 7 * 86_400_000): void {

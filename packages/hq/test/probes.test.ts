@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { makeEnv, until } from './helpers.ts';
-import { loadProbes, parseCharterProbes, parseDuration, runHttpProbe, sshWitness } from '../src/probes.ts';
+import { loadProbes, parseCharterProbes, parseDuration, runHttpProbe, runDiskProbe, sshWitness } from '../src/probes.ts';
 
 // The example company (fixtures/README.md): its charters declare probes the way a real company's do.
 const COMPANY = join(import.meta.dirname, '..', '..', '..', 'fixtures', 'company-home', 'company');
@@ -225,5 +225,70 @@ test('witness: fine from ci-host but failing here for 2×fail_after → alert, a
     await hq.probes.tick();
     assert.equal(a().length, 1);
     assert.match(a()[0]!.body, /נתיב שבור רק משם/);
+  } finally { await env.cleanup(); }
+});
+
+const DISKS = `# nws
+
+\`\`\`yaml
+probes:
+  - {id: kafka-disk, disk: 'root@203.0.113.12:/', identity: ~/.ssh/hakav_ed25519, every: 5m, max_percent: 80, fail_after: 2}
+  - {id: local-disk, disk: 'local:/', every: 5m, max_percent: 80, fail_after: 2}
+  - {id: bad, disk: nopath, every: 5m, max_percent: 80}
+\`\`\`
+`;
+
+test('disk probe: parsing, over/under the threshold, no answer = unknown, garbage = unknown', async () => {
+  const [k, l, bad] = parseCharterProbes('nws', DISKS);
+  assert.deepEqual([k!.kind, l!.kind, bad!.kind], ['disk', 'disk', 'unsupported']);
+  assert.equal(k!.disk!.host, 'root@203.0.113.12');
+  assert.equal(k!.disk!.path, '/');
+  assert.equal(l!.disk!.host, null);
+  assert.match(k!.disk!.identityFile!, /\/\.ssh\/hakav_ed25519$/);
+  const calls: string[][] = [];
+  const mk = (out: string | Error) => async (args: string[]) => { calls.push(args); if (out instanceof Error) throw out; return out; };
+  const over = await runDiskProbe(k!, mk('92%\n'));
+  assert.equal(over.ok, false);
+  assert.equal(over.percent, 92);
+  assert.equal(over.unknown, undefined);
+  assert.match(over.error!, /92%.*\/.*root@203\.0\.113\.12.*80%/);
+  assert.match(calls[0]!.join(' '), /-i \S+hakav_ed25519 root@203\.0\.113\.12 df --output=pcent -- '\/' \| tail -1$/);
+  assert.equal((await runDiskProbe(k!, mk(' 41%')) ).ok, true);
+  assert.equal((await runDiskProbe(k!, mk('80%'))).ok, true, 'at the threshold is not over it');
+  for (const bad of [new Error('ssh exit 255'), '', 'df: /x: No such file', '250%']) {
+    const o = await runDiskProbe(k!, mk(bad));
+    assert.equal(o.unknown, true, String(bad));
+  }
+  assert.equal((await runDiskProbe(l!, mk('x'), async () => 'Use%\n 97%\n')).percent, 97, 'local: no ssh');
+  assert.equal(calls.length, 7, 'local never went through ssh');
+});
+
+test('disk probe: unknown never counts toward fail_after; over the threshold twice → anomaly with percent, path, server, no witness', async () => {
+  const env = await makeEnv({ projects: { nws: DISKS } });
+  try {
+    const { hq, clock } = env;
+    const seq: Array<'unknown' | number> = ['unknown', 95, 'unknown', 'unknown', 96, 50];
+    hq.probes.run = async (p) => {
+      if (p.id !== 'kafka-disk') return { ok: true, status: 10, latencyMs: 1, error: null, percent: 10 };
+      const v = seq.shift()!;
+      return v === 'unknown' ? { ok: false, unknown: true, status: null, latencyMs: 5, error: 'ssh timeout' }
+        : { ok: v <= 80, percent: v, status: v, latencyMs: 5, error: v > 80 ? `${v}% בשימוש ב-/ על root@203.0.113.12, הסף 80%` : null };
+    };
+    hq.probes.witness = async () => { throw new Error('disk must not be verified from ci-host'); };
+    const anomalies = () => hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'probe_anomaly'`).all() as { body: string }[];
+    const fails = () => (hq.store.db.prepare(`SELECT consecutive_failures n FROM probe_state WHERE probe_id = 'nws/kafka-disk'`).get() as { n: number }).n;
+    const step = async () => { await hq.probes.tick(); clock.advance(5 * 60_000 + 1000); };
+    await step(); // unknown
+    await step(); // 95
+    assert.equal(fails(), 1);
+    await step(); await step(); // unknown ×2: the streak stays
+    assert.equal(fails(), 1, 'unknown neither adds nor resets');
+    assert.equal(anomalies().length, 0);
+    await step(); // 96 → second failure
+    assert.equal(anomalies().length, 1);
+    assert.match(anomalies()[0]!.body, /דיסק \/ על root@203\.0\.113\.12, הסף 80%/);
+    assert.match(anomalies()[0]!.body, /96% בשימוש ב-\//);
+    await step(); // 50 → recovered
+    assert.ok((hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'system'`).all() as { body: string }[]).some((m) => /kafka-disk חזר לתקין \(50%/.test(m.body)));
   } finally { await env.cleanup(); }
 });
