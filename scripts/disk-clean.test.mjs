@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, existsSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, existsSync, symlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pickTmp, parseBytes, clean } from './disk-clean.mjs';
@@ -50,4 +50,53 @@ test('בלי רשימת משימות פתוחות ובלי hq.db: מדלגים �
   const r = await clean({ tmp, home, stateDir: join(home, 's'), tmpOnly: true });
   assert.equal(existsSync(join(tmp, 't121')), true);
   assert.match(r.steps.at(-1).note, /מדלג/);
+});
+
+test('docker: שלבי הניקוי מדווחים את שינוי הדיסק בפועל, מדמון מדומה', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dcd-'));
+  const bin = join(dir, 'docker');
+  writeFileSync(bin, `#!/bin/sh
+echo "$@" >> "${dir}/calls"
+case "$1" in
+  info) echo 29.1.3;;
+  builder) printf 'ID\\tRECLAIMABLE\\nabc\\ttrue\\nTotal:\\t2GB\\n';;
+  image) echo 'Total reclaimed space: 1GB';;
+esac
+`, { mode: 0o755 });
+  let u = 10 * 1024 ** 3;
+  const usedFn = () => (u -= 1024 ** 3); // every call looks like 1GB went away
+  const home = mkdtempSync(join(tmpdir(), 'dch-'));
+  const r = await clean({ tmp: mkdtempSync(join(tmpdir(), 'dc-')), home, stateDir: join(home, 's'), closedTasks: [], dockerBin: bin, usedFn, tmpOnly: true });
+  const cache = r.steps.find((s) => s.name === 'docker build cache');
+  const img = r.steps.find((s) => s.name === 'docker images');
+  assert.equal(cache.freed, 1024 ** 3);
+  assert.match(cache.note, /docker דיווח 2\.0GB, הדיסק כולו \(לא רק docker\) השתנה ב-1\.0GB/);
+  assert.match(img.note, /docker דיווח 1\.0GB/);
+  const calls = readFileSync(join(dir, 'calls'), 'utf8');
+  assert.match(calls, /builder prune -af --filter until=6h/);
+  assert.match(calls, /image prune -af --filter until=24h/);
+});
+
+test('docker: דמון לא נגיש נרשם כשלב docker עם הערה, בלי ניקוי', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dcd-'));
+  const bin = join(dir, 'docker');
+  writeFileSync(bin, `#!/bin/sh\necho "permission denied on docker.sock" >&2\nexit 1\n`, { mode: 0o755 });
+  const home = mkdtempSync(join(tmpdir(), 'dch-'));
+  const r = await clean({ tmp: mkdtempSync(join(tmpdir(), 'dc-')), home, stateDir: join(home, 's'), closedTasks: [], dockerBin: bin, tmpOnly: true });
+  assert.match(r.steps.find((s) => s.name === 'docker').note, /הדמון לא נגיש.*permission denied/);
+});
+
+test('docker: בלי docker במכונה אין שלב docker ואין כשל', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'dch-'));
+  const r = await clean({ tmp: mkdtempSync(join(tmpdir(), 'dc-')), home, stateDir: join(home, 's'), closedTasks: [], dockerBin: join(home, 'no-docker'), tmpOnly: true });
+  assert.equal(r.steps.some((s) => s.name.startsWith('docker')), false);
+});
+
+test('docker: prune שנכשל נרשם עם השגיאה', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dcd-'));
+  const bin = join(dir, 'docker');
+  writeFileSync(bin, `#!/bin/sh\ncase "$1" in info) echo 29.1.3;; *) echo "boom" >&2; exit 1;; esac\n`, { mode: 0o755 });
+  const home = mkdtempSync(join(tmpdir(), 'dch-'));
+  const r = await clean({ tmp: mkdtempSync(join(tmpdir(), 'dc-')), home, stateDir: join(home, 's'), closedTasks: [], dockerBin: bin, usedFn: () => 0, tmpOnly: true });
+  assert.match(r.steps.find((s) => s.name === 'docker images').note, /נכשל: boom/);
 });

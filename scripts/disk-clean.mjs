@@ -6,20 +6,28 @@
 //
 //   node scripts/disk-clean.mjs [--dry-run] [--json] [--closed-tasks 3,7,12]
 //
-// It prunes docker build cache (24h) and unused images (72h), verifies the npm cache, trims the user journal to 300MB,
+// It prunes docker build cache (6h) and unused images (24h), verifies the npm cache, trims the user journal to 300MB,
 // and removes /tmp directories of tasks (t<N>, task-<N>, rev<N>, directories only) that closed more than 24 hours ago, plus audit-*
 // directories nobody touched for 24 hours. It never touches docker volumes, and never a /tmp of a task that is open.
+//
+// Task 263: the docker steps used to report `freed: 0` while 28GB of cache and 23GB of images sat there. Measured on hq-host
+// (22/10): `builder prune -f --filter until=6h` without `-a` freed 0B with 15.6GB reclaimable, and with `-a` it freed 2.2GB
+// (records used in the last 6h, and anything a running build holds, stay). The number was also read from a "reclaimed" line
+// that `builder prune` does not print ("Total:\t1.2GB"). On the containerd image store `until` is when the image was stored
+// here, not when it was built, and images are pulled again all the time, so 72h almost never matched. `docker --version`
+// passed even when the daemon was unreachable. Now each docker step reports how much the disk really changed, with docker's
+// own figure in the note, and an unreachable daemon is a `docker` step with a note in the log, not a silent 0.
 //
 // "Closed" comes from --closed-tasks (hq passes it for a node, which has no hq.db) or else from hq.db, read-only: the tasks
 // known to be done for over 24 hours. Any other task id keeps its /tmp. With no list the /tmp step is skipped.
 import { execFile } from 'node:child_process';
-import { appendFileSync, lstatSync, mkdirSync, readdirSync, rmSync, statfsSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statfsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const DOCKER_BUILD_CACHE_AGE = '24h';
-export const DOCKER_IMAGE_AGE = '72h';
+export const DOCKER_BUILD_CACHE_AGE = '6h';
+export const DOCKER_IMAGE_AGE = '24h';
 export const JOURNAL_SIZE = '300M';
 export const TMP_AGE_MS = 24 * 3600_000;
 
@@ -50,12 +58,20 @@ export function parseBytes(text) {
   return Math.round(Number(m[1]) * 1024 ** pow);
 }
 
+const DOCKER_ROOT = '/var/lib/docker';
+
+/** Docker's own count from a prune: "Total reclaimed space: 3.1GB" (image prune) or "Total:\t3.1GB" (builder prune). */
+export function dockerReported(out) {
+  const line = out.split('\n').find((l) => /^\s*Total(?: reclaimed space)?:/i.test(l));
+  return line ? parseBytes(line) : null;
+}
+
 export const human = (b) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)}GB` : b >= 1024 ** 2 ? `${Math.round(b / 1024 ** 2)}MB` : `${Math.round(b / 1024)}KB`);
 
 function run(cmd, args, timeout = 10 * 60_000) {
   return new Promise((resolve) => {
     execFile(cmd, args, { timeout, maxBuffer: 16 << 20 }, (err, stdout, stderr) => {
-      resolve({ ok: !err, out: String(stdout ?? ''), err: err ? (String(stderr || err.message).trim().split('\n')[0] ?? '') : '' });
+      resolve({ ok: !err, missing: err?.code === 'ENOENT', out: String(stdout ?? ''), err: err ? (String(stderr || err.message).trim().split('\n')[0] ?? '') : '' });
     });
   });
 }
@@ -105,15 +121,22 @@ export async function clean(opts = {}) {
   const before = used(tmp);
 
   const system = !opts.tmpOnly; // tests clean a /tmp of their own and must not prune the machine's docker
-  const hasDocker = system && (await run('docker', ['--version'], 10_000)).ok;
-  if (hasDocker) {
+  const docker = opts.dockerBin ?? 'docker';
+  const info = (system || opts.dockerBin) && (await run(docker, ['info', '--format', '{{.ServerVersion}}'], 30_000));
+  const hasDocker = info && !info.missing; // no docker on this machine at all: nothing to clean, not a failure
+  if (hasDocker && !info.ok) steps.push({ name: 'docker', freed: 0, note: `הדמון לא נגיש, לא ניקיתי: ${info.err}` });
+  else if (hasDocker) {
+    const usedFn = opts.usedFn ?? (() => used(existsSync(DOCKER_ROOT) ? DOCKER_ROOT : tmp));
     for (const [name, args] of [
-      ['docker build cache', ['builder', 'prune', '-f', '--filter', `until=${DOCKER_BUILD_CACHE_AGE}`]],
+      ['docker build cache', ['builder', 'prune', '-af', '--filter', `until=${DOCKER_BUILD_CACHE_AGE}`]],
       ['docker images', ['image', 'prune', '-af', '--filter', `until=${DOCKER_IMAGE_AGE}`]],
     ]) {
       if (dry) { steps.push({ name, freed: 0, note: 'dry-run' }); continue; }
-      const r = await run('docker', args);
-      steps.push({ name, freed: parseBytes(r.out.split('\n').filter((l) => /reclaimed/i.test(l)).join(' ')) ?? 0, note: r.ok ? '' : r.err });
+      const b = usedFn();
+      const r = await run(docker, args);
+      const reported = dockerReported(r.out);
+      const actual = Math.max(0, b - usedFn());
+      steps.push({ name, freed: actual, note: r.ok ? `docker דיווח ${reported === null ? 'כלום' : human(reported)}, הדיסק כולו (לא רק docker) השתנה ב-${human(actual)}` : `נכשל: ${r.err}` });
     }
   }
   if (!system) { /* no npm, no journal */ }
