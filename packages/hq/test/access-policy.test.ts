@@ -169,3 +169,14 @@ test('describeResource: an ssh allowlist reads as groups, and a change in prod i
   assert.match(describeResource('ssh:none', { type: 'ssh', host: 'h', env: 'ci', allow: [] }), /אין עדיין פקודות/);
   assert.match(d, /kubectl top \{nodes\}/);
 });
+
+test('ssh:ci-host catalog: cgroup files of a slice and docker system df fit; other files and a way up do not', () => {
+  const allow = [['docker', 'system', 'df'], ['cat', '/sys/fs/cgroup/*/memory.current'], ['cat', '/sys/fs/cgroup/*/cpu.stat']];
+  const ok = (argv: string[]) => allow.some((p) => matchPattern(p, argv));
+  assert.ok(ok(['docker', 'system', 'df']));
+  assert.ok(ok(['cat', '/sys/fs/cgroup/ci.slice/memory.current']));
+  assert.ok(ok(['cat', '/sys/fs/cgroup/system.slice/actions-runner.service/cpu.stat']));
+  assert.ok(!ok(['cat', '/etc/shadow']));
+  assert.ok(!ok(['cat', '/sys/fs/cgroup/../../etc/shadow']));
+  assert.ok(!ok(['docker', 'system', 'prune']));
+});

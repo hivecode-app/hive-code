@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { ENV, englishLines, hebrewReason, shiftDir, statePaths } from '@company/shared';
 import { writeCompactHandoff } from './compact.ts';
 import { checkToolUse } from './guard.ts';
+import { HEAVY_EVENT, heavyReminder } from './heavy.ts';
 import { checkMerge, detectMerges } from './merge.ts';
 import { turnTexts } from './turn-text.ts';
 import { appendSpool, mkdirp, UNKNOWN_SHIFT } from './spool.ts';
@@ -80,7 +81,19 @@ async function main(): Promise<void> {
       reason = checkToolUse((payload ?? {}) as object, { repo: process.env[ENV.repo], company: process.env[ENV.home], identity: process.env[ENV.identity] });
     } catch (e) { logError('guard', e); }
     if (!reason) reason = await mergeGate(payload);
-    if (!reason) return;
+    if (!reason) {
+      // Stage 4 of resource management: a reminder, never a block. The event is how the false-positive rate is measured.
+      try {
+        const bp = (payload ?? {}) as { tool_name?: unknown; tool_input?: { command?: unknown } };
+        const command = bp.tool_input?.command;
+        const reminder = bp.tool_name === 'Bash' && typeof command === 'string' ? heavyReminder(command) : null;
+        if (reminder) {
+          appendSpool(stateRoot, shift, { ts: new Date().toISOString(), event: HEAVY_EVENT, pid: process.pid, payload: { class: reminder.hit.class, what: reminder.hit.what, command } });
+          process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: reminder.text } }));
+        }
+      } catch (e) { logError('heavy-reminder', e); }
+      return;
+    }
     try { appendSpool(stateRoot, shift, { ts: new Date().toISOString(), event: 'PreToolUse.denied', pid: process.pid, payload }); }
     catch (e) { logError('spool', e); }
     process.stdout.write(JSON.stringify({
