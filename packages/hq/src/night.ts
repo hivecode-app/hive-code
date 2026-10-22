@@ -282,8 +282,9 @@ export class Night {
     const slots = this.scheduler.slots();
     // A task whose start is under way (a long worktree_setup) is not waiting, and its slot is taken.
     const waiting = queue.filter((t) => !this.scheduler.isStarting(t.id));
-    // A slot that exists but cannot start (not enough memory free right now) is empty too.
-    const empty = waiting.length > 0 && (slots.total - slots.running > 0 || slots.total === 0);
+    // Slots follow the free memory, so with shifts running, no free slot is full, not empty. With nothing running, a
+    // task that cannot start for want of memory is an empty machine.
+    const empty = waiting.length > 0 && (slots.free > 0 || slots.running === 0);
     const reason = empty ? this.reason(waiting, slots) : null;
     const open = this.openInterval(night.id);
     if (open && open.reason !== reason) {

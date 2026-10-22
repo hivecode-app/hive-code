@@ -151,7 +151,7 @@ export function companyDay(store: Store, companyDir: string, tz: string, date: s
     'SELECT kind, created_at, due_at, closed_at, outcome FROM estimates WHERE superseded_by IS NULL')) {
     const k = (kinds[e.kind] ??= { kind: e.kind, n: 0, onTime: 0, late: 0, open: 0, ratios: [] });
     k.n++;
-    if (!e.closed_at || e.outcome === 'cancelled') { k.open++; continue; }
+    if (!e.closed_at || e.outcome === 'cancelled' || e.outcome === 'frozen') { k.open++; continue; }
     if (e.closed_at <= e.due_at) k.onTime++; else k.late++;
     k.ratios.push((e.closed_at - e.created_at) / Math.max(1, e.due_at - e.created_at));
   }

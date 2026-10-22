@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeEnv, until } from './helpers.ts';
+import { makeEnv, memForSlots, until } from './helpers.ts';
 import { plainTitle } from '../src/open-tasks.ts';
 import { validateBlocks, type HomeRefs } from '../src/home.ts';
 
@@ -22,8 +22,8 @@ test('#128: queued tasks are on the board with their opener, place in line and w
   const env = await makeEnv({ noStart: true });
   try {
     const { hq } = env;
-    // One work slot: (7046 − 4096 − 1 resident × 450) / 2500.
-    hq.scheduler.memInfo = () => ({ totalMb: 7046, availableMb: 7000 });
+    // One work slot.
+    hq.scheduler.memInfo = memForSlots(hq, 1);
     await hq.start({ listen: true, timers: false });
     const token = readFileSync(join(env.cfg.stateDir, 'api-token'), 'utf8').trim();
     const get = async (path: string) => (await (await fetch(`http://127.0.0.1:${hq.port}${path}`, { headers: { authorization: `Bearer ${token}` } })).json()) as Record<string, any>;
@@ -46,7 +46,8 @@ test('#128: queued tasks are on the board with their opener, place in line and w
     assert.deepEqual({ ...ra, since: undefined }, { id: a.id, ref: null, project: 'agent-company', title: 'שגיאת המפתח בקבלות', opened_by: 'yoav',
       worker: `agent-company-t${a.id}`, state: 'running', position: null, reason: null, since: undefined });
     assert.equal(ra.since, hq.scheduler.task(a.id)!.started_at);
-    assert.deepEqual([rb.state, rb.position, rb.reason, rb.worker, rb.title, rb.opened_by], ['queued', 1, 'מחכה למשבצת', null, 'דבר שני', 'yoav']);
+    // Slots follow the free memory, so a full slot is a memory wait.
+    assert.deepEqual([rb.state, rb.position, rb.reason, rb.worker, rb.title, rb.opened_by], ['queued', 1, 'מחכה לזיכרון', null, 'דבר שני', 'yoav']);
     assert.deepEqual([rc.state, rc.position, rc.opened_by], ['queued', 2, 'ac-ceo'], 'no opener: the project lead');
     assert.deepEqual([rd.state, rd.position, rd.reason, rd.opened_by], ['blocked', null, 'מחכה להחלטה', 'eli']);
 

@@ -3,6 +3,7 @@
 // with the company's calibration (memory/company/time-estimates.md) as a suggestion, and closes it with the real time:
 //   status done / eta_done → done (closed_at = the real moment, even when it was late)
 //   the task closes any other way → cancelled, but one already past due stays missed (a promise that was not kept)
+//   the task is frozen (parked, needs-decision) → frozen, "הוקפא על ידי <מי>": not a promise that was broken, and no reminder
 //   past due and still open → missed (swept; closing it later still keeps the real time, and `missed` stays on the row)
 // remind() is the scheduler's every-minute pass: the reminder before the due time, the one after it, the manager at +10 minutes.
 // A new estimate of the same worker on the same `what` is an update: the old row stays as given, closed as cancelled
@@ -12,7 +13,7 @@ import { hhmm, nextLocal, tzOffsetMs } from './timezone.ts';
 
 export const ETA_KINDS = ['small-fix', 'feature', 'investigation', 'report', 'build', 'deploy', 'release'] as const;
 export type EtaKind = (typeof ETA_KINDS)[number];
-export type EstimateOutcome = 'missed' | 'done' | 'cancelled';
+export type EstimateOutcome = 'missed' | 'done' | 'cancelled' | 'frozen';
 export type EstimateState = 'open' | EstimateOutcome;
 
 /** Closed estimates of one kind in one project that turn the default factor into the project's own data. */
@@ -39,6 +40,8 @@ export interface EstimateRow {
 
 /** A row as the API shows it: `state` is the outcome or `open`, the times are in minutes, `late` = closed after its due time. */
 export interface EstimateView extends EstimateRow {
+  /** outcome `frozen`: who froze the task (parked / needs-decision) it was promised on. */
+  frozen_by: string | null;
   state: EstimateState; estimated_min: number; actual_min: number | null; late: boolean;
   /** Was ever past due while open, also after it closed late: what the statistics and the app count. */
   missed: boolean;
@@ -154,6 +157,7 @@ export class Estimates {
     const now = this.store.now();
     const out = { reminded: 0, missed: 0, escalated: 0 };
     const open = `closed_at IS NULL`;
+    this.freezeFrozenTasks();
     for (const x of db.prepare(`SELECT * FROM estimates WHERE ${open} AND reminded_at IS NULL AND due_at > ?`).all(now) as EstimateRow[]) {
       const total = x.due_at - x.created_at;
       const lead = Math.min(Math.max(total * REMIND_FRACTION, REMIND_MIN_MIN * 60_000), REMIND_MAX_MIN * 60_000);
@@ -233,6 +237,28 @@ export class Estimates {
   }
 
   /**
+   * The task was frozen (parked, or needs-decision): nobody is working on it, so its open estimates close as `frozen` by `by`
+   * ("הוקפא על ידי …"), with no reminder and no `missed`, even when past due. A task that thaws gets a new estimate from its worker.
+   */
+  freezeForTask(taskId: number, by: string): number {
+    const now = this.store.now();
+    const ids = this.store.db.prepare('SELECT id, identity FROM estimates WHERE task = ? AND closed_at IS NULL').all(taskId) as { id: number; identity: string }[];
+    for (const x of ids) {
+      this.store.db.prepare(`UPDATE estimates SET closed_at = ?, outcome = 'frozen' WHERE id = ?`).run(now, x.id);
+      this.store.db.prepare('INSERT OR REPLACE INTO estimate_frozen (estimate_id, by) VALUES (?, ?)').run(x.id, by);
+      this.store.emit('estimate.closed', x.identity, { id: x.id, outcome: 'frozen', by, task: taskId });
+    }
+    return ids.length;
+  }
+
+  /** The every-minute net under freezeForTask: a task frozen some way that did not say who (hq itself marks needs-decision). */
+  private freezeFrozenTasks(): void {
+    const rows = this.store.db.prepare(`SELECT DISTINCT e.task FROM estimates e JOIN tasks t ON t.id = e.task
+      WHERE e.closed_at IS NULL AND (t.state IN ('parked','needs_decision') OR EXISTS (SELECT 1 FROM json_each(t.labels) WHERE value = 'needs-decision'))`).all() as { task: number }[];
+    for (const r of rows) this.freezeForTask(r.task, 'hq');
+  }
+
+  /**
    * The task ended some other way than its worker saying done: its estimates were never delivered. One that was already
    * past due stays `missed` (closed, but still a promise that was not kept); only one cancelled before its due time is `cancelled`.
    */
@@ -257,6 +283,7 @@ export class Estimates {
       actual_min: r.closed_at != null && r.outcome === 'done' ? Math.round((r.closed_at - r.created_at) / 60_000) : null,
       late: r.closed_at != null && r.outcome === 'done' && r.closed_at > r.due_at,
       missed: r.missed_at != null,
+      frozen_by: r.outcome === 'frozen' ? (this.store.db.prepare('SELECT by FROM estimate_frozen WHERE estimate_id = ?').get(r.id) as { by: string } | undefined)?.by ?? null : null,
     };
   }
 
@@ -297,7 +324,7 @@ export function yesterdayRange(ts: number, tz: string): { since: number; until: 
  * and only when more than one kind was given.
  */
 export function accuracyLine(rows: EstimateView[], name: (identity: string) => string = (id) => id): string | null {
-  const all = rows.filter((r) => r.state !== 'cancelled' && r.state !== 'open');
+  const all = rows.filter((r) => r.state !== 'cancelled' && r.state !== 'frozen' && r.state !== 'open');
   if (!all.length) return null;
   const order = (a: EstimateView, b: EstimateView) => a.created_at - b.created_at || a.id - b.id;
   const late = all.filter((r) => r.late).sort(order);

@@ -1,10 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeEnv, ORG_YAML, until, type TestEnv } from './helpers.ts';
+import { makeEnv, memForSlots, ORG_YAML, until, type TestEnv } from './helpers.ts';
 import { parseNightTrigger, priorityOf, type Issue } from '../src/night.ts';
 
 const CHARTER = (status = 'active') => `---\nproject: agent-company\nstatus: ${status}\nrepo: hivecode-app/hive-code\nnight_weight: 3\n---\n\n# x\n`;
-const TWO_SLOTS = { totalMb: 4096 + 450 + 2 * 2500 + 100, availableMb: 4096 + 2 * 2500 + 100 };
 const NO_SLOTS = { totalMb: 4096, availableMb: 1000 };
 
 function issue(number: number, title: string, labels: string[] = []): Issue {
@@ -19,7 +18,7 @@ async function nightEnv(issues: Issue[], opts: { summary?: boolean; scheduler?: 
     projects: { 'agent-company': CHARTER(), lumo: CHARTER('dormant').replace('agent-company', 'lumo') },
     deps: { issues: async (repo) => { calls.push(repo); return [...open.values()]; } },
   });
-  env.hq.scheduler.memInfo = () => TWO_SLOTS;
+  env.hq.scheduler.memInfo = memForSlots(env.hq, 2);
   env.hq.store.setToggle('yoav/night-scheduler', opts.scheduler ?? true);
   env.hq.store.setToggle('yoav/morning-summary', opts.summary ?? true);
   return { env, open, calls };
@@ -91,7 +90,7 @@ test('empty slots are measured with their reason; no machine capacity is not a r
     hq.scheduler.memInfo = () => NO_SLOTS;
     await hq.night.start();
     for (let m = 0; m < 10; m++) await minute(env);
-    hq.scheduler.memInfo = () => TWO_SLOTS;
+    hq.scheduler.memInfo = memForSlots(hq, 2);
     await minute(env);
     await until(() => byRef(env, 1)?.state === 'running' && byRef(env, 2)?.state === 'running');
     for (let m = 0; m < 9; m++) await minute(env);
@@ -247,7 +246,7 @@ test('memory short of a free slot counts as empty, with the memory reason', asyn
   const { env } = await nightEnv([issue(1, 'א')]);
   try {
     const { hq } = env;
-    hq.scheduler.memInfo = () => ({ totalMb: TWO_SLOTS.totalMb, availableMb: 4096 + 100 }); // 2 slots exist, none can start
+    hq.scheduler.memInfo = () => ({ totalMb: 23_000, availableMb: 4096 + 100 }); // 2 slots exist, none can start
     await hq.night.start();
     for (let m = 0; m < 5; m++) await minute(env);
     const s = hq.night.end('owner')!;

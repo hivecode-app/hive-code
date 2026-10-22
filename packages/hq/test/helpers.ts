@@ -374,3 +374,14 @@ grants: []
 
 # proj
 `;
+
+/**
+ * A fake memInfo with room for `n` work slots (reserve 4096, RSS_work 1300) that, like the real one, loses 1300MB for every
+ * task shift that runs: MemAvailable has the running shifts in it.
+ */
+export function memForSlots(hq: { store: { db: { prepare(sql: string): { get(): unknown } } } }, n: number): () => { totalMb: number; availableMb: number } {
+  return () => {
+    const running = (hq.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND task_id IS NOT NULL`).get() as { n: number }).n;
+    return { totalMb: 23_000, availableMb: 4096 + n * 1300 + 100 - 1300 * running };
+  };
+}

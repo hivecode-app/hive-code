@@ -82,7 +82,7 @@ test('standing worker: own worktree and a new session per task, one at a time, t
     // It ran before (a resumable session in the checkout): the task must not resume it.
     await hq.shifts.request('gal', { reason: 'message' });
     await hq.shifts.stop('gal-1', 'rest');
-    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 450 + 2 * 2500 + 100, availableMb: 4096 + 2 * 2500 + 100 }); // 2 slots
+    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 450 + 2 * 1300 + 100, availableMb: 4096 + 2 * 1300 + 100 }); // 2 slots
 
     const a = hq.scheduler.addTask({ title: 'ראשונה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'], priority: 1 });
     await until(() => hq.scheduler.task(a.id)!.state === 'running', 5000, 'first task running');

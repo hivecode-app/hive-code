@@ -55,8 +55,8 @@ export interface HqConfig {
   };
   capacity: {
     reserveMb: number;           // B.5: 4GB reserve
-    rssIdleMb: number;           // placeholder until measured at the gate
-    rssWorkMb: number;           // placeholder until measured at the gate
+    rssIdleMb: number;           // p90 of an idle lead's anon (measured 22/10); the reference, not in the slot formula
+    rssWorkMb: number;           // p90 of a working shift's anon (measured 22/10): one slot
     residents: string[];         // resident pool (not counted in work slots): org.yaml `resident: true`, else the manager
     maxSlots: number;
     maxLoad: number;             // #224: no new shift here while load1 per CPU is over this (load from outside the shifts too)
@@ -197,7 +197,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       turnEndWaitMs: 3 * 60_000,
       accountsMs: 10 * 60_000,
     },
-    capacity: { reserveMb: 4096, rssIdleMb: 450, rssWorkMb: 2500, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8, maxLoad: 1.5 },
+    capacity: { reserveMb: 4096, rssIdleMb: 400, rssWorkMb: 1300, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8, maxLoad: 1.5 },
     backupsKeep: 48,
     heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: {} },
     auth: {

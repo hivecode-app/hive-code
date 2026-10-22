@@ -293,6 +293,47 @@ test('a closed estimate is not reminded', async () => {
   } finally { await env.cleanup(); }
 });
 
+test('a frozen task (parked or needs-decision): no reminder, closed as frozen by whoever froze it, not missed', async () => {
+  const env = await makeEnv();
+  try {
+    const mk = (title: string, what: string) => {
+      const t = env.hq.scheduler.addTask({ title, project: 'agent-company', identity: 'ac-ceo' });
+      env.hq.store.db.prepare(`UPDATE tasks SET state = 'running' WHERE id = ?`).run(t.id);
+      return t;
+    };
+    // The estimate takes the worker's open task (one at a time): the first is frozen by a label, by yoav; then the second by state.
+    const t1 = mk('א', 'x');
+    op(env, 'status', { state: 'working', eta_min: 40, eta_kind: 'feature', eta_what: 'של א' });
+    env.hq.scheduler.setTaskLabels(t1.id, ['needs-decision'], [], 'yoav');
+    env.hq.store.db.prepare(`UPDATE tasks SET state = 'done' WHERE id = ?`).run(t1.id);
+    const frozen = env.hq.estimates.list().find((x) => x.what === 'של א')!;
+    assert.equal(frozen.state, 'frozen');
+    assert.equal(frozen.frozen_by, 'yoav');
+    assert.equal(frozen.missed, false);
+    // Past its due time: still no reminder and no missed.
+    env.clock.advance(60 * MIN);
+    await env.hq.scheduler.sweep();
+    assert.deepEqual(mail(env, 'ac-ceo').filter((m) => m.id.startsWith('estimate-')), []);
+    assert.equal(env.hq.estimates.list().find((x) => x.what === 'של א')!.state, 'frozen', 'not missed');
+  } finally { await env.cleanup(); }
+});
+
+test('a frozen task whose label was set some other way: the sweep freezes its estimate before it reminds', async () => {
+  const env = await makeEnv();
+  try {
+    const t = env.hq.scheduler.addTask({ title: 'ב', project: 'agent-company', identity: 'ac-ceo' });
+    env.hq.store.db.prepare(`UPDATE tasks SET state = 'running' WHERE id = ?`).run(t.id);
+    op(env, 'status', { state: 'working', eta_min: 40, eta_kind: 'feature', eta_what: 'של ב' });
+    env.hq.store.db.prepare(`UPDATE tasks SET state = 'needs_decision' WHERE id = ?`).run(t.id);
+    env.clock.advance(35 * MIN); // inside the reminder window
+    await env.hq.scheduler.sweep();
+    assert.deepEqual(mail(env, 'ac-ceo').filter((m) => m.id.startsWith('estimate-')), [], 'no "נשארו 9 דקות"');
+    const x = env.hq.estimates.list().find((e) => e.what === 'של ב')!;
+    assert.equal(x.state, 'frozen');
+    assert.equal(x.frozen_by, 'hq');
+  } finally { await env.cleanup(); }
+});
+
 test('past due: missed, one more message to the worker, nothing to the owner, the manager only 10 minutes after the due time', async () => {
   const env = await makeEnv();
   try {
@@ -371,7 +412,7 @@ const view = (id: number, o: Partial<EstimateView> & { est?: number; act?: numbe
   const created_at = id * 1000;
   const closed = o.act != null ? created_at + o.act * MIN : null;
   return { id, identity: 'dana', shift: null, task: null, project: 'agent-company', kind: 'feature', what: `משהו ${id}`, message_id: null, created_at,
-    due_at: created_at + est * MIN, closed_at: closed, outcome: closed ? 'done' : null, superseded_by: null, missed_at: null, reminded_at: null, missed_told_at: null, escalated_at: null, missed: false, state: closed ? 'done' : 'open',
+    due_at: created_at + est * MIN, closed_at: closed, outcome: closed ? 'done' : null, superseded_by: null, missed_at: null, reminded_at: null, missed_told_at: null, escalated_at: null, frozen_by: null, missed: false, state: closed ? 'done' : 'open',
     estimated_min: est, actual_min: o.act ?? null, late: closed != null && o.act! > est, ...o };
 };
 

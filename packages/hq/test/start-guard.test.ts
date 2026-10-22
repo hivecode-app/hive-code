@@ -22,7 +22,7 @@ test('#224: over the load or short of memory here, nothing starts and the queue 
 
     // Load is fine, memory is not: MemAvailable under reserve + one shift.
     hq.scheduler.loadInfo = () => ({ load1: 4, cpus: 8 });
-    hq.scheduler.memInfo = () => ({ totalMb: 23_000, availableMb: 4096 + 2000 });
+    hq.scheduler.memInfo = () => ({ totalMb: 23_000, availableMb: 4096 + 1000 });
     await hq.scheduler.fill();
     assert.equal(launcher.launches.length, 0);
     assert.equal(hq.scheduler.slots().pressure, 'memory');

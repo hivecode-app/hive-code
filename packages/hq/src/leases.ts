@@ -165,6 +165,11 @@ export class Leases {
     return { cls: all.get(name) ?? null, known: [...all.keys()] };
   }
 
+  /** Memory the granted leases of a machine hold together (their ceilings). */
+  heldMb(machine: string): number {
+    return this.granted(machine).reduce((n, r) => n + r.mem_mb, 0);
+  }
+
   private granted(machine: string): LeaseRow[] {
     return this.db.prepare(`SELECT * FROM leases WHERE state = 'granted' AND machine = ? ORDER BY granted_at, id`).all(machine) as LeaseRow[];
   }

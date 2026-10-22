@@ -6,15 +6,30 @@ import { bgTasks } from '../src/shifts.ts';
 import { loadConfig } from '../src/config.ts';
 import { join } from 'node:path';
 
-test('capacity formula: floor((RAM − reserve − residents × idle) / work), capped by what is free now', () => {
-  const cfg = loadConfig({ stateDir: '/nonexistent', capacity: { reserveMb: 4096, rssIdleMb: 500, rssWorkMb: 2500, residents: ['yoav'], maxSlots: 8, maxLoad: 1.5 } });
-  assert.deepEqual(capacity(cfg, { totalMb: 23_552, availableMb: 19_000 }, 0, 1), { total: 7, running: 0, free: 5 });
-  assert.equal(capacity(cfg, { totalMb: 23_552, availableMb: 19_000 }, 6, 1).free, 1);
-  assert.equal(capacity(cfg, { totalMb: 23_552, availableMb: 5_000 }, 0, 1).free, 0);
-  assert.equal(capacity(cfg, { totalMb: 64_000, availableMb: 60_000 }, 0, 1).total, 8, 'maxSlots cap');
+/** The memory a running task shift takes out of what is free (the fake memInfo of a test does not move by itself). */
+const taskShifts = (hq: { store: { db: { prepare(sql: string): { get(): unknown } } } }) =>
+  (hq.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND task_id IS NOT NULL`).get() as { n: number }).n;
+
+test('capacity formula: floor((MemAvailable − reserve − leases held) / RSS_work), capped by maxSlots − running', () => {
+  const cfg = loadConfig({ stateDir: '/nonexistent', capacity: { reserveMb: 4096, rssIdleMb: 400, rssWorkMb: 1300, residents: ['yoav'], maxSlots: 8, maxLoad: 1.5 } });
+  assert.deepEqual(capacity(cfg, { totalMb: 23_552, availableMb: 14_000 }, 0), { total: 7, running: 0, free: 7 });
+  assert.deepEqual(capacity(cfg, { totalMb: 23_552, availableMb: 14_000 }, 6), { total: 8, running: 6, free: 2 }, 'maxSlots − running');
+  assert.equal(capacity(cfg, { totalMb: 23_552, availableMb: 5_000 }, 0).free, 0);
+  assert.deepEqual(capacity(cfg, { totalMb: 23_552, availableMb: 5_000 }, 3), { total: 3, running: 3, free: 0 }, 'no room: total is what runs');
+  assert.equal(capacity(cfg, { totalMb: 64_000, availableMb: 60_000 }, 0).total, 8, 'maxSlots cap');
+  // Held leases count as consumption: 14000 − 4096 − 4000 = 5904 → 4 slots.
+  assert.equal(capacity(cfg, { totalMb: 23_552, availableMb: 14_000 }, 0, 4_000).free, 4);
 });
 
-test('queue follows B.16 order and skips needs-decision', async () => {
+test('capacity today: 13 leads alive and 14.8G available gives more than 5 slots', () => {
+  const cfg = loadConfig({ stateDir: '/nonexistent' });
+  // Before: floor((RAM − 4096 − 13 × 450) / 2500) was 5–6 whatever was free. Now the free memory decides.
+  const c = capacity(cfg, { totalMb: 23_552, availableMb: 14_800 }, 0);
+  assert.ok(c.free > 5, `free=${c.free}`);
+  assert.equal(c.free, Math.min(cfg.capacity.maxSlots, Math.floor((14_800 - cfg.capacity.reserveMb) / cfg.capacity.rssWorkMb)));
+});
+
+test('queue follows B.16 order (priority first) and skips needs-decision', async () => {
   const env = await makeEnv();
   try {
     const { hq, clock } = env;
@@ -28,7 +43,20 @@ test('queue follows B.16 order and skips needs-decision', async () => {
     s.addTask({ title: 'open without worktree', state: 'open' });
     s.addTask({ title: 'needs decision', labels: ['needs-decision'], priority: 0 });
     const d0 = s.addTask({ title: 'default p0', priority: 0 });
-    assert.deepEqual(s.queue().map((t) => t.id), [open.id, left.id, n.id, d0.id, d.id]);
+    assert.deepEqual(s.queue().map((t) => t.id), [d0.id, d.id, open.id, left.id, n.id]);
+  } finally { await env.cleanup(); }
+});
+
+test('queue: a queued p0 goes before a p2 that came back interrupted; within one priority interrupted goes before queued', async () => {
+  const env = await makeEnv();
+  try {
+    const s = env.hq.scheduler;
+    env.hq.store.setToggle('scheduler', false);
+    const q1 = s.addTask({ title: 'p1 חדשה', priority: 1 }); env.clock.advance(1);
+    const i2 = s.addTask({ title: 'p2 שחזרה', priority: 2, state: 'interrupted', worktree: '/w/i2' }); env.clock.advance(1);
+    const i1 = s.addTask({ title: 'p1 שחזרה', priority: 1, state: 'interrupted', worktree: '/w/i1' }); env.clock.advance(1);
+    const p0 = s.addTask({ title: 'p0 חדשה', priority: 0 });
+    assert.deepEqual(s.queue().map((t) => t.id), [p0.id, i1.id, q1.id, i2.id]);
   } finally { await env.cleanup(); }
 });
 
@@ -36,7 +64,7 @@ test('scheduler fills free slots immediately with task workers under the project
   const env = await makeEnv();
   try {
     const { hq, launcher } = env;
-    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 450 + 2 * 2500 + 100, availableMb: 4096 + 2 * 2500 + 100 }); // 2 slots
+    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 450 + 2 * 1300 + 100, availableMb: 4096 + 2 * 1300 + 100 }); // 2 slots
     const t1 = hq.scheduler.addTask({ title: 'תקן את ה-CI', project: 'agent-company' });
     const t2 = hq.scheduler.addTask({ title: 'שני', project: 'agent-company' });
     const t3 = hq.scheduler.addTask({ title: 'שלישי', project: 'agent-company' });
@@ -283,14 +311,14 @@ test('#128: idle leads hold no work slot; with a task waiting they rest after 5 
   try {
     const { hq, clock, launcher } = env;
     // 2 work slots with yoav and two idle leads on the RSS_idle line.
-    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 3 * 450 + 2 * 2500 + 100, availableMb: 4096 + 2 * 2500 + 100 });
+    hq.scheduler.memInfo = () => ({ totalMb: 23_000, availableMb: 4096 + 2 * 1300 + 100 - 1300 * taskShifts(hq) });
     hq.store.setToggle('scheduler', false);
     await hq.scheduler.ensureResidents();
     for (const [id, to] of [['l-1', 'eli'], ['l-2', 'ac-ceo']]) hq.mailbox.tell({ msg_id: id, to, body: 'שלום' });
     await until(() => ['l-1', 'l-2'].every((m) => hq.mailbox.get(m)!.state === 'delivered'), 3000, 'leads up');
     hq.mailbox.markHandled('l-1'); hq.mailbox.markHandled('l-2');
     await until(() => !hq.shifts.get('eli-1')!.in_turn && !hq.shifts.get('ac-ceo-1')!.in_turn && hq.shifts.get('yoav-1')?.state === 'live', 3000, 'idle');
-    assert.deepEqual(hq.scheduler.slots(), { total: 2, running: 0, free: 2, pressure: null, load: 0.06, availableMb: 9196, tasks: 0, leads: { active: 0, idle: 2, resting: 0 } });
+    assert.deepEqual(hq.scheduler.slots(), { total: 2, running: 0, free: 2, pressure: null, load: 0.06, availableMb: 6796, tasks: 0, leads: { active: 0, idle: 2, resting: 0 } });
 
     hq.store.setToggle('scheduler', true);
     const t1 = hq.scheduler.addTask({ title: 'א', project: 'agent-company' });
@@ -331,7 +359,7 @@ test('#128: a message left delivered by an earlier shift does not keep an idle s
   const env = await makeEnv();
   try {
     const { hq, clock } = env;
-    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 3 * 450 + 2 * 2500 + 100, availableMb: 4096 + 2 * 2500 + 100 });
+    hq.scheduler.memInfo = () => ({ totalMb: 23_000, availableMb: 4096 + 2 * 1300 + 100 - 1300 * taskShifts(hq) });
     hq.store.setToggle('scheduler', false);
     await hq.scheduler.ensureResidents();
     for (const [id, to] of [['o-1', 'eli'], ['o-2', 'ac-ceo']]) hq.mailbox.tell({ msg_id: id, to, body: 'שלום' });
@@ -353,7 +381,7 @@ test('#128: no pressure (empty queue) → idle leads stay up; a lead in a turn h
   const env = await makeEnv();
   try {
     const { hq, clock } = env;
-    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 2 * 450 + 2 * 2500 + 100, availableMb: 4096 + 2 * 2500 + 100 });
+    hq.scheduler.memInfo = () => ({ totalMb: 23_000, availableMb: 4096 + 2 * 1300 + 100 - 1300 * taskShifts(hq) });
     hq.mailbox.tell({ msg_id: 'n-1', to: 'eli', body: 'שלום' });
     await until(() => hq.mailbox.get('n-1')!.state === 'delivered', 3000, 'eli up');
     hq.shifts.setFields('eli-1', { in_turn: 1 });

@@ -42,7 +42,7 @@ import { TabHandoffs } from './tab/handoffs.ts';
 import { CdpTabBrowser, type TabBrowser } from './tab/browser.ts';
 import { startTabServer, type TabServer } from './tab/server.ts';
 import { clockOf, readTimeZone } from './timezone.ts';
-import { Nodes, RoutingLauncher, nodeToggle, type RemoteNode, type SshRun } from './nodes.ts';
+import { LOCAL, Nodes, RoutingLauncher, nodeToggle, type RemoteNode, type SshRun } from './nodes.ts';
 
 /** The phone view's own diagnostics go to the journal, not the event log (frames and taps are not events). */
 const tabLog = (msg: string, data?: unknown) => console.log(`tab: ${msg}${data === undefined ? '' : ` ${JSON.stringify(data)}`}`);
@@ -177,9 +177,11 @@ export class Hq {
     this.estimates = new Estimates(this.store);
     this.access = new Access(this, deps.accessRunner);
     this.leases = new Leases(this);
+    this.scheduler.heldMb = () => this.leases.heldMb(LOCAL);
     this.shifts.on('ended', (row) => this.leases.releaseShift(row.id));
     this.night.estimates = this.estimates;
     this.scheduler.onTaskDone = (id) => this.estimates.cancelForTask(id);
+    this.scheduler.onTaskFrozen = (id, by) => this.estimates.freezeForTask(id, by);
     this.scheduler.onSweep = () => {
       if (!this.store.toggle('scheduler')) return;
       this.estimates.remind((to, msg_id, body) => { this.mailbox.tell({ msg_id, from: 'hq', to, kind: 'system', priority: 'next', body }); }, this.timeZone(),

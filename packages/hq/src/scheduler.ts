@@ -32,17 +32,25 @@ export interface NewTask {
   labels?: string[]; priority?: number; night_weight?: number; worktree?: string; identity?: string;
 }
 
-/** B.5: work_slots = floor((RAM − 4GB reserve − residents × RSS_idle) / RSS_work). RSS values are placeholders until measured. */
-export function capacity(cfg: HqConfig, mem: { totalMb: number; availableMb: number }, running: number, residentsLive: number) {
-  const { reserveMb, rssIdleMb, rssWorkMb, maxSlots } = cfg.capacity;
-  const total = Math.max(0, Math.min(maxSlots, Math.floor((mem.totalMb - reserveMb - residentsLive * rssIdleMb) / rssWorkMb)));
-  // Never start more than the memory that is actually free right now can hold.
-  const byAvailable = Math.max(0, Math.floor((mem.availableMb - reserveMb) / rssWorkMb));
-  const free = Math.max(0, Math.min(total - running, byAvailable));
+/** A shift this young is still growing to its working size. */
+const RAMP_MS = 2 * 60_000;
+
+/**
+ * B.5: the slots follow the memory that is free now (MemAvailable already has every live shift, resident and idle lead
+ * in it): free = floor((available − reserve − heldMb) / RSS_work), capped by maxSlots − running. `heldMb` is what
+ * company-run leases hold on this machine (their ceilings: a command that has not grown yet counts in full). RSS_work
+ * is the 90th percentile of a working shift's anon, measured (resources.ts samples).
+ */
+export function capacity(cfg: HqConfig, mem: { totalMb: number; availableMb: number }, running: number, heldMb = 0) {
+  const { reserveMb, rssWorkMb, maxSlots } = cfg.capacity;
+  const byAvailable = Math.max(0, Math.floor((mem.availableMb - reserveMb - heldMb) / rssWorkMb));
+  const free = Math.max(0, Math.min(maxSlots - running, byAvailable));
+  const total = Math.min(maxSlots, running + free);
   return { total, running, free };
 }
 
-// B.16 queue order: 1 open/interrupted with a worktree · 2 left over from last night · 3 `company:night` by priority then age ·
+// B.16 queue order: priority first (a p0 that has not started goes before a p2 that came back interrupted), then within one
+// priority: 1 open/interrupted with a worktree · 2 left over from last night · 3 `company:night` by priority then age ·
 // 4 everything else without `needs-decision`, by priority, project night_weight, age.
 const QUEUE_SQL = `
   SELECT t.*,
@@ -57,7 +65,7 @@ const QUEUE_SQL = `
     AND NOT EXISTS (SELECT 1 FROM json_each(t.labels) WHERE value = 'needs-decision')
     AND (t.state = 'queued' OR t.worktree IS NOT NULL)
     AND (@scope IS NULL OR t.project IN (SELECT value FROM json_each(@scope)))
-  ORDER BY bucket, t.priority, CASE WHEN bucket = 4 THEN -t.night_weight ELSE 0 END, t.created_at, t.id`;
+  ORDER BY t.priority, bucket, CASE WHEN bucket = 4 THEN -t.night_weight ELSE 0 END, t.created_at, t.id`;
 
 /**
  * SQL over tasks t JOIN identities i: t is the task a standing worker (org.ts isStandingWorker) is on now. close_team
@@ -124,6 +132,8 @@ class WorktreeGone extends Error { override name = 'WorktreeGone'; }
 export const BUSY_REASON = 'השרת עמוס';
 
 export class Scheduler {
+  /** Memory the company-run leases hold on this machine (hq sets it from the leases). */
+  heldMb: () => number = () => 0;
   memInfo: () => { totalMb: number; availableMb: number } = memInfoMb;
   /** #224: load here (/proc/loadavg). Tests swap it. */
   loadInfo: () => { load1: number; cpus: number } = loadInfo;
@@ -215,11 +225,14 @@ export class Scheduler {
 
   /** A task that ends (any way) cancels the estimates still open on it; the ones its worker closed with status done are already closed. */
   onTaskDone?: (id: number) => void;
+  /** A task parked or marked needs-decision freezes the estimates open on it (estimates.ts freezeForTask); `by` = who did it. */
+  onTaskFrozen?: (id: number, by: string) => void;
 
-  setTaskState(id: number, state: string): void {
+  setTaskState(id: number, state: string, by = 'hq'): void {
     this.store.db.prepare('UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?').run(state, this.store.now(), id);
     this.store.emit('task.state', null, { id, state });
     if (state === 'done' || state === 'closed') this.onTaskDone?.(id);
+    if (state === 'parked' || state === 'needs_decision') this.onTaskFrozen?.(id, by);
   }
 
   queue(): (TaskRow & { bucket: number })[] {
@@ -235,15 +248,19 @@ export class Scheduler {
    */
   slots() {
     const db = this.store.db;
-    const live = db.prepare(`SELECT s.task_id, s.in_turn, s.state, ${STANDING_SHIFT} AS standing FROM shifts s
+    const live = db.prepare(`SELECT s.task_id, s.in_turn, s.state, s.started_at, ${STANDING_SHIFT} AS standing FROM shifts s
       LEFT JOIN identities i ON i.id = s.identity WHERE s.state IN ('starting','live') AND s.kind = 'work' AND s.machine = 'local'`)
-      .all({ mgr: this.cfg.managerId }) as { task_id: number | null; in_turn: number; state: string; standing: number }[];
+      .all({ mgr: this.cfg.managerId }) as { task_id: number | null; in_turn: number; state: string; started_at: number; standing: number }[];
     const leadShifts = live.filter((s) => s.standing && s.task_id == null);
     const idle = leadShifts.filter((s) => s.state === 'live' && !s.in_turn).length;
     const active = leadShifts.length - idle;
+    // A shift that just started has not grown to its working size, so MemAvailable still shows its memory as free:
+    // for its first minutes a working shift holds RSS_work in full (else every sweep would start another on the same free memory).
+    const rampSince = this.store.now() - RAMP_MS;
+    const idleLeads = new Set(leadShifts.filter((s) => s.state === 'live' && !s.in_turn));
+    const young = live.filter((s) => s.started_at > rampSince && !idleLeads.has(s)).length;
     // A task still in its worktree setup has no shift row yet, but its slot is taken.
     const tasks = live.length - leadShifts.length + [...this.starting.values()].filter((m) => m === LOCAL).length;
-    const residents = (db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND kind = 'resident'`).get() as { n: number }).n;
     // Standing identities that ran before and are down now: rested (idle, pressure) or stopped by hand. A message wakes them.
     const resting = (db.prepare(`SELECT COUNT(*) n FROM identities i WHERE i.source = 'org' AND i.active = 1
       AND COALESCE(i.team_kind, '') != 'task' AND i.lifecycle != 'resident' AND i.id != @mgr
@@ -251,13 +268,15 @@ export class Scheduler {
       AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.identity = i.id AND s.state IN ('starting','live'))`)
       .get({ mgr: this.cfg.managerId }) as { n: number }).n;
     const mem = this.memInfo();
-    const c = capacity(this.cfg, mem, tasks + active, Math.max(residents, this.cfg.capacity.residents.length) + idle);
+    const starting = [...this.starting.values()].filter((m) => m === LOCAL).length;
+    const held = this.heldMb() + Math.max(young, starting) * this.cfg.capacity.rssWorkMb;
+    const c = capacity(this.cfg, mem, tasks + active, held);
     // #224: the machine itself, whatever loads it (a CI runner, a build outside the shifts): over the load or short of
     // memory for one more shift, nothing starts, and the queue says why.
     const { load1, cpus } = this.loadInfo();
     const load = cpus > 0 ? Math.round((load1 / cpus) * 100) / 100 : null;
     const overLoad = load != null && load > this.cfg.capacity.maxLoad;
-    const shortMem = c.total > c.running && mem.availableMb - this.cfg.capacity.reserveMb < this.cfg.capacity.rssWorkMb;
+    const shortMem = c.free === 0 && tasks + active < this.cfg.capacity.maxSlots && mem.availableMb - held - this.cfg.capacity.reserveMb < this.cfg.capacity.rssWorkMb;
     const pressure: 'load' | 'memory' | null = overLoad ? 'load' : shortMem ? 'memory' : null;
     return { ...c, free: overLoad ? 0 : c.free, pressure, load, availableMb: Math.round(mem.availableMb), tasks, leads: { active, idle, resting } };
   }
@@ -276,10 +295,10 @@ export class Scheduler {
       const enabled = this.store.toggle(nodeToggle(name));
       const load = st?.up && st.cpus ? Math.round((st.load1 / st.cpus) * 100) / 100 : null;
       if (!st?.up) return { name, enabled, up: false, error: st?.error ?? null, load, total: 0, running, free: 0, busy: false };
-      const c = capacity({ ...this.cfg, capacity: { ...this.cfg.capacity, maxSlots: n.def.maxSlots } }, st, running, 0);
+      const c = capacity({ ...this.cfg, capacity: { ...this.cfg.capacity, maxSlots: n.def.maxSlots } }, st, running);
       const overLoad = load == null || load > n.def.maxLoad;
       const free = overLoad ? 0 : c.free;
-      const busy = overLoad || (c.total > running && st.availableMb - this.cfg.capacity.reserveMb < this.cfg.capacity.rssWorkMb);
+      const busy = overLoad || (running < n.def.maxSlots && st.availableMb - this.cfg.capacity.reserveMb < this.cfg.capacity.rssWorkMb);
       return { name, enabled, up: true, error: null, load, total: c.total, running, free, busy };
     });
   }
@@ -601,6 +620,7 @@ export class Scheduler {
         // queue (needs-decision) and the opener hears why.
         const labels = [...new Set([...(JSON.parse(t.labels || '[]') as string[]), 'needs-decision'])];
         this.store.db.prepare('UPDATE tasks SET labels = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(labels), this.store.now(), t.id);
+        this.onTaskFrozen?.(t.id, 'hq');
         this.mailbox.tell({ msg_id: `task-${t.id}-worktree-failed-${this.store.now()}`, from: 'hq', to: openedBy ?? lead ?? this.cfg.managerId, priority: 'next',
           body: `משימה ${t.ref ?? `#${t.id}`} (${t.title}) לא התחילה: ${(e as Error).message}. היא סומנה needs-decision ויצאה מהתור.` });
         throw e;
@@ -1173,13 +1193,14 @@ export class Scheduler {
   }
 
   /** Adds and removes labels (PATCH /api/tasks/:id): a lead keeps a queued task here (`needs-local`) with no DB edit. */
-  setTaskLabels(id: number, add: string[], remove: string[]): TaskRow | undefined {
+  setTaskLabels(id: number, add: string[], remove: string[], by = 'hq'): TaskRow | undefined {
     const cur = this.task(id);
     if (!cur) return undefined;
     const labels = [...new Set([...(JSON.parse(cur.labels || '[]') as string[]), ...add])].filter((l) => !remove.includes(l));
     this.store.db.prepare('UPDATE tasks SET labels = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(labels), this.store.now(), id);
     const t = this.task(id)!;
     this.store.emit('task.labels', t.identity, { id, labels });
+    if (add.includes('needs-decision')) this.onTaskFrozen?.(id, by);
     queueMicrotask(() => this.store.bg(this.fill(), 'scheduler.fill'));
     return t;
   }

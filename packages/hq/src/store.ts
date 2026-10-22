@@ -570,6 +570,10 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS leases_open ON leases(state, machine, created_at);
   CREATE INDEX IF NOT EXISTS leases_shift ON leases(shift, state);
   `,
+  // v29: an estimate on a task that was frozen (parked / needs-decision) closes as `frozen`, not as a broken promise (estimates.ts freezeForTask).
+  `
+  CREATE TABLE IF NOT EXISTS estimate_frozen (estimate_id INTEGER PRIMARY KEY, by TEXT NOT NULL);
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

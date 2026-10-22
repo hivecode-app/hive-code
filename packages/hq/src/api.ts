@@ -395,7 +395,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     if (b.priority === undefined && !add && !remove) throw new HttpError(400, 'nothing to change: priority, labels or remove_labels');
     if (b.priority !== undefined && (!Number.isInteger(b.priority) || (b.priority as number) < 0 || (b.priority as number) > 3)) throw new HttpError(400, 'priority must be an integer 0..3');
     if (!hq.scheduler.task(id)) throw new HttpError(404, `no task ${params[0]}`);
-    if (add || remove) hq.scheduler.setTaskLabels(id, add ?? [], remove ?? []);
+    if (add || remove) hq.scheduler.setTaskLabels(id, add ?? [], remove ?? [], typeof b.by === 'string' && b.by ? b.by : 'לא ידוע');
     const t = b.priority !== undefined ? hq.scheduler.setTaskPriority(id, b.priority as number) : hq.scheduler.task(id);
     if (!t) throw new HttpError(404, `no task ${params[0]}`);
     return { task: t };
