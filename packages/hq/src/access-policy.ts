@@ -48,6 +48,9 @@ const KUBE_TYPES = new Set(['pod', 'pods', 'po', 'deployment', 'deployments', 'd
 type FlagKind = 'bool' | 'value';
 interface Flag { name: string; short?: string; kind: FlagKind; check?: (v: string) => boolean }
 
+/** Types whose full object never carries an env or a secret: in prod these may be read as yaml/json. */
+const KUBE_PLAIN_TYPES = new Set(['service', 'services', 'svc', 'event', 'events', 'ev', 'hpa', 'horizontalpodautoscaler', 'horizontalpodautoscalers',
+  'endpoints', 'ep', 'persistentvolumeclaim', 'persistentvolumeclaims', 'pvc']);
 const outputOk = (v: string) => /^(json|yaml|wide|name)$/.test(v) || /^(jsonpath|custom-columns)=\S+$/.test(v);
 const durationOk = (v: string) => /^\d+(s|m|h)?$/.test(v);
 const intOk = (v: string) => /^\d{1,6}$/.test(v);
@@ -223,6 +226,12 @@ export function planKube(res: KubeResource, argv: string[]): Verdict {
   } else {
     const bad = checkTyped(p.positional);
     if (bad) return bad;
+    // Prod reads run without a card (#279): a full object (`-o yaml|json|jsonpath|custom-columns`) of a pod, deployment, job… carries its env, so it is refused there, as in ssh:shared-cluster.
+    const o = p.flags.get('output');
+    if (verb === 'get' && typeof o === 'string' && /^(json|yaml|jsonpath|custom-columns)/.test(o) && (res.env === undefined || res.env === 'prod')
+      && !p.positional[0]!.split('/')[0]!.split(',').every((k) => KUBE_PLAIN_TYPES.has(k.toLowerCase()))) {
+      return unfit(`\`-o ${o.split('=')[0]}\` על המשאב הזה בפרודקשן יכול לחשוף env וסודות`, 'אפשר `-o wide` או `-o name`, `describe`, או `logs --tail=N`');
+    }
   }
   const out: string[] = [verb];
   if (verb === 'scale') out.push(p.positional[0]!, `--replicas=${String(p.flags.get('replicas'))}`);

@@ -51,6 +51,21 @@ test('kube: --kubeconfig, --token, --as, another namespace and --server are refu
   ]) bad(argv, 'deny');
 });
 
+test('kube: in prod a full object of a type that can hold env is refused as yaml/json/jsonpath (#280)', () => {
+  const prod: KubeResource = { type: 'kube', namespace: 'lumo-prod', kubeconfig: '/k/prod.yaml', env: 'prod' };
+  const pv = (argv: string[]) => planKube(prod, argv);
+  for (const a of [['get', 'deploy/api', '-o', 'yaml'], ['get', 'pods', '-o', 'json'], ['get', 'pods,svc', '-o', 'json'], ['get', 'deploy', 'api', '--output=jsonpath={.spec}'],
+    ['get', 'job', '-o', 'custom-columns=E:.spec.template.spec.containers[*].env'], ['get', 'secret', 'db', '-o', 'yaml'], ['get', 'secrets', '-o', 'json']]) {
+    const v = pv(a);
+    assert.ok(!v.ok && v.kind === 'unfit', `${a.join(' ')} should be refused in prod`);
+  }
+  for (const a of [['get', 'pods', '-o', 'wide'], ['get', 'deploy', '-o', 'name'], ['get', 'svc', '-o', 'yaml'], ['get', 'events', '-o', 'json'], ['describe', 'pod', 'api-7d9']]) {
+    assert.ok(pv(a).ok, `${a.join(' ')} stays allowed in prod`);
+  }
+  assert.ok(!planKube({ ...prod, env: undefined }, ['get', 'pods', '-o', 'yaml']).ok, 'no env counts as prod');
+  assert.ok(plan(['get', 'deploy/api', '-o', 'yaml']).ok, 'dev is unchanged');
+});
+
 test('kube: secrets, follow, port-forward, apply and interactive exec are unfit, with a way out', () => {
   assert.match(bad(['get', 'secret', 'db'], 'unfit').why, /secrets/);
   bad(['get', 'secrets', '-o', 'yaml'], 'unfit');

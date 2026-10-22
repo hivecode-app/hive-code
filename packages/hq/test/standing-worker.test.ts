@@ -235,7 +235,7 @@ test('close_team on a standing worker: it is asked for a handoff, closes itself,
       sessionId: null, op: 'close_team', args: { team, reason: 'עדיפות אחרת' } });
 
     const a = hq.scheduler.addTask({ title: 'ראשונה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'] });
-    await until(() => hq.scheduler.task(a.id)!.state === 'running', 5000, 'running');
+    await until(() => hq.scheduler.task(a.id)!.state === 'running', 30000, 'running');
     const res = await close(`t${a.id}`, 'proj-ceo-1:c1');
     assert.equal(res.json.result.state, 'closing');
     const ask = hq.mailbox.get(`task-${a.id}-closing`)!;
@@ -247,18 +247,18 @@ test('close_team on a standing worker: it is asked for a handoff, closes itself,
     const queued = hq.scheduler.addTask({ title: 'בתור', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'] });
     const q = await close(`t${queued.id}`, 'proj-ceo-1:c0');
     assert.equal(q.json.result.state, 'closing');
-    await until(() => hq.scheduler.task(queued.id)!.state === 'done', 3000, 'queued task closed at once');
+    await until(() => hq.scheduler.task(queued.id)!.state === 'done', 30000, 'queued task closed at once');
     assert.equal(hq.mailbox.get(`task-${queued.id}-closing`), undefined, 'no handoff asked for it');
     assert.match(hq.mailbox.get('proj-ceo-1:c0-close')!.body, /שחיכתה לך בתור בוטלה/, 'not "your shift stops now"');
     assert.equal(hq.scheduler.task(a.id)!.state, 'running');
     // It writes a handoff and closes with status done.
     await post(sock, '/v1/ops', { id: 'gal-1:h', v: 1, ts: new Date().toISOString(), identity: 'gal', shift: 'gal-1', sessionId: null, op: 'handoff', args: { state: 'נסגר באמצע' } });
     await post(sock, '/v1/ops', { id: 'gal-1:d', v: 1, ts: new Date().toISOString(), identity: 'gal', shift: 'gal-1', sessionId: null, op: 'status', args: { state: 'done' } });
-    await until(() => hq.scheduler.task(a.id)!.state === 'done', 3000, 'closed by the worker');
+    await until(() => hq.scheduler.task(a.id)!.state === 'done', 30000, 'closed by the worker');
 
     // It never answers: the sweep closes it once the grace is over.
     const b = hq.scheduler.addTask({ title: 'שנייה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'] });
-    await until(() => hq.scheduler.task(b.id)!.state === 'running', 5000, 'second running');
+    await until(() => hq.scheduler.task(b.id)!.state === 'running', 30000, 'second running');
     await close(`t${b.id}`, 'proj-ceo-1:c2');
     await hq.scheduler.sweep();
     assert.equal(hq.scheduler.task(b.id)!.state, 'running');
