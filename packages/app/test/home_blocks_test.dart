@@ -67,15 +67,17 @@ void main() {
       {'type': 'alert', 'inbox': 99},
       {'type': 'alert', 'shift': 'keren-1'},
       {'type': 'waiting', 'inbox': [36, 99]},
+      {'type': 'asked', 'messages': ['m1']},
+      {'type': 'awaiting', 'tasks': [12]},
       {'type': 'lanes', 'projects': ['agent-company', 'gone']},
       {'type': 'project', 'project': 'gone'},
       {'type': 'people', 'identities': ['ghost']},
       {'type': 'note', 'text': 'נשאר', 'icon': 'info'},
     ]);
     final live = liveBlocks(r, d);
-    expect(live.map((b) => b.type), ['waiting', 'lanes', 'note']);
-    expect(live[0].inbox, [36]);
-    expect(live[1].projects, ['agent-company']);
+    // Decisions are the "החלטות" tab's: waiting, asked, awaiting and an alert on an inbox item are skipped.
+    expect(live.map((b) => b.type), ['lanes', 'note']);
+    expect(live[0].projects, ['agent-company']);
     d.presence['keren'] = Presence(status: WorkerStatus.stuck);
     expect(liveBlocks(r, d).first.shift, 'keren-1');
   });

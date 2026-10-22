@@ -1,6 +1,6 @@
 // The owner's single "waiting for you" inbox (A.4). Order: blocking first, then urgency, then age.
 // Only items that block on him are pushed (A.4, B.8); everything else waits in the inbox/summary.
-import type { InboxItemDTO, InboxKind, Urgency } from '@company/shared';
+import type { InboxItemDTO, InboxLink, InboxKind, Urgency } from '@company/shared';
 import type { Store } from './store.ts';
 
 export interface NewInboxItem {
@@ -13,11 +13,12 @@ export interface NewInboxItem {
   ref?: string | null;
   link?: string | null;
   headline?: string | null;
+  links?: InboxLink[] | null;
   dedupe_key?: string | null;
 }
 
 interface InboxRow { id: number; kind: InboxKind; title: string; body: string; from_identity: string | null; urgency: Urgency;
-  blocking: number; ref: string | null; link: string | null; headline: string | null; state: InboxItemDTO['state']; created_at: number; pushed_at: number | null; acked_at: number | null;
+  blocking: number; ref: string | null; link: string | null; headline: string | null; links: string | null; state: InboxItemDTO['state']; created_at: number; pushed_at: number | null; acked_at: number | null;
   snoozed_at: number | null; telegram_at: number | null; push_error: string | null }
 
 export const URGENCY_RANK: Record<Urgency, number> = { urgent: 0, normal: 1, low: 2 };
@@ -48,9 +49,9 @@ export class Inbox {
       const ex = this.store.db.prepare('SELECT * FROM inbox WHERE dedupe_key = ?').get(n.dedupe_key) as InboxRow | undefined;
       if (ex) return toDTO(ex);
     }
-    const r = this.store.db.prepare(`INSERT INTO inbox (kind, title, body, from_identity, urgency, blocking, ref, link, headline, dedupe_key, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(n.kind, n.title, n.body ?? '', n.from_identity ?? null, n.urgency ?? 'normal',
-      n.blocking ? 1 : 0, n.ref ?? null, n.link ?? null, n.headline ?? null, n.dedupe_key ?? null, now);
+    const r = this.store.db.prepare(`INSERT INTO inbox (kind, title, body, from_identity, urgency, blocking, ref, link, headline, links, dedupe_key, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(n.kind, n.title, n.body ?? '', n.from_identity ?? null, n.urgency ?? 'normal',
+      n.blocking ? 1 : 0, n.ref ?? null, n.link ?? null, n.headline ?? null, n.links?.length ? JSON.stringify(n.links) : null, n.dedupe_key ?? null, now);
     const item = this.get(Number(r.lastInsertRowid))!;
     this.store.emit('inbox.new', item.from_identity, item);
     this.notify(item);
@@ -155,7 +156,15 @@ export class Inbox {
 function toDTO(r: InboxRow): InboxItemDTO {
   return {
     id: r.id, kind: r.kind, title: r.title, body: r.body, from_identity: r.from_identity, urgency: r.urgency,
-    blocking: r.blocking === 1, ref: r.ref, link: r.link ?? null, headline: r.headline ?? null, state: r.state, created_at: r.created_at, pushed_at: r.pushed_at, acked_at: r.acked_at,
+    blocking: r.blocking === 1, ref: r.ref, link: r.link ?? null, headline: r.headline ?? null, links: parseLinks(r.links), state: r.state, created_at: r.created_at, pushed_at: r.pushed_at, acked_at: r.acked_at,
     snoozed_at: r.snoozed_at ?? null,
   };
+}
+
+function parseLinks(raw: string | null): InboxLink[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return Array.isArray(v) ? v.filter((l): l is InboxLink => !!l && typeof l === 'object' && ((l as InboxLink).kind === 'report' || (l as InboxLink).kind === 'pr') && typeof (l as InboxLink).url === 'string') : [];
+  } catch { return []; }
 }

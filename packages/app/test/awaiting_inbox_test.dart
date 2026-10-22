@@ -1,4 +1,4 @@
-// #219: a finished task that waits on him is a card in "מחכה לך", with "בוצע" and "נכשל" (one tap each).
+// #219: a finished task that waits on him is a card in "מחכה לך", with "עובד" and "לא עובד" (one tap each).
 import 'dart:convert';
 import 'dart:io';
 
@@ -47,7 +47,7 @@ List<Map<String, dynamic>> _load(String name, String key) =>
     (jsonDecode(File('test/fixtures/samples/hq/$name.json').readAsStringSync())[key] as List).cast<Map<String, dynamic>>();
 
 void main() {
-  test('an hq `awaiting` item maps to a non-blocking card with "בוצע" and "נכשל"', () {
+  test('an hq `awaiting` item maps to a non-blocking card with "עובד" and "לא עובד"', () {
     final at = DateTime(2026, 10, 22, 1, 58).millisecondsSinceEpoch;
     final d = mapSnapshot(
       board: _load('board', 'identities'),
@@ -68,33 +68,33 @@ void main() {
     expect(w.ref, 'task-160');
     expect(w.inboxId, 41);
     expect(w.askId, isNull);
-    expect([for (final o in w.options) o.label], ['בוצע', 'נכשל']);
+    expect([for (final o in w.options) o.label], ['עובד', 'לא עובד']);
     expect(w.options.first.primary, isTrue);
   });
 
   for (final (look, dark, scale) in [('light', false, 1.0), ('dark', true, 1.0), ('text13', false, 1.3)]) {
     testWidgets('"מחכה לך": a card to check beside a GO and a question ($look)', (tester) async {
       await _list(tester, (_) => [_check('inbox:41')], 'open-$look', dark: dark, scale: scale);
-      expect(find.text('בוצע'), findsOneWidget);
-      expect(find.text('נכשל'), findsOneWidget);
+      expect(find.text('עובד'), findsOneWidget);
+      expect(find.text('לא עובד'), findsOneWidget);
       expect(find.descendant(of: find.byKey(const ValueKey('inbox:41')), matching: find.text('פתיחה')), findsNothing, reason: 'a tap on the card opens its page');
     });
-    testWidgets('"מחכה לך": after "בוצע" and after "נכשל", folded ($look)', (tester) async {
+    testWidgets('"מחכה לך": after "עובד" and after "לא עובד", folded ($look)', (tester) async {
       await _list(tester, (_) => [
-            _check('inbox:41', state: WaitState.answered, answerLine: 'בוצע'),
-            _check('inbox:42', state: WaitState.answered, answerLine: 'נכשל', failed: true),
+            _check('inbox:41', state: WaitState.answered, answerLine: 'עובד'),
+            _check('inbox:42', state: WaitState.answered, answerLine: 'לא עובד', failed: true),
           ], 'answered-$look', dark: dark, scale: scale);
     });
   }
 
   for (final (look, dark, scale) in [('light', false, 1.0), ('dark', true, 1.0), ('text13', false, 1.3)]) {
-    testWidgets('a tap on the card opens its page, with "בוצע" and "נכשל" ($look)', (tester) async {
+    testWidgets('a tap on the card opens its page, with "עובד" and "לא עובד" ($look)', (tester) async {
       await _list(tester, (_) => [_check('inbox:41')], 'open-$look', dark: dark, scale: scale);
       await tester.tap(find.descendant(of: find.byKey(const ValueKey('inbox:41')), matching: find.byType(InkWell)).first);
       await tester.pumpAndSettle();
       expect(find.byType(WaitItemScreen), findsOneWidget, reason: 'not the conversation: the card is in none');
-      expect(find.text('בוצע'), findsOneWidget);
-      expect(find.text('נכשל'), findsOneWidget);
+      expect(find.text('עובד'), findsOneWidget);
+      expect(find.text('לא עובד'), findsOneWidget);
       expect(find.text('סגירה'), findsNothing);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/awaiting_inbox/page-$look.png'));
     });

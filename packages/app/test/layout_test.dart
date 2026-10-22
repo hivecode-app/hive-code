@@ -24,7 +24,6 @@ import 'package:agent_company/ui/settings/settings_screen.dart';
 import 'package:agent_company/ui/entity_link.dart';
 import 'package:agent_company/ui/projects/project_screen.dart';
 import 'package:agent_company/ui/status/status_screen.dart';
-import 'package:agent_company/ui/home/wait_item_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -328,47 +327,6 @@ void main() {
   }
 
   final at19 = DateTime(2026, 10, 20, 19, 0);
-
-  testWidgets('head: a tap on what waits opens its page, and "לשיחה עם" from there the conversation', (tester) async {
-    await _pump(tester, head: true, earlierWaiting: true);
-    await tester.tap(findShown('בועז · GO לפרודקשן'));
-    await tester.pumpAndSettle();
-    expect(find.byType(WaitItemScreen), findsOneWidget);
-    expect(find.byType(ChatScreen), findsNothing);
-    await tester.tap(find.textContaining('לשיחה עם'));
-    await tester.pumpAndSettle();
-    expect(find.byType(ChatScreen), findsOneWidget);
-    expect(tester.widget<ChatScreen>(find.byType(ChatScreen)).identityId, 'boaz');
-  });
-
-  testWidgets('head: a swipe is "לא עכשיו"; a handled row folds away in 200ms', (tester) async {
-    final ctx = await _pump(tester, head: true, earlierWaiting: true);
-    final store = StoreScope.read(ctx);
-    final adi = store.data!.waiting.firstWhere((w) => w.from == 'adi');
-    final boaz = store.data!.waiting.firstWhere((w) => w.from == 'boaz');
-    await tester.drag(findShown('עדי · GO לפרודקשן'), const Offset(-300, 0));
-    await tester.pumpAndSettle();
-    expect(adi.state, WaitState.notNow);
-    expect(findShown('עדי · GO לפרודקשן'), findsNothing);
-    expect(findShown('בועז · GO לפרודקשן'), findsOneWidget);
-    // Answered elsewhere: the row shrinks and goes.
-    final row = find.ancestor(of: findShown('בועז · GO לפרודקשן'), matching: find.byType(SizeTransition)).first;
-    final h = tester.getSize(row).height;
-    boaz.state = WaitState.answered;
-    store.touch();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    final mid = tester.getSize(row).height;
-    expect(mid, greaterThan(0));
-    expect(mid, lessThan(h));
-    await tester.pumpAndSettle();
-    expect(findShown('בועז · GO לפרודקשן'), findsNothing);
-    // Back (the "לא עכשיו" undone on another device): it comes in again.
-    adi.state = WaitState.open;
-    store.touch();
-    await tester.pumpAndSettle();
-    expect(findShown('עדי · GO לפרודקשן'), findsOneWidget);
-  });
 
   testWidgets('head: a stuck worker burns, with the task he is stuck on', (tester) async {
     final ctx = await _pump(tester, head: true);

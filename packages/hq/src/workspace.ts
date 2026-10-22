@@ -42,6 +42,18 @@ export const noWorkers = (ch: Charter | null) => ch?.status === 'dormant' || ch?
 const expand = (p: string) => resolve(p === '~' ? homedir() : p.startsWith('~/') ? join(homedir(), p.slice(2)) : p);
 const SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
+/**
+ * The GitHub repo a task's PR is in: the checkout its worktree lives in (<checkout>/<worktree_dir>/<name>), else the
+ * charter's only checkout. Null when it can't be told (several checkouts, none matching): no link is better than one
+ * to another repo's PR with the same number.
+ */
+export function repoOfWorktree(ch: Charter | null, worktree: string | null | undefined): string | null {
+  if (!ch) return null;
+  const hit = worktree ? ch.checkouts.find((c) => dirname(worktree) === join(c.path, ch.worktreeDir)) : undefined;
+  if (hit) return hit.repo;
+  return ch.checkouts.length === 1 ? ch.checkouts[0]!.repo : null;
+}
+
 /** The charter's frontmatter, or null when the project has no charter. Read fresh on every call. */
 export function readCharter(companyDir: string, project: string): Charter | null {
   if (!SLUG.test(project)) return null;

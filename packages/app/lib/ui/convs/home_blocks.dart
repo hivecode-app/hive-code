@@ -13,31 +13,22 @@ const _kMotion = kBlockMotion;
 const _kCurve = kBlockCurve;
 
 /// What [recipe] shows on this device now: its blocks with live data applied (closed items gone, empty
-/// blocks dropped). Pure, for tests.
+/// blocks dropped, and the ones about decisions skipped: they are the "החלטות" tab's). Pure, for tests.
 List<HomeBlock> liveBlocks(HomeRecipe recipe, CompanyData d) {
-  final open = {
-    for (final w in d.waiting)
-      if ((w.state == WaitState.open || w.state == WaitState.pending) && w.inboxId != null) w.inboxId!: w,
-  };
   final projects = {for (final p in d.projects) p.id};
   final out = <HomeBlock>[];
   for (final b in recipe.blocks) {
     switch (b.type) {
       case 'alert':
-        if (b.inbox.isNotEmpty ? open.containsKey(b.inbox.first) : shiftAlertLine(d, b.shift) != null) out.add(b);
-      case 'waiting':
-        final ids = [for (final i in b.inbox) if (open.containsKey(i)) i];
-        if (ids.isNotEmpty) out.add(b.copyWith(inbox: ids));
+        // A fault with no decision (a stuck worker). One on an inbox item is a decision: it waits in "החלטות".
+        if (b.inbox.isEmpty && shiftAlertLine(d, b.shift) != null) out.add(b);
+      case 'waiting' || 'asked' || 'awaiting':
+        // Decisions are not on the home (task 306); a recipe from before that still names them.
       case 'lanes' || 'quiet':
         final ids = projects.isEmpty ? b.projects : [for (final p in b.projects) if (projects.contains(p)) p];
         if (ids.isNotEmpty) out.add(b.copyWith(projects: ids));
       case 'project':
         if (projects.isEmpty || projects.contains(b.projects.firstOrNull)) out.add(b);
-      case 'asked':
-        // A request he read the answer to is gone; one the recipe names that this device doesn't know, too.
-        final asked = {for (final a in d.asked) a.id};
-        final ids = [for (final m in b.messages) if (asked.contains(m)) m];
-        if (ids.isNotEmpty) out.add(b.copyWith(messages: ids));
       case 'people':
         final ids = [for (final i in b.identities) if (d.identities.containsKey(i)) i];
         if (ids.isNotEmpty) out.add(b.copyWith(identities: ids));

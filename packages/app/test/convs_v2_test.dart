@@ -93,22 +93,26 @@ void main() {
     final store = await pumpApp(tester, home: const Scaffold(body: ConversationsV2()));
     final d = store.data!;
     _set(d, [for (final (i, id) in [for (final w in d.identities.values) if (!w.temp) w.id].indexed) _c(id, i * 7)]);
+    // A stuck worker keeps the home open (its card); with only decisions waiting it is already one row.
+    d.presence['rotem'] = const Presence(status: WorkerStatus.stuck);
     store.touch();
     await tester.pump();
     expect(find.byType(HomeBarV2), findsNothing);
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -2500));
     await tester.pumpAndSettle();
     expect(find.byType(HomeBarV2), findsOneWidget);
-    await tester.tap(find.byType(HomeBarV2));
+    // With decisions waiting the sentence leads to them; the chevron brings the home back.
+    await tester.tap(find.descendant(of: find.byType(HomeBarV2), matching: find.byIcon(kIcons['expand_more']!)));
     await tester.pumpAndSettle();
     expect(find.byType(HomeBarV2), findsNothing);
   });
 
-  testWidgets('the home opens folded, the sentence and what waits; a tap on the sentence opens the rest', (tester) async {
+  testWidgets('the home is one row with the count of decisions; its sentence leads to them, its chevron opens the rest', (tester) async {
     final store = await pumpApp(tester, size: const Size(342, 3000), home: const Scaffold(body: ConversationsV2()));
     expect(store.data!.waitingCount, greaterThan(0), reason: 'the fake company has something waiting');
     expect(find.text('הפרויקטים'), findsNothing);
-    expect(find.text('מחכה לך'), findsWidgets);
+    expect(find.textContaining('החלטות מחכות לך'), findsOneWidget);
+    expect(find.text('מחכה לך'), findsNothing);
     await tester.tap(find.byIcon(kIcons['expand_more']!).first);
     await tester.pumpAndSettle();
     expect(find.text('הפרויקטים'), findsOneWidget);
@@ -140,7 +144,7 @@ void main() {
     expect(fold(), anyOf(isNull, 1.0), reason: 'never left half folded');
   });
 
-  testWidgets('the state is at the end of the second line: מחכה לך with the hand, עובד with play', (tester) async {
+  testWidgets('the state is at the end of the second line: the hand when he decides, עובד with play', (tester) async {
     final store = await pumpApp(tester, size: const Size(342, 3000), home: const Scaffold(body: ConversationsV2()));
     final d = store.data!;
     _set(d, [_c('rotem', 2), _c('eli', 4), _c('amit', 6)]);
@@ -150,7 +154,7 @@ void main() {
     store.touch();
     await tester.pump();
     Finder inRow(String name, Finder f) => find.descendant(of: find.ancestor(of: find.text(name), matching: find.byType(ConversationRowV2)), matching: f);
-    expect(inRow('רותם', find.text('מחכה לך')), findsOneWidget);
+    expect(inRow('רותם', find.text('מחכה לך')), findsNothing, reason: 'the hand alone: what he decides is in the "החלטות" tab');
     expect(inRow('רותם', find.byIcon(kIcons['front_hand']!)), findsOneWidget);
     expect(inRow('אלי', find.byIcon(kIcons['play_arrow']!)), findsOneWidget);
     expect(inRow('עמית', find.byIcon(kIcons['bedtime']!)), findsNothing, reason: '"נח" says nothing in the row');

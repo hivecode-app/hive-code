@@ -57,16 +57,18 @@ const DAY_MS = 24 * 3_600_000;
 
 const firstLine = (s: string, max: number): string => (s.split('\n').map((l) => l.trim()).find(Boolean) ?? '').slice(0, max);
 
-/** The default's one sentence, from the live numbers: an alert, what waits for him, what is running, what finished. */
-export function headline(waiting: number, running: number, done: number, alert = false): string {
+/**
+ * The default's one sentence, from the live numbers: an alert, what is running, what finished. What waits for him is
+ * not here: the app puts "N החלטות מחכות לך." in front of it from the live data (task 306).
+ */
+export function headline(running: number, done: number, alert = false): string {
   const parts: string[] = [];
   if (alert) parts.push('יש תקלה');
-  if (waiting) parts.push(waiting === 1 ? 'דבר אחד מחכה לך' : `${waiting} דברים מחכים לך`);
   if (running) parts.push(running === 1 ? 'משימה אחת בעבודה' : `${running} משימות בעבודה`);
   // After "בעבודה" the word "משימות" is understood, and the sentence stays within two lines on a phone.
   if (done) parts.push(running ? (done === 1 ? 'אחת הסתיימה ביממה האחרונה' : `${done} הסתיימו ביממה האחרונה`)
     : done === 1 ? 'משימה אחת הסתיימה ביממה האחרונה' : `${done} משימות הסתיימו ביממה האחרונה`);
-  if (!parts.length) return 'שקט: אין מה שמחכה לך ואין משימות בעבודה.';
+  if (!parts.length) return 'שקט: אין משימות בעבודה.';
   const last = parts.pop()!;
   return `${parts.length ? `${parts.join(', ')} ו${last.match(/^\d/) ? '-' : ''}${last}` : last}.`;
 }
@@ -159,7 +161,8 @@ export function validateBlocks(raw: unknown, refs: HomeRefs): Block[] {
       case 'alert': {
         const hasInbox = o.inbox !== undefined, hasShift = o.shift !== undefined;
         if (hasInbox === hasShift) throw new HomeError(`${at} (alert): צריך בדיוק אחד מ-inbox או shift`);
-        if (hasInbox) out.push({ type: t, inbox: inboxId(o.inbox, 'inbox'), ...base });
+        // An alert on an inbox item is a decision: it waits in the tab. An alert stays only for a fault with none.
+        if (hasInbox) break;
         else {
           if (typeof o.shift !== 'string' || !o.shift) throw new HomeError(`${at} (alert): shift חייב להיות מזהה משמרת`);
           if (refs.shifts && !refs.shifts.has(o.shift)) throw new HomeError(`${at} (alert): אין משמרת "${o.shift}"`);
@@ -167,28 +170,8 @@ export function validateBlocks(raw: unknown, refs: HomeRefs): Block[] {
         }
         break;
       }
-      case 'waiting': {
-        if (!Array.isArray(o.inbox) || !o.inbox.length) throw new HomeError(`${at} (waiting): inbox חייב להיות רשימת מזהי inbox לא ריקה`);
-        out.push({ type: t, inbox: [...new Set(o.inbox.map((x) => inboxId(x, 'inbox')))], ...base });
-        break;
-      }
-      case 'asked': {
-        const v = o.messages;
-        if (!Array.isArray(v) || !v.length || v.some((x) => typeof x !== 'string' || !x)) {
-          throw new HomeError(`${at} (asked): messages חייב להיות רשימת מזהי הודעות לא ריקה`);
-        }
-        for (const x of v as string[]) if (!refs.asked?.has(x)) throw new HomeError(`${at} (asked): ההודעה ${x} לא ב"ביקשת"`);
-        out.push({ type: t, messages: [...new Set(v as string[])], ...base });
-        break;
-      }
-      case 'awaiting': {
-        if (!Array.isArray(o.tasks) || !o.tasks.length || o.tasks.some((x) => !Number.isInteger(x))) {
-          throw new HomeError(`${at} (awaiting): tasks חייב להיות רשימת מזהי משימות (מספרים) לא ריקה`);
-        }
-        for (const x of o.tasks as number[]) if (!refs.awaiting.has(x)) throw new HomeError(`${at} (awaiting): משימה ${x} לא ב"מה לבדוק"`);
-        out.push({ type: t, tasks: [...new Set(o.tasks as number[])], ...base });
-        break;
-      }
+      // Decisions are the app's "החלטות" tab, not the home (task 306): these blocks from an older composer are skipped.
+      case 'waiting': case 'asked': case 'awaiting': break;
       case 'tasks': {
         if (o.tasks === 'open') { out.push({ type: t, tasks: 'open', ...base }); break; }
         if (!Array.isArray(o.tasks) || !o.tasks.length || o.tasks.some((x) => !Number.isInteger(x))) {
@@ -392,23 +375,9 @@ export class Home {
     for (const b of blocks) {
       switch (b.type) {
         case 'alert':
-          if (b.inbox !== undefined ? refs.inbox.has(b.inbox) : shiftOk(b.shift!)) out.push(b);
+          if (b.inbox === undefined && shiftOk(b.shift!)) out.push(b);
           break;
-        case 'waiting': {
-          const inbox = b.inbox.filter((i) => refs.inbox.has(i));
-          if (inbox.length) out.push({ ...b, inbox });
-          break;
-        }
-        case 'asked': {
-          const messages = b.messages.filter((m) => refs.asked?.has(m));
-          if (messages.length) out.push({ ...b, messages });
-          break;
-        }
-        case 'awaiting': {
-          const tasks = b.tasks.filter((i) => refs.awaiting.has(i));
-          if (tasks.length) out.push({ ...b, tasks });
-          break;
-        }
+        case 'waiting': case 'asked': case 'awaiting': break;
         case 'tasks': {
           // "open" follows the list as it is; named tasks leave as they finish.
           if (b.tasks === 'open') { if (refs.open?.size) out.push(b); break; }
@@ -430,31 +399,6 @@ export class Home {
         default: out.push(b);
       }
     }
-    const placed = new Set(out.flatMap((b) => (b.type === 'waiting' ? b.inbox : b.type === 'alert' && b.inbox !== undefined ? [b.inbox] : [])));
-    const missing = open.filter((i) => i.blocking && !i.snoozed_at && !placed.has(i.id)).map((i) => i.id);
-    if (missing.length) {
-      const w = out.findIndex((b) => b.type === 'waiting');
-      if (w >= 0) out[w] = { ...(out[w] as Extract<Block, { type: 'waiting' }>), inbox: [...(out[w] as Extract<Block, { type: 'waiting' }>).inbox, ...missing] };
-      else {
-        // After the headline and the alert, where the default puts it.
-        let at = 0;
-        while (at < out.length && (out[at]!.type === 'headline' || out[at]!.type === 'alert')) at++;
-        out.splice(at, 0, { type: 'waiting', inbox: missing });
-      }
-    }
-    // What he asked for is never only in a conversation he has to search (#118): one nobody placed is shown anyway.
-    const askedPlaced = new Set(out.flatMap((b) => (b.type === 'asked' ? b.messages : [])));
-    const askedMissing = [...(refs.asked ?? [])].filter((m) => !askedPlaced.has(m));
-    if (askedMissing.length) {
-      const a = out.findIndex((b) => b.type === 'asked');
-      if (a >= 0) out[a] = { ...(out[a] as Extract<Block, { type: 'asked' }>), messages: [...(out[a] as Extract<Block, { type: 'asked' }>).messages, ...askedMissing] };
-      else {
-        // Right after "מחכה לך", where the default puts it.
-        let at = out.findIndex((b) => b.type === 'waiting') + 1;
-        if (at === 0) while (at < out.length && (out[at]!.type === 'headline' || out[at]!.type === 'alert')) at++;
-        out.splice(at, 0, { type: 'asked', messages: askedMissing });
-      }
-    }
     return out;
   }
 
@@ -468,23 +412,16 @@ export class Home {
     const now = this.hq.store.now();
     const dayAgo = now - DAY_MS;
     const blocks: Block[] = [];
-    const open = this.hq.inbox.open().filter((i) => !i.snoozed_at);
-    const incident = open.find((i) => i.kind === 'incident');
     let alert: Block | null = null;
-    if (incident) alert = { type: 'alert', inbox: incident.id };
-    else {
+    {
       const stuck = this.db.prepare(`SELECT id FROM shifts WHERE state IN ('starting','live') AND stuck_since IS NOT NULL ORDER BY stuck_since LIMIT 1`).get() as { id: string } | undefined;
       if (stuck) alert = { type: 'alert', shift: stuck.id };
     }
-    const waiting = open.filter((i) => i.id !== incident?.id).map((i) => i.id);
     const running = this.hq.openTasks().filter((t) => t.state === 'running');
     const done = this.db.prepare(`SELECT id, project, summary FROM tasks WHERE state = 'done' AND summary IS NOT NULL AND summary != '' AND updated_at > ?
       ORDER BY updated_at DESC, id DESC`).all(dayAgo) as { id: number; project: string | null; summary: string }[];
-    blocks.push({ type: 'headline', text: headline(waiting.length, running.length, done.length, !!alert) });
+    blocks.push({ type: 'headline', text: headline(running.length, done.length, !!alert) });
     if (alert) blocks.push(alert);
-    if (waiting.length) blocks.push({ type: 'waiting', inbox: waiting });
-    const asked = this.asked().map((a) => a.id);
-    if (asked.length) blocks.push({ type: 'asked', messages: asked });
     const known = new Set(this.hq.projects().map((p) => p.id));
     const moved = (this.db.prepare(`SELECT project FROM tasks WHERE project IS NOT NULL AND updated_at > ? GROUP BY project ORDER BY MAX(updated_at) DESC`)
       .all(dayAgo) as { project: string }[]).map((r) => r.project).filter((p) => known.has(p));

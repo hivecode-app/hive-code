@@ -11,7 +11,8 @@ import 'projects/project_screen.dart';
 import 'settings/settings_screen.dart';
 
 /// The bottom tabs (#53): chats is the main screen; status, projects and settings are secondary.
-enum AppTab { chats, status, projects, settings }
+/// [decisions] is first in the bar and last here, so the other tabs keep their places.
+enum AppTab { chats, status, projects, settings, decisions }
 
 class AppNav extends ChangeNotifier {
   AppTab tab = AppTab.chats;

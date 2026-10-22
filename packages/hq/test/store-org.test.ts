@@ -18,11 +18,11 @@ test('store: WAL, migrations idempotent across reopen, toggles seeded once', () 
     const path = join(dir, 'hq.db');
     const s1 = new Store(path);
     assert.equal(s1.db.pragma('journal_mode', { simple: true }), 'wal');
-    assert.equal(s1.schemaVersion, 23);
+    assert.equal(s1.schemaVersion, 24);
     s1.setToggle('probes', false);
     s1.close();
     const s2 = new Store(path);
-    assert.equal(s2.schemaVersion, 23);
+    assert.equal(s2.schemaVersion, 24);
     assert.equal(s2.toggle('probes'), false, 'manual off survives restart');
     assert.equal(s2.toggle('scheduler'), true);
     const e = s2.emit('x', 'eli', { a: 1 });
@@ -302,4 +302,17 @@ test('legacy t<N> workers are renamed once at startup, helpers as helpers (#51)'
     assert.match(row('company-t14').title, /^עוזר/);
     assert.equal(renameTaskWorkers(store), 0, 'idempotent');
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('v24: an inbox with rows from before `links` upgrades, and they have none', () => {
+  const s = new Store(':memory:');
+  try {
+    s.db.exec('ALTER TABLE inbox DROP COLUMN links');
+    s.db.pragma('user_version = 23');
+    s.db.prepare(`INSERT INTO inbox (kind, title, body, urgency, blocking, created_at) VALUES ('go', 'GO: ישן', '', 'normal', 1, 100)`).run();
+    (s as unknown as { migrate(): void }).migrate();
+    assert.equal(s.schemaVersion, 24);
+    const row = s.db.prepare('SELECT title, links FROM inbox').get() as { title: string; links: string | null };
+    assert.deepEqual(row, { title: 'GO: ישן', links: null });
+  } finally { s.close(); }
 });

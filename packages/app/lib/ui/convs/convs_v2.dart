@@ -167,8 +167,7 @@ class _ConversationsV2State extends State<ConversationsV2> {
 
   /// The list's first item: the home, folded, as one row when nothing waits for him.
   Widget _home(CompanyData d, DateTime now) {
-    final head = HeadData.of(d, since: CompanyTime.now());
-    if (!homeOpen && head.burning.isEmpty && head.waiting.isEmpty) return HomeBarV2(onTap: _openHome, height: _barH);
+    if (!homeOpen && stuckWorkers(d) == 0) return HomeBarV2(onTap: _openHome, height: _barH);
     return HomeV2(recipe: d.home, data: d, now: now, folded: !homeOpen, onToggle: () => setState(() => homeOpen = !homeOpen));
   }
 
@@ -290,9 +289,51 @@ class HomeBarV2 extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
     final d = StoreScope.of(context).data!;
-    final head = HeadData.of(d, since: CompanyTime.now());
-    final waits = head.burning.length + head.waiting.length;
-    final sentence = firstSentence(topSentence(d, d.home, burning: head.burning.length, waiting: head.waiting.length));
+    final decisions = d.waitingCount;
+    final sentence = firstSentence(fullSentence(d, d.home, stuck: stuckWorkers(d)));
+    final chevron = Ic('expand_more', size: 22, color: p.text2);
+    final decorated = BoxDecoration(border: Border(bottom: BorderSide(color: p.line)));
+    // Something waits for him: the sentence is the way to it (the "החלטות" tab), and the chevron opens the home.
+    if (decisions > 0) {
+      return Material(
+        color: p.bg,
+        child: Container(
+          constraints: BoxConstraints(minHeight: height),
+          decoration: decorated,
+          child: Row(children: [
+            Expanded(
+              child: Semantics(
+                button: true,
+                label: sentence,
+                hint: 'מעבר להחלטות',
+                excludeSemantics: true,
+                onTap: () => NavScope.read(context).go(AppTab.decisions),
+                child: InkWell(
+                  onTap: () => NavScope.read(context).go(AppTab.decisions),
+                  child: Container(
+                    constraints: BoxConstraints(minHeight: height),
+                    padding: const EdgeInsetsDirectional.fromSTEB(16, 6, 8, 6),
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Row(children: [
+                      Ic('front_hand', size: 18, fill: true, color: p.text),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(sentence, style: T.row2.copyWith(color: p.text, fontWeight: FontWeight.w500))),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+            Semantics(
+              button: true,
+              label: 'פתיחת הבית',
+              excludeSemantics: true,
+              onTap: onTap,
+              child: InkWell(onTap: onTap, child: SizedBox(width: 52, height: height, child: Center(child: chevron))),
+            ),
+          ]),
+        ),
+      );
+    }
     return Semantics(
       button: true,
       label: sentence,
@@ -305,12 +346,11 @@ class HomeBarV2 extends StatelessWidget {
           child: Container(
             constraints: BoxConstraints(minHeight: height),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+            decoration: decorated,
             child: Row(children: [
-              if (waits > 0) ...[Ic('front_hand', size: 18, fill: true, color: p.text), const SizedBox(width: 8)],
-              Expanded(child: Text(sentence, style: T.row2.copyWith(color: p.text, fontWeight: waits > 0 ? FontWeight.w500 : null))),
+              Expanded(child: Text(sentence, style: T.row2.copyWith(color: p.text))),
               const SizedBox(width: 8),
-              Ic('expand_more', size: 22, color: p.text2),
+              chevron,
             ]),
           ),
         ),
@@ -346,7 +386,7 @@ class ConversationRowV2 extends StatelessWidget {
     final line = plainLine(draft.isNotEmpty ? draft.split('\n').first : (c.text ?? c.lastLine));
     final mine = draft.isEmpty && c.delivery != null;
     final working = pr.status == WorkerStatus.working;
-    final showStatus = statusLoud(pr.status) || working || d.isDone(c.identityId);
+    final showStatus = (statusLoud(pr.status) || working || d.isDone(c.identityId)) && pr.status != WorkerStatus.waiting;
     final lineStyle = T.row2.copyWith(color: unread ? p.text : p.text2, fontWeight: unread ? FontWeight.w500 : null);
     final (String tick, Color tickColor, String tickWord) = switch (c.delivery) {
       Delivery.read || Delivery.handled => ('done_all', p.read, 'נקרא'),
@@ -357,12 +397,15 @@ class ConversationRowV2 extends StatelessWidget {
     // The state at the end of the second line, as the count is (נועה, 21/10): only when it says something.
     final statusText = statusWord(pr.status, who.gender);
     final statusColor = statusLoud(pr.status) ? p.text : p.text2;
+    // A decision of his waits in "החלטות"; the row says so with the hand alone.
+    final decides = (pr.status == WorkerStatus.waiting || d.waiting.any((w) => w.from == c.identityId && (w.state == WaitState.open || w.state == WaitState.pending) && !d.superseded(w)));
     return Semantics(
       button: true,
       label: [
         who.name, if (team.isNotEmpty) team, time,
         if (mine) 'אתה: $line, $tickWord' else if (draft.isNotEmpty) 'טיוטה: $line' else line,
         if (showStatus) statusText,
+        if (decides) 'מחכה להחלטה שלך',
         if (unread) c.unread == 1 ? 'הודעה אחת שלא נקראה' : '${c.unread} הודעות שלא נקראו',
         if (c.muted) 'מושתקת',
         if (pinned) 'מוצמדת',
@@ -409,6 +452,7 @@ class ConversationRowV2 extends StatelessWidget {
                         const SizedBox(width: 3),
                         Text(statusText, softWrap: false, style: T.small.copyWith(height: 21 / 13, color: statusColor, fontWeight: statusLoud(pr.status) ? FontWeight.w700 : null)),
                       ],
+                      if (decides) ...[const SizedBox(width: 8), Padding(padding: const EdgeInsets.only(top: 2), child: Ic('front_hand', size: 17, fill: true, color: p.text))],
                       if (unread) ...[const SizedBox(width: 8), Padding(padding: const EdgeInsets.only(top: 1), child: UnreadPill(c.unread, muted: c.muted))],
                     ]),
                   ]),

@@ -9,8 +9,8 @@ import 'package:agent_company/theme/theme.dart';
 import 'package:agent_company/theme/tokens.dart';
 import 'package:agent_company/ui/blocks/blocks.dart';
 import 'package:agent_company/ui/common.dart';
-import 'package:agent_company/ui/convs/head.dart';
 import 'package:agent_company/ui/convs/home_v2.dart';
+import 'package:agent_company/ui/nav.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -19,39 +19,37 @@ import 'helpers.dart';
 CompanyData _data({List<OpenTask> tasks = const []}) => mapSnapshot(board: const [], inbox: const [], asks: const [], toggles: const [])..openTasks = tasks;
 
 void main() {
-  test('the sentence says what waits, and what runs, from live data', () {
+  test('the sentence says what runs, from live data; how many decisions wait is its lead', () {
     final run = [
       for (final (i, p) in [(1, 'a'), (2, 'a'), (3, 'b')]) OpenTask(id: i, title: 't$i', state: OpenTaskState.running, project: p),
     ];
-    expect(homeSentence(_data(), burning: 0, waiting: 0), 'שום דבר לא מחכה לך. הכול שקט.');
-    expect(homeSentence(_data(tasks: run), burning: 0, waiting: 0), 'שום דבר לא מחכה לך. 3 משימות רצות בשני פרויקטים.');
-    expect(homeSentence(_data(tasks: run.take(1).toList()), burning: 0, waiting: 1), 'דבר אחד מחכה לך. בינתיים משימה אחת רצה.');
-    expect(homeSentence(_data(), burning: 0, waiting: 2), 'שני דברים מחכים לך.');
-    expect(homeSentence(_data(tasks: run), burning: 1, waiting: 2), 'תקלה אחת צריכה אותך עכשיו.');
+    expect(homeSentence(_data(), stuck: 0), 'שום דבר לא מחכה לך. הכול שקט.');
+    expect(homeSentence(_data(tasks: run), stuck: 0), 'שום דבר לא מחכה לך. 3 משימות רצות בשני פרויקטים.');
+    expect(homeSentence(_data(tasks: run.take(1).toList()), stuck: 0, decisions: 1), 'בינתיים משימה אחת רצה.');
+    expect(homeSentence(_data(), stuck: 0, decisions: 2), '', reason: 'the lead says it all');
+    expect(homeSentence(_data(tasks: run), stuck: 1, decisions: 2), 'תקלה אחת צריכה אותך עכשיו.');
+    expect([for (final n in [0, 1, 2, 3, 12]) decisionsLead(n)], [null, 'החלטה אחת מחכה לך.', 'שתי החלטות מחכות לך.', '3 החלטות מחכות לך.', '12 החלטות מחכות לך.']);
   });
 
-  test("the composer's headline while it is newer than the last change in what waits, else the live sentence", () {
+  test("the composer's headline while it is fresh, else the live sentence", () {
     final at = DateTime(2026, 10, 21, 9);
-    HomeRecipe recipe(DateTime? changed, {String source = 'agent'}) =>
-        HomeRecipe(version: 3, composedBy: 'adi', composedAt: at, source: source, waitingChangedAt: changed, blocks: const [HomeBlock(type: 'headline', text: 'GO קטן אחד מחכה לך')]);
+    HomeRecipe recipe({String source = 'agent'}) =>
+        HomeRecipe(version: 3, composedBy: 'adi', composedAt: at, source: source, blocks: const [HomeBlock(type: 'headline', text: 'בוקר שקט, שתי משימות רצות')]);
     final now = at.add(const Duration(minutes: 20));
     final quiet = _data();
-    // Composed after the last change: hers.
-    expect(topSentence(quiet, recipe(at.subtract(const Duration(minutes: 5))), burning: 0, waiting: 0, now: now), 'GO קטן אחד מחכה לך');
-    expect(topSentence(quiet, recipe(null), burning: 0, waiting: 0, now: now), 'GO קטן אחד מחכה לך', reason: 'nothing ever waited');
-    // The GO was answered after it: the live sentence (the quiet copy of 21/10).
-    expect(topSentence(quiet, recipe(at.add(const Duration(minutes: 5))), burning: 0, waiting: 0, now: now), 'שום דבר לא מחכה לך. הכול שקט.');
-    // Something burning, or a headline older than hq's 30 minutes (from the cache): live.
-    expect(topSentence(quiet, recipe(null), burning: 1, waiting: 0, now: now), 'תקלה אחת צריכה אותך עכשיו.');
-    expect(topSentence(quiet, recipe(null), burning: 0, waiting: 0, now: at.add(const Duration(minutes: 31))), 'שום דבר לא מחכה לך. הכול שקט.');
+    expect(topSentence(quiet, recipe(), stuck: 0, now: now), 'בוקר שקט, שתי משימות רצות');
+    // A stuck worker, or a headline older than hq's 30 minutes (from the cache): live.
+    expect(topSentence(quiet, recipe(), stuck: 1, now: now), 'תקלה אחת צריכה אותך עכשיו.');
+    expect(topSentence(quiet, recipe(), stuck: 0, now: at.add(const Duration(minutes: 31))), 'שום דבר לא מחכה לך. הכול שקט.');
     // hq's own default, or no recipe: live.
-    expect(topSentence(quiet, recipe(null, source: 'default'), burning: 0, waiting: 0, now: now), 'שום דבר לא מחכה לך. הכול שקט.');
-    expect(topSentence(quiet, null, burning: 0, waiting: 0, now: now), 'שום דבר לא מחכה לך. הכול שקט.');
-    // An older hq with no time: an open item newer than the headline makes it stale too.
+    expect(topSentence(quiet, recipe(source: 'default'), stuck: 0, now: now), 'שום דבר לא מחכה לך. הכול שקט.');
+    expect(topSentence(quiet, null, stuck: 0, now: now), 'שום דבר לא מחכה לך. הכול שקט.');
+    // With decisions waiting, the lead comes first and nothing else says "שום דבר".
     final d = mapSnapshot(board: const [], asks: const [], toggles: const [], inbox: [
       {'id': 1, 'kind': 'go', 'title': 'GO: hq', 'body': '', 'from_identity': 'adi', 'urgency': 'normal', 'blocking': true, 'state': 'open', 'created_at': at.add(const Duration(minutes: 10)).millisecondsSinceEpoch},
     ]);
-    expect(topSentence(d, recipe(null), burning: 0, waiting: 1, now: now), 'דבר אחד מחכה לך.');
+    expect(fullSentence(d, null, stuck: 0, now: now), 'החלטה אחת מחכה לך.');
+    expect(fullSentence(d, recipe(), stuck: 0, now: now), 'החלטה אחת מחכה לך. בוקר שקט, שתי משימות רצות');
   });
 
   testWidgets('a project line is cut between words, never inside one (T2)', (tester) async {
@@ -85,23 +83,26 @@ void main() {
     expect(Palette.lightV2.identity('purple'), Palette.lightV2.identity('slate'));
   });
 
-  testWidgets('what waits is every open item, live, also one the recipe does not name: the sentence agrees with the card', (tester) async {
+  testWidgets('the home leads with the live count of decisions, a tap goes to the tab, and no card of them is under it', (tester) async {
     late CompanyData d;
+    late AppNav nav;
     await pumpApp(tester, size: const Size(412, 2400), home: Builder(builder: (c) {
       d = StoreScope.of(c).data!;
-      // A composer's recipe that names nothing waiting, and says the opposite of what is live.
-      // Composed before what waits last changed: it is not shown.
-      final recipe = HomeRecipe(version: 1, composedBy: 'adi', composedAt: kDemoNow, waitingChangedAt: kDemoNow.add(const Duration(minutes: 1)), blocks: const [HomeBlock(type: 'headline', text: 'שום דבר לא מחכה לך')]);
+      nav = NavScope.read(c);
+      // Nobody stuck: the composer's headline stands.
+      for (final id in d.presence.keys.toList()) {
+        if (d.presence[id]!.status == WorkerStatus.stuck) d.presence[id] = Presence(status: WorkerStatus.working);
+      }
+      // A composer's recipe that says nothing of what waits: the count is the app's.
+      final recipe = HomeRecipe(version: 1, composedBy: 'adi', composedAt: kDemoNow, source: 'agent', blocks: const [HomeBlock(type: 'headline', text: 'בוקר שקט')]);
       return Scaffold(body: ListView(children: [HomeV2(recipe: recipe, data: d, now: kDemoNow)]));
     }));
-    final open = [for (final w in d.waiting) if ((w.state == WaitState.open || w.state == WaitState.pending) && !HeadData.hot(w)) w];
-    expect(open, isNotEmpty, reason: 'the demo data has something waiting');
-    expect(find.text('שום דבר לא מחכה לך'), findsNothing);
-    // The exact sentence, with every open item counted: one the recipe left out included.
-    final hot = [for (final w in d.waiting) if ((w.state == WaitState.open || w.state == WaitState.pending) && HeadData.hot(w)) w];
-    final stuck = [for (final id in d.identities.keys) if (d.presence[id]?.status == WorkerStatus.stuck) id];
-    expect(find.text(homeSentence(d, burning: hot.length + stuck.length, waiting: open.length)), findsOneWidget);
-    expect(find.bySemanticsLabel(RegExp('^מחכה לך')), findsWidgets);
+    expect(d.waitingCount, greaterThan(0), reason: 'the demo data has something waiting');
+    expect(find.text(decisionsLead(d.waitingCount)!), findsOneWidget);
+    expect(findShown('בוקר שקט'), findsOneWidget);
+    expect(find.text('מחכה לך'), findsNothing, reason: 'no card of what waits');
+    await tester.tap(find.text(decisionsLead(d.waitingCount)!));
+    expect(nav.tab, AppTab.decisions);
   });
 
   // The seven projects of org.yaml with the tones decided on 21/10, by the icons the app draws for them today, so

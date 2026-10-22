@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../data/backend.dart' show CompanyData;
 import '../data/store.dart';
 import '../model/models.dart';
 import '../theme/tokens.dart';
@@ -11,7 +12,8 @@ import 'chat/items.dart' show shortcutAsk, shortcutOptions;
 import 'chat/tool_details.dart';
 import 'common.dart';
 import 'convs/conversations_screen.dart';
-import 'home/home_screen.dart';
+import 'decisions/decisions_strip.dart';
+import 'decisions/decisions_screen.dart';
 import 'nav.dart';
 import 'projects/projects_screen.dart';
 import 'settings/settings_screen.dart';
@@ -37,7 +39,6 @@ class _DesktopFrameState extends State<DesktopFrame> {
 
   void _rebuild() => setState(() {});
   bool gPrefix = false;
-  bool peekWaiting = false;
 
   @override
   void dispose() {
@@ -53,6 +54,10 @@ class _DesktopFrameState extends State<DesktopFrame> {
 
   /// The main column shows a conversation (not the home).
   static bool _chatShown(AppNav nav, AppStore store) => !(nav.tab == AppTab.chats && store.homeOpen);
+
+  /// The conversation on the screen has a decision of his open in its card: the line above the keys would say it twice.
+  static bool _decisionShown(AppNav nav, AppStore store, CompanyData d) =>
+      _chatShown(nav, store) && d.waiting.any((w) => w.from == store.currentConversation && (w.state == WaitState.open || w.state == WaitState.pending) && !d.superseded(w));
 
   KeyEventResult _onKey(FocusNode _, KeyEvent e) {
     if (e is! KeyDownEvent) return KeyEventResult.ignored;
@@ -74,20 +79,20 @@ class _DesktopFrameState extends State<DesktopFrame> {
       tools.close();
       FocusManager.instance.primaryFocus?.unfocus();
       focus.requestFocus();
-      setState(() => peekWaiting = false);
       return KeyEventResult.handled;
     }
     // Single-letter shortcuts are off while a text field has focus (§8.2).
     if (_typing || ctrl) return KeyEventResult.ignored;
+    if (nav.tab == AppTab.decisions && !gPrefix && decisionKey(context, k)) return KeyEventResult.handled;
     if (gPrefix) {
       gPrefix = false;
       final t = {
+        PhysicalKeyboardKey.keyD: AppTab.decisions,
         PhysicalKeyboardKey.keyC: AppTab.chats,
         PhysicalKeyboardKey.keyS: AppTab.status,
         PhysicalKeyboardKey.keyP: AppTab.projects,
       }[k];
       if (t != null) nav.go(t);
-      if (k == PhysicalKeyboardKey.keyI) setState(() => peekWaiting = !peekWaiting);
       return KeyEventResult.handled;
     }
     if (k == PhysicalKeyboardKey.keyG) {
@@ -215,12 +220,12 @@ class _DesktopFrameState extends State<DesktopFrame> {
       case AppTab.status:
         list = const StatusScreen();
         main = ChatScreen(identityId: selected, embedded: true);
-        side = _ContextColumn(identityId: selected, showWaiting: false);
+        side = _ContextColumn(identityId: selected);
       case AppTab.chats:
         list = const ConversationsScreen(compact: true);
         // v2: the home is a place of its own in the main column, as wide as a chat (home_v2.dart).
         main = store.homeOpen ? const HomeV2Page() : ChatScreen(identityId: selected, embedded: true);
-        side = peekWaiting ? const _WaitingPeek() : (store.homeOpen ? null : _ContextColumn(identityId: selected));
+        side = store.homeOpen ? null : _ContextColumn(identityId: selected);
       case AppTab.settings:
         list = const SettingsScreen(tab: true);
         main = ChatScreen(identityId: selected, embedded: true);
@@ -228,7 +233,12 @@ class _DesktopFrameState extends State<DesktopFrame> {
       case AppTab.projects:
         list = const ProjectsScreen();
         main = ChatScreen(identityId: selected, embedded: true);
-        side = _ContextColumn(identityId: selected, showWaiting: false);
+        side = _ContextColumn(identityId: selected);
+      case AppTab.decisions:
+        // Its own list and the decision, across the whole width (decisions_screen.dart).
+        list = const SizedBox.shrink();
+        main = const SizedBox.shrink();
+        side = null;
     }
 
     // A tool's details take the side column while its conversation is open; Esc or the X give it back.
@@ -258,6 +268,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
                   ),
               ]),
             ),
+            if (nav.tab == AppTab.decisions) const Expanded(child: DecisionsDesktop()) else ...[
             Container(
               // The chats column holds the home over the phone's two-line rows (convs_v2.dart), 360 wide.
               width: nav.tab == AppTab.chats ? 360 : 380,
@@ -271,8 +282,12 @@ class _DesktopFrameState extends State<DesktopFrame> {
               ),
             ),
             if (side != null && ctxCol) SizedBox(width: toolSide ? 420 : 330, child: Container(color: p.surface, child: side)),
+            ],
           ]),
         ),
+        // The line says how many decisions wait; not on the tab itself, and not in a conversation whose decision is
+        // open right there in its card.
+        DecisionsStrip(hidden: nav.tab == AppTab.decisions || (nav.tab == AppTab.chats && store.homeOpen) || (d != null && _decisionShown(nav, store, d))),
         _KeyBar(chat: _chatShown(nav, store)),
       ]),
     );
@@ -284,7 +299,7 @@ const kShortcuts = [
   ('Ctrl K', 'מעבר מהיר'),
   ('Ctrl F', 'חיפוש בשיחה'),
   ('G  H / C / B / O', 'בית, שיחות, לוח, ארגון'),
-  ('G  I', 'מחכה לך'),
+  ('G  D', 'החלטות'),
   ('J / K', 'הבא, הקודם'),
   ('Enter', 'שליחה אחרי הצעד הנוכחי'),
   ('Ctrl Enter', 'שליחה עכשיו'),
@@ -310,24 +325,30 @@ class _KeyBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(color: p.surface, border: Border(top: BorderSide(color: p.line))),
       child: Wrap(spacing: 18, runSpacing: 6, children: [
-        item(['Ctrl K'], 'מעבר מהיר'),
-        item(['Ctrl F'], 'חיפוש בשיחה'),
-        item(['G', 'I'], 'מחכה לך'),
-        if (chat) ...[
-          item(['1', '3'], 'תשובה לשאלה'),
-          item(['Ctrl .'], 'עצירת העובד'),
+        if (NavScope.of(context).tab == AppTab.decisions) ...[
+          item(['1', '4'], 'תשובה'),
+          item(['J', 'K'], 'הבאה, הקודמת'),
+          item(['G', 'C'], 'שיחות'),
+          item(['?'], 'כל הקיצורים'),
+        ] else ...[
+          item(['Ctrl K'], 'מעבר מהיר'),
+          item(['Ctrl F'], 'חיפוש בשיחה'),
+          item(['G', 'D'], 'החלטות'),
+          if (chat) ...[
+            item(['1', '3'], 'תשובה לשאלה'),
+            item(['Ctrl .'], 'עצירת העובד'),
+          ],
+          item(['?'], 'כל הקיצורים'),
         ],
-        item(['?'], 'כל הקיצורים'),
       ]),
     );
   }
 }
 
-/// Context column: task, PR, files, and a peek at what else waits (mockup `.ctx`).
+/// Context column: task, PR and files (mockup `.ctx`).
 class _ContextColumn extends StatelessWidget {
-  const _ContextColumn({required this.identityId, this.showWaiting = true});
+  const _ContextColumn({required this.identityId});
   final String identityId;
-  final bool showWaiting;
 
   @override
   Widget build(BuildContext context) {
@@ -340,7 +361,6 @@ class _ContextColumn extends StatelessWidget {
     final presence = d.presence[identityId];
     final who = d.who(identityId);
     final ticket = d.tickets.where((t) => t.assignee == who.name).firstOrNull;
-    final others = d.waiting.where((w) => w.from != identityId && w.state == WaitState.open).toList();
 
     Widget h(String t) => Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 6), child: Text(t, style: TextStyle(fontFamily: kFont, fontSize: 13, fontWeight: FontWeight.w700, color: p.text2)));
     Widget kv(String k, String v) => Padding(
@@ -390,31 +410,6 @@ class _ContextColumn extends StatelessWidget {
           ),
         const Padding(padding: EdgeInsets.fromLTRB(16, 10, 16, 10), child: Align(alignment: AlignmentDirectional.centerStart, child: Btn('VS Code', icon: 'open_in_new', height: 34, fontSize: 13))),
       ],
-      if (showWaiting && others.isNotEmpty) ...[
-        h('מחכה לך · עוד ${others.length}'),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            for (final w in others)
-              InkWell(
-                onTap: () => openWait(context, w),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: Rich('${d.who(w.from).name} · ${w.short}', style: TextStyle(fontFamily: kFont, fontSize: 13.5, height: 1.8, color: p.text)),
-                ),
-              ),
-            const SizedBox(height: 4),
-            Row(children: [const Kbd('J'), const SizedBox(width: 4), const Kbd('K'), const SizedBox(width: 6), Text('מעבר בין הפריטים', style: T.meta.copyWith(color: p.text2))]),
-          ]),
-        ),
-      ],
     ]);
   }
-}
-
-/// G then I: "waiting for you" in the context column without leaving the conversation.
-class _WaitingPeek extends StatelessWidget {
-  const _WaitingPeek();
-  @override
-  Widget build(BuildContext context) => const WaitingList();
 }

@@ -475,6 +475,8 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX error_signatures_state ON error_signatures(state);
   `,
+  // v-next: the links under a decision in the app ("הדוח המלא", "ה-PR"): JSON [{kind: 'report' | 'pr', url}], NULL = none.
+  `ALTER TABLE inbox ADD COLUMN links TEXT;`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

@@ -53,6 +53,8 @@ export class AwaitingBoard {
   onOutcome: AwaitingTell = () => {};
   /** Whose the card is: the task's opener, who hears "נכשל". Null: nobody who can hear it. */
   openerOf: (t: { project: string | null; labels: string }) => string | null = () => null;
+  /** A project's GitHub repo (owner/name), for the PR's link under a decision. */
+  repoOf: (project: string, worktree: string | null) => string | null = () => null;
   constructor(store: Store, inbox: Inbox | null = null) { this.store = store; this.inbox = inbox; }
 
   /**
@@ -131,8 +133,8 @@ export class AwaitingBoard {
   sync(taskId: number): void {
     if (!this.inbox) return;
     const ref = `task-${taskId}`;
-    const open = this.store.db.prepare(`SELECT id, title, body, headline FROM inbox WHERE kind = 'awaiting' AND ref = ? AND state = 'open'`)
-      .all(ref) as { id: number; title: string; body: string; headline: string | null }[];
+    const open = this.store.db.prepare(`SELECT id, title, body, headline, links FROM inbox WHERE kind = 'awaiting' AND ref = ? AND state = 'open'`)
+      .all(ref) as { id: number; title: string; body: string; headline: string | null; links: string | null }[];
     const t = this.get(taskId);
     if (!t || !this.isHis(t)) {
       for (const o of open) this.inbox.resolve(o.id);
@@ -141,18 +143,25 @@ export class AwaitingBoard {
     const title = (t.summary?.split('\n')[0]?.trim() || t.title).slice(0, 200);
     const headline = t.awaiting_note ?? title;
     const body = t.pr ? `${title} · PR #${t.pr}` : title;
+    const repo = t.pr && t.project ? this.repoOf(t.project, this.worktreeOf(taskId)) : null;
+    const links = repo ? JSON.stringify([{ kind: 'pr', url: `https://github.com/${repo}/pull/${t.pr}` }]) : null;
     const [cur, ...extra] = open;
     for (const o of extra) this.inbox.resolve(o.id);
     if (cur) {
-      if (cur.title !== title || cur.headline !== headline || cur.body !== body) {
-        this.store.db.prepare('UPDATE inbox SET title = ?, headline = ?, body = ? WHERE id = ?').run(title, headline, body, cur.id);
+      if (cur.title !== title || cur.headline !== headline || cur.body !== body || cur.links !== links) {
+        this.store.db.prepare('UPDATE inbox SET title = ?, headline = ?, body = ?, links = ? WHERE id = ?').run(title, headline, body, links, cur.id);
         this.store.emit('inbox.updated', null, { id: cur.id });
       }
       return;
     }
     // No dedupe_key: the open card by ref is the dedupe, and a card closed earlier (a GO asked, then declined) must
     // be able to come back while the task still waits.
-    this.inbox.add({ kind: 'awaiting', from_identity: this.openerOf(this.taskRow(taskId)), title, headline, body, ref, blocking: false });
+    this.inbox.add({ kind: 'awaiting', from_identity: this.openerOf(this.taskRow(taskId)), title, headline, body, ref, blocking: false,
+      links: links ? JSON.parse(links) : null });
+  }
+
+  private worktreeOf(id: number): string | null {
+    return (this.store.db.prepare('SELECT worktree FROM tasks WHERE id = ?').get(id) as { worktree: string | null } | undefined)?.worktree ?? null;
   }
 
   private taskRow(id: number): { project: string | null; labels: string } {

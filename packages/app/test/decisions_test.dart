@@ -1,13 +1,13 @@
 // #258: decisions in one tap. A GO or a question shows its buttons, always; a tap on the card opens its
 // details and never starts an answer; one tap decides and folds the card to "אישרת · 14:06" with "ביטול"
 // for 5 seconds; older GO requests from the same worker fold to one line; the banner leads to the card;
-// and "מחכה לך" at home decides with the same buttons.
+// and the "החלטות" tab decides with the same buttons.
 import 'package:agent_company/data/fake_backend.dart';
 import 'package:agent_company/data/store.dart';
 import 'package:agent_company/main.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
-import 'package:agent_company/ui/convs/conversations_screen.dart';
+import 'package:agent_company/ui/decisions/decisions_screen.dart';
 import 'package:agent_company/ui/home/home_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -41,7 +41,7 @@ void _danaWithHistory(AppStore store) {
   d.waiting.insert(0, WaitItem(id: 'w-dana-old', kind: WaitKind.go, from: 'dana', time: '12:50', kicker: 'GO לפרודקשן', body: 'גרסה 1.1.20-rc1', askId: 'inbox:31', inboxId: 31, createdAt: _at(12, 50)));
 }
 
-/// "מחכה לך" with three decisions (a fixture): Dana's GO, Ido's question with options, and Noga's GO.
+/// Three decisions (a fixture): Dana's GO, Ido's question with options, and Noga's GO.
 void _threeDecisions(AppStore store) {
   final d = store.data!;
   d.waiting.removeWhere((w) => w.kind != WaitKind.go && w.kind != WaitKind.blockingAsk);
@@ -94,16 +94,6 @@ void main() {
       expect(find.text('אישור'), findsNothing);
       await _shot(tester, 'b-approved-$look');
       await tester.pump(const Duration(seconds: 6));
-    });
-
-    testWidgets('(c) "מחכה לך" at home with three decisions ($look)', (tester) async {
-      final store = await pumpApp(tester, dark: dark, textScale: scale, size: const Size(342, 900), home: const SizedBox());
-      _threeDecisions(store);
-      await pumpScreen(tester, store, const Scaffold(body: ConversationsScreen()), dark: dark);
-      expect(find.text('אישור'), findsNWidgets(2));
-      expect(find.text('ביטול המנוי מיד'), findsOneWidget);
-      expect(find.text('תשובה אחרת'), findsOneWidget);
-      await _shot(tester, 'c-home-$look');
     });
   }
 
@@ -166,10 +156,14 @@ void main() {
     expect(find.text('לשאלה'), findsNothing);
   });
 
-  testWidgets('"מחכה לך" decides in place: the same folded line, and the card in the chat agrees', (tester) async {
+  testWidgets('the "החלטות" tab decides in place: the same folded line, and the card in the chat agrees', (tester) async {
     final store = await pumpApp(tester, size: const Size(342, 900), home: const SizedBox());
     _threeDecisions(store);
-    await pumpScreen(tester, store, const Scaffold(body: ConversationsScreen()));
+    decisionQueue
+      ..order.clear()
+      ..done.clear()
+      ..current = null;
+    await pumpScreen(tester, store, const Scaffold(body: DecisionsScreen()));
     await tester.tap(find.text('ביטול המנוי מיד'));
     await tester.pump();
     expect(findShown('ענית: ביטול המנוי מיד · 14:06'), findsOneWidget);

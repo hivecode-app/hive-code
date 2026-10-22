@@ -60,7 +60,8 @@ void main() {
       expect(store.homeOpen, isTrue);
       expect(find.byType(HomeV2Page), findsOneWidget);
       expect(find.byType(HomeEntryRow), findsOneWidget);
-      expect(find.byType(WaitingBlock), findsOneWidget);
+      expect(find.byType(WaitingBlock), findsNothing, reason: 'what waits is the "החלטות" tab\'s');
+      expect(find.text(decisionsLead(store.data!.waitingCount)!), findsOneWidget, reason: 'the sentence leads with the live count');
       expect(tester.takeException(), isNull);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/desktop_home/waiting-$t.png'));
     });

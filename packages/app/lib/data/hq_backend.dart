@@ -1605,6 +1605,10 @@ CompanyData mapSnapshot({
       options: options,
       domain: kind == WaitKind.login ? (i['title'] as String?) : null,
       link: i['link'] as String?,
+      links: [
+        for (final l in (i['links'] as List? ?? const []).whereType<Map>())
+          if (WaitLinkKind.values.asNameMap()[l['kind']] case final kind? when l['url'] is String && (l['url'] as String).startsWith('https://')) WaitLink(kind, l['url'] as String),
+      ],
       // "לא עכשיו" lives in hq (#74): it stays put across refreshes and devices.
       state: i['snoozed_at'] != null ? WaitState.notNow : WaitState.open,
     ));

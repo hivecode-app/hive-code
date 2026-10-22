@@ -12,11 +12,12 @@ import { execFile } from 'node:child_process';
 import { join, relative } from 'node:path';
 import {
   COMPANY_API_VERSION, g, OWNER, pre, type OpAck, type OpName, type Priority, type RecallItem, type RecallRequest, type RecallResponse,
-  type Urgency, type WalEntry,
+  type InboxLink, type Urgency, type WalEntry,
 } from '@company/shared';
 import type { Hq } from './hq.ts';
 import { noWorkers, readCharter } from './workspace.ts';
 import { getIdentity, isStandingWorker } from './org.ts';
+import { prNumber } from './awaiting.ts';
 import { HandoffError } from './tab/handoffs.ts';
 import { HomeError } from './home.ts';
 import { waitingLine } from './mailbox.ts';
@@ -92,6 +93,14 @@ export class Ingest {
     return ack;
   }
 
+  /** The GitHub repo of the project a worker belongs to (its charter), for the link of a PR given as a number. */
+  private repoOfWorker(identity: string): string | null {
+    const t = this.hq.store.db.prepare(`SELECT project, worktree FROM tasks WHERE identity = ? AND state IN ('running','resting') ORDER BY updated_at DESC LIMIT 1`)
+      .get(identity) as { project: string | null; worktree: string | null } | undefined;
+    const project = t?.project ?? getIdentity(this.hq.store, identity)?.project;
+    return project ? this.hq.awaiting.repoOf(project, t?.worktree ?? null) : null;
+  }
+
   private apply(e: WalEntry, a: Record<string, unknown>): OpAck {
     const { mailbox, inbox } = this.hq;
     const need = (k: string) => { const v = s(a[k]); if (!v) throw new IngestError(400, `${e.op}: ${k} is required`, `חסר השדה \`${k}\``); return v; };
@@ -120,6 +129,7 @@ export class Ingest {
         const what = need('what');
         const item = inbox.add({ kind: 'go', from_identity: e.identity, title: `GO: ${what}`.slice(0, 200), blocking: true,
           urgency: a.risk === 'high' ? 'urgent' : 'normal', ref: e.id, dedupe_key: `op:${e.id}`, headline: s(a.headline)?.trim() || null,
+          links: requestGoLinks(a, this.repoOfWorker(e.identity)),
           body: [what, s(a.pr) ? `PR: ${String(a.pr)}` : '', s(a.risk) ? `סיכון: ${String(a.risk)}` : ''].filter(Boolean).join('\n') });
         return { ok: true, id: e.id, ref: `inbox-${item.id}` };
       }
@@ -575,4 +585,13 @@ export function taskSummary(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const line = v.split('\n')[0]!.trim();
   return line ? line.slice(0, 200) : null;
+}
+
+/** The links of a GO: its report and PR. A bare PR number becomes a link in the worker's project repo, when it has one. */
+function requestGoLinks(a: Record<string, unknown>, repo: string | null): InboxLink[] {
+  const https = (v: unknown) => (typeof v === 'string' && /^https:\/\/\S+$/.test(v.trim()) ? v.trim() : null);
+  const report = https(a.report);
+  const n = prNumber(a.pr);
+  const pr = https(a.pr) ?? (n && repo ? `https://github.com/${repo}/pull/${n}` : null);
+  return [...(report ? [{ kind: 'report' as const, url: report }] : []), ...(pr ? [{ kind: 'pr' as const, url: pr }] : [])];
 }

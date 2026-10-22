@@ -185,14 +185,14 @@ class AppStore extends ChangeNotifier {
     final card = _cardOf(item.from, item.askId);
     final at = company_time.CompanyTime.now();
     if (item.kind == WaitKind.awaiting) {
-      // A finished task (#219): "בוצע" or "נכשל" folds like any decision, with the same 5 seconds.
+      // A finished task (#219): "עובד" or "לא עובד" folds like any decision, with the same 5 seconds.
       final done = option.id == 'done';
       startUndo(key, to, () async {
         item.failed = !done;
         final r = await backend.awaitingOutcome(item, done);
-        item.answerLine = done ? 'בוצע' : 'נכשל';
+        item.answerLine = done ? 'עובד' : 'לא עובד';
         return r;
-      }, line: done ? 'בוצע' : 'נכשל', seconds: decisionUndoSeconds);
+      }, line: done ? 'עובד' : 'לא עובד', seconds: decisionUndoSeconds);
     } else if (option.id == 'go') {
       startUndo(key, to, () async {
         final r = await backend.go(item);

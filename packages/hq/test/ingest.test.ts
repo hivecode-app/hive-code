@@ -58,6 +58,10 @@ test('ingest socket: 0600, ops are idempotent on id, tell/ask/request_go land wh
     assert.equal(go.headline, 'עדכון לאפליקציה');
     assert.equal(go.urgency, 'urgent');
     assert.match(go.body, /PR: #12/);
+    assert.deepEqual(go.links, [], 'a bare number with no repo behind it is not a link');
+    await post(sock, '/v1/ops', entry('request_go', { headline: 'עוד אחד', what: 'פרטים', pr: 'https://github.com/hivecode-app/hive-code/pull/13', report: 'https://example.com/report' }, 'ac-ceo-1:02', 'ac-ceo'));
+    assert.deepEqual(hq.inbox.open().find((i) => i.headline === 'עוד אחד')!.links,
+      [{ kind: 'report', url: 'https://example.com/report' }, { kind: 'pr', url: 'https://github.com/hivecode-app/hive-code/pull/13' }]);
     await until(() => env.telegrams.some((x) => /GO: פריסה לפרודקשן/.test(x)), 2000, 'GO pushed (telegram fallback)');
 
     assert.equal((await post(sock, '/v1/ops', { ...entry('tell', {}, 'x'), v: 2 })).status, 400);

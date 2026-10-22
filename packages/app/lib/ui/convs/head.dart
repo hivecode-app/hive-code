@@ -458,7 +458,7 @@ List<DecisionButton>? decisionKeysOf(BuildContext context, WaitItem item) {
         Nav.chat(context, item.from, quote: Quote(author: store.nameOf(item.from), text: (item.headline ?? item.body).split('\n').first, askId: item.askId), focus: true);
       });
     case WaitKind.awaiting:
-      // A finished task to check (#219): "בוצע" or "נכשל", one tap each.
+      // A finished task to check (#219): "עובד" or "לא עובד", one tap each.
       return [for (final o in item.options) DecisionButton(o.label, primary: o.primary, onTap: () => store.answerWait(item, o))];
     default:
       return null;

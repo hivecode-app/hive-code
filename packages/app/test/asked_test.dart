@@ -82,9 +82,8 @@ void main() {
     expect(r.blocks.first.emphasis, Emphasis.strong);
     expect(HomeRecipe.fromJson(r.toJson()).toJson(), r.toJson());
     final d = mapSnapshot(board: const [], inbox: const [], asks: const [], toggles: const [], asked: [_asked('m3'), _asked('m1')]);
-    final live = liveBlocks(r, d);
-    expect(live.length, 1, reason: 'a block with no id left is gone');
-    expect(live.single.messages, ['m1', 'm3']);
+    // Decisions are the "החלטות" tab's (task 306): a recipe that still names "ביקשת" is skipped on the home.
+    expect(liveBlocks(r, d), isEmpty);
   });
 
   testWidgets('the block: an open row says who it waits for and since when, an answered one says "ענו"', (tester) async {

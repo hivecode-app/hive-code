@@ -123,11 +123,10 @@ test('#118: "ביקשת": open after two minutes without an answer, then "answer
       'the app hears of it');
     assert.equal(hq.home.watchAsked(), false, 'once per change');
 
-    // Default home: right after "מחכה לך"; a composed recipe without it gets it anyway.
-    const def = hq.home.defaultRecipe().blocks;
-    assert.deepEqual(def.find((b) => b.type === 'asked'), { type: 'asked', messages: ['m-req'] });
+    // The home does not show it (task 306): not in the default, and not put into a composed recipe.
+    assert.equal(hq.home.defaultRecipe().blocks.some((b) => b.type === 'asked'), false);
     hq.home.compose([{ type: 'headline', text: 'בוקר שקט' }, { type: 'people', identities: ['eli'] }], 'yoav');
-    assert.deepEqual(hq.home.current().blocks.map((b) => b.type), ['headline', 'asked', 'people']);
+    assert.deepEqual(hq.home.current().blocks.map((b) => b.type), ['headline', 'people']);
 
     clock.advance(5 * 60_000);
     hq.mailbox.tell({ msg_id: 'eli-1:tell', from: 'eli', to: 'owner', body: 'הבעיות: הפענוח בתוך ה-webhook' });
@@ -135,7 +134,6 @@ test('#118: "ביקשת": open after two minutes without an answer, then "answer
     assert.equal(answered!.state, 'answered');
     assert.equal(answered!.reply!.id, 'eli-1:tell');
     assert.equal(answered!.count, 2);
-    assert.deepEqual(hq.home.current().blocks.find((b) => b.type === 'asked'), { type: 'asked', messages: ['m-req'] });
 
     clock.advance(1000);
     hq.conversations.markRead('eli');
@@ -157,11 +155,10 @@ test('#118: an ask or a GO that answered him is in "מחכה לך", not in "בי
   } finally { await env.cleanup(); }
 });
 
-test('compose_home: asked {messages[]} is validated against the list', () => {
+test('compose_home: asked {messages[]} from an older composer is skipped, not shown', () => {
   const refs = { projects: new Set<string>(), identities: new Set<string>(), inbox: new Set<number>(), awaiting: new Set<number>(), asked: new Set(['m-1']) };
-  assert.deepEqual(validateBlocks([{ type: 'asked', messages: ['m-1', 'm-1'] }], refs), [{ type: 'asked', messages: ['m-1'] }]);
-  assert.throws(() => validateBlocks([{ type: 'asked', messages: ['m-2'] }], refs), /לא ב"ביקשת"/);
-  assert.throws(() => validateBlocks([{ type: 'asked', messages: [] }], refs), /messages/);
+  assert.deepEqual(validateBlocks([{ type: 'asked', messages: ['m-1', 'm-1'] }, { type: 'headline', text: 'x' }], refs), [{ type: 'headline', text: 'x' }]);
+  assert.throws(() => validateBlocks([{ type: 'asked' }], refs), /חסר השדה "messages"/);
 });
 
 test('#118: asked.changed is emitted after the event that changed the list, never from inside it (the WS cursor)', async () => {

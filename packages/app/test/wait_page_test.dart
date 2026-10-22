@@ -4,10 +4,11 @@ import 'package:agent_company/data/store.dart';
 import 'package:agent_company/main.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
-import 'package:agent_company/ui/convs/conversations_screen.dart';
 import 'package:agent_company/ui/home/wait_item_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'package:agent_company/ui/nav.dart';
 
 import 'helpers.dart';
 
@@ -51,13 +52,13 @@ Future<AppStore> _open(WidgetTester tester, WaitItem item, {bool dark = false, d
 }
 
 void main() {
-  testWidgets('a tap on a question in "מחכה לך" opens its page, not the conversation', (tester) async {
+  testWidgets('a question\'s page: the details open, and its link goes to the conversation', (tester) async {
     final store = await pumpApp(tester, size: const Size(390, 900), home: const SizedBox());
-    store.data!.waiting.insert(0, _ask());
+    final item = _ask();
+    store.data!.waiting.insert(0, item);
     store.touch();
-    await tester.pumpWidget(CompanyApp(store: store, home: const Scaffold(body: ConversationsScreen())));
-    await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('מה עושים עם המנוי', findRichText: true).first);
+    await tester.pumpWidget(CompanyApp(store: store, home: Builder(builder: (c) => Scaffold(body: TextButton(onPressed: () => Nav.waitItem(c, item), child: const Text('פתיחה'))))));
+    await tester.tap(find.text('פתיחה'));
     await tester.pumpAndSettle();
     expect(find.byType(WaitItemScreen), findsOneWidget);
     expect(find.byType(ChatScreen), findsNothing);

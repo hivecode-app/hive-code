@@ -199,3 +199,15 @@ test('scheduler: a broken charter means no workers, and says so', async () => {
     assert.ok(ev, 'charter.invalid emitted');
   } finally { await env.cleanup(); }
 });
+
+test('repoOfWorktree: the checkout the worktree lives in; one checkout is the project\'s; several and no match is no link', async () => {
+  const { repoOfWorktree } = await import('../src/workspace.ts');
+  const co = (name: string, path: string, repo: string | null) => ({ name, path, defaultBranch: 'main', repo });
+  const ch = (checkouts: ReturnType<typeof co>[]) => ({ project: 'p', status: 'active', machine: null, checkouts, worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, designReview: null, paused: null }) as never;
+  const two = ch([co('a', '/r/a', 'o/a'), co('b', '/r/b', 'o/b')]);
+  assert.equal(repoOfWorktree(two, '/r/b/.worktrees/company-t1'), 'o/b');
+  assert.equal(repoOfWorktree(two, '/elsewhere/x'), null);
+  assert.equal(repoOfWorktree(two, null), null);
+  assert.equal(repoOfWorktree(ch([co('a', '/r/a', 'o/a')]), null), 'o/a');
+  assert.equal(repoOfWorktree(null, '/r/a/.worktrees/x'), null);
+});

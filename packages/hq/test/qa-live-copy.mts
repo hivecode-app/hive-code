@@ -13,6 +13,8 @@
 //   QA_ASK=2     and a second one, from dana, so two things wait (the mockup of company-engine#37)
 //   QA_UNTIL=<id>:<seq>,…  each worker's conversation as it was at that event: its later events and messages are
 //                dropped, so a moment from its history is the last thing on screen (the tool details mockup, task 281)
+//   QA_REOPEN=220,213  these inbox items (a GO, a question) open again, as they were before he answered: real
+//                decisions for the decisions queue mockup (task 286), when fewer than enough wait right now
 //   QA_OWNER_LAST=1  three lines he "wrote" last, for the conversations mockup (company-engine#37): to
 //                matan still queued, to noga delivered and not read yet, to eli read. A fixture, said so beside the shots
 import { homedir } from 'node:os';
@@ -50,6 +52,14 @@ const { env, close } = await openIsolatedCopy(live, {
       add.run('qa-owner-queued', 'matan', 'מצאת מה שולח לי את ההתראות?', 'queued', 0, t - 1 * 60_000, null);
       add.run('qa-owner-delivered', 'noga', 'תודה. אפשר לקבל את הטבלה המלאה?', 'delivered', 1, t - 2 * 60_000, t - 2 * 60_000);
       add.run('qa-owner-seen', 'eli', 'הזמנתי, תודה', 'seen', 1, t - 3 * 60_000, t - 3 * 60_000);
+    }
+    if (process.env.QA_REOPEN) {
+      for (const id of process.env.QA_REOPEN.split(',').map(Number)) {
+        const row = db.prepare('SELECT kind, ref FROM inbox WHERE id = ?').get(id) as { kind: string; ref: string | null } | undefined;
+        if (!row) continue;
+        db.prepare("UPDATE inbox SET state = 'open', resolved_at = NULL WHERE id = ?").run(id);
+        if (row.kind === 'ask' && row.ref) db.prepare("UPDATE asks SET state = 'open', answer = NULL, answered_by = NULL, answered_at = NULL WHERE id = ?").run(row.ref);
+      }
     }
     if (process.env.QA_QUIET) {
       db.exec(`UPDATE asks SET state = 'cancelled' WHERE state IN ('open', 'escalated'); UPDATE inbox SET state = 'dismissed', resolved_at = ${Date.now()} WHERE state = 'open'`);

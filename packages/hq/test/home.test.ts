@@ -45,10 +45,10 @@ test('validation: the whole vocabulary passes; anything off is a 400 with the re
     { type: 'note', text: 'שווה לבדוק את הפריסה של 2.6.10', icon: 'rocket_launch', emphasis: 'quiet' },
   ];
   const out = validateBlocks(all, REFS);
-  assert.equal(out.length, all.length);
-  assert.deepEqual(out[3], { type: 'waiting', inbox: [7] }, 'duplicates folded');
+  // Decisions are the app's tab (task 306): waiting, asked and awaiting from an older composer pass and are skipped; an alert on an inbox item too.
+  assert.deepEqual(out.map((b) => b.type), all.map((b) => b.type).filter((t) => !['waiting', 'asked', 'awaiting'].includes(t)).filter((t, i, a) => !(t === 'alert' && a.indexOf(t) === i)));
   assert.equal(out[0]!.emphasis, 'strong');
-  assert.deepEqual(out[9], { type: 'since', items: [{ text: 'התמונות עולות' }, { text: 'הלילה עבר בשקט' }] }, 'a sentence is {text}');
+  assert.deepEqual(out.find((b) => b.type === 'since'), { type: 'since', items: [{ text: 'התמונות עולות' }, { text: 'הלילה עבר בשקט' }] }, 'a sentence is {text}');
 
   rejects([], /ריק/);
   rejects({}, /רשימה/);
@@ -59,10 +59,7 @@ test('validation: the whole vocabulary passes; anything off is a 400 with the re
   rejects([{ type: 'headline', text: 'שורה\nשנייה' }], /שורה אחת/);
   rejects([{ type: 'alert' }], /בדיוק אחד/);
   rejects([{ type: 'alert', inbox: 4, shift: 's' }], /בדיוק אחד/);
-  rejects([{ type: 'alert', inbox: 99 }], /לא פתוח/);
   rejects([{ type: 'alert', shift: 'ghost-1' }], /אין משמרת "ghost-1"/);
-  rejects([{ type: 'waiting', inbox: [] }], /לא ריקה/);
-  rejects([{ type: 'awaiting', tasks: [13] }], /לא ב"מה לבדוק"/);
   rejects([{ type: 'lanes', projects: ['nope'] }], /אין פרויקט "nope"/);
   rejects([{ type: 'project', project: 'nope' }], /אין פרויקט/);
   rejects([{ type: 'quiet', projects: ['nope'] }], /אין פרויקט "nope"/);
@@ -97,7 +94,7 @@ test('fallback: the default with no recipe, the agent one while fresh, the defau
     let cur = hq.home.current();
     assert.equal(cur.source, 'default');
     assert.equal(cur.fallback, 'none');
-    assert.deepEqual(cur.blocks, [{ type: 'headline', text: 'דבר אחד מחכה לך.' }, { type: 'waiting', inbox: [go.id] }, { type: 'quiet', projects: ['agent-company'] }],
+    assert.deepEqual(cur.blocks, [{ type: 'headline', text: 'שקט: אין משימות בעבודה.' }, { type: 'quiet', projects: ['agent-company'] }],
       'the active project that did not move folds into the last line; dormant lumo is not in it');
     // "מה לבדוק" is on the status screen: the default does not show it, a composed recipe still may.
     const t = hq.scheduler.addTask({ title: 'תמונות', project: 'agent-company' });
@@ -105,15 +102,15 @@ test('fallback: the default with no recipe, the agent one while fresh, the defau
     assert.equal(hq.home.current().blocks.some((b) => b.type === 'awaiting'), false);
     hq.home.compose([{ type: 'awaiting', tasks: [t.id] }], 'ac-ceo');
     hq.awaiting.clear(t.id, 'owner', 'checked');
-    assert.deepEqual(hq.home.current().blocks.map((b) => b.type), ['waiting'], 'checked: gone from the recipe too');
+    assert.deepEqual(hq.home.current().blocks.map((b) => b.type), ['headline', 'project'], 'a composed awaiting block is skipped: nothing left, the default shows');
 
     const r = hq.home.compose([{ type: 'headline', text: 'יום עמוס' }, { type: 'project', project: 'lumo' }], 'ac-ceo', 'בדיקה');
     cur = hq.home.current();
     assert.equal(cur.source, 'agent');
     assert.equal(cur.version, r.version);
     assert.equal(cur.composed_by, 'ac-ceo');
-    // Live data wins: the blocking GO nobody placed is put in, after the headline.
-    assert.deepEqual(cur.blocks.map((b) => b.type), ['headline', 'waiting', 'project']);
+    // A GO nobody placed is not put into the home: it waits in the app's decisions tab.
+    assert.deepEqual(cur.blocks.map((b) => b.type), ['headline', 'project']);
 
     clock.advance(STALE_MS + 1);
     cur = hq.home.current();
@@ -140,7 +137,7 @@ test('the default is short: a sentence, what waits, a line per project that move
     const old = hq.scheduler.addTask({ title: 'ישנה', project: 'lumo' });
     hq.store.db.prepare(`UPDATE tasks SET state = 'done', summary = 'מלפני יומיים' WHERE id = ?`).run(old.id);
     clock.advance(25 * 3_600_000);
-    assert.deepEqual(hq.home.defaultRecipe().blocks, [{ type: 'headline', text: 'שקט: אין מה שמחכה לך ואין משימות בעבודה.' }, { type: 'quiet', projects: ['agent-company'] }],
+    assert.deepEqual(hq.home.defaultRecipe().blocks, [{ type: 'headline', text: 'שקט: אין משימות בעבודה.' }, { type: 'quiet', projects: ['agent-company'] }],
       'nothing moved in a day: no project line, nothing since, the project is quiet');
     hq.awaiting.mark(old.id, { awaiting: 'deploy', awaiting_note: 'לפרוס' }, 'ac-ceo');
     const done = ['הראשונה הסתיימה', 'השנייה הסתיימה\nפרטים', 'השלישית הסתיימה'].map((summary) => {
@@ -162,10 +159,10 @@ test('the default is short: a sentence, what waits, a line per project that move
 });
 
 test('headline: one sentence from the numbers', () => {
-  assert.equal(headline(2, 1, 0), '2 דברים מחכים לך ומשימה אחת בעבודה.');
-  assert.equal(headline(0, 0, 3), '3 משימות הסתיימו ביממה האחרונה.');
-  assert.equal(headline(0, 0, 0, true), 'יש תקלה.', 'never "quiet" over an alert');
-  assert.equal(headline(1, 3, 5), 'דבר אחד מחכה לך, 3 משימות בעבודה ו-5 הסתיימו ביממה האחרונה.');
+  assert.equal(headline(1, 0), 'משימה אחת בעבודה.');
+  assert.equal(headline(0, 3), '3 משימות הסתיימו ביממה האחרונה.');
+  assert.equal(headline(0, 0, true), 'יש תקלה.', 'never "quiet" over an alert');
+  assert.equal(headline(3, 5), '3 משימות בעבודה ו-5 הסתיימו ביממה האחרונה.');
 });
 
 test('a block whose reference closed disappears; a list keeps what is still open', async () => {
@@ -178,9 +175,7 @@ test('a block whose reference closed disappears; a list keeps what is still open
     hq.home.compose([{ type: 'alert', inbox: a.id }, { type: 'waiting', inbox: [b.id, c.id] }, { type: 'note', text: 'הערה', icon: 'info' }], 'ac-ceo');
     hq.inbox.resolve(a.id);
     hq.inbox.resolve(b.id);
-    assert.deepEqual(hq.home.current().blocks, [{ type: 'waiting', inbox: [c.id] }, { type: 'note', text: 'הערה', icon: 'info' }]);
-    hq.inbox.resolve(c.id);
-    assert.deepEqual(hq.home.current().blocks.map((x) => x.type), ['note']);
+    assert.deepEqual(hq.home.current().blocks, [{ type: 'note', text: 'הערה', icon: 'info' }], 'decisions are not blocks of the home any more');
     assert.equal(hq.home.current().source, 'agent', 'pruning is not a reason to drop the recipe');
   } finally { await env.cleanup(); }
 });

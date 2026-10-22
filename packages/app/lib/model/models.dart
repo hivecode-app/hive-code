@@ -140,7 +140,7 @@ class Presence {
 // ───────────────────────────── waiting for you (home) ─────────────────────────────
 
 /// Sort order of APP-SPEC §4.2: urgent prod, blocking ask, GO, login, failure, a finished task to check, soft ask.
-/// `awaiting` (#219): a finished task that waits on him to check or verify something; "בוצע" or "נכשל".
+/// `awaiting` (#219): a finished task that waits on him to check or verify something; "עובד" or "לא עובד".
 enum WaitKind { urgentProd, blockingAsk, go, login, failure, awaiting, softAsk }
 
 enum WaitState { open, pending, answered, notNow }
@@ -156,6 +156,15 @@ class AskOption {
   final bool primary;
 }
 
+/// Under a decision: the full report, the PR. hq sends them as full links; what it does not have is not shown.
+enum WaitLinkKind { report, pr }
+
+class WaitLink {
+  const WaitLink(this.kind, this.url);
+  final WaitLinkKind kind;
+  final String url;
+}
+
 class WaitItem {
   WaitItem({
     required this.id,
@@ -169,6 +178,7 @@ class WaitItem {
     this.inboxId,
     this.domain,
     this.link,
+    this.links = const [],
     this.doneLine,
     this.state = WaitState.open,
     this.answerLine,
@@ -213,6 +223,9 @@ class WaitItem {
   /// The one-time tab handoff link from hq (B.9); "פתיחה" goes there. Null when hq gave none.
   final String? link;
 
+  /// "הדוח המלא", "ה-PR" (hq's `links`).
+  final List<WaitLink> links;
+
   /// What the collapsed row says after delivery ("GO נשלח · דנה מתחילה פריסה").
   final String? doneLine;
   WaitState state;
@@ -224,8 +237,8 @@ class WaitItem {
   bool failed = false;
 }
 
-/// "בוצע" and "נכשל" on a finished task's card (#219). One tap each; "נכשל" asks for nothing more.
-const kAwaitingOptions = [AskOption(id: 'done', label: 'בוצע', primary: true), AskOption(id: 'failed', label: 'נכשל')];
+/// "עובד" and "לא עובד" on a task he was asked to check (#219). One tap each; "לא עובד" asks for nothing more.
+const kAwaitingOptions = [AskOption(id: 'done', label: 'עובד', primary: true), AskOption(id: 'failed', label: 'לא עובד')];
 
 class DecisionByManager {
   const DecisionByManager({required this.by, required this.text, required this.time});

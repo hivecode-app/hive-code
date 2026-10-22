@@ -85,7 +85,7 @@ class WaitItemScreen extends StatelessWidget {
                       store.notNow(item);
                       Navigator.of(context).maybePop();
                     }),
-                  // Closed without doing it; the worker who asked is told (#74). A finished task closes with "בוצע" or "נכשל".
+                  // Closed without doing it; the worker who asked is told (#74). A finished task closes with "עובד" or "לא עובד".
                   if (item.inboxId != null && item.kind != WaitKind.awaiting)
                     Btn('סגירה', onTap: () {
                       store.dismiss(item);

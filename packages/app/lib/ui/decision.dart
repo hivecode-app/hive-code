@@ -12,13 +12,16 @@ import 'convs/kbd.dart';
 
 /// One answer: [primary] is filled in the brand color, only when the worker marked it; the rest are outlined, all of the same weight. At least 48 high.
 class DecisionButton extends StatelessWidget {
-  const DecisionButton(this.label, {super.key, required this.onTap, this.primary = false, this.hint});
+  const DecisionButton(this.label, {super.key, required this.onTap, this.primary = false, this.hint, this.height = 48});
   final String label;
 
   /// The desktop's key for it ("1", "2"), shown before the label.
   final String? hint;
   final VoidCallback onTap;
   final bool primary;
+
+  /// At least this high: 48 in a card, 56 at the foot of a decision on its own screen (task 286).
+  final double height;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +37,7 @@ class DecisionButton extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           child: Container(
-            constraints: const BoxConstraints(minHeight: 48),
+            constraints: BoxConstraints(minHeight: height),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             alignment: Alignment.center,
             child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -161,5 +164,5 @@ class DecisionLine extends StatelessWidget {
 /// The line while it can still be taken back: "אישרת · 02:14".
 String pendingLine(PendingAnswer p) => '${p.line ?? 'נשלח'} · ${hm(p.at)}';
 
-/// Its icon: `close` for "נכשל" (#219), `check_circle` for the rest.
-String pendingIcon(PendingAnswer p) => p.line == 'נכשל' ? 'close' : 'check_circle';
+/// Its icon: `close` for "לא עובד" (#219), `check_circle` for the rest.
+String pendingIcon(PendingAnswer p) => p.line == 'לא עובד' ? 'close' : 'check_circle';

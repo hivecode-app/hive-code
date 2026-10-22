@@ -39,6 +39,9 @@ export type ShiftState = 'starting' | 'live' | 'ended' | 'dead';
 /** `awaiting` (#219): a finished task that waits on him to check or verify something, ref `task-<id>`. */
 export type InboxKind = 'ask' | 'go' | 'login' | 'delivery_failure' | 'incident' | 'escalation_note' | 'shift_failure' | 'awaiting';
 
+/** A link under a decision in the app: the full report, or the PR (always a full https URL). */
+export interface InboxLink { kind: 'report' | 'pr'; url: string }
+
 export interface InboxItemDTO {
   id: number;
   kind: InboxKind;
@@ -52,6 +55,8 @@ export interface InboxItemDTO {
   link: string | null;
   /** First line of an ask or GO, in his words: what changes for him. The body is the details. */
   headline: string | null;
+  /** "הדוח המלא", "ה-PR": what the app shows under the decision. Empty when there is none. */
+  links: InboxLink[];
   state: 'open' | 'resolved' | 'dismissed';
   created_at: number;          // epoch ms
   pushed_at: number | null;

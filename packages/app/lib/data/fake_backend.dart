@@ -340,6 +340,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
       options: const [AskOption(id: 'go', label: 'GO', primary: true)],
       askId: 'ask-dana-go',
       doneLine: 'GO נשלח · דנה מתחילה פריסה',
+      links: const [WaitLink(WaitLinkKind.report, 'https://example.com/reports/lumo-1.1.20'), WaitLink(WaitLinkKind.pr, 'https://github.com/hive-owner/lumo/pull/3698')],
       short: 'GO · לומו 1.1.20',
     ),
     WaitItem(

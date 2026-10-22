@@ -1,12 +1,12 @@
-// The home in design language v2 (docs/design/language-v2.md §8, mockup behind DESIGN_V2): the head of the
-// conversations screen cut down to four parts, in this order, each only when it has something:
-// 1. one sentence on the state: the composer's headline while it is newer than the last change in what waits
-//    for him, else one from live data: a headline from before that change may say the opposite of the card
-//    under it (audit #1);
-// 2. what waits for him (GO, a question), each in two full lines (audit #2);
+// The home in design language v2 (docs/design/language-v2.md §8): the head of the conversations screen cut down to
+// these parts, in this order, each only when it has something:
+// 1. one sentence on the state. It starts with "3 החלטות מחכות לך." from the live count, which leads to the
+//    "החלטות" tab (task 306: decisions are not shown here); the rest is the composer's headline while it is fresh,
+//    else one from live data;
+// 2. a fault with no decision (a stuck worker);
 // 3. a line per project: its tone, icon and name, what runs and who, and how many wait for him;
 // 4. what finished lately.
-// The recipe stays the structure (home_blocks.dart): its waiting, project and since blocks, in its words.
+// The recipe stays the structure (home_blocks.dart): its project and since blocks, in its words.
 // Identity is tone, a state is an icon and a word. Nothing moves while the screen rests.
 import 'package:flutter/material.dart';
 
@@ -25,37 +25,38 @@ import 'home_blocks.dart';
 /// "שני דברים", "3 דברים": a count in words for one and two, as people say it.
 String _count(int n, String one, String two, String many) => n == 1 ? one : n == 2 ? two : '$n $many';
 
-/// The one sentence on top, from live data, so it never contradicts the card under it.
-String homeSentence(CompanyData d, {required int burning, required int waiting}) {
+/// The start of the sentence on top, from the live count: "3 החלטות מחכות לך." Null when none wait. It leads to the
+/// "החלטות" tab; the rest of the sentence ([topSentence]) is about everything else.
+String? decisionsLead(int n) => n <= 0 ? null : '${_count(n, 'החלטה אחת מחכה', 'שתי החלטות מחכות', 'החלטות מחכות')} לך.';
+
+/// The one sentence on top without the decisions, from live data, so it never contradicts what is under it.
+String homeSentence(CompanyData d, {required int stuck, int decisions = 0}) {
   final running = [for (final t in d.openTasks) if (t.state == OpenTaskState.running) t];
   final projects = {for (final t in running) t.project}.length;
   final work = running.isEmpty
       ? ''
       : '${_count(running.length, 'משימה אחת רצה', 'שתי משימות רצות', 'משימות רצות')}${projects > 1 ? (projects == 2 ? ' בשני פרויקטים' : ' ב-$projects פרויקטים') : ''}.';
-  if (burning > 0) return '${_count(burning, 'תקלה אחת צריכה', 'שתי תקלות צריכות', 'תקלות צריכות')} אותך עכשיו.';
-  if (waiting > 0) {
-    final head = '${_count(waiting, 'דבר אחד מחכה', 'שני דברים מחכים', 'דברים מחכים')} לך.';
-    return work.isEmpty ? head : '$head בינתיים $work';
-  }
+  if (stuck > 0) return '${_count(stuck, 'תקלה אחת צריכה', 'שתי תקלות צריכות', 'תקלות צריכות')} אותך עכשיו.';
+  if (decisions > 0) return work.isEmpty ? '' : 'בינתיים $work';
   return work.isEmpty ? 'שום דבר לא מחכה לך. הכול שקט.' : 'שום דבר לא מחכה לך. $work';
 }
 
-/// The sentence on top: the composer's headline while it was composed after what waits for him last changed
-/// (something came in, was answered or put off), else [homeSentence]. With no time from hq (an older one), the
-/// newest open item is the last change it knows of. Something burning (an incident, a stuck worker) or a
-/// headline older than hq's 30 minutes (a recipe from the cache) always gets the live sentence.
-String topSentence(CompanyData d, HomeRecipe? recipe, {required int burning, required int waiting, DateTime? now}) {
+/// Workers who are stuck: a fault with no decision, the only thing the home still raises by itself.
+int stuckWorkers(CompanyData d) => d.identities.keys.where((id) => d.presence[id]?.status == WorkerStatus.stuck).length;
+
+/// The sentence on top after [decisionsLead]: the composer's headline while it is fresh (it says nothing of how
+/// many wait for him: the app's count is live), else [homeSentence]. A stuck worker or a headline older than hq's
+/// 30 minutes (a recipe from the cache) always gets the live sentence. Empty when the lead says it all.
+String topSentence(CompanyData d, HomeRecipe? recipe, {required int stuck, DateTime? now}) {
   final headline = recipe == null || !recipe.byAgent ? null : recipe.blocks.where((b) => b.type == 'headline').firstOrNull?.text?.trim();
   final fresh = recipe != null && (now ?? CompanyTime.now()).difference(recipe.composedAt) <= const Duration(minutes: 30);
-  if (headline != null && headline.isNotEmpty && burning == 0 && fresh) {
-    DateTime? changed = recipe.waitingChangedAt;
-    for (final w in d.waiting) {
-      if ((w.state == WaitState.open || w.state == WaitState.pending) && w.createdAt != null && (changed == null || w.createdAt!.isAfter(changed))) changed = w.createdAt;
-    }
-    if (changed == null || recipe.composedAt.isAfter(changed)) return headline;
-  }
-  return homeSentence(d, burning: burning, waiting: waiting);
+  if (headline != null && headline.isNotEmpty && stuck == 0 && fresh) return headline;
+  return homeSentence(d, stuck: stuck, decisions: d.waitingCount);
 }
+
+/// The whole sentence as one string (the folded bar, the desktop's row, a screen reader).
+String fullSentence(CompanyData d, HomeRecipe? recipe, {required int stuck, DateTime? now}) =>
+    [?decisionsLead(d.waitingCount), topSentence(d, recipe, stuck: stuck, now: now)].where((x) => x.isNotEmpty).join(' ');
 
 class HomeV2 extends StatelessWidget {
   const HomeV2({super.key, required this.data, required this.now, this.recipe, this.folded = false, this.onToggle});
@@ -77,25 +78,9 @@ class HomeV2 extends StatelessWidget {
     final p = context.p;
     final d = data;
     final blocks = recipe == null ? null : liveBlocks(recipe!, d);
-    // A GO with a newer one from the same worker is not his to decide any more (#258).
-    bool open(WaitItem w) => (w.state == WaitState.open || w.state == WaitState.pending) && !d.superseded(w);
-
-    // 2. What waits: every open item, live, the same list the project rows and the desktop's home row count,
-    // so no part of the screen says otherwise (audit #1). The recipe only orders it: the ones it names first.
-    final named = [
-      for (final b in blocks ?? const <HomeBlock>[])
-        if (b.type == 'alert' || b.type == 'waiting') ...b.inbox,
-    ];
-    int rank(WaitItem w) {
-      final i = w.inboxId == null ? -1 : named.indexOf(w.inboxId!);
-      return i < 0 ? named.length : i;
-    }
-    final live = [for (final w in d.waiting) if (open(w)) w];
-    // Stable: the rest keep the data's order.
-    final items = [for (final (_, w) in [for (final (i, w) in live.indexed) (i, w)]..sort((a, b) => rank(a.$2) != rank(b.$2) ? rank(a.$2).compareTo(rank(b.$2)) : a.$1.compareTo(b.$1))) w];
+    // What waits for him as a decision is the "החלטות" tab's, and the sentence on top leads there. What stays here is a
+    // fault with no decision: a worker who is stuck.
     final stuck = [for (final id in d.identities.keys) if (d.presence[id]?.status == WorkerStatus.stuck) id];
-    final hot = [for (final w in items) if (HeadData.hot(w)) w];
-    final rest = [for (final w in items) if (!HeadData.hot(w)) w];
 
     // 3. A line for every active project, always (decided 20/10): the recipe's first, in its order and with
     // its notes, then the rest, the busy ones first.
@@ -131,23 +116,17 @@ class HomeV2 extends StatelessWidget {
           ]
         : SinceData.of(d, since: now.subtract(const Duration(hours: 24))).items;
 
-    final sentence = topSentence(d, recipe, burning: hot.length + stuck.length, waiting: rest.length, now: now);
+    final lead = decisionsLead(d.waitingCount);
+    final sentence = topSentence(d, recipe, stuck: stuck.length, now: now);
 
     final rows = <(String, Widget)>[
-      ('sentence', _Sentence(sentence, open: onToggle == null ? null : !folded, onTap: onToggle)),
-      if (hot.isNotEmpty || stuck.isNotEmpty || rest.isNotEmpty)
+      ('sentence', _Sentence(sentence, lead: lead, onLead: () => NavScope.read(context).go(AppTab.decisions), open: onToggle == null ? null : !folded, onTap: onToggle)),
+      if (stuck.isNotEmpty)
         (
-          'waiting',
+          'stuck',
           BlockCard(
-            label: 'מחכה לך',
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Column(children: [
-                if (hot.isNotEmpty || stuck.isNotEmpty) AlertBlock(items: hot, stuck: stuck, now: now),
-                if ((hot.isNotEmpty || stuck.isNotEmpty) && rest.isNotEmpty) const BlockHairline(),
-                if (rest.isNotEmpty) WaitingBlock(items: rest, now: now),
-              ]),
-            ),
+            label: 'תקלה',
+            child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: AlertBlock(items: const [], stuck: stuck, now: now)),
           )
         ),
       if (projects.isNotEmpty && !folded) ('projects:label', const _Label('הפרויקטים')),
@@ -182,8 +161,12 @@ class HomeV2 extends StatelessWidget {
 }
 
 class _Sentence extends StatelessWidget {
-  const _Sentence(this.text, {this.open, this.onTap});
+  const _Sentence(this.text, {this.lead, this.onLead, this.open, this.onTap});
   final String text;
+
+  /// "3 החלטות מחכות לך.", a button to the tab, before [text].
+  final String? lead;
+  final VoidCallback? onLead;
 
   /// Null: not a toggle. Else whether the home under it is open (`expand_less`) or folded (`expand_more`).
   final bool? open;
@@ -208,8 +191,10 @@ class _Sentence extends StatelessWidget {
   }
 
   Widget _plain(BuildContext context, Palette p) {
+    final style = T.name.copyWith(fontSize: 18, height: 26 / 18, color: p.text);
     return Semantics(
       header: true,
+      container: true,
       child: Padding(
         padding: const EdgeInsetsDirectional.fromSTEB(20, 16, 20, 8),
         // The full width, so a one-line sentence starts at the start too instead of in the middle.
@@ -218,7 +203,35 @@ class _Sentence extends StatelessWidget {
           child: AnimatedSwitcher(
             duration: kBlockMotion,
             layoutBuilder: (cur, prev) => Stack(alignment: AlignmentDirectional.topStart, children: [...prev, ?cur]),
-            child: Rich(text, key: ValueKey(text), auto: true, maxLines: 3, style: T.name.copyWith(fontSize: 18, height: 26 / 18, color: p.text)),
+            child: Column(
+              key: ValueKey('$lead|$text'),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (lead != null)
+                  Semantics(
+                    button: true,
+                    hint: 'מעבר להחלטות',
+                    excludeSemantics: true,
+                    label: lead,
+                    onTap: onLead,
+                    child: InkWell(
+                      onTap: onLead,
+                      borderRadius: BorderRadius.circular(8),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 44),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Ic('front_hand', size: 20, fill: true, color: p.text),
+                          const SizedBox(width: 8),
+                          Flexible(child: Text(lead!, style: style.copyWith(fontWeight: FontWeight.w700))),
+                          const SizedBox(width: 2),
+                          Ic('chevron_left', size: 20, color: p.text2),
+                        ]),
+                      ),
+                    ),
+                  ),
+                if (text.isNotEmpty) Rich(text, auto: true, maxLines: 3, style: style),
+              ],
+            ),
           ),
         ),
       ),
@@ -463,9 +476,8 @@ class HomeEntryRow extends StatelessWidget {
     final p = context.p;
     final store = StoreScope.of(context);
     final d = store.data!;
-    final head = HeadData.of(d, since: CompanyTime.now());
-    final sentence = topSentence(d, d.home, burning: head.burning.length, waiting: head.waiting.length);
-    final waits = head.burning.length + head.waiting.length;
+    final waits = d.waitingCount + stuckWorkers(d);
+    final sentence = fullSentence(d, d.home, stuck: stuckWorkers(d));
     return Semantics(
       button: true,
       selected: selected,

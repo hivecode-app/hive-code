@@ -6,6 +6,7 @@ import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 import type { HqConfig } from './config.ts';
 import { Store } from './store.ts';
+import { readCharter, repoOfWorktree } from './workspace.ts';
 import { syncOrg, getIdentity, listIdentities, listProjects, listTones, projectLead, renameTaskWorkers } from './org.ts';
 import { Inbox } from './inbox.ts';
 import { Conversations } from './conversations.ts';
@@ -146,6 +147,8 @@ export class Hq {
     // Whose the card is and who hears "נכשל": the task's opener, else its project's lead, else the manager. One that
     // can't hear it (gone from org.yaml, or a task worker whose task closed) is skipped: the message would bounce
     // back to him as a delivery failure (21/10).
+    // The PR's link under the decision: the project's repo from its charter.
+    this.awaiting.repoOf = (project, worktree) => repoOfWorktree(readCharter(this.cfg.companyDir, project), worktree);
     this.awaiting.openerOf = (t) => [openedBy(t), t.project ? projectLead(this.store, t.project) : null, this.cfg.managerId]
       .find((id): id is string => !!id && id !== OWNER && !!getIdentity(this.store, id)?.active && !this.mailbox.taskClosed(id)) ?? null;
     // #219: "נכשל" on a task's card reaches the opener at once, with no details: if he has any, he writes them in

@@ -9,6 +9,8 @@ import '../theme/motion.dart';
 import '../theme/tokens.dart';
 import 'common.dart';
 import 'convs/conversations_screen.dart';
+import 'decisions/decisions_screen.dart';
+import 'decisions/decisions_strip.dart';
 import 'desktop.dart';
 import 'nav.dart';
 import 'projects/projects_screen.dart';
@@ -44,8 +46,11 @@ class Shell extends StatelessWidget {
                   StoreGate(active: nav.tab == AppTab.status, child: const StatusScreen()),
                   StoreGate(active: nav.tab == AppTab.projects, child: const ProjectsScreen()),
                   StoreGate(active: nav.tab == AppTab.settings, child: const SettingsScreen(tab: true)),
+                  StoreGate(active: nav.tab == AppTab.decisions, child: const DecisionsScreen()),
                 ]),
               ),
+              // Not on "החלטות", and not on the chats tab: the home's sentence there already leads to them.
+              DecisionsStrip(hidden: nav.tab == AppTab.decisions || nav.tab == AppTab.chats),
               const BottomNav(),
             ]);
       return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -119,6 +124,7 @@ class NavDest {
 }
 
 const kDests = [
+  NavDest(AppTab.decisions, 'front_hand', 'החלטות'),
   NavDest(AppTab.chats, 'chat', 'שיחות'),
   NavDest(AppTab.status, 'monitor_heart', 'סטטוס'),
   NavDest(AppTab.projects, 'folder', 'פרויקטים'),
@@ -155,7 +161,8 @@ class BottomNav extends StatelessWidget {
 /// The number on a tab: "בית" counts what waits for him, "שיחות" the messages he hasn't read.
 int? navCount(AppTab tab, CompanyData? d) => switch (tab) {
       AppTab.chats => d?.unreadCount,
-      AppTab.status => d?.waitingCount,
+      // What waits for him is counted on "החלטות", and only there.
+      AppTab.decisions => d?.waitingCount,
       _ => null,
     };
 
