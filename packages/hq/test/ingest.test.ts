@@ -520,6 +520,27 @@ test('status done from a standing worker with no task rests its shift now; a mes
   } finally { await env.cleanup(); }
 });
 
+test('restIdle does not cut a turn that started while it waited', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq } = env;
+    hq.store.setToggle('scheduler', false);
+    await hq.scheduler.ensureResidents();
+    hq.mailbox.tell({ msg_id: 'ri-1', to: 'eli', body: 'שלום' });
+    await until(() => hq.mailbox.get('ri-1')!.state === 'delivered', 5000, 'eli up');
+    hq.mailbox.markHandled('ri-1');
+    await until(() => !hq.shifts.get('eli-1')!.in_turn, 5000, 'eli idle');
+    // A message arrives during the wait and the worker starts answering it.
+    const wait = hq.shifts.waitTurnEnd.bind(hq.shifts);
+    hq.shifts.waitTurnEnd = async (...a: Parameters<typeof wait>) => {
+      await wait(...a);
+      hq.store.db.prepare('UPDATE shifts SET in_turn = 1 WHERE id = ?').run('eli-1');
+    };
+    assert.equal(await hq.scheduler.restIdle('eli'), false);
+    assert.equal(hq.shifts.get('eli-1')!.state, 'live');
+  } finally { await env.cleanup(); }
+});
+
 test('close_team on a task that never started marks it cancelled; one that ran is finished', async () => {
   const env = await ingestEnv();
   try {
@@ -542,5 +563,20 @@ test('close_team on a task that never started marks it cancelled; one that ran i
     const done = hq.scheduler.task(ran.id)!;
     assert.ok(!isCancelled(done));
     assert.deepEqual(forApp([done]).map((t) => t.state), ['done']);
+  } finally { await env.cleanup(); }
+});
+
+test('close_team on a task that ran and went back to the queue is finished, not cancelled', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock } = env;
+    hq.store.setToggle('scheduler', false);
+    const t = hq.scheduler.addTask({ title: 'עבדה והוחזרה', project: 'agent-company', labels: ['opened-by:eli'] });
+    // It ran (task.state running), then was moved between machines: back in the queue with started_at cleared.
+    hq.store.emit('task.state', 'eli', { id: t.id, state: 'running' });
+    assert.equal(hq.scheduler.task(t.id)!.started_at, null);
+    await post(sock, '/v1/ops', entry('close_team', { team: `t${t.id}` }, 'eli-1:63'));
+    await until(() => hq.scheduler.task(t.id)!.state === 'done', 3000, 'closed');
+    assert.ok(!isCancelled(hq.scheduler.task(t.id)!));
   } finally { await env.cleanup(); }
 });

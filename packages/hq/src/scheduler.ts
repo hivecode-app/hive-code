@@ -998,6 +998,9 @@ export class Scheduler {
   markCancelled(id: number): void {
     const t = this.task(id);
     if (!t || t.state === 'done' || t.started_at != null) return;
+    // started_at is cleared when a task goes back to the queue (moved between machines): ask the history instead.
+    if (this.store.db.prepare(`SELECT 1 FROM events WHERE type = 'task.state' AND json_extract(data, '$.id') = ? AND json_extract(data, '$.state') = 'running' LIMIT 1`).get(id)
+      || this.store.db.prepare('SELECT 1 FROM shifts WHERE task_id = ? LIMIT 1').get(id)) return;
     const labels = JSON.parse(t.labels || '[]') as string[];
     if (labels.includes(CANCELLED)) return;
     this.store.db.prepare('UPDATE tasks SET labels = ? WHERE id = ?').run(JSON.stringify([...labels, CANCELLED]), id);
@@ -1016,7 +1019,7 @@ export class Scheduler {
     if (!cur || cur.kind !== 'work' || cur.task_id != null) return false;
     await this.shifts.waitTurnEnd(cur.id, this.cfg.timers.turnEndWaitMs);
     const now = this.shifts.get(cur.id);
-    if (!now || now.state !== 'live' || now.started_at !== cur.started_at || now.task_id != null || this.taskOf(identity)) return false;
+    if (!now || now.state !== 'live' || now.in_turn || now.started_at !== cur.started_at || now.task_id != null || this.taskOf(identity)) return false;
     if (this.store.db.prepare(`SELECT 1 FROM shifts s WHERE s.id = ? AND EXISTS (${PENDING})`).get(cur.id)) return false;
     await this.shifts.stop(cur.id, 'rest', cur.started_at);
     this.store.emit('scheduler.rest_on_done', identity, { shift: cur.id });
