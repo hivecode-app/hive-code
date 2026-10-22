@@ -307,3 +307,45 @@ test('API: a project team in /api/org carries the owner\'s name for the project 
     assert.equal(teams.find((t) => t.id === 'personal')?.name, null, 'a permanent team: no project name');
   } finally { await env.cleanup(); }
 });
+
+test('API: the app\'s device token on the three routes the "החלטות" tab sends is him: a message from owner (#208)', async () => {
+  const env = await apiEnv();
+  try {
+    const { call, hq } = env;
+    const code = (await call('POST', '/api/devices/pair', {})).json.code;
+    const paired = await fetch(`${env.base}/api/auth/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, name: 'טלפון' }) });
+    const device = ((await paired.json()) as { token: string }).token;
+    const app = async (path: string, body: unknown) => {
+      const res = await fetch(env.base + path, { method: 'POST', headers: { authorization: `Bearer ${device}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: res.status, json: (await res.json()) as Record<string, any> };
+    };
+
+    // 1. A GO: the app sends done with {note:'GO'}. The worker is told "רן סיים", from him.
+    const go = await call('POST', '/api/inbox', { kind: 'go', from: 'eli', title: 'GO: פריסה', body: 'פריסה' });
+    const done = await app(`/api/inbox/${go.json.item.id}/done`, { note: 'GO' });
+    assert.equal(done.status, 200);
+    assert.equal(done.json.item.state, 'resolved');
+    assert.equal(done.json.message.from_identity, 'owner');
+    assert.equal(done.json.message.to_identity, 'eli');
+    assert.match(done.json.message.body, /^רן סיים: GO: פריסה\nGO$/);
+
+    // 2. His own words on an inbox ask: the answer leaves from him.
+    hq.mailbox.ask({ msg_id: 'ask-app-1', from: 'eli', question: 'להעביר את הבוטים?', blocking: true });
+    const item = hq.inbox.open().find((i) => i.ref === 'ask-app-1')!;
+    const viaInbox = await app(`/api/inbox/${item.id}/answer`, { answer: 'לא, בלי הבוטים' });
+    assert.equal(viaInbox.status, 200);
+    const a1 = hq.mailbox.get('ask-app-1-answer')!;
+    assert.equal(a1.from_identity, 'owner');
+    assert.equal(a1.to_identity, 'eli');
+    assert.match(a1.body, /לא, בלי הבוטים/);
+
+    // 3. A button on the ask itself: /api/asks/:id/answer.
+    hq.mailbox.ask({ msg_id: 'ask-app-2', from: 'eli', question: 'לפרוס?', blocking: true });
+    const viaAsk = await app('/api/asks/ask-app-2/answer', { answer: 'GO', by: 'owner' });
+    assert.equal(viaAsk.status, 200);
+    const a2 = hq.mailbox.get('ask-app-2-answer')!;
+    assert.equal(a2.from_identity, 'owner');
+    assert.equal(a2.to_identity, 'eli');
+    assert.match(a2.body, /GO/);
+  } finally { await env.cleanup(); }
+});
