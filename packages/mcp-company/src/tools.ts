@@ -198,7 +198,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       wait: { type: 'number', description: 'כמה שניות להמתין לתוצאה או לאישור, עד 100 (ברירת מחדל 90) / seconds to wait for the result or approval, up to 100 (default 90)' },
     }, []),
     tool('resources', 'מצב המשאבים של השרתים, קריאה בלבד: בכל מכונה זיכרון, עומס ודיסק, מי מחזיק בהם לפי פרויקט (כולל "לא מזוהה" עם שם ה-cgroup או הקונטיינר), ומי מחכה למקום. '
-      + 'קוראים לפני build מלא, `flutter test` מלא, docker או smoke, ואחרי שמשהו נתקע על "השרת עמוס". חלק שלא נמדד כתוב "לא נמדד", ואין לקרוא אותו כתקין. הזיכרון לפי פרויקט הוא `memory.current` של ה-cgroup וכולל page cache, ולכן הסכום יכול לעבור את "בשימוש". '
+      + 'קוראים לפני build מלא, `flutter test` מלא, docker או smoke, ואחרי שמשהו נתקע על "השרת עמוס". חלק שלא נמדד כתוב "לא נמדד", ואין לקרוא אותו כתקין. הזיכרון לפי פרויקט הוא anon של ה-cgroup (בלי page cache), ולכן הסכום קרוב ל"בשימוש". '
       + 'Read-only: per machine memory, load and disk, who holds them by project (unidentified ones with their cgroup/container name), and who waits for room. Call before a heavy build, full test run, docker or smoke.', {}, []),
     tool('reserve', 'הזמנת מקום לפני פקודה כבדה בשרת המשותף: build מלא, `flutter test` מלא, `docker build`/`compose up` או smoke. hq מחזיר אחת משלוש תשובות: '
       + 'granted (יש מקום: מריצים דרך `company-run --lease <lease> -- <הפקודה>`, וההזמנה משתחררת לבד כשהפקודה נגמרת), '

@@ -264,3 +264,22 @@ test('מסך המשאבים: הזמנות פעילות ותור, ומשימה ש
   assert.doesNotMatch(lo, /דקות/);
   await env.cleanup();
 });
+
+test('ברירת מחדל: user@1001, דפדפן, claude-remote, gha-deploy ומשמרת בלי משימה מזוהים; map גובר; השאר נשאר "לא מזוהה"', () => {
+  const MBc = 1024 ** 2;
+  const raw = { unmeasured: [], cgroups: [
+    { path: 'user.slice/user-1001.slice/user@1001.service', memBytes: 5000 * MBc, cpuUsec: null },
+    { path: 'system.slice/chrome-personal.service', memBytes: 3000 * MBc, cpuUsec: null },
+    { path: 'system.slice/system-claude\\x2dremote.slice/claude-remote@hq-host.service', memBytes: 200 * MBc, cpuUsec: null },
+    { path: 'system.slice/gha-deploy.service', memBytes: 178 * MBc, cpuUsec: null },
+    { path: 'system.slice/mystery.service', memBytes: 500 * MBc, cpuUsec: null },
+    { path: 'user.slice/user-1001.slice/user@1001.service/app.slice/company-shift@yoav-6.service', memBytes: 200 * MBc, cpuUsec: null },
+  ] };
+  const by = (map = {}) => Object.fromEntries(attribute(raw, ctx({ map, shift: (id) => (id === 'yoav-6' ? { task: null, project: null } : null) }), new Map(), 'local', 1).map((r) => [r.name.split('/').pop()!.split(' ')[0], r.project]));
+  assert.deepEqual(by(), { 'user@1001.service': 'agent-company', 'chrome-personal.service': 'agent-company', 'claude-remote@hq-host.service': 'owner-sessions', 'gha-deploy.service': 'lumo', 'mystery.service': null, 'משמרת': 'agent-company' });
+  assert.equal(by({ 'chrome-personal.service': 'lumo' })['chrome-personal.service'], 'lumo');
+});
+
+test('docker-df שלא נשאל בסבב הזה אינו "לא נמדד"', () => {
+  assert.deepEqual(parseRaw(FAST_OUT, `##docker-ps\n##rc docker-ps 0\n##docker\n##rc docker 0\n`).unmeasured, []);
+});

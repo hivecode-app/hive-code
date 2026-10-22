@@ -7,6 +7,7 @@
 //   ci-<project>.slice         → the project;
 //   a docker container         → its compose project, or the `resources.map` table of hq.config.json;
 //   anything else              → "לא מזוהה", always shown, with the cgroup's name.
+// Memory is anon + shmem from `memory.stat` (not `memory.current`, which includes cache) so the holders add up to what "used" says.
 // A part that failed to read is "לא נמדד" (`unmeasured`), never "fine" (principle 5). Samples are kept for a few hours.
 import { execFile } from 'node:child_process';
 import { hostname } from 'node:os';
@@ -42,14 +43,17 @@ export interface Usage { kind: Kind; project: string | null; task: number | null
 
 // ── The reading script: sections, each with its own timeout, so one slow part costs only itself ──────────────────────────
 
-const FAST = String.raw`
+export const FAST = String.raw`
 run() { n=$1; t=$2; shift 2; printf '##%s\n' "$n"; timeout "$t" "$@"; printf '##rc %s %s\n' "$n" "$?"; }
 meminfo() { grep -E '^(MemTotal|MemAvailable):' /proc/meminfo && cut -d' ' -f1 /proc/loadavg && nproc; }
 cgroups() {
   cd /sys/fs/cgroup || return 1
   find . -mindepth 2 -maxdepth 7 -type d \( -name '*.service' -o -name '*.scope' -o -name 'ci-*.slice' \) 2>/dev/null | while IFS= read -r d; do
-    m=''; c=''
+    m=''; c=''; a=''; sh=''
     read -r m < "$d/memory.current" 2>/dev/null || continue
+    # anon + shmem, not memory.current: that one counts page cache, which the kernel gives back, and so adds up to more than "used"
+    while read -r k v; do case $k in anon) a=$v;; shmem) sh=$v;; esac; done < "$d/memory.stat" 2>/dev/null
+    [ -n "$a" ] && m=$((a + \${sh:-0}))
     while read -r k v; do [ "$k" = usage_usec ] && c=$v; done < "$d/cpu.stat" 2>/dev/null
     printf '%s\t%s\t%s\n' "\${d#./}" "$m" "$c"
   done
@@ -134,7 +138,7 @@ export function parseRaw(fast: string | null, docker: string | null): Raw {
           const [type, size, rec] = l.split('\t');
           return type && size ? [{ type, sizeMb: Math.round(parseBytes(size) / MB), reclaimableMb: Math.round(parseBytes(rec ?? '') / MB) }] : [];
         });
-      } else bad('docker-df');
+      } else if (df) bad('docker-df'); // not asked this time (see DF_EVERY_MS) is not a failure
     }
   } else bad('docker');
   return raw;
@@ -153,6 +157,21 @@ export interface AttrCtx {
   dockerRead: boolean;
 }
 
+/** Pseudo-project for what is not a project of org.yaml but is known: Ran's own Claude sessions. */
+export const OWNER_SESSIONS = 'owner-sessions';
+const BUILTIN_NAMES: Record<string, string> = { [OWNER_SESSIONS]: 'הסשנים של רן' };
+/** What the company runs on a machine, by the unit's own name: the default of `resources.map` (which wins over it). Exact names, then patterns. */
+const DEFAULT_MAP: Record<string, string> = {
+  'user@1001.service': 'agent-company', // hq, shift-host and node, and what Ran's login holds
+  'chrome-personal.service': 'agent-company', 'playwright-mcp.service': 'agent-company', 'kasmvnc.service': 'agent-company', // the browser
+  'gha-deploy.service': 'lumo',
+};
+const DEFAULT_PATTERNS: [RegExp, string][] = [[/^claude-remote@.+\.service$/, OWNER_SESSIONS]];
+/** Project of a unit by default, from its last path segment. */
+const defaultOf = (last: string): string | null => DEFAULT_MAP[last] ?? DEFAULT_PATTERNS.find(([re]) => re.test(last))?.[1] ?? null;
+/** The company's own project: a shift with no task and no project (a permanent worker, the manager) is the company's. */
+const COMPANY = 'agent-company';
+
 const UNIT = /\.(service|scope)$/;
 
 /** Raw cgroups and containers → rows. The cgroup tree is nested: only the outermost unit of a kind is counted, never a unit and its children. */
@@ -160,6 +179,7 @@ export function attribute(raw: Raw, ctx: AttrCtx, prev: Map<string, { usec: numb
   const out: Usage[] = [];
   const mapped = (...names: (string | null | undefined)[]) => {
     for (const n of names) if (n && ctx.map[n]) return ctx.map[n]!;
+    for (const n of names) { const d = n && defaultOf(n.split('/').pop()!); if (d) return d; }
     return null;
   };
   const cpuOf = (path: string, usec: number | null): number | null => {
@@ -183,7 +203,7 @@ export function attribute(raw: Raw, ctx: AttrCtx, prev: Map<string, { usec: numb
       if (shiftAt !== seg.length - 1) continue;
       const id = /^company-shift@(.+)\.service$/.exec(last)![1]!;
       const hit = ctx.shift(id);
-      out.push({ kind: 'shift', project: hit?.project ?? null, task: hit?.task ?? null, name: hit ? `משמרת ${id}` : c.path, memMb, cpuPct: cpuOf(c.path, c.cpuUsec) });
+      out.push({ kind: 'shift', project: hit ? (hit.project ?? COMPANY) : null, task: hit?.task ?? null, name: hit ? `משמרת ${id}` : c.path, memMb, cpuPct: cpuOf(c.path, c.cpuUsec) });
     } else if (ciAt >= 0) {
       if (ciAt !== seg.length - 1) continue;
       const slug = last.slice(3, -'.slice'.length);
@@ -338,7 +358,7 @@ export class Resources {
       const r = db.prepare(`SELECT * FROM resource_machine WHERE machine = ? ORDER BY at DESC LIMIT 1`).get(name) as
         { at: number; error: string | null; mem_total_mb: number | null; mem_avail_mb: number | null; load1: number | null; cpus: number | null;
           disk_pct: number | null; disk_free_mb: number | null; unmeasured: string; docker_df: string | null } | undefined;
-      if (!r) return { name, label, measured: false, at: null, error: null, unmeasured: ['memory', 'disk', 'cgroups', 'docker'], mem: null, load1: null, cpus: null, disk: null, docker_df: null, holders: [], unidentified: [] };
+      if (!r) return { name, label, measured: false, at: null, error: 'עוד לא נקרא (אין קריאה אחת שנשמרה)', unmeasured: ['memory', 'disk', 'cgroups', 'docker'], mem: null, load1: null, cpus: null, disk: null, docker_df: null, holders: [], unidentified: [] };
       const unmeasured = JSON.parse(r.unmeasured) as Part[];
       const stale = now - r.at > 3 * SAMPLE_EVERY_MS;
       const rows = db.prepare(`SELECT kind, project, name, mem_mb, cpu_pct FROM resource_usage WHERE machine = ? AND at = ?`).all(name, r.at) as
@@ -346,7 +366,7 @@ export class Resources {
       const by = new Map<string, MachineView['holders'][number]>();
       for (const u of rows) {
         const key = u.project ?? '';
-        const h = by.get(key) ?? { project: u.project, name: u.project ? this.hq.projectName(u.project) : 'לא מזוהה', mem_mb: 0, cpu_pct: null, count: 0, kinds: [] };
+        const h = by.get(key) ?? { project: u.project, name: u.project ? (BUILTIN_NAMES[u.project] ?? this.hq.projectName(u.project)) : 'לא מזוהה', mem_mb: 0, cpu_pct: null, count: 0, kinds: [] };
         h.mem_mb = Math.round((h.mem_mb + u.mem_mb) * 10) / 10;
         if (u.cpu_pct != null) h.cpu_pct = Math.round(((h.cpu_pct ?? 0) + u.cpu_pct) * 10) / 10;
         h.count++;
