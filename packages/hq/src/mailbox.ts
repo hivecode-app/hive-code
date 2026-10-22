@@ -76,7 +76,7 @@ export class Mailbox {
         // `neverRan`: a resume the CLI refused (no transcript) answers so; the shift ends as `resume_rejected` and the next
         // run is a new shift (shifts.ts), so there was no turn to fail.
         // Replayed frames (reattach after an hq restart) were caught the first time.
-        if (f.ev.isError && !f.ev.interrupted && !neverRan(f.ev) && live !== false) {
+        if (f.ev.isError && !f.ev.interrupted && !f.ev.stray && !neverRan(f.ev) && live !== false) {
           this.store.emit('turn.error', row.identity, { shift: row.id, identity: row.identity, subtype: f.ev.subtype, text: (f.ev.text ?? '').slice(0, 1000) });
         }
         this.onTurnEnd(row, f.ev);

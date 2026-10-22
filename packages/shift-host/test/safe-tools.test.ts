@@ -134,3 +134,24 @@ test('a turn that fails by itself is still a failure: no `interrupted`, its line
     await h.wait((f) => f.t === 'delivery' && f.msgId === 'm' && f.state === 'failed');
   } finally { await h.close(); }
 });
+
+test('company#237: an empty error result with no turn behind it right after a good one is `stray`, not a failure', async () => {
+  const h = await hostWithClient();
+  try {
+    h.send({ t: 'send', id: 'a', msgId: 'm', text: 'STRAY', priority: 'next' });
+    const ok = await h.wait((f) => f.t === 'event' && f.ev.kind === 'result');
+    assert.equal(ok.ev.isError, false);
+    const stray = await h.wait((f) => f.t === 'event' && f.ev.kind === 'result' && f.ev.isError);
+    assert.equal(stray.ev.stray, true);
+    assert.ok(!h.frames.some((f) => f.t === 'delivery' && f.msgId === 'm' && f.state === 'failed'));
+  } finally { await h.close(); }
+});
+
+test('company#237: a real failure is not stray', async () => {
+  const h = await hostWithClient();
+  try {
+    h.send({ t: 'send', id: 'a', msgId: 'm', text: 'FAIL', priority: 'next' });
+    const r = await h.wait((f) => f.t === 'event' && f.ev.kind === 'result');
+    assert.equal(r.ev.stray, undefined);
+  } finally { await h.close(); }
+});

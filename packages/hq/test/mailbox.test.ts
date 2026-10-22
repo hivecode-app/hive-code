@@ -221,3 +221,19 @@ test('neverRan: רק result של חידוש שנדחה, לא כשל ביצוע �
   assert.equal(neverRan({ ...ev, durationMs: 900 }), false);
   assert.equal(neverRan({ ...ev, text: 'boom' }), false);
 });
+
+test('company#237: result `stray` is no turn.error, a real error result still is', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    hq.mailbox.tell({ msg_id: 's-1', to: 'eli', body: 'א' });
+    await until(() => hq.mailbox.get('s-1')!.state === 'delivered');
+    const row = hq.shifts.get('eli-1')!;
+    const errs = () => (hq.store.db.prepare(`SELECT COUNT(*) n FROM events WHERE type = 'turn.error'`).get() as { n: number }).n;
+    const before = errs();
+    hq.shifts.emit('frame', row, { t: 'event', seq: 999, ts: '', ev: { kind: 'result', subtype: 'error_during_execution', isError: true, stray: true } }, true);
+    assert.equal(errs(), before);
+    hq.shifts.emit('frame', row, { t: 'event', seq: 999, ts: '', ev: { kind: 'result', subtype: 'error_during_execution', isError: true } }, true);
+    assert.equal(errs(), before + 1);
+  } finally { await env.cleanup(); }
+});
