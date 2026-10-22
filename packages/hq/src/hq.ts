@@ -124,6 +124,8 @@ export class Hq {
   constructor(cfg: HqConfig, deps: HqDeps = {}) {
     this.cfg = cfg;
     this.store = new Store(cfg.dbPath, { now: deps.now, managerName: loadNames(cfg.companyDir, cfg.managerId).manager.name });
+    this.store.ensureToggle('codex/lean', cfg.codexLean ?? false, 'Codex זמני: רק פניות שלך, עובד פעיל אחד בכל רגע');
+    cfg.codexLean = this.store.toggle('codex/lean');
     this.inbox = new Inbox(this.store);
     this.auth = new Auth(this.store, cfg.auth);
     this.nodes = new Nodes(cfg.nodes, cfg.stateDir, deps.ssh);
@@ -272,6 +274,8 @@ export class Hq {
   }
 
   async start(opts: { listen?: boolean; timers?: boolean } = {}): Promise<void> {
+    if (this.cfg.codexLean && this.store.getMeta('codex.lean_active') !== '1') this.store.setMeta('codex.lean_since', String(this.store.now()));
+    this.store.setMeta('codex.lean_active', this.cfg.codexLean ? '1' : '0');
     this.reloadContract();
     this.accounts.sync();
     // The identity check runs once at start for every account (no inference; profile + cached oauthAccount).
@@ -279,7 +283,7 @@ export class Hq {
     // The nodes' health first: the first fill already knows what room they have, and their shifts can be reattached.
     await this.pollNodes();
     await this.shifts.reattachAll();
-    await this.shifts.restoreLost(this.watchdog.procCheck);
+    if (!this.cfg.codexLean) await this.shifts.restoreLost(this.watchdog.procCheck);
     this.store.bg(this.ingest.drainPendingTickets(), 'open_ticket.drain');
     this.ingest.resumePendingDone();
     // #219: what waited on him before this version (and anything a crash left half-done) gets its card now.
@@ -292,7 +296,7 @@ export class Hq {
       this.every(5_000, 'spool', () => this.shifts.collectSpools());
       this.every(T.watchdogMs, 'watchdog', async () => { await this.watchdog.sweep(); await this.shifts.releaseEnded(); });
       this.every(T.livenessMs, 'liveness', () => this.shifts.pingAll());
-      this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); await this.night.sweep(); this.home.sweep(); this.home.watchAsked(); this.awaiting.sweep(); });
+      this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); if (!this.cfg.codexLean) { await this.night.sweep(); this.home.sweep(); this.home.watchAsked(); } this.awaiting.sweep(); });
       this.every(5_000, 'probes', () => this.probes.tick());
       // reserve (leases.ts): the ceiling of a class, a company-run that stopped answering, a place nobody takes; then whoever waits is served.
       this.every(5_000, 'leases', () => this.leases.sweep());
@@ -397,6 +401,29 @@ export class Hq {
       } else { res.writeHead(404); res.end(); }
     });
     return new Promise((resolve, reject) => { s.once('error', reject); s.listen(port, host, () => resolve(s)); });
+  }
+
+  /** Runtime switch: preserve sessions/tasks and park the idle workers of the previous provider. */
+  async setCodexLean(enabled: boolean): Promise<void> {
+    if (this.mailbox.deliveryPaused) throw new Error('החלפת מצב כבר מתבצעת');
+    if (enabled === this.cfg.codexLean) return;
+    const owned = this.shifts.active().filter((s) => s.kind !== 'foreign');
+    if (owned.some((s) => s.in_turn || s.long_tool || s.state === 'starting') || this.mailbox.leanBusy()) {
+      throw new Error('יש עובד פעיל; אפשר להחליף מצב אחרי שיסיים');
+    }
+    this.mailbox.deliveryPaused = true;
+    this.shifts.suspendStarts = true;
+    try {
+      for (const row of owned) await this.shifts.stop(row.id, 'provider_change', row.started_at);
+      if (enabled) this.store.setMeta('codex.lean_since', String(this.store.now()));
+      this.cfg.codexLean = enabled;
+      this.store.setToggle('codex/lean', enabled, true);
+      this.store.setMeta('codex.lean_active', enabled ? '1' : '0');
+      this.store.emit('codex.lean', null, { enabled });
+    } finally {
+      this.shifts.suspendStarts = false;
+      this.mailbox.deliveryPaused = false;
+    }
   }
 
   async stop(): Promise<void> {

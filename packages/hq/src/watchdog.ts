@@ -35,6 +35,7 @@ export class Watchdog {
     const out: Record<string, Health> = {};
     for (const s of this.shifts.active()) {
       if (s.kind === 'foreign') continue;
+      if (this.cfg.codexLean && s.account !== 'codex') continue;
       out[s.id] = await this.check(s);
     }
     return out;

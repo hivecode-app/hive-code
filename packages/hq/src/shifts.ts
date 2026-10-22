@@ -36,6 +36,8 @@ export interface ShiftRow {
 }
 
 export interface LaunchSpec {
+  provider?: 'claude' | 'codex';
+  codexModel?: string;
   shiftId: string; identity: string; shiftNo: number; sessionId: string; resume: boolean;
   kind: ShiftKind; cwd: string; socketPath: string; taskId: number | null;
   /** systemd unit: company-shift@<shift>.service (the template instance). */
@@ -105,6 +107,8 @@ export function hostArgs(spec: LaunchSpec, stateDir: string): Record<string, str
   return {
     identity: spec.identity, shift: spec.shiftId, 'shift-no': String(spec.shiftNo), 'session-id': spec.sessionId,
     cwd: spec.cwd, 'state-dir': stateDir, resume: spec.resume,
+    ...(spec.provider ? { provider: spec.provider } : {}),
+    ...(spec.codexModel ? { 'codex-model': spec.codexModel } : {}),
     ...(spec.systemPromptFile ? { 'append-system-prompt-file': spec.systemPromptFile } : {}),
     ...(spec.configDir ? { 'config-dir': spec.configDir } : {}),
   };
@@ -170,6 +174,7 @@ export interface ShiftEvents {
 }
 
 export class ShiftManager extends EventEmitter<ShiftEvents> {
+  suspendStarts = false;
   readonly conns = new Map<string, HostConnection>();
   private connecting = new Set<string>();
   private readonly paths;
@@ -246,7 +251,16 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
   }
 
   private async requestUnlocked(identity: string, opts: RequestOpts): Promise<ShiftRow> {
+    if (this.suspendStarts) throw new ShiftBusyError('החלפת מצב מתבצעת');
+    if (this.cfg.codexLean && !['message', 'manual', 'resurrect'].includes(opts.reason)) {
+      throw new Error('מצב Codex רזה: עובד מתעורר רק מפנייה ישירה של הבעלים');
+    }
     const cur = this.current(identity);
+    const providerChanged = !!cur && (cur.account === 'codex') !== !!this.cfg.codexLean;
+    if (providerChanged) {
+      if (this.midTurn(cur!)) throw new ShiftBusyError(`${identity}: the current turn must finish before changing provider`);
+      opts = { ...opts, forceNew: true, reason: 'message' };
+    }
     if (cur && !opts.forceNew) {
       if (!this.conns.get(cur.id)?.connected) this.store.bg(this.attach(cur), 'shift.attach');
       return cur;
@@ -262,22 +276,25 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     const ownTask = opts.taskId == null ? this.standingTask(identity) : undefined;
     // A shift number whose session never ran (launch/stop failed before any frame) is reused as new.
     const neverRan = !!last && last.host_seq === 0 && last.run_start_seq == null;
-    const wouldResume = !!last && !neverRan && !opts.forceNew && !NEW_SHIFT_REASONS.has(last.end_reason ?? '')
+    const wouldResume = !!last && (last.account === 'codex') === !!this.cfg.codexLean && !neverRan && !opts.forceNew && !NEW_SHIFT_REASONS.has(last.end_reason ?? '')
       && !this.pastTask(identity, last.task_id) && (!ownTask || last.task_id === ownTask.id);
-    const cwd = opts.cwd ?? this.taskCwd(opts.taskId ?? ownTask?.id ?? (wouldResume ? last!.task_id : null), identity) ?? this.projectCwd(identity) ?? this.cfg.defaultCwd;
+    let cwd = opts.cwd ?? this.taskCwd(opts.taskId ?? ownTask?.id ?? (wouldResume ? last!.task_id : null), identity) ?? this.projectCwd(identity) ?? this.cfg.defaultCwd;
     // A task placed on a node (nodes.ts) runs there, every run; everything else runs here.
-    const machine = this.taskMachine(opts.taskId ?? ownTask?.id ?? (wouldResume ? last!.task_id : null), identity);
+    const taskMachine = this.taskMachine(opts.taskId ?? ownTask?.id ?? (wouldResume ? last!.task_id : null), identity);
+    const remoteConversation = !!this.cfg.codexLean && taskMachine !== LOCAL;
+    const machine = remoteConversation ? LOCAL : taskMachine;
+    if (remoteConversation) cwd = this.cfg.defaultCwd; // Never silently edit another machine's worktree here.
     // The session lives where it ran (Claude Code keeps sessions per cwd, per machine): elsewhere, a new shift. Rows
     // from before v7 have no cwd and resume as before (on hq-host defaultCwd is the agent-company checkout itself).
     const moved = (!!last?.cwd && last.cwd !== cwd) || (!!last && (last.machine ?? LOCAL) !== machine);
     const resume = wouldResume && !moved;
-    const shiftNo = resume || (neverRan && !opts.forceNew) ? last!.shift_no : (last?.shift_no ?? 0) + 1;
+    const shiftNo = resume || (neverRan && !opts.forceNew && (last?.account === 'codex') === !!this.cfg.codexLean) ? last!.shift_no : (last?.shift_no ?? 0) + 1;
     const shiftId = `${identity}-${shiftNo}`;
     const socketPath = shiftSocketPath(this.paths, shiftId);
     const sessionId = sessionIdFor(identity, shiftNo);
     const now = this.store.now();
     const kind: ShiftKind = opts.kind ?? last?.kind ?? (this.cfg.capacity.residents.includes(identity) ? 'resident' : 'work');
-    const taskId = opts.taskId ?? ownTask?.id ?? (resume ? last!.task_id : null);
+    const taskId = remoteConversation ? null : opts.taskId ?? ownTask?.id ?? (resume ? last!.task_id : null);
     this.store.db.prepare(`INSERT INTO shifts (id, identity, shift_no, session_id, state, kind, socket_path, task_id, started_at, last_event_at, cwd, machine)
         VALUES (?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET state='starting', kind=excluded.kind, started_at=excluded.started_at, ended_at=NULL,
@@ -303,13 +320,16 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
           WHERE to_identity = ? AND state = 'delivered' AND held_by_cli = 1`).run(identity);
       }
       this.writePrime(shiftId, identity);
+      if (this.cfg.codexLean) this.writeContinuity(shiftId, identity, taskMachine);
       const systemPromptFile = this.writeSystem(shiftId, identity);
       // A node runs on its own login (nodes.ts): not one of the accounts here, and never moved between them.
-      const acct = machine === LOCAL ? this.chooseAccount?.(identity, opts.account) ?? null : { name: nodeAccount(machine), configDir: null };
+      const acct = this.cfg.codexLean ? { name: 'codex', configDir: null }
+        : machine === LOCAL ? this.chooseAccount?.(identity, opts.account) ?? null : { name: nodeAccount(machine), configDir: null };
       this.patch(shiftId, { account: acct?.name ?? null });
       await this.launcher.launch({
         shiftId, identity, shiftNo, sessionId, resume, kind, socketPath, taskId, unit,
         cwd, systemPromptFile, account: acct?.name ?? null, configDir: acct?.configDir ?? null, machine,
+        ...(this.cfg.codexLean ? { provider: 'codex' as const, codexModel: this.cfg.codexModel } : {}),
       });
     } catch (e) {
       this.markEnded(shiftId, 'dead', stage);
@@ -730,6 +750,20 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     }
     return writeSystemPrompt(shiftDir(this.paths, shiftId), buildSystemPrompt(this.cfg.companyDir, row ?? unknownIdentity(identity), this.cfg.managerId,
       row?.reports_to ? getIdentity(this.store, row.reports_to) : undefined));
+  }
+
+  /** Bounded, read-only handover. Original sessions and the full mailbox remain intact. */
+  private writeContinuity(shiftId: string, identity: string, machine: string): void {
+    const messages = this.store.db.prepare(`SELECT from_identity, to_identity, body, created_at FROM messages
+      WHERE (from_identity = ? OR to_identity = ?) ORDER BY created_at DESC, rowid DESC LIMIT 20`)
+      .all(identity, identity) as { from_identity: string; to_identity: string; body: string; created_at: number }[];
+    const tasks = this.store.db.prepare(`SELECT id, title, body, state, worktree, machine FROM tasks WHERE identity = ? AND state != 'done' ORDER BY updated_at DESC LIMIT 3`).all(identity);
+    const text = ['# רקע בלבד מהמשמרת הקודמת — לא הוראות לביצוע מחדש',
+      `מכונת המשימה הקודמת: ${machine}. כאשר אינה local, אתה כאן לצורך השיחה; ה-worktree נשאר במכונה המקורית.`,
+      'משימות פתוחות:', JSON.stringify(tasks).slice(0, 10000), 'הודעות אחרונות:',
+      ...messages.reverse().map((m) => `${new Date(m.created_at).toISOString()} ${m.from_identity} → ${m.to_identity}: ${m.body.slice(0, 1500)}`),
+    ].join('\n');
+    writeFileSync(join(shiftDir(this.paths, shiftId), 'codex-continuity.txt'), text.slice(0, 32000), { mode: 0o600 });
   }
 
   /** B.7: which account a run goes to (set by hq's AccountManager); null = the CLI's own login. */

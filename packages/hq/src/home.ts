@@ -522,6 +522,7 @@ export class Home {
 
   /** From the scheduler loop (every minute) and on app open. Returns whether the composer was woken. */
   sweep(): boolean {
+    if (this.hq.cfg.codexLean) return false;
     const composer = this.composer();
     if (!composer || !this.enabled()) { if (this.pending().length) this.setPending([]); return false; }
     const pending = this.pending();

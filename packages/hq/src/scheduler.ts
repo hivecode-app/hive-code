@@ -183,7 +183,7 @@ export class Scheduler {
     shifts.on('ended', (row, reason) => {
       if (row.task_id != null) this.onTaskShiftEnded(row.task_id, reason, row.machine, row);
       // A failed launch frees nothing: refilling on it would spin (start → fail → ended → fill → …).
-      if (row.kind === 'work' && reason !== 'launch_failed' && reason !== 'account_switch') this.store.bg(this.fill(), 'scheduler.fill');
+      if (row.kind === 'work' && !['launch_failed', 'account_switch', 'provider_change'].includes(reason)) this.store.bg(this.fill(), 'scheduler.fill');
     });
     // A resting task worker woken by a message is working on its task again.
     shifts.on('live', (row) => {
@@ -458,6 +458,7 @@ export class Scheduler {
    * starts started (after they settle); a call that coalesced into a running pass gets the ids started so far.
    */
   async fill(): Promise<number[]> {
+    if (this.cfg.codexLean) return [];
     if (!this.store.toggle('scheduler')) return [];
     if (this.filling) { this.refill = true; return this.filling; }
     const started: number[] = [];
@@ -787,6 +788,12 @@ export class Scheduler {
 
   private onTaskShiftEnded(taskId: number, reason: string, machine: string = LOCAL, row?: { id: string; started_at: number }): void {
     const t = this.task(taskId);
+    // A deliberate provider switch parks work in place, including an unaccepted brief on a remote node.
+    // It must not trigger failed-start retries, worktree cleanup or automatic node fallback.
+    if (reason === 'provider_change') {
+      if (t?.state === 'running') this.setTaskState(taskId, 'resting');
+      return;
+    }
     // On a node and its worker never took the task (did not come up, exited before accepting): it runs here instead.
     if (reason === NODE_FALLBACK) return; // fallbackLocal sets the task itself
     if (t && (machine ?? LOCAL) !== LOCAL && !['task_done', 'rest', 'account_switch'].includes(reason) && this.neverTook(t)) {
@@ -1221,6 +1228,7 @@ export class Scheduler {
 
   /** B.2: residents (יואב) always run, in their own pool. Keep them up; retry a failed launch every 5 min. */
   async ensureResidents(): Promise<string[]> {
+    if (this.cfg.codexLean) return [];
     if (!this.store.toggle('residents')) return [];
     const now = this.store.now();
     const started: string[] = [];
@@ -1245,6 +1253,7 @@ export class Scheduler {
    * per identity, so a restart or a second call never sends it again. Returns the leads it woke.
    */
   wakeNewLeads(): string[] {
+    if (this.cfg.codexLean) return [];
     const rows = this.store.db.prepare(`SELECT id, name, title FROM identities i WHERE lifecycle = 'lead' AND active = 1
       AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.identity = i.id)`).all() as { id: string; name: string; title: string }[];
     const woke: string[] = [];
@@ -1263,6 +1272,7 @@ export class Scheduler {
   }
 
   async sweep(): Promise<void> {
+    if (this.cfg.codexLean) { this.store.setMeta('last_sweep_at', String(this.store.now())); return; }
     const now = this.store.now();
     this.escalateAsks();
     await this.ensureResidents();

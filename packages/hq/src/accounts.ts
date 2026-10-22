@@ -182,6 +182,7 @@ export class AccountManager {
   }
 
   private async follow(row: ShiftRow): Promise<void> {
+    if (this.cfg.codexLean || row.account === 'codex') return;
     const pin = this.pinned();
     if (!pin || row.kind === 'foreign' || (row.account ?? this.primary) === pin || row.state !== 'live') return;
     // A node's shift runs on that node's own login (nodes.ts): "everyone to X" does not move it here.
@@ -216,6 +217,7 @@ export class AccountManager {
 
   /** The shift's account ran out: resume the same session on the account with the most room, if there is one. */
   async switchAway(row: ShiftRow): Promise<string | null> {
+    if (this.cfg.codexLean || row.account === 'codex') return null;
     const from = this.get(row.account ?? this.primary);
     const next = this.pick();
     // Everyone is blocked: the shift parks; the board shows "חסום: מכסה" until the reset.
@@ -226,6 +228,7 @@ export class AccountManager {
 
   /** Stop at the turn boundary and --resume the same session id on `to` (B.7 "החלפה באמצע"). */
   async move(row: ShiftRow, to: string, why: string): Promise<boolean> {
+    if (this.cfg.codexLean || row.account === 'codex') return false;
     if (this.moving.has(row.identity)) return false;
     this.moving.add(row.identity);
     try {
@@ -266,6 +269,7 @@ export class AccountManager {
 
   /** Live shifts still on a blocked account (a rejection missed while hq was down) move if another account is open. */
   async rebalance(): Promise<void> {
+    if (this.cfg.codexLean) return;
     for (const s of this.shifts.active()) {
       const r = this.get(s.account ?? this.primary);
       if (s.kind === 'foreign' || s.state !== 'live' || s.in_turn || !r || !this.blocked(r)) continue;

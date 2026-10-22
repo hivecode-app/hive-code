@@ -14,6 +14,9 @@ import type { NodeDef } from './nodes.ts';
 import { DEFAULT_HEAVY } from './heavy.ts';
 
 export interface HqConfig {
+  /** Temporary, owner-message-only Codex continuity. Off unless explicitly enabled. */
+  codexLean?: boolean;
+  codexModel?: string;
   stateDir: string;
   dbPath: string;
   /** COMPANY_HOME: the company's checkout, company/ and memory/ at its root (shared company-home.ts). */

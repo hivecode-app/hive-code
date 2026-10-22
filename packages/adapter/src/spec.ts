@@ -27,6 +27,9 @@ export interface ShiftSpec {
   env?: Record<string, string>;
   stateRoot: string;
   claudeBin?: string;
+  provider?: 'claude' | 'codex';
+  codexBin?: string;
+  codexModel?: string;
   extraArgs?: string[];
 }
 

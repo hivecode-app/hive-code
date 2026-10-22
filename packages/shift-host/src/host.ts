@@ -9,7 +9,7 @@ import {
   type DeliveryState, type EngineEvent, type HostInfo, type HostState, type HostToHq, type HqToHost,
   type LoggedFrame, type ErrorCode, type SendReply,
 } from '@company/shared';
-import { ClaudeProcess, consumeSegments, pendingQueued, procStartOf, readTranscript, toContextReply, toUsageReply, type ShiftSpec } from '@company/adapter';
+import { ClaudeProcess, CodexProcess, consumeSegments, pendingQueued, procStartOf, readTranscript, toContextReply, toUsageReply, type ShiftSpec, type WorkerProcess } from '@company/adapter';
 import { DurableLog, type FrameInput } from './log.ts';
 import { SpoolReader } from './spool.ts';
 import { safeToInterrupt } from './safe-tools.ts';
@@ -19,7 +19,7 @@ export interface HostOptions {
   /** Keep serving this long after claude exits, so hq can read the tail. */
   lingerMs?: number;
   /** Factory for tests (fake claude). */
-  makeProcess?: (spec: ShiftSpec, h: ConstructorParameters<typeof ClaudeProcess>[1]) => ClaudeProcess;
+  makeProcess?: (spec: ShiftSpec, h: ConstructorParameters<typeof ClaudeProcess>[1]) => WorkerProcess;
   onExit?: (code: number) => void;
 }
 
@@ -42,7 +42,7 @@ export class ShiftHost {
   readonly dir: string;
   readonly log: DurableLog;
   readonly spool: SpoolReader;
-  claude: ClaudeProcess | null = null;
+  claude: WorkerProcess | null = null;
   state: HostState = 'starting';
   private server: Server | null = null;
   private client: Client | null = null;
@@ -101,7 +101,8 @@ export class ShiftHost {
       onLifecycle: (l: { commandUuid: string; state: string }) => this.onLifecycle(l.commandUuid, l.state),
       onExit: (code: number | null, signal: string | null) => this.onClaudeExit(code, signal),
     };
-    this.claude = this.o.makeProcess ? this.o.makeProcess(this.spec, handlers) : new ClaudeProcess(this.spec, handlers);
+    this.claude = this.o.makeProcess ? this.o.makeProcess(this.spec, handlers)
+      : this.spec.provider === 'codex' ? new CodexProcess(this.spec, handlers) : new ClaudeProcess(this.spec, handlers);
     this.record({ t: 'lifecycle', state: 'starting', sessionId: this.spec.sessionId, resume: this.spec.resume,
       note: `claude pid ${this.claude.pid}${this.spec.resume ? ' (resume)' : ''}` }, true);
   }
@@ -441,7 +442,7 @@ export class ShiftHost {
     return c.interrupt();
   }
 
-  private need(): ClaudeProcess {
+  private need(): WorkerProcess {
     if (!this.claude || this.claude.exited) throw new HostError('not_running', 'claude is not running');
     return this.claude;
   }

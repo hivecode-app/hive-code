@@ -62,6 +62,16 @@ export function tokenless(ev: { text?: string; usage?: unknown }): boolean {
 }
 
 export class Mailbox {
+  deliveryPaused = false;
+  private leanDispatch: Promise<void> = Promise.resolve();
+  // Persist the reservation before send: HQ can restart after the host accepted it but before turn/started.
+  private get leanMessage(): { id: string; identity: string } | null {
+    return JSON.parse(this.store.getMeta('codex.active_message') || 'null');
+  }
+  private set leanMessage(value: { id: string; identity: string } | null) {
+    this.store.setMeta('codex.active_message', JSON.stringify(value));
+  }
+  leanBusy(): boolean { return this.leanMessage !== null; }
   /** #237: tokenless error results held for `retryGraceMs`, per shift: a fresh `init` of the same shift cancels them. */
   private heldErrors = new Map<string, { timer: NodeJS.Timeout; identity: string; err: Record<string, unknown> }>();
   private store: Store;
@@ -87,6 +97,7 @@ export class Mailbox {
       // message answered): that error is no failure of the turn. A held one is raised only if no new turn begins.
       if (f.t === 'event' && f.ev.kind === 'init' && live !== false) this.dropHeld(row.id);
       if (f.t === 'event' && f.ev.kind === 'result') {
+        if (this.leanMessage?.identity === row.identity) this.leanMessage = null;
         // error-watch.ts: a turn that ended in an error he did not cause (a stop he pressed is `interrupted`, #177).
         // `neverRan`: a resume the CLI refused (no transcript) answers so; the shift ends as `resume_rejected` and the next
         // run is a new shift (shifts.ts), so there was no turn to fail.
@@ -103,7 +114,14 @@ export class Mailbox {
         this.onTurnEnd(row, f.ev);
       }
     });
-    shifts.on('ended', (row) => { this.raiseHeld(row.id); this.requeueUndelivered(row); });
+    shifts.on('ended', (row) => {
+      if (this.leanMessage?.identity === row.identity) {
+        const m = this.get(this.leanMessage.id);
+        this.leanMessage = null;
+        if (m && ['queued', 'delivered'].includes(m.state)) this.fail({ ...m, error: 'משמרת Codex הסתיימה לפני קבלת הפנייה; אפשר לשלוח אותה מחדש' });
+      }
+      this.raiseHeld(row.id); this.requeueUndelivered(row);
+    });
   }
 
   /** A new turn began: the held error was the CLI's own retry, nothing to raise. */
@@ -247,6 +265,31 @@ export class Mailbox {
    * Without it a re-send is idempotent in the host and only reports the stored state.
    */
   async deliver(id: string, retry = false): Promise<void> {
+    if (this.deliveryPaused) return;
+    if (!this.cfg.codexLean) return this.deliverOne(id, retry);
+    const m = this.get(id);
+    if (!m || m.state !== 'queued') return;
+    if (m.to_identity === OWNER || m.to_identity === 'hq') return this.deliverOne(id, retry);
+    const since = Number(this.store.getMeta('codex.lean_since') ?? 0);
+    // Old prompts and autonomous peer/system messages stay pending, never replayed into a new provider.
+    if (m.from_identity !== OWNER || m.created_at < since) return;
+    const run = this.leanDispatch.catch(() => {}).then(async () => {
+      if (this.deliveryPaused || !this.cfg.codexLean) return;
+      if (this.get(id)?.state !== 'queued') return;
+      if (this.leanMessage) return;
+      if (this.shifts.active().some((s) => s.account === 'codex' && (s.in_turn || s.state === 'starting'))) return;
+      const cur = this.shifts.current(m.to_identity);
+      if (!cur || cur.account !== 'codex') {
+        try { await this.shifts.request(m.to_identity, { reason: 'message' }); }
+        catch (e) { this.fail({ ...m, error: String(e) }); return; }
+      }
+      await this.deliverOne(id, retry);
+    });
+    this.leanDispatch = run;
+    return run;
+  }
+
+  private async deliverOne(id: string, retry = false): Promise<void> {
     const m = this.get(id);
     if (!m || m.state !== 'queued') return;
     this.store.db.prepare('UPDATE messages SET attempts = attempts + 1, last_attempt_at = ? WHERE id = ?').run(this.store.now(), id);
@@ -279,6 +322,7 @@ export class Mailbox {
     const conn = shift ? this.shifts.connection(shift.id) : undefined;
     if (shift && conn?.isLive) {
       try {
+        if (this.cfg.codexLean) this.leanMessage = { id, identity: m.to_identity };
         this.store.db.prepare('UPDATE messages SET shift_id = ? WHERE id = ?').run(shift.id, id);
         // His own `now` stops the worker, but only out of a tool that is safe to cut (shift-host safe-tools.ts, adi
         // 21/10/2026); otherwise it goes in right after the running tool. hq's notes and the answers it writes in his
@@ -287,10 +331,12 @@ export class Mailbox {
         // Idempotent on msgId in the host: a resend after an hq crash returns the current state instead.
         let r = await conn.send(id, this.envelope(m), m.priority, retry, stop);
         // The host remembers this msgId as never accepted (e.g. its claude restarted): write it again.
-        if (r?.state === 'failed' && !retry) r = await conn.send(id, this.envelope(m), m.priority, true);
+        if (r?.state === 'failed' && !retry && !this.cfg.codexLean) r = await conn.send(id, this.envelope(m), m.priority, true);
         if (r?.waitingOn) this.setWaiting(id, r.waitingOn);
         if (r) this.onDelivery(shift, id, r.state);
       } catch (e) {
+        // A timeout/disconnect is not proof of rejection: the host may already be running this prompt.
+        // Keep the durable slot until its delivery/result/exit is reconciled.
         this.store.db.prepare('UPDATE messages SET error = ? WHERE id = ?').run((e as Error).message, id);
       }
       return;
@@ -330,6 +376,10 @@ export class Mailbox {
     if (!m) return;
     if (state === 'failed') {
       this.store.db.prepare('UPDATE messages SET error = ? WHERE id = ?').run(error ?? 'host reported failure', msgId);
+      if (this.cfg.codexLean) {
+        if (this.leanMessage?.id === msgId) this.leanMessage = null;
+        this.fail({ ...m, error: error ?? 'Codex לא קיבל את הפנייה; אפשר לשלוח מחדש' });
+      }
       return;
     }
     if (state === 'written') return;
@@ -421,6 +471,23 @@ export class Mailbox {
 
   /** B.4 visible failures: 60s → retry with resurrection; another 60s → failed, in both inboxes. */
   async sweep(): Promise<void> {
+    if (this.cfg.codexLean) {
+      // No stale-message resurrection storms while other identities wait for the single active turn.
+      if (this.leanMessage) {
+        const m = this.get(this.leanMessage.id);
+        const s = this.shifts.current(this.leanMessage.identity);
+        if (!s || ['handled', 'failed'].includes(m?.state ?? 'failed')) this.leanMessage = null;
+        else if (m?.state === 'queued' && s.state === 'live' && this.shifts.connection(s.id)?.isLive
+          && (m.last_attempt_at ?? 0) <= this.store.now() - this.cfg.timers.deliveryTimeoutMs) {
+          // Same msgId, no retry flag: reconcile an uncertain send without issuing a second model turn.
+          await this.deliverOne(m.id);
+        }
+      }
+      const since = Number(this.store.getMeta('codex.lean_since') ?? 0);
+      const rows = this.store.db.prepare(`SELECT id FROM messages WHERE state = 'queued' AND from_identity = ? AND created_at >= ? ORDER BY created_at, rowid LIMIT 25`).all(OWNER, since) as { id: string }[];
+      for (const r of rows) await this.deliver(r.id);
+      return;
+    }
     const cutoff = this.store.now() - this.cfg.timers.deliveryTimeoutMs;
     let stale = (this.store.db.prepare(`SELECT * FROM messages WHERE state = 'queued' AND last_attempt_at IS NOT NULL AND last_attempt_at <= ?
       ORDER BY created_at, rowid`).all(cutoff) as StoredRow[]).map(hydrate);
@@ -574,7 +641,7 @@ export class Mailbox {
   }
 
   private fail(m: MessageRow): void {
-    this.setState(m.id, 'failed');
+    this.setState(m.id, 'failed', { error: m.error });
     if (this.fromInboxClose(m)) return;
     this.store.emit('message.undelivered', m.to_identity, { id: m.id, from: m.from_identity, to: m.to_identity, why: m.error ?? 'לא נמסרה בזמן' });
     const why = m.error ? ` (${m.error})` : '';

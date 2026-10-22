@@ -448,7 +448,10 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     if (typeof b.enabled !== 'boolean') throw new HttpError(400, 'enabled must be boolean');
     const key = decodeURIComponent(params[0]!);
     if (!hq.store.toggles().some((t) => t.key === key)) throw new HttpError(404, `no toggle ${key}`);
-    hq.store.setToggle(key, b.enabled, true);
+    if (key === 'codex/lean') {
+      try { await hq.setCodexLean(b.enabled); }
+      catch (e) { throw new HttpError(409, (e as Error).message); }
+    } else hq.store.setToggle(key, b.enabled, true);
     return { toggles: hq.store.toggles() };
   });
 

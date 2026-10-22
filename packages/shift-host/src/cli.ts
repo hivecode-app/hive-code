@@ -30,6 +30,9 @@ const OPTIONS = {
     'permission-hook': { type: 'string', multiple: true },
     'state-dir': { type: 'string' },
     'claude-bin': { type: 'string' },
+    provider: { type: 'string' },
+    'codex-bin': { type: 'string' },
+    'codex-model': { type: 'string' },
     'oauth-token-file': { type: 'string' },
     'config-dir': { type: 'string' },           // managed CLAUDE_CONFIG_DIR of the account hq picked (B.7)
     'company-repo': { type: 'string' },         // the engine's main checkout (COMPANY_REPO, the hooks guard)
@@ -61,6 +64,7 @@ const v = { ...fileValues, ...cliValues } as typeof cliValues;
 function die(msg: string): never { process.stderr.write(`company-shift-host: ${msg}\n`); process.exit(2); }
 
 const identity = v.identity ?? die('--identity required');
+if (v.provider && !['claude', 'codex'].includes(v.provider)) die('--provider must be claude or codex');
 const epochNo = Number(v.epoch ?? 0);
 // hq should always pass --shift (= the systemd instance name %i, where host-args.json lives).
 const shift = v.shift ?? (v['shift-no'] ? (epochNo ? `${identity}-e${epochNo}-${v['shift-no']}` : `${identity}-${v['shift-no']}`) : die('--shift or --shift-no required'));
@@ -108,6 +112,7 @@ const spec: ShiftSpec = {
   appendSystemPromptFile: v['append-system-prompt-file'],
   mcpConfigFile, settingsFile, oauthToken, configDir: v['config-dir'],
   claudeBin: v['claude-bin'],
+  provider: v.provider === 'codex' ? 'codex' : 'claude', codexBin: v['codex-bin'], codexModel: v['codex-model'],
   env: {
     COMPANY_REPO: v['company-repo'] ?? process.env.COMPANY_REPO ?? repoRoot,
     // COMPANY_HOME from the same hq.config.json hq reads, at every start: a `systemctl restart` of the shift follows a
