@@ -541,6 +541,35 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS resource_usage_at ON resource_usage(machine, at);
   `,
+  // v28: reserve/release (leases.ts): a worker's place for a heavy command on a machine, from the queue to its release.
+  `
+  CREATE TABLE IF NOT EXISTS leases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    identity TEXT NOT NULL,
+    shift TEXT,
+    task INTEGER,
+    project TEXT,
+    class TEXT NOT NULL,
+    machine TEXT NOT NULL,                   -- 'local' or a node's name (nodes.ts)
+    note TEXT,
+    priority INTEGER NOT NULL DEFAULT 2,     -- the task's: 0 = p0, first in the queue
+    mem_mb INTEGER NOT NULL,
+    cpu REAL NOT NULL,
+    exclusive TEXT,
+    timeout_ms INTEGER NOT NULL,
+    state TEXT NOT NULL,                     -- queued | granted | released
+    created_at INTEGER NOT NULL,
+    polled_at INTEGER NOT NULL,              -- the last time the worker asked: a queued lease nobody asks for goes away
+    granted_at INTEGER,
+    attached_at INTEGER,                     -- company-run took it
+    beat_at INTEGER,                         -- company-run's last sign of life
+    released_at INTEGER,
+    release_reason TEXT,                     -- released | exited | timeout | shift-ended | connection-lost | unclaimed | abandoned | cancelled
+    exit_code INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS leases_open ON leases(state, machine, created_at);
+  CREATE INDEX IF NOT EXISTS leases_shift ON leases(shift, state);
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

@@ -6,7 +6,7 @@ import type { CompanyNames, OpName } from '@company/shared';
 type Schema = Record<string, unknown>;
 
 export interface ToolDef {
-  name: OpName | 'recall' | 'request_access' | 'resources';
+  name: OpName | 'recall' | 'request_access' | 'resources' | 'reserve' | 'release';
   description: string;
   inputSchema: { type: 'object'; properties: Record<string, Schema>; required: string[]; additionalProperties: boolean };
 }
@@ -200,6 +200,22 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
     tool('resources', 'מצב המשאבים של השרתים, קריאה בלבד: בכל מכונה זיכרון, עומס ודיסק, מי מחזיק בהם לפי פרויקט (כולל "לא מזוהה" עם שם ה-cgroup או הקונטיינר), ומי מחכה למקום. '
       + 'קוראים לפני build מלא, `flutter test` מלא, docker או smoke, ואחרי שמשהו נתקע על "השרת עמוס". חלק שלא נמדד כתוב "לא נמדד", ואין לקרוא אותו כתקין. הזיכרון לפי פרויקט הוא `memory.current` של ה-cgroup וכולל page cache, ולכן הסכום יכול לעבור את "בשימוש". '
       + 'Read-only: per machine memory, load and disk, who holds them by project (unidentified ones with their cgroup/container name), and who waits for room. Call before a heavy build, full test run, docker or smoke.', {}, []),
+    tool('reserve', 'הזמנת מקום לפני פקודה כבדה בשרת המשותף: build מלא, `flutter test` מלא, `docker build`/`compose up` או smoke. hq מחזיר אחת משלוש תשובות: '
+      + 'granted (יש מקום: מריצים דרך `company-run --lease <lease> -- <הפקודה>`, וההזמנה משתחררת לבד כשהפקודה נגמרת), '
+      + 'queued (אין מקום עכשיו: התשובה חוזרת תוך עד 90 שניות עם מי מחזיק, המקום בתור והערכה; ממשיכים במה שלא תלוי בזה וחוזרים עם `lease` כדי להמשיך מאותו מקום בתור) '
+      + 'או unavailable (לא יהיה מקום, או שהמחלקה לא מוגדרת; עם חלופה). משימה דחופה (p0) לא נעקפת, ו-hq לא עוצר הזמנה קיימת בשבילה. '
+      + 'הזמנה משתחררת לבד בסוף הפקודה, אחרי התקרה של המחלקה (ברירת מחדל 30 דקות) ובסגירת המשמרת. '
+      + 'Reserve a place before a heavy command on the shared server (full build, full flutter test, docker, smoke). granted → run it with company-run; queued → come back with `lease` to keep your place; unavailable → see the alternative.', {
+      class: s('המחלקה: build | test-full | docker | smoke, או מחלקה שהאמנה של הפרויקט מגדירה בבלוק heavy / the class of work'),
+      machine: s('המכונה (ברירת מחדל: זו של המשמרת שלך), local או שם של node / the machine, default: your shift\'s'),
+      note: s('מה מריצים, שורה בעברית: מופיע למי שמחכה / what you run, one line in Hebrew'),
+      lease: s('lease-N: ממשיכים הזמנה שחזרה queued, באותו מקום בתור / continue a queued lease from the same place in the queue'),
+      wait: { type: 'number', description: 'כמה שניות להמתין למקום, עד 100 (ברירת מחדל 90) / seconds to wait for a place, up to 100 (default 90)' },
+    }, []),
+    tool('release', 'שחרור הזמנה (`reserve`) כשהמקום לא נחוץ יותר, או ביטול הזמנה שמחכה בתור. לא חובה אחרי `company-run`: הוא משחרר לבד בסוף הפקודה. '
+      + 'Release a lease, or leave the queue. Not needed after company-run: it releases when the command ends.', {
+      lease: s('lease-N / the lease id'),
+    }, ['lease']),
     tool('open_ticket', 'פתיחת כרטיס ב-repo. Open an issue in a repo.', {
       repo: s('owner/repo'),
       title: s('כותרת / title'),
@@ -250,7 +266,7 @@ export function validateArgs(def: ToolDef, args: unknown): string | null {
 
 /** Everything a person reads goes out in Hebrew (dir-0002, #51): message text by line, titles whole. */
 const HEBREW_TEXT: Partial<Record<ToolDef['name'], string[]>> = {
-  tell: ['body'], ask: ['question'], withdraw_ask: ['note'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'], request_access: ['why'],
+  tell: ['body'], ask: ['question'], withdraw_ask: ['note'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'], request_access: ['why'], reserve: ['note'],
 };
 const HEBREW_TITLE: Partial<Record<ToolDef['name'], string[]>> = {
   open_team: ['name'], open_ticket: ['title'], ask: ['headline'], request_go: ['headline'],

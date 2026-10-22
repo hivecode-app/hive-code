@@ -235,6 +235,10 @@ if [ -f "$ENGINE/scripts/company" ]; then
   mkdir -p "$HOME/.local/bin"
   ln -sfn "$ENGINE/scripts/company" "$HOME/.local/bin/company"
 fi
+if [ -f "$ENGINE/scripts/company-run" ]; then
+  mkdir -p "$HOME/.local/bin"
+  ln -sfn "$ENGINE/scripts/company-run" "$HOME/.local/bin/company-run"
+fi
 
 # ── 4. Claude Code ───────────────────────────────────────────────────────────
 step 4 "Claude Code"

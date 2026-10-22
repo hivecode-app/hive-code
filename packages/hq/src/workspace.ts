@@ -7,6 +7,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmdirSync, rmSync 
 import { homedir, hostname, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parse } from 'yaml';
+import { parseHeavy, type HeavyClass } from './heavy.ts';
 
 export interface Checkout {
   name: string;
@@ -36,6 +37,8 @@ export interface Charter {
   designReview: DesignReview | null;  // design_review: a second review, by a designer, for a PR that touches these paths
   /** `access:` — what request_access may run without asking him each time: a resource, the verb classes, his quote and the date (A.7). */
   access: AccessGrant[];
+  /** `heavy:` — what is heavy in this project (reserve): classes that replace the company's of the same name (heavy.ts). */
+  heavy: HeavyClass[];
   paused: string | null;  // paused: he put the project on hold (the reason, or "מושהה"). Workers still run; hq doesn't wake it (stall-watch.ts)
   error?: string;         // status "invalid": why the charter could not be read
 }
@@ -71,7 +74,7 @@ export function readCharter(companyDir: string, project: string): Charter | null
     const m = readFileSync(file, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
     fm = ((m ? parse(m[1]!) : {}) ?? {}) as Record<string, unknown>;
   } catch (e) {
-    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, designReview: null, access: [], paused: null, error: (e as Error).message };
+    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, designReview: null, access: [], heavy: [], paused: null, error: (e as Error).message };
   }
   const s = (v: unknown) => (typeof v === 'string' && v ? v : null);
   const checkouts: Checkout[] = [];
@@ -87,7 +90,7 @@ export function readCharter(companyDir: string, project: string): Charter | null
   return {
     project, status: s(fm.status) ?? 'active', machine: s(fm.machine), checkouts,
     worktreeDir: s(fm.worktree_dir) ?? '.worktrees', commands, ciCheck: s(fm.ci_check),
-    mergeInstructions: steps(fm.merge_instructions), designReview: designReview(fm.design_review), access: accessGrants(fm.access),
+    mergeInstructions: steps(fm.merge_instructions), designReview: designReview(fm.design_review), access: accessGrants(fm.access), heavy: parseHeavy(fm.heavy),
     paused: fm.paused === true ? 'מושהה' : s(fm.paused),
   };
 }

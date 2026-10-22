@@ -11,6 +11,7 @@ import { COMPANY_HOME_ENV, ENGINE_ROOT, companyDirOf, expandHome } from '@compan
 import type { TabConfig } from './tab/handoffs.ts';
 import type { DictateConfig } from './dictate.ts';
 import type { NodeDef } from './nodes.ts';
+import { DEFAULT_HEAVY } from './heavy.ts';
 
 export interface HqConfig {
   stateDir: string;
@@ -61,6 +62,9 @@ export interface HqConfig {
     maxLoad: number;             // #224: no new shift here while load1 per CPU is over this (load from outside the shifts too)
   };
   backupsKeep: number;
+  /** resources-design.md §1, `reserve`: the classes of heavy work (heavy.ts parseHeavy: class, mem, cpu, disk, timeout, exclusive, env), and
+   *  the memory the leases of one machine may hold together: `machines.<name>.memMb` (`local` = this one), else `budgetPct` of its total. */
+  heavy: { classes: unknown[]; budgetPct: number; machines: Record<string, { memMb?: number }> };
   /** WebAuthn and device pairing (auth.ts). */
   auth: {
     rpId: string;                // passkeys are bound to this host (and its subdomains)
@@ -195,6 +199,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     },
     capacity: { reserveMb: 4096, rssIdleMb: 450, rssWorkMb: 2500, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8, maxLoad: 1.5 },
     backupsKeep: 48,
+    heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: {} },
     auth: {
       rpId: 'localhost',
       rpName: 'החברה',
@@ -225,6 +230,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     tab: { ...base.tab, ...fromFile.tab, ...overrides.tab },
     dictate: { ...base.dictate, ...fromFile.dictate, ...overrides.dictate },
     resources: { map: { ...base.resources.map, ...fromFile.resources?.map, ...overrides.resources?.map } },
+    heavy: { ...base.heavy, ...fromFile.heavy, ...overrides.heavy },
   };
   cfg.nodes = (cfg.nodes ?? []).map((n) => ({ ...n, projects: n.projects ?? [], maxSlots: n.maxSlots ?? 8, maxLoad: n.maxLoad ?? 0.85,
     identityFile: n.identityFile ? expandHome(n.identityFile) : null }));

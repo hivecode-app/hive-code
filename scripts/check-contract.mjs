@@ -492,6 +492,16 @@ export function main() {
         if (!isObj(dr) || !Array.isArray(dr.paths) || !dr.paths.length || !dr.paths.every((v) => typeof v === 'string' && v)) err(`${rel(charter)}: design_review needs "paths", a list of paths`);
         for (const k of ['wait_minutes', 'small_lines']) if (isObj(dr) && dr[k] != null && !(Number.isInteger(dr[k]) && dr[k] > 0)) err(`${rel(charter)}: design_review "${k}" must be a positive whole number`);
       }
+      // heavy: the classes `reserve` knows in this project (packages/hq/src/heavy.ts). hq drops a class it cannot read, so a typo is caught here.
+      if (fm.heavy != null) {
+        if (!Array.isArray(fm.heavy)) err(`${rel(charter)}: "heavy" must be a list of classes`);
+        else for (const [i, h] of fm.heavy.entries()) {
+          if (!isObj(h) || typeof h.class !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(h.class)) err(`${rel(charter)}: heavy[${i}] needs "class", a lowercase name`);
+          else if (!/^\s*\d+(\.\d+)?\s*(kb|mb|gb|tb|k|m|g|t)?\s*$/i.test(String(h.mem))) err(`${rel(charter)}: heavy "${h.class}" needs "mem", a size (8GB, 512MB)`);
+          else if (h.cpu != null && !(typeof h.cpu === 'number' && h.cpu > 0)) err(`${rel(charter)}: heavy "${h.class}" "cpu" must be a positive number`);
+          else if (h.timeout != null && !/^\s*\d+(\.\d+)?\s*[smh]?\s*$/i.test(String(h.timeout))) err(`${rel(charter)}: heavy "${h.class}" "timeout" must be a duration (30m, 90s, 2h)`);
+        }
+      }
       // paused: he put the project on hold. hq does not wake it when it stands with work open (stall-watch).
       if (fm.paused != null && fm.paused !== true && !(typeof fm.paused === 'string' && fm.paused.trim())) err(`${rel(charter)}: "paused" must be true or the reason (a string)`);
       checkCharterPaths(charter, companyDir);

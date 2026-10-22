@@ -31,6 +31,8 @@ export interface ServerDeps {
   access?: (req: Record<string, unknown>) => Promise<unknown>;
   /** resources: hq's read-only picture of the machines, as text. */
   resources?: () => Promise<string>;
+  /** reserve / release: hq answers in the same call (reserve may wait for a place, up to ~100s). */
+  lease?: (req: Record<string, unknown>) => Promise<unknown>;
   now?: () => Date;
   log?: (msg: string) => void;
   /** tools/list: the catalogue with this company's names (buildTools). Default: TOOLS. */
@@ -93,6 +95,16 @@ export function createServer(deps: ServerDeps) {
         return text(await deps.access({ ...args, identity: deps.ctx.identity, shift: deps.ctx.shift }));
       } catch (e) {
         return text(`request_access נכשל: ${e instanceof Error ? e.message : String(e)}. ייתכן שהבקשה הגיעה ל-hq ורצה: אם יש לך מזהה acc-N מקריאה קודמת, בדוק אותו עם request; אחרת אפשר לנסות שוב. אם זה נמשך, status עם needs-local.`, true);
+      }
+    }
+
+    if (def.name === 'reserve' || def.name === 'release') {
+      if (!deps.lease) return text(`${def.name} לא זמין בשרת ה-MCP הזה`, true);
+      if (def.name === 'reserve' && !args.class && !args.lease) return text('invalid arguments: pass class, or lease to go on with one', true);
+      try {
+        return text(await deps.lease({ ...args, op: def.name, identity: deps.ctx.identity, shift: deps.ctx.shift }));
+      } catch (e) {
+        return text(`${def.name} נכשל: ${e instanceof Error ? e.message : String(e)}. ייתכן שהבקשה הגיעה ל-hq: אם יש לך lease-N מקריאה קודמת, המשך איתו; אחרת אפשר לנסות שוב. אם hq לא עונה, ממשיכים בלי הזמנה, כמו לפני שהיה כלי כזה.`, true);
       }
     }
 

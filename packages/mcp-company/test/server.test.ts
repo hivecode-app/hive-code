@@ -67,7 +67,7 @@ test('handshake, tools/list, write tools queue to WAL while hq is down', async (
 
     const list = await c.call('tools/list');
     const names = list.result.tools.map((t: { name: string }) => t.name).sort();
-    assert.deepEqual(names, ['ask', 'close_team', 'compose_home', 'handoff', 'open_team', 'open_ticket', 'recall', 'remember', 'request_access', 'request_go', 'resources', 'status', 'tell', 'withdraw_ask']);
+    assert.deepEqual(names, ['ask', 'close_team', 'compose_home', 'handoff', 'open_team', 'open_ticket', 'recall', 'release', 'remember', 'request_access', 'request_go', 'reserve', 'resources', 'status', 'tell', 'withdraw_ask']);
     for (const t of list.result.tools) assert.equal(t.inputSchema.type, 'object');
 
     const tell = await c.call('tools/call', { name: 'tell', arguments: { to: 'dana', body: 'שלום', urgency: 'now' } });
@@ -311,4 +311,43 @@ test('resources: the tool is read-only, answers with hq\'s text, and says so whe
     await c.close();
     hq.close();
   }
+});
+
+test('reserve and release go to hq /v1/lease with the shift, and their answers are the tool results; they are not WAL ops', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mcp-lease-'));
+  const seen: any[] = [];
+  const hq = createHttpServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (d: Buffer) => chunks.push(d));
+    req.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      seen.push({ path: req.url, body });
+      res.writeHead(body.op === 'reserve' ? 200 : 404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(body.op === 'reserve' ? { status: 'queued', lease: 'lease-4', position: 2, message: 'אין מקום' } : { ok: false, error: 'no lease lease-4 of lumo-t9' }));
+    });
+  });
+  await new Promise<void>((r) => hq.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${(hq.address() as { port: number }).port}`;
+  const c = new Client({ COMPANY_STATE_DIR: root, COMPANY_SHIFT: 'x-1', COMPANY_IDENTITY: 'lumo-t9', COMPANY_HQ_URL: url, COMPANY_REPO: root });
+  try {
+    await c.call('initialize', { protocolVersion: '2025-06-18', capabilities: {} });
+    const r = await c.call('tools/call', { name: 'reserve', arguments: { class: 'build', note: 'בונה APK' } });
+    assert.equal(r.result.isError, undefined);
+    assert.equal(JSON.parse(r.result.content[0].text).lease, 'lease-4');
+    assert.equal(seen[0].path, '/v1/lease');
+    assert.deepEqual(seen[0].body, { class: 'build', note: 'בונה APK', op: 'reserve', identity: 'lumo-t9', shift: 'x-1' });
+    const cont = await c.call('tools/call', { name: 'reserve', arguments: { lease: 'lease-4', wait: 5 } });
+    assert.equal(cont.result.isError, undefined);
+    assert.equal(seen[1].body.lease, 'lease-4');
+    const empty = await c.call('tools/call', { name: 'reserve', arguments: {} });
+    assert.equal(empty.result.isError, true);
+    const en = await c.call('tools/call', { name: 'reserve', arguments: { class: 'build', note: 'Building the debug APK for the release candidate' } });
+    assert.equal(en.result.isError, true);
+    assert.match(en.result.content[0].text, /בעברית/);
+    const rel = await c.call('tools/call', { name: 'release', arguments: { lease: 'lease-4' } });
+    assert.equal(rel.result.isError, true);
+    assert.match(rel.result.content[0].text, /no lease lease-4/);
+    assert.equal(seen.length, 3, 'the empty one and the English one never reached hq');
+    assert.equal(walLines(root, 'x-1', 'wal.ndjson').length, 0, 'not WAL ops');
+  } finally { await c.close(); hq.close(); }
 });

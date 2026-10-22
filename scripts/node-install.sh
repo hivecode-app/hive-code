@@ -47,6 +47,8 @@ current="$(readlink "$HOME/.local/share/agent-company/claude/current" 2>/dev/nul
 update_engine() {
   on "set -e; cd $ENGINE; git fetch --quiet origin; before=\$(git rev-parse HEAD); git checkout --quiet --detach $sha
       if [ ! -d node_modules ] || ! git diff --quiet \$before $sha -- package-lock.json; then npm ci --no-audit --no-fund >/dev/null; fi"
+  # `company-run` (reserve, resources-design.md): on the PATH of a shift here, which is /usr/local/bin and not ~/.local/bin.
+  on "ln -sfn $ENGINE/scripts/company-run /usr/local/bin/company-run"
   # The pinned Claude Code, same version as here.
   on "set -e; [ -x $H/.local/share/agent-company/claude/$current/claude ] || bash $ENGINE/scripts/install-claude.sh $current >/dev/null
       ln -sfn $current $H/.local/share/agent-company/claude/current"

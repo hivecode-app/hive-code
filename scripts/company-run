@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# `company-run --lease lease-N -- <cmd>`: a heavy command under the lease `reserve` gave (packages/mcp-company/src/run.ts).
+# The installer links ~/.local/bin/company-run here, through engine/current, so it is always the live engine's.
+set -euo pipefail
+engine="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd -P)"
+exec node "$engine/packages/mcp-company/src/run.ts" "$@"

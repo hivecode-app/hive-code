@@ -13,6 +13,7 @@ import { Conversations } from './conversations.ts';
 import { AwaitingBoard } from './awaiting.ts';
 import { Estimates } from './estimates.ts';
 import { Access, type JobRunner } from './access.ts';
+import { Leases } from './leases.ts';
 import { ShiftManager, TemplateLauncher, type Launcher, type ConnectionFactory } from './shifts.ts';
 import { Mailbox, noForeignInjector, type ForeignInjector } from './mailbox.ts';
 import { Uploads } from './uploads.ts';
@@ -90,6 +91,7 @@ export class Hq {
   readonly awaiting: AwaitingBoard;
   readonly estimates: Estimates;
   readonly access: Access;
+  readonly leases: Leases;
   readonly shifts: ShiftManager;
   readonly mailbox: Mailbox;
   readonly uploads: Uploads;
@@ -171,6 +173,8 @@ export class Hq {
     };
     this.estimates = new Estimates(this.store);
     this.access = new Access(this, deps.accessRunner);
+    this.leases = new Leases(this);
+    this.shifts.on('ended', (row) => this.leases.releaseShift(row.id));
     this.night.estimates = this.estimates;
     this.scheduler.onTaskDone = (id) => this.estimates.cancelForTask(id);
     this.scheduler.onSweep = () => {
@@ -285,6 +289,8 @@ export class Hq {
       this.every(T.livenessMs, 'liveness', () => this.shifts.pingAll());
       this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); await this.night.sweep(); this.home.sweep(); this.home.watchAsked(); this.awaiting.sweep(); });
       this.every(5_000, 'probes', () => this.probes.tick());
+      // reserve (leases.ts): the ceiling of a class, a company-run that stopped answering, a place nobody takes; then whoever waits is served.
+      this.every(5_000, 'leases', () => this.leases.sweep());
       this.every(30_000, 'push', () => this.pusher.sweepUnacked());
       // A handoff link never outlives its 10 minutes, and never leaves a phone viewport on a tab.
       this.every(15_000, 'tab', () => this.tab.sweep());

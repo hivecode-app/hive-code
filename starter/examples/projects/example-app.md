@@ -31,6 +31,11 @@ monitoring:                   # probes: GET בלבד, בלי טוקנים. רצ�
     expect: 200
     max_latency: 3s
     fail_after: 3             # שלוש בדיקות כושלות ברצף לפני שמעירים את הניטור
+heavy:                        # מה כבד בפרויקט הזה: עובד עושה `reserve` לפני, ומריץ דרך `company-run`. מחלקה כאן גוברת על ברירת המחדל של החברה באותו שם
+  - class: build
+    mem: 4GB
+    cpu: 2
+    timeout: 20m
 grants: []                    # הרשאות פרודקשן: team, action, quote, date. ריק עד שבעל החברה נותן
 ---
 

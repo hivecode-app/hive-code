@@ -47,6 +47,13 @@ const server = createServer({
     const b = (r.body ?? {}) as { error?: unknown };
     throw new Error(typeof b.error === 'string' ? b.error : `HTTP ${r.status}`);
   },
+  lease: async (req) => {
+    // reserve may wait for a place (~100s); a failure is the caller's to read: the work goes on without a lease.
+    const r = await postJson(target, '/v1/lease', req, ACCESS_TIMEOUT_MS);
+    if (r.status >= 200 && r.status < 300) return r.body;
+    const b = (r.body ?? {}) as { error?: unknown };
+    throw new Error(typeof b.error === 'string' ? b.error : `HTTP ${r.status}`);
+  },
   append: (e) => wal.append(e),
   waitSettled: (id, ms) => wal.waitSettled(id, ms),
   recall: (req) => recall(req, {
