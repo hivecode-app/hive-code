@@ -4,6 +4,7 @@ import { request } from 'node:http';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeEnv, ORG_YAML, until, type TestEnv } from './helpers.ts';
+import { DEFAULT_HEAVY } from '../src/heavy.ts';
 import { writeCatalog, type JobRunner, type JobSpec } from '../src/access.ts';
 
 /** A runner that "runs" at once: the output is a canned text per command, written the way the real script writes it. */
@@ -36,13 +37,15 @@ const CATALOG = {
     'kube:lumo-prod': { type: 'kube', namespace: 'lumo-prod', kubeconfig: '/k/prod.yaml', env: 'prod' },
     'ssh:ci-host': { type: 'ssh', host: 'ci-host.example', user: 'root', env: 'ci', allow: [{ argv: ['docker', 'images'] }] },
     'hq:query': { type: 'hq-query', env: 'internal' },
+    'build:hq-host': { type: 'build', registry: 'ghcr.io/hive-owner/', env: 'registry', script: '/engine/scripts/access-build.sh' },
     'kube:other': { type: 'kube', namespace: 'other', env: 'dev', projects: ['someone-else'] },
   },
 };
 
 async function setup(access = '', listen = false) {
   const runner = new FakeRunner();
-  const env = await makeEnv({ noStart: true, deps: { accessRunner: runner }, projects: { 'agent-company': CHARTER(access) } });
+  const env = await makeEnv({ noStart: true, deps: { accessRunner: runner }, projects: { 'agent-company': CHARTER(access) },
+    cfg: { heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: { local: { memMb: 10_000 } } } } });
   await env.hq.start({ listen, timers: false });
   writeCatalog(env.cfg.stateDir, CATALOG);
   const t = env.hq.scheduler.addTask({ title: 'משימה', project: 'agent-company' });
@@ -322,5 +325,64 @@ test('access: hq:query answers a second call from the same stored result', async
     assert.equal(r.status, 'done');
     const again = await ask({ request: r.request }) as any;
     assert.equal(again.output, r.output);
+  } finally { await env.cleanup(); }
+});
+
+const SHA = 'a'.repeat(40);
+const BUILD = ['hive-owner/lumo', SHA, 'deploy/Dockerfile', 'ghcr.io/hive-owner/lumo-api:dev-aaaa'];
+
+test('access: a build asks for a docker place, runs under company-run in the worker\'s name, and returns the digest', async () => {
+  const { env, runner, ask, events } = await setup('');
+  try {
+    runner.output = () => ({ text: 'clone\nbuild\npush\ndigest: sha256:' + 'b'.repeat(64) + '\n', code: 0 });
+    const r = await ask({ resource: 'build:hq-host', argv: BUILD, why: 'image ל-dev' }) as any;
+    assert.equal(r.status, 'done');
+    assert.match(r.output, /digest: sha256:b{64}/);
+    assert.equal(env.hq.inbox.open().filter((i) => i.kind === 'go').length, 0, 'a push to the registry is not a deploy: no card');
+    assert.equal(events('access.granted')[0].by, 'auto:non-prod');
+    const j = runner.started[0]!;
+    assert.equal(j.cmd, 'env');
+    assert.equal(j.args[0], 'COMPANY_IDENTITY=ac-ceo');
+    assert.match(j.args[1]!, /^COMPANY_STATE_DIR=/);
+    assert.match(j.args[2]!, /scripts\/company-run$/);
+    assert.deepEqual(j.args.slice(3, 6), ['--lease', 'lease-1', '--']);
+    assert.deepEqual(j.args.slice(6), ['/engine/scripts/access-build.sh', ...BUILD, '.']);
+    assert.equal(j.timeoutSec, 1500);
+    const lease = env.hq.store.db.prepare('SELECT class, machine, shift FROM leases WHERE id = 1').get() as any;
+    assert.deepEqual(lease, { class: 'docker', machine: 'local', shift: 'ac-ceo-1' });
+  } finally { await env.cleanup(); }
+});
+
+test('access: a build with no room waits with its place, and runs when the place is free', async () => {
+  const { env, runner, ask } = await setup('');
+  try {
+    // someone else holds the room of the whole machine
+    const other = env.hq.store.db.prepare(`INSERT INTO shifts (id, identity, shift_no, state, started_at) VALUES ('amit-1', 'amit', 1, 'live', ?)`);
+    other.run(env.clock.now());
+    const t = env.hq.scheduler.addTask({ title: 'אחר', project: 'agent-company' });
+    env.hq.store.db.prepare(`UPDATE tasks SET identity = 'amit', state = 'running' WHERE id = ?`).run(t.id);
+    assert.equal(((await env.hq.leases.request({ identity: "amit", shift: "amit-1", class: "build", wait: 0 })) as any).status, "granted");
+    const first = await ask({ resource: 'build:hq-host', argv: BUILD }) as any;
+    assert.equal(first.status, 'pending');
+    assert.match(first.message, /מחכה למקום/);
+    assert.equal(runner.started.length, 0);
+    assert.equal(((await ask({ request: first.request })) as any).status, 'pending', 'coming back keeps the place and does not queue twice');
+    assert.equal(env.hq.leases.list().filter((l) => l.identity === 'ac-ceo').length, 1);
+    for (const l of env.hq.leases.list().filter((x) => x.identity === 'amit')) env.hq.leases.end(l.id, 'released');
+    const done = await ask({ request: first.request }) as any;
+    assert.equal(done.status, 'done');
+    assert.equal(runner.started.length, 1);
+  } finally { await env.cleanup(); }
+});
+
+test('access: a build of a repo or a tag that is not ours is refused before it asks for a place', async () => {
+  const { env, runner, ask } = await setup('');
+  try {
+    const r1 = await ask({ resource: 'build:hq-host', argv: ['someone/else', SHA, 'Dockerfile', 'ghcr.io/hive-owner/x:1'] }) as any;
+    assert.equal(r1.status, 'denied');
+    const r2 = await ask({ resource: 'build:hq-host', argv: ['hive-owner/lumo', SHA, 'Dockerfile', 'ghcr.io/other/x:1'] }) as any;
+    assert.equal(r2.status, 'denied');
+    assert.equal(runner.started.length, 0);
+    assert.equal(env.hq.leases.list().length, 0);
   } finally { await env.cleanup(); }
 });

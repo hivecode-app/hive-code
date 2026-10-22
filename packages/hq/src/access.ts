@@ -9,12 +9,14 @@
 // Nothing here copies a secret anywhere: the catalog (<state>/access/catalog.json) only points at what is already on this machine.
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, openSync, readSync, closeSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { OWNER } from '@company/shared';
+import { ENV, OWNER } from '@company/shared';
 import type { Hq } from './hq.ts';
 import { getIdentity } from './org.ts';
 import { readCharter } from './workspace.ts';
+import type { LeaseReply } from './leases.ts';
 import { describeResource, parseCatalog, planAccess, redact, type AccessClass, type Catalog, type Plan, type Resource } from './access-policy.ts';
 
 /** At most this many at once: the runs are only a relay (ssh, kubectl), but the server is shared. */
@@ -23,9 +25,13 @@ export const DEFAULT_WAIT_S = 90;
 export const MAX_WAIT_S = 100;
 export const DEFAULT_TIMEOUT_S = 600;
 export const MAX_TIMEOUT_S = 1800;
+/** A build runs under a `docker` lease (30 minutes); the job ends a little before it. */
+export const BUILD_TIMEOUT_S = 1500;
+/** The scripts of the engine this hq runs from: the build script and company-run. */
+const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'scripts');
 export const TAIL_LINES = 200;
 const TAIL_CHARS = 20_000;
-const LOG_LIMIT_BLOCKS = 2048; // ulimit -f, 512-byte blocks: 1MB a job
+const LOG_LIMIT_BLOCKS = 2048; // ulimit -S -f, 512-byte blocks: 1MB a job (soft, so a build script may lift it for its clone)
 const QUERY_ROWS = 200;
 const QUERY_MS = 10_000;
 
@@ -60,7 +66,7 @@ export interface JobRunner {
   stop(j: { id: number; exitPath: string }): Promise<void>;
 }
 
-const SCRIPT = 'ulimit -f "$4"; log=$1; ex=$2; secs=$3; shift 4; timeout -k 10 "$secs" "$@" >"$log" 2>&1 </dev/null; echo $? >"$ex.tmp"; mv "$ex.tmp" "$ex"';
+const SCRIPT = 'ulimit -S -f "$4"; log=$1; ex=$2; secs=$3; shift 4; timeout -k 10 "$secs" "$@" >"$log" 2>&1 </dev/null; echo $? >"$ex.tmp"; mv "$ex.tmp" "$ex"';
 
 /** A job outlives hq: a transient user unit (systemd-run), else a detached process. Output goes to a file, the exit code to another. */
 export class SystemdRunner implements JobRunner {
@@ -87,6 +93,7 @@ export class SystemdRunner implements JobRunner {
 }
 
 const CLASS_HE: Record<AccessClass, string> = { read: 'קריאה', write: 'שינוי', exec: 'הרצת פקודה בתוך ה-pod' };
+const timeoutOf = (resource: string) => (resource.startsWith('build:') ? BUILD_TIMEOUT_S : DEFAULT_TIMEOUT_S);
 const asS = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
 
 export class Access {
@@ -116,6 +123,7 @@ export class Access {
     try {
       const r = parseCatalog(JSON.parse(readFileSync(file, 'utf8')));
       catalog = r.catalog;
+      for (const res of Object.values(catalog)) if (res.type === 'build') res.script = res.script ?? join(SCRIPTS, 'access-build.sh');
       if (r.problems.length) this.hq.store.emit('access.catalog_problems', null, { problems: r.problems });
     } catch (e) {
       this.hq.store.emit('access.catalog_problems', null, { problems: [(e as Error).message] });
@@ -278,12 +286,19 @@ export class Access {
   private async start(r: AccessRow, plan: Plan, waitS: number, by?: string): Promise<AccessReply> {
     if (plan.kind === 'process') {
       const now = this.now();
-      const running = (this.db.prepare(`SELECT id, started_at FROM access_requests WHERE state = 'running'`).all() as { id: number; started_at: number | null }[])
-        .filter((x) => !existsSync(this.exitPath(x.id)) && now - (x.started_at ?? now) < (DEFAULT_TIMEOUT_S + 60) * 1000).length;
+      const running = (this.db.prepare(`SELECT id, resource, started_at FROM access_requests WHERE state = 'running'`).all() as { id: number; resource: string; started_at: number | null }[])
+        .filter((x) => !existsSync(this.exitPath(x.id)) && now - (x.started_at ?? now) < (timeoutOf(x.resource) + 60) * 1000).length;
       if (running >= MAX_RUNNING) {
         if (by) this.setState(r.id, 'pending', { approved_by: by, decided_at: now });
         return { status: 'pending', request: `acc-${r.id}`, message: `יש כבר ${MAX_RUNNING} פעולות שרצות. אושר, ולא רץ. חזור עוד דקה עם \`request: "acc-${r.id}"\`.` };
       }
+    }
+    // A build is heavy: it asks for its place like a worker would (a `docker` lease), and runs under it.
+    let run = plan.kind === 'process' ? { cmd: plan.cmd, args: plan.args } : null;
+    if (plan.kind === 'process' && plan.lease) {
+      const got = await this.lease(r, plan.lease, waitS, by);
+      if ('reply' in got) return got.reply;
+      run = got.run(plan);
     }
     if (!this.claim(r.id, by)) return this.advance(this.row(r.id)!, waitS);
     if (by === 'owner') this.hq.store.emit('access.granted', r.identity, { request: r.id, by: 'owner' });
@@ -296,11 +311,29 @@ export class Access {
       return this.watch(cur, Date.now() + 1000);
     }
     try {
-      await this.runner.start({ id: r.id, cmd: plan.cmd, args: plan.args, logPath: this.logPath(r.id), exitPath: this.exitPath(r.id), timeoutSec: DEFAULT_TIMEOUT_S });
+      await this.runner.start({ id: r.id, cmd: run!.cmd, args: run!.args, logPath: this.logPath(r.id), exitPath: this.exitPath(r.id), timeoutSec: timeoutOf(r.resource) });
     } catch (e) {
       return this.finish(cur, 127, `לא הצלחתי להפעיל: ${(e as Error).message}`, true);
     }
     return this.watch(cur, Date.now() + waitS * 1000);
+  }
+
+  /** The place for a heavy request on this machine: granted → the command wrapped in company-run; queued → pending (the request waits with its place); not possible → failed with the reason. */
+  private async lease(r: AccessRow, want: { class: string; note: string }, waitS: number, by: string | undefined):
+    Promise<{ reply: AccessReply } | { run: (p: Extract<Plan, { kind: 'process' }>) => { cmd: string; args: string[] } }> {
+    const rep = await this.hq.leases.request({ op: 'reserve', identity: r.identity, shift: r.shift, class: want.class, machine: 'local', note: want.note, wait: Math.max(0, waitS) }) as LeaseReply;
+    if (rep.status === 'granted') {
+      const name = rep.lease!;
+      return { run: (p) => ({ cmd: 'env', args: [`${ENV.identity}=${r.identity}`, `${ENV.stateDir}=${this.hq.cfg.stateDir}`, join(SCRIPTS, 'company-run'), '--lease', name, '--', p.cmd, ...p.args] }) };
+    }
+    if (rep.status === 'queued') {
+      if (by) this.setState(r.id, 'pending', { approved_by: by, decided_at: this.now() });
+      const eta = rep.eta_min ? `, הערכה כ-${rep.eta_min} דקות` : '';
+      return { reply: { status: 'pending', request: `acc-${r.id}`, message: `אושר, ומחכה למקום ל-${want.class} בשרת${rep.holder ? ` (מחזיק: ${rep.holder})` : ''}${rep.position ? `, מקום בתור ${rep.position}` : ''}${eta}. חזור עם \`request: "acc-${r.id}"\`: המקום בתור נשמר כל עוד חוזרים.` } };
+    }
+    // Unavailable, or released at once: this request ends here, with the reason as its output.
+    this.claim(r.id, by);
+    return { reply: this.finish(this.row(r.id)!, 1, rep.message + (rep.alternative ? `\n${rep.alternative}` : '')) };
   }
 
   private async watch(r: AccessRow, until: number): Promise<AccessReply> {
@@ -310,7 +343,7 @@ export class Access {
         return this.finish(r, Number.isFinite(code) ? code : 1, this.readLog(r.id));
       }
       // Gone without an exit file (the unit died with the machine): the job is lost, say so.
-      if (r.started_at && this.now() - r.started_at > (DEFAULT_TIMEOUT_S + 60) * 1000) return this.finish(r, 1, 'הפעולה נעלמה בלי קוד יציאה', true);
+      if (r.started_at && this.now() - r.started_at > (timeoutOf(r.resource) + 60) * 1000) return this.finish(r, 1, 'הפעולה נעלמה בלי קוד יציאה', true);
       if (Date.now() >= until) break;
       await sleep(Math.min(250, until - Date.now()));
     }

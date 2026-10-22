@@ -10,14 +10,16 @@ export interface KubeResource { type: 'kube'; namespace: string; kubeconfig?: st
 export interface SshAllow { argv: string[]; class?: AccessClass }
 export interface SshResource { type: 'ssh'; host: string; user?: string; port?: number; key?: string; allow: SshAllow[]; env?: string; projects?: string[] }
 export interface HqQueryResource { type: 'hq-query'; env?: string; projects?: string[] }
-export type Resource = KubeResource | SshResource | HqQueryResource;
+/** `build:<name>`: docker build and push of a repo's sha, on this machine, in a temp clone (access-build.sh). Pushes only under `registry`. */
+export interface BuildResource { type: 'build'; registry: string; owners?: string[]; script?: string; env?: string; projects?: string[] }
+export type Resource = KubeResource | SshResource | HqQueryResource | BuildResource;
 
-/** The catalog file's resource names: `kube:<name>`, `ssh:<name>`, `hq:query`. */
+/** The catalog file's resource names: `kube:<name>`, `ssh:<name>`, `build:<name>`, `hq:query`. */
 export type Catalog = Record<string, Resource>;
 
 /** What hq runs: a process (never through a shell of ours), or a read-only query on its own database. */
 export type Plan =
-  | { kind: 'process'; cmd: string; args: string[]; class: AccessClass; shown: string }
+  | { kind: 'process'; cmd: string; args: string[]; class: AccessClass; shown: string; lease?: { class: string; note: string } }
   | { kind: 'query'; sql: string; class: 'read'; shown: string };
 
 export type Verdict = { ok: true; plan: Plan } | { ok: false; kind: 'deny' | 'unfit'; why: string; hint?: string };
@@ -303,8 +305,42 @@ export function describeResource(name: string, res: Resource): string {
       const example = res.allow.find((r) => !r.argv.some((w) => w.includes('*')));
       return `\`${name}\` (${env}): argv מלא${example ? `, למשל \`${example.argv.join(' ')}\`` : ''}. מותר: ${sshAllowed(res)}`;
     }
+    case 'build': return `\`${name}\` (${env}): docker build ושליחה ל-\`${res.registry}\`. argv: [repo, sha מלא, נתיב Dockerfile, תג מלא, context אופציונלי]`;
     case 'hq-query': return `\`${name}\` (${env}): SELECT אחד על hq.db, ב-argv מחרוזת אחת`;
   }
+}
+
+// ── build and push ─────────────────────────────────────────────────────────
+
+export const DEFAULT_REGISTRY = 'ghcr.io/hive-owner/';
+const REPO = /^([A-Za-z0-9][A-Za-z0-9-]{0,38})\/([A-Za-z0-9._-]{1,100})$/;
+const SHA = /^[0-9a-f]{40}$/;
+const REL_PATH = /^[A-Za-z0-9._][A-Za-z0-9._/-]*$/;
+
+/** A relative path inside the clone: no way up, no flag, no absolute path. */
+const relPathOk = (p: string) => REL_PATH.test(p) && !p.split('/').includes('..') && !p.startsWith('-');
+
+/** `[repo, sha, dockerfile, tag, context?]` → the build script under a `docker` lease. The repo is ours, the sha is whole, the tag is under the registry. */
+export function planBuild(res: BuildResource, argv: string[]): Verdict {
+  const usage = '`["hive-owner/<repo>", "<sha של 40 תווים>", "<נתיב Dockerfile>", "ghcr.io/hive-owner/<שם>:<תג>", "<context, ברירת מחדל .>"]`';
+  if (argv.length < 4 || argv.length > 5) return unfit('build מקבל repo, sha, נתיב ל-Dockerfile ותג (ואופציונלית context)', usage);
+  const [repo, sha, dockerfile, tag, context = '.'] = argv as [string, string, string, string, string?];
+  const m = REPO.exec(repo);
+  if (!m) return unfit(`\`${repo}\` לא בצורה owner/name`, usage);
+  const owners = res.owners ?? ['hive-owner'];
+  // A repo of another owner is allowed in the catalog by name, once we have WRITE on it (access-build.sh checks that too).
+  if (!owners.includes(m[1]!) && !owners.includes(repo)) return deny(`ה-repo \`${repo}\` לא שלנו: מותר רק של ${owners.join(', ')}`);
+  if (!SHA.test(sha)) return unfit('ה-sha חייב להיות מלא (40 תווים, אותיות קטנות): ענף או תג לא מספיקים, כי הבנייה חייבת להיות קומיט אחד', usage);
+  if (!relPathOk(dockerfile)) return unfit(`נתיב ה-Dockerfile \`${dockerfile}\` לא מותר: יחסי ל-repo, בלי \`..\``);
+  if (context !== '.' && !relPathOk(context)) return unfit(`ה-context \`${context}\` לא מותר: תיקייה יחסית ל-repo, בלי \`..\``);
+  const registry = res.registry.endsWith('/') ? res.registry : `${res.registry}/`;
+  const t = /^([a-z0-9][a-z0-9._/-]*):([A-Za-z0-9_][A-Za-z0-9._-]{0,127})$/.exec(tag);
+  if (!t || !tag.startsWith(registry) || tag.length === registry.length || t[1]!.split('/').includes('..')) {
+    return deny(`התג חייב להיות תחת \`${registry}\` ובצורה \`${registry}<שם>:<תג>\``);
+  }
+  const script = res.script ?? 'access-build.sh';
+  return { ok: true, plan: { kind: 'process', cmd: script, args: [repo, sha, dockerfile, tag, context], class: 'write',
+    shown: `build ${repo}@${sha.slice(0, 12)} ${dockerfile} → ${tag}`, lease: { class: 'docker', note: `docker build ושליחה של ${repo} ל-${tag}` } } };
 }
 
 // ── hq.db, read only ───────────────────────────────────────────────────────
@@ -330,6 +366,7 @@ export function planAccess(name: string, res: Resource, argv: string[]): Verdict
   switch (res.type) {
     case 'kube': return planKube(res, argv);
     case 'ssh': return planSsh(res, argv);
+    case 'build': return planBuild(res, argv);
     case 'hq-query': return planQuery(argv);
     default: return unfit(`סוג משאב לא מוכר ב-${name}`);
   }
@@ -358,6 +395,10 @@ export function parseCatalog(raw: unknown): { catalog: Catalog; problems: string
       });
       catalog[name] = { type: 'ssh', host: str(o.host)!, ...(str(o.user) ? { user: str(o.user)! } : {}), ...(typeof o.port === 'number' ? { port: o.port } : {}),
         ...(str(o.key) ? { key: str(o.key)! } : {}), allow, ...common };
+    } else if (/^build:[a-z0-9-]+$/.test(name) && o.type === 'build') {
+      const owners = Array.isArray(o.owners) ? o.owners.filter((x): x is string => typeof x === 'string' && /^[A-Za-z0-9._/-]+$/.test(x)) : undefined;
+      catalog[name] = { type: 'build', registry: str(o.registry) && /^ghcr\.io\/[a-z0-9][a-z0-9._/-]*\/?$/.test(str(o.registry)!) ? str(o.registry)! : DEFAULT_REGISTRY,
+        ...(owners?.length ? { owners } : {}), ...(str(o.script) ? { script: str(o.script)! } : {}), ...common };
     } else if (name === 'hq:query' && o.type === 'hq-query') {
       catalog[name] = { type: 'hq-query', ...common };
     } else problems.push(`${name}: רשומה לא תקינה`);

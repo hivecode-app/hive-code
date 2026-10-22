@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { planBuild, type BuildResource } from '../src/access-policy.ts';
 import { describeResource, matchPattern, parseCatalog, planAccess, planKube, planQuery, planSsh, redact, type KubeResource, type SshResource } from '../src/access-policy.ts';
 
 const dev: KubeResource = { type: 'kube', namespace: 'lumo-dev', kubeconfig: '/k/dev.yaml', env: 'dev' };
@@ -179,4 +180,42 @@ test('ssh:ci-host catalog: cgroup files of a slice and docker system df fit; oth
   assert.ok(!ok(['cat', '/etc/shadow']));
   assert.ok(!ok(['cat', '/sys/fs/cgroup/../../etc/shadow']));
   assert.ok(!ok(['docker', 'system', 'prune']));
+});
+
+const buildRes: BuildResource = { type: 'build', registry: 'ghcr.io/hive-owner/', env: 'registry', script: '/s/access-build.sh' };
+const SHA40 = '0123456789abcdef0123456789abcdef01234567';
+const b = (...argv: string[]) => planBuild(buildRes, argv);
+
+test('build: our repo, a whole sha and a tag under the registry become the build script, under a docker lease', () => {
+  const v = b('hive-owner/lumo', SHA40, 'deploy/Dockerfile', 'ghcr.io/hive-owner/lumo-api:dev-0123456');
+  assert.ok(v.ok);
+  assert.deepEqual(v.plan, { kind: 'process', cmd: '/s/access-build.sh', args: ['hive-owner/lumo', SHA40, 'deploy/Dockerfile', 'ghcr.io/hive-owner/lumo-api:dev-0123456', '.'], class: 'write',
+    shown: 'build hive-owner/lumo@0123456789ab deploy/Dockerfile → ghcr.io/hive-owner/lumo-api:dev-0123456', lease: { class: 'docker', note: 'docker build ושליחה של hive-owner/lumo ל-ghcr.io/hive-owner/lumo-api:dev-0123456' } });
+  assert.ok(b('hive-owner/lumo', SHA40, 'Dockerfile', 'ghcr.io/hive-owner/a/b:1.2', 'services/api').ok);
+});
+
+test('build: another owner, a tag outside the registry, a short sha or a path up the tree are refused', () => {
+  const t = 'ghcr.io/hive-owner/x:1';
+  const refused = (v: ReturnType<typeof b>, kind: 'deny' | 'unfit') => { assert.ok(!v.ok); assert.equal(v.kind, kind, v.why); };
+  refused(b('stranger/repo', SHA40, 'Dockerfile', t), 'deny');
+  refused(b('hive-owner/lumo', SHA40, 'Dockerfile', 'ghcr.io/stranger/x:1'), 'deny');
+  refused(b('hive-owner/lumo', SHA40, 'Dockerfile', 'docker.io/hive-owner/x:1'), 'deny');
+  refused(b('hive-owner/lumo', SHA40, 'Dockerfile', 'ghcr.io/hive-owner/x'), 'deny');
+  refused(b('hive-owner/lumo', SHA40, 'Dockerfile', 'ghcr.io/hive-owner/../stranger/x:1'), 'deny');
+  refused(b('hive-owner/lumo', 'main', 'Dockerfile', t), 'unfit');
+  refused(b('hive-owner/lumo', SHA40.slice(0, 12), 'Dockerfile', t), 'unfit');
+  refused(b('hive-owner/lumo', SHA40, '../Dockerfile', t), 'unfit');
+  refused(b('hive-owner/lumo', SHA40, '/etc/passwd', t), 'unfit');
+  refused(b('hive-owner/lumo', SHA40, 'Dockerfile', t, '../..'), 'unfit');
+  refused(b('hive-owner/lumo', SHA40, '--target=x', t), 'unfit');
+  refused(b('hive-owner/lumo'), 'unfit');
+  // another owner's repo only by name in the catalog, once we have WRITE on it
+  assert.ok(planBuild({ ...buildRes, owners: ['hive-owner', 'partner/shared'] }, ['partner/shared', SHA40, 'Dockerfile', t]).ok);
+  assert.ok(!planBuild({ ...buildRes, owners: ['hive-owner', 'partner/shared'] }, ['partner/other', SHA40, 'Dockerfile', t]).ok);
+});
+
+test('build: the catalog entry loads with the default registry, and a registry outside ghcr is dropped to it', () => {
+  const { catalog } = parseCatalog({ resources: { 'build:hq-host': { type: 'build', env: 'registry' }, 'build:evil': { type: 'build', registry: 'evil.io/x/' } } });
+  assert.equal((catalog['build:hq-host'] as BuildResource).registry, 'ghcr.io/hive-owner/');
+  assert.equal((catalog['build:evil'] as BuildResource).registry, 'ghcr.io/hive-owner/');
 });

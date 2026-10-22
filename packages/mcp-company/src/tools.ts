@@ -187,13 +187,13 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       reason: s('למה ההרכבה הזו, בשורה / why this composition, one line'),
     }, ['blocks']),
     tool('request_access', 'הרצת פקודה על שרת, קלאסטר או מסד של החברה בשמך, בלי שיהיו לך המפתחות. hq בונה את הפקודה בעצמו מרשימות סגורות, מריץ אותה ומחזיר את הפלט. '
-      + 'resource: `kube:<שם>` (kubectl ב-namespace כפוי), `ssh:<שם>` (פקודה מרשימה) או `hq:query` (SELECT על hq.db). argv: המילים של הפקודה, בלי הקידומת (`["get","pods"]`, לא `kubectl get pods`). '
+      + 'resource: `kube:<שם>` (kubectl ב-namespace כפוי), `ssh:<שם>` (פקודה מרשימה), `build:<שם>` (docker build ו-push של קומיט ל-ghcr.io/hive-owner/*; argv = [repo, sha מלא, נתיב Dockerfile, תג מלא, context אופציונלי]; מחזיר digest, ו-push אינו פריסה) או `hq:query` (SELECT על hq.db). argv: המילים של הפקודה, בלי הקידומת (`["get","pods"]`, לא `kubectl get pods`). '
       + 'מותר: get, describe, logs --tail, rollout status|history|restart|undo, set image, scale, delete pod/<name>, exec <pod> -- <פקודה>. לא נתמך: `-f`, port-forward, apply, מעטפת אינטראקטיבית. הדגלים --kubeconfig, --token, --as ו-`-n` של namespace אחר נדחים תמיד. '
       + 'מחוץ לפרודקשן (dev, ci, hq:query) הכול רץ מיד. בפרודקשן קריאה עם grant באמנה רצה מיד, וכל השאר, כולל כל שינוי בכל פעם, מגיע ' + pre('ל', O) + ' ככרטיס עם הפקודה המדויקת: התשובה היא status pending, ממשיכים במה שלא תלוי בה, וחוזרים עם request. '
       + 'לא יודעים איזה משאב? לא מנחשים: שם שלא קיים חוזר עם unfit, וה-hint שלו מונה את המשאבים שפתוחים למשימה ואת הפקודות שמותרות בכל אחד. '
       + 'פקודה ארוכה חוזרת אחרי עד 90 שניות עם status running ו-request, וממשיכים לקרוא באותו request (הפלט נשמר). פקודה שלא ברשימה חוזרת עם unfit והצעה: לא מנסים לעקוף, ואם אין חלופה, `status` עם needs-local. '
       + 'Run a command on a company server, cluster or database in your name, without holding the keys. hq builds it from closed lists and returns the output. Pending approval or a long run: come back with `request`.', {
-      resource: s('kube:<name> | ssh:<name> | hq:query'),
+      resource: s('kube:<name> | ssh:<name> | build:<name> | hq:query'),
       argv: strs('מילות הפקודה בלי הקידומת, למשל ["rollout","status","deploy/api","--timeout=5m"]; ב-hq:query מחרוזת SQL אחת / the words of the command without the prefix; for hq:query one SQL string'),
       why: s('למה, שורה בעברית: ' + G('הוא', 'היא') + ' רואה את זה בכרטיס / why, one line in Hebrew'),
       request: s('acc-N: ממשיכים בקשה שחזרה pending או running / continue a request that came back pending or running'),
