@@ -107,6 +107,16 @@ test('matchPattern: a literal, * for one word, ** for the rest', () => {
   assert.ok(!matchPattern(['a'], ['b']));
   assert.ok(!matchPattern(['tail', '*'], ['tail', '-f']), 'a star is not a flag');
   assert.ok(!matchPattern(['cat', '/var/log/app/*'], ['cat', '/var/log/app/../../etc/shadow']), 'nor a way up');
+  assert.ok(matchPattern(['logs', '*', '--tail=*'], ['logs', 'api-1', '--tail=50']), 'a flag the pattern names may carry a star');
+  assert.ok(!matchPattern(['logs', '*', '--tail=*'], ['logs', 'api-1', '--since=1h']));
+  assert.ok(!matchPattern(['logs', '*', '--tail=*'], ['logs', 'api-1', '--tail=50', '-f']));
+  assert.ok(!matchPattern(['ls', '--dir=*'], ['ls', '--dir=a/../../etc']), 'still no way up');
+  assert.ok(!matchPattern(['ls', '--dir=*'], ['ls', '--dir=../etc']), 'nor right after the =');
+  assert.ok(!matchPattern(['ls', '--dir=*'], ['ls', '--dir=..']));
+  assert.ok(!matchPattern(['dd', 'if=*'], ['dd', 'if=../etc']));
+  assert.ok(!matchPattern(['curl', '--data=*'], ['curl', '--data=@../secret']));
+  assert.ok(!matchPattern(['ls', '--dir=*'], ['ls', '--dir=a,../etc']));
+  assert.ok(!matchPattern(['ls', '-n*'], ['ls', '-nf']), 'a short flag with a star would let others in');
   assert.ok(!matchPattern(['docker', 'logs', '**'], ['docker', 'logs', '--follow', 'x']));
   assert.ok(matchPattern(['docker', 'logs', '-f', '*'], ['docker', 'logs', '-f', 'api']), 'a flag named in the pattern is allowed');
 });

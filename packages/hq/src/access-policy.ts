@@ -236,17 +236,21 @@ export function planKube(res: KubeResource, argv: string[]): Verdict {
 /** An allowlist pattern: a word is itself (a `*` inside it stands for safe text), `*` alone is one safe word, `**` at the end is any number of them. */
 export function matchPattern(pattern: string[], argv: string[]): boolean {
   // A star never stands for a flag or a way up the tree: those must be named in the pattern to be allowed.
-  const wild = (a: string) => !a.startsWith('-') && !a.split('/').includes('..');
+  // `..` counts as a step up after `=`, `:`, `,` or `@` too ("if=../etc"), not only between slashes.
+  const noUp = (a: string) => !a.split(/[/=:,@]/).includes('..');
+  const wild = (a: string) => !a.startsWith('-') && noUp(a);
   for (let i = 0; i < pattern.length; i++) {
     const p = pattern[i]!;
     if (p === '**') return i === pattern.length - 1 && argv.slice(i).every(wild);
     const a = argv[i];
     if (a === undefined) return false;
     if (p === '*') { if (!wild(a)) return false; continue; }
-    // A word with a star in it ("ghcr.io/hive-owner/*") matches any safe text in the star's place.
+    // A word with a star in it ("ghcr.io/hive-owner/*") matches any safe text in the star's place. A pattern that names
+    // its flag up to the `=` ("--tail=*") lets the word be that flag; "-n*" would let "-nf" in, so it does not.
     if (p.includes('*')) {
       const re = new RegExp(`^${p.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[A-Za-z0-9._:/=@,+%-]*')}$`);
-      if (!re.test(a) || !wild(a)) return false;
+      const flag = p.startsWith('-') && p.slice(0, p.indexOf('*')).endsWith('=');
+      if (!re.test(a) || !(flag ? noUp(a) : wild(a))) return false;
     } else if (p !== a) return false;
   }
   return argv.length === pattern.length;
