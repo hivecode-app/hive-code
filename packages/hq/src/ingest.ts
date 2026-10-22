@@ -26,7 +26,7 @@ import { blobSha, MAX_TEXT_BYTES, secretIn } from './memory-registry.ts';
 import { guarded, requestUrl } from './http-guard.ts';
 import { EstimateError, parseEta } from './estimates.ts';
 
-const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home']);
+const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home', 'withdraw_ask']);
 
 export class IngestError extends Error {
   status: number;
@@ -124,6 +124,12 @@ export class Ingest {
         const ask = mailbox.ask({ msg_id: e.id, from: e.identity, question: need('question'), headline: s(a.headline),
           options: strList(a.options), blocking: a.blocking === true });
         return { ok: true, id: e.id, ref: ask.id };
+      }
+      case 'withdraw_ask': {
+        const id = need('ask');
+        const ask = mailbox.getAsk(id);
+        if (!ask || ask.from_identity !== e.identity) throw new IngestError(404, `withdraw_ask: no ask ${id} of ${e.identity}`, `אין שאלה פתוחה שלך עם המזהה ${id}`);
+        return { ok: true, id: e.id, ref: id, result: { withdrawn: mailbox.withdraw(id, s(a.note)) } };
       }
       case 'request_go': {
         const what = need('what');

@@ -173,6 +173,7 @@ test('migration: what was there before counts as read', () => {
     s.db.exec('DROP TABLE estimates'); // v21 (its indexes go with it)
     s.db.exec('DROP TABLE error_signatures'); // v23
     s.db.exec('ALTER TABLE inbox DROP COLUMN links'); // v24
+    s.db.exec('ALTER TABLE asks DROP COLUMN manager_note'); // v25
     s.db.pragma('user_version = 10');
     s.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, body, created_at) VALUES ('a', 'eli', 'owner', 'ישן', 100), ('b', 'eli', 'owner', 'ישן יותר', 50)`).run();
     (s as unknown as { migrate(): void }).migrate();

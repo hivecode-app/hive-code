@@ -477,6 +477,20 @@ const MIGRATIONS: string[] = [
   `,
   // v-next: the links under a decision in the app ("הדוח המלא", "ה-PR"): JSON [{kind: 'report' | 'pr', url}], NULL = none.
   `ALTER TABLE inbox ADD COLUMN links TEXT;`,
+  // v-next: what the manager wrote on an escalated ask without answering it (mailbox.ts tell): the card keeps its asker and buttons.
+  `
+  ALTER TABLE asks ADD COLUMN manager_note TEXT;
+  -- Once, at deploy (#331): an ask the manager "answered" with a plain tell (no "החלטתי במקומך" line) whose escalation note
+  -- is still open goes back to its asker's card, and the manager's words stay as the note.
+  CREATE TEMP TABLE repair_escalated AS
+    SELECT a.id FROM asks a JOIN inbox n ON n.ref = a.id AND n.kind = 'escalation_note' AND n.state = 'open'
+    WHERE a.state = 'answered' AND a.answered_by = 'manager' AND a.answer NOT LIKE 'החלטתי במקומך%';
+  UPDATE inbox SET state = 'open', resolved_at = NULL, acked_at = NULL WHERE kind = 'ask' AND ref IN (SELECT id FROM repair_escalated);
+  UPDATE inbox SET state = 'dismissed', resolved_at = CAST(strftime('%s', 'now') AS INTEGER) * 1000
+    WHERE kind = 'escalation_note' AND state = 'open' AND ref IN (SELECT id FROM repair_escalated);
+  UPDATE asks SET state = 'escalated', manager_note = answer, answer = NULL, answered_by = NULL, answered_at = NULL WHERE id IN (SELECT id FROM repair_escalated);
+  DROP TABLE repair_escalated;
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

@@ -453,6 +453,27 @@
    }
   },
   {
+   "name": "withdraw_ask",
+   "description": "סגירת שאלה שלך שההחלטה בה התקבלה בדרך אחרת, כדי שלא תישאר אצל רן בטאב \"החלטות\". הקריאה מוחקת את הכרטיס ולא שולחת תשובה. Withdraw an ask of yours that was decided another way, so it does not stay in רן's decisions tab. The card is closed; no answer is sent.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "ask": {
+      "type": "string",
+      "description": "מזהה השאלה (ה-ref שחזר מ-ask) / the ask id (the ref ask returned)"
+     },
+     "note": {
+      "type": "string",
+      "description": "למה נסגרה, שורה אחת בעברית / why it closed, one line in Hebrew"
+     }
+    },
+    "required": [
+     "ask"
+    ],
+    "additionalProperties": false
+   }
+  },
+  {
    "name": "request_go",
    "description": "בקשת אישור לפעולה. מופיעה אצלו כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. אישור או דחייה ברורים בשיחה (או הכפתור) סוגרים את הבקשה; כל מה אחר שהוא כותב מגיע אליך כהודעה רגילה והבקשה נשארת פתוחה. לא סוגרים את המשימה כל עוד היא פתוחה. Request a go-ahead before acting. He sees it as a message in his chat with you with a GO button: the headline first, the details (what) folded. Only a clear yes or no closes it; anything else he types reaches you as an ordinary message and the request stays open. The task is not closed while it is open.",
    "inputSchema": {

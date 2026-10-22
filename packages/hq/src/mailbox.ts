@@ -41,10 +41,13 @@ export const noForeignInjector: ForeignInjector = {
   async injectForeign() { throw new Error('adapter.injectForeign not available yet'); },
 };
 
+/** The manager's explicit decision on an escalated ask, as the escalation message asks for it. */
+const MANAGER_DECISION = /^\s*החלטתי במקומך\s*[:,\-–]?\s*/;
+
 const URGENCY_HE: Record<Urgency, string> = { urgent: 'דחופה', normal: 'רגילה', low: 'נמוכה' };
 
 interface AskRow { id: string; from_identity: string; question: string; headline: string | null; options: string; blocking: number; urgency: Urgency;
-  state: AskDTO['state']; answer: string | null; answered_by: AskDTO['answered_by']; created_at: number; escalated_at: number | null }
+  state: AskDTO['state']; answer: string | null; answered_by: AskDTO['answered_by']; created_at: number; escalated_at: number | null; manager_note: string | null }
 
 /** A `result` error of a turn that never started: no text, no turns, no time (a refused resume). */
 export function neverRan(ev: { subtype: string; text?: string; numTurns?: number; durationMs?: number }): boolean {
@@ -175,21 +178,33 @@ export class Mailbox {
   }
 
   /** Store then deliver. Idempotent by msg_id: a retried request returns the existing message. */
-  tell(req: TellRequest & { kind?: MessageKind; text_ref?: string; attachments?: string[] }): MessageRow {
+  tell(req: TellRequest & { kind?: MessageKind; text_ref?: string; attachments?: string[]; chat?: boolean }): MessageRow {
     const id = req.msg_id ?? `m-${randomUUID()}`;
     const existing = this.get(id);
     if (existing) return existing;
     const files = this.attachmentsFor(req.attachments ?? []);
     if (!req.to || (!req.body && !files.length)) throw new Error('to and body are required');
     const from = req.from ?? OWNER;
-    // Answering an ask = a reply with ref=<ask id> to the asker: from the owner, or from the manager once
-    // it was escalated to him (A.4 "החלטתי במקומך"). It goes through answer() so the inbox closes too.
-    if (req.ref && (from === OWNER || from === this.cfg.managerId)) {
+    // What closes an ask: an explicit answer (the app's button or reply, `answer`), or his own words in that worker's
+    // conversation while its card is open. A worker's tell closes nothing, the manager's included: with ref=<ask> on
+    // an escalated ask it is a note on the card, unless it opens with the decision line ("החלטתי במקומך").
+    if (req.ref && from === this.cfg.managerId) {
       const a = this.getAsk(req.ref);
-      if (a && a.from_identity === req.to && (a.state === 'open' || a.state === 'escalated')
-        && (from === OWNER || a.state === 'escalated')) {
-        this.answer(a.id, req.body ?? '', from === OWNER ? 'owner' : 'manager', undefined, req.attachments);
-        return this.get(`${a.id}-answer`)!;
+      if (a && a.from_identity === req.to && a.state === 'escalated') {
+        if (MANAGER_DECISION.test(req.body ?? '')) {
+          this.answer(a.id, req.body ?? '', 'manager', undefined, req.attachments);
+          return this.lastAnswer(a.id)!;
+        }
+        this.store.db.prepare('UPDATE asks SET manager_note = ? WHERE id = ?').run(req.body ?? '', a.id);
+        this.store.emit('ask.noted', a.from_identity, this.getAsk(a.id)!);
+      }
+    }
+    if (req.chat && from === OWNER && (req.kind ?? 'tell') === 'tell') {
+      const target = req.ref ? this.getAsk(req.ref) : undefined;
+      const open = target ? [target] : (this.store.db.prepare(`SELECT * FROM asks WHERE from_identity = ? AND state IN ('open','escalated')`).all(req.to) as AskRow[]).map(askDTO);
+      if (open.length === 1 && open[0]!.from_identity === req.to && (open[0]!.state === 'open' || open[0]!.state === 'escalated')) {
+        this.answer(open[0]!.id, req.body ?? '', 'owner', undefined, req.attachments);
+        return this.lastAnswer(open[0]!.id)!;
       }
     }
     const now = this.store.now();
@@ -593,7 +608,7 @@ export class Mailbox {
       const a = this.getAsk(item.ref);
       if (a && (a.state === 'open' || a.state === 'escalated')) {
         this.answer(a.id, opts.note ?? 'סיימתי');
-        return { item: this.inbox.get(itemId), message: this.get(`${a.id}-answer`) ?? null };
+        return { item: this.inbox.get(itemId), message: this.lastAnswer(a.id) ?? null };
       }
     }
     if (item.state !== 'open') return { item, message: null };
@@ -654,7 +669,7 @@ export class Mailbox {
     if (!open) throw new Error(`inbox item ${itemId} is already handled`);
     if (item.kind === 'ask' && item.ref && this.getAsk(item.ref)) {
       const a = this.answer(item.ref, text, 'owner', undefined, attachments);
-      return { item: this.inbox.get(itemId), message: this.get(`${a.id}-answer`) ?? null };
+      return { item: this.inbox.get(itemId), message: this.lastAnswer(a.id) ?? null };
     }
     const requester = item.from_identity;
     if (!requester || requester === OWNER || requester === 'hq' || !getIdentity(this.store, requester)) {
@@ -739,16 +754,42 @@ export class Mailbox {
     this.inbox.resolveByRef('ask', id);
     if (fromHq) this.onHqAnswer?.(id, answer);
     const from = by === 'owner' ? OWNER : this.cfg.managerId;
-    if (!fromHq) this.tell({ msg_id: `${id}-answer`, from, to: a.from_identity, kind: 'answer', ref: id, urgency: a.urgency, priority: 'now',
+    if (!fromHq) this.tell({ msg_id: this.freshAnswerId(id), from, to: a.from_identity, kind: 'answer', ref: id, urgency: a.urgency, priority: 'now',
       body: by === 'owner' ? `תשובה לשאלה ${id}: ${answer}` : `${this.names.manager.name} ${g(this.names.manager, 'החליט', 'החליטה')} במקום ${this.names.owner.name} (${id}): ${answer}${why ? `, כי ${why}` : ''}`, attachments });
-    if (by === 'manager') {
-      // "החלטתי במקומך: X, כי Y" — informational, never pushed.
+    // "החלטתי במקומך: X, כי Y" — informational, never pushed, and never beside an open card of the same ask.
+    if (by === 'manager' && !this.store.db.prepare(`SELECT 1 FROM inbox WHERE ref = ? AND kind = 'ask' AND state = 'open'`).get(id)) {
       this.inbox.add({ kind: 'escalation_note', title: `${this.label(this.cfg.managerId)} ${g(this.names.manager, 'החליט', 'החליטה')} במקומך`, from_identity: this.cfg.managerId,
         body: `${a.question}\n→ ${answer}${why ? `, כי ${why}` : ''}`, ref: id, urgency: 'low', dedupe_key: `escalation_note:${id}` });
     }
     const out = this.getAsk(id)!;
     this.store.emit('ask.answered', a.from_identity, out);
     return out;
+  }
+
+  /**
+   * One id per answer: an ask can be answered again after it was put back (repairEscalated, a manual reopen), and tell()
+   * returns the existing message for a known id, so a second answer under `<ask>-answer` would never be delivered.
+   */
+  private freshAnswerId(ask: string): string {
+    let id = `${ask}-answer`;
+    for (let n = 2; this.get(id); n++) id = `${ask}-answer-${n}`;
+    return id;
+  }
+
+  /** The newest answer message the asker got for this ask. */
+  private lastAnswer(ask: string): MessageRow | undefined {
+    const r = this.store.db.prepare(`SELECT id FROM messages WHERE ref = ? AND kind = 'answer' ORDER BY rowid DESC LIMIT 1`).get(ask) as { id: string } | undefined;
+    return r ? this.get(r.id) : undefined;
+  }
+
+  /** A worker closes its own ask (decided another way): the card goes, nothing is sent. False = nothing was open. */
+  withdraw(id: string, note?: string): boolean {
+    const a = this.getAsk(id);
+    if (!a || (a.state !== 'open' && a.state !== 'escalated')) return false;
+    this.store.db.prepare(`UPDATE asks SET state = 'cancelled', answered_at = ? WHERE id = ?`).run(this.store.now(), id);
+    this.inbox.resolveByRef('ask', id, 'dismissed');
+    this.store.emit('ask.cancelled', a.from_identity, { id, note: note ?? null });
+    return true;
   }
 
   /** Scheduler code, not an LLM remembering to check (B.4): blocking ask unanswered → manager. */
@@ -760,7 +801,7 @@ export class Mailbox {
         `שאלה חוסמת מ-${this.label(a.from_identity)} לא נענתה ע"י ${this.names.owner.name} (${why}).`,
         `שאלה (${a.id}): ${a.question}`,
         a.options.length ? `אפשרויות: ${a.options.join(' / ')}` : '',
-        `אם זה בסמכותך: ענה עם tell(to="${a.from_identity}", ref="${a.id}", body="החלטתי במקומך: X, כי Y"). אם לא: השאר אותה ${pre('ל', this.names.owner.name)}.`,
+        `אם זה בסמכותך: ענה עם tell(to="${a.from_identity}", ref="${a.id}", body="החלטתי במקומך: X, כי Y"). אם לא: השאר אותה ${pre('ל', this.names.owner.name)}. כל tell אחר עם ה-ref הזה לא עונה על השאלה: הוא נשאר הערה קטנה בכרטיס, והכרטיס נשאר של ${this.label(a.from_identity)} עם הכפתורים שלו.`,
       ].filter(Boolean).join('\n') });
     this.store.emit('ask.escalated', a.from_identity, { id: a.id, why });
   }

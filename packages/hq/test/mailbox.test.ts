@@ -128,22 +128,87 @@ test('retry with resurrection actually re-sends: a message the old process never
   } finally { await env.cleanup(); }
 });
 
-test('the manager answers an escalated ask by replying with ref=<ask id>', async () => {
+test('the manager answers an escalated ask only with the explicit decision line; any other tell is a note on the card', async () => {
   const env = await makeEnv();
   try {
     const { hq, clock } = env;
-    hq.mailbox.ask({ msg_id: 'ask-m', from: 'eli', question: 'לחדש את הדומיין?', blocking: true });
+    hq.mailbox.ask({ msg_id: 'ask-m', from: 'eli', question: 'לחדש את הדומיין?', options: ['כן', 'לא'], blocking: true });
     hq.mailbox.tell({ msg_id: 'early', from: 'yoav', to: 'eli', ref: 'ask-m', body: 'כן' });
     assert.equal(hq.mailbox.getAsk('ask-m')!.state, 'open', 'not escalated yet: yoav can\'t decide for the owner');
     clock.advance(11 * 60_000);
     hq.scheduler.escalateAsks();
     assert.match(hq.mailbox.get('ask-m-escalation')!.body, /tell\(to="eli", ref="ask-m"/);
+    // Dana's case (#331): "I can't answer this for him" is not an answer.
+    hq.mailbox.tell({ msg_id: 'y-0', from: 'yoav', to: 'eli', ref: 'ask-m', body: 'את זה אני לא יכול לענות במקומו' });
+    let a = hq.mailbox.getAsk('ask-m')!;
+    assert.equal(a.state, 'escalated');
+    assert.equal(a.manager_note, 'את זה אני לא יכול לענות במקומו');
+    const cards = hq.inbox.open().filter((i) => i.ref === 'ask-m');
+    assert.deepEqual(cards.map((c) => c.kind), ['ask'], 'still the asker\'s card, no escalation_note beside or instead');
+    assert.equal(cards[0]!.from_identity, 'eli');
+    assert.equal(hq.mailbox.get('ask-m-answer'), undefined);
     hq.mailbox.tell({ msg_id: 'y-1', from: 'yoav', to: 'eli', ref: 'ask-m', body: 'החלטתי במקומך: כן, כי זה 12$' });
-    const a = hq.mailbox.getAsk('ask-m')!;
+    a = hq.mailbox.getAsk('ask-m')!;
     assert.equal(a.state, 'answered');
     assert.equal(a.answered_by, 'manager');
+    assert.match(a.answer!, /כן, כי זה 12\$/);
     assert.ok(hq.inbox.open().some((i) => i.kind === 'escalation_note'));
     assert.equal(hq.mailbox.get('ask-m-answer')!.priority, 'now');
+  } finally { await env.cleanup(); }
+});
+
+test('his plain text in the asker\'s conversation answers its open ask (Boaz\'s case, #331); a worker\'s tell closes nothing', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    hq.mailbox.ask({ msg_id: 'ask-b', from: 'eli', question: 'לפרוס?', blocking: true });
+    // Another worker's tell, and a tell from eli to someone else, close nothing.
+    hq.mailbox.tell({ msg_id: 'w-1', from: 'noa', to: 'eli', ref: 'ask-b', body: 'ענו כבר' });
+    assert.equal(hq.mailbox.getAsk('ask-b')!.state, 'open');
+    // Written for another conversation: not this ask's.
+    hq.mailbox.tell({ msg_id: 'o-0', from: 'owner', to: 'noa', body: 'כן', chat: true });
+    assert.equal(hq.mailbox.getAsk('ask-b')!.state, 'open');
+    // Internal owner-side tells (no chat flag) do not answer either.
+    hq.mailbox.tell({ msg_id: 'o-1', from: 'owner', to: 'eli', body: 'תזכורת' });
+    assert.equal(hq.mailbox.getAsk('ask-b')!.state, 'open');
+    const m = hq.mailbox.tell({ msg_id: 'o-2', from: 'owner', to: 'eli', body: 'כן, תפרוס', chat: true });
+    assert.equal(hq.mailbox.getAsk('ask-b')!.state, 'answered');
+    assert.equal(hq.mailbox.getAsk('ask-b')!.answered_by, 'owner');
+    assert.match(m.body, /כן, תפרוס/);
+    assert.ok(!hq.inbox.open().some((i) => i.ref === 'ask-b'), 'the card is closed');
+  } finally { await env.cleanup(); }
+});
+
+test('GO: his free text does not close the request, a worker\'s withdraw_ask closes its own ask only', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    const go = hq.inbox.add({ kind: 'go', from_identity: 'eli', title: 'GO: פריסה', blocking: true, ref: 'go-1' });
+    hq.mailbox.reply(go.id, 'למה?');
+    assert.equal(hq.inbox.get(go.id)!.state, 'open');
+    hq.mailbox.ask({ msg_id: 'ask-w', from: 'eli', question: 'לפרוס?', blocking: true });
+    assert.equal(hq.mailbox.withdraw('ask-w', 'הוחלט בשיחה'), true);
+    assert.equal(hq.mailbox.getAsk('ask-w')!.state, 'cancelled');
+    assert.ok(!hq.inbox.open().some((i) => i.ref === 'ask-w'));
+    assert.equal(hq.mailbox.withdraw('ask-w'), false, 'idempotent');
+    assert.equal(hq.mailbox.get('ask-w-answer'), undefined, 'nothing is sent to the asker');
+  } finally { await env.cleanup(); }
+});
+
+test('a second answer to an ask that was put back is delivered under its own id, never swallowed (#331)', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    hq.mailbox.ask({ msg_id: 'ask-r', from: 'eli', question: 'איזה?', options: ['א', 'ב'], blocking: true });
+    // The first answer took `ask-r-answer` (the manager's, the old way); the ask was then reopened by hand.
+    hq.mailbox.tell({ msg_id: 'ask-r-answer', from: 'yoav', to: 'eli', kind: 'answer', ref: 'ask-r', body: 'לא יכול לענות' });
+    hq.store.db.prepare(`UPDATE asks SET state = 'open' WHERE id = 'ask-r'`).run();
+    hq.mailbox.answer('ask-r', 'נפתח הצ\'אט', 'owner');
+    const mine = hq.store.db.prepare(`SELECT id, from_identity, body FROM messages WHERE ref = 'ask-r' AND kind = 'answer' ORDER BY rowid`).all() as { id: string; from_identity: string; body: string }[];
+    assert.equal(mine.length, 2);
+    assert.equal(mine[1]!.from_identity, 'owner');
+    assert.match(mine[1]!.body, /נפתח הצ'אט/);
+    assert.notEqual(mine[1]!.id, mine[0]!.id);
   } finally { await env.cleanup(); }
 });
 

@@ -79,6 +79,8 @@ export interface AskDTO {
   answered_by: 'owner' | 'manager' | null;
   created_at: number;
   escalated_at: number | null;
+  /** What the one it was escalated to wrote about it (a tell, not an answer): a small line on the card. */
+  manager_note: string | null;
 }
 
 /** Writers (mcp-company, hooks spool collector) POST these to hq. msg_id makes retries idempotent. */

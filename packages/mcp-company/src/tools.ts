@@ -149,6 +149,11 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
         + '/ close even though the owner is still waiting for an answer from the worker (without it hq warns and does not close)' },
       ...awaitingArgs,
     }, ['team']),
+    tool('withdraw_ask', 'סגירת שאלה שלך שההחלטה בה התקבלה בדרך אחרת, כדי שלא תישאר אצל ' + O + ' בטאב "החלטות". הקריאה מוחקת את הכרטיס ולא שולחת תשובה. '
+      + 'Withdraw an ask of yours that was decided another way, so it does not stay in ' + O + '\'s decisions tab. The card is closed; no answer is sent.', {
+      ask: s('מזהה השאלה (ה-ref שחזר מ-ask) / the ask id (the ref ask returned)'),
+      note: s('למה נסגרה, שורה אחת בעברית / why it closed, one line in Hebrew'),
+    }, ['ask']),
     tool('request_go', 'בקשת אישור לפעולה. מופיעה ' + G('אצלו', 'אצלה') + ' כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. '
       + 'אישור או דחייה ברורים בשיחה (או הכפתור) סוגרים את הבקשה; כל מה אחר ' + G('שהוא כותב', 'שהיא כותבת') + ' מגיע אליך כהודעה רגילה והבקשה נשארת פתוחה. לא סוגרים את המשימה כל עוד היא פתוחה. '
       + 'Request a go-ahead before acting. ' + G('He sees', 'She sees') + ' it as a message in ' + G('his', 'her') + ' chat with you with a GO button: the headline first, '
@@ -228,7 +233,7 @@ export function validateArgs(def: ToolDef, args: unknown): string | null {
 
 /** Everything a person reads goes out in Hebrew (dir-0002, #51): message text by line, titles whole. */
 const HEBREW_TEXT: Partial<Record<ToolDef['name'], string[]>> = {
-  tell: ['body'], ask: ['question'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'],
+  tell: ['body'], ask: ['question'], withdraw_ask: ['note'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'],
 };
 const HEBREW_TITLE: Partial<Record<ToolDef['name'], string[]>> = {
   open_team: ['name'], open_ticket: ['title'], ask: ['headline'], request_go: ['headline'],

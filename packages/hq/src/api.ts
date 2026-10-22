@@ -228,7 +228,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     return { message: hq.mailbox.tell({
       msg_id: str(b.msg_id, 'msg_id', false), from: str(b.from, 'from', false), to: str(b.to, 'to')!, body: str(b.body, 'body', !hasFiles(b)) ?? '',
       urgency: oneOf(b.urgency, URGENCIES, 'urgency'), priority: oneOf(b.priority, PRIORITIES, 'priority'), ref: str(b.ref, 'ref', false),
-      attachments: strings(b.attachments, 'attachments'),
+      attachments: strings(b.attachments, 'attachments'), chat: true,
     }) };
   });
   route('POST', '/api/messages/:id/handled', ({ params }) => ({ ok: hq.mailbox.markHandled(decodeURIComponent(params[0]!)) }));
