@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkMerge, detectMerges, verdictFor, type GhRun } from '../src/index.ts';
 
+const W = process.cwd(); // a directory that exists
 const SHA = 'a'.repeat(40);
 const OLD = 'b'.repeat(40);
 const approve = (sha: string) => `## סקירה\n\nreviewed: ${sha}\n\n**החלטה: approve**\n`;
@@ -32,57 +33,57 @@ test('detectMerges: other commands are not merges', () => {
 });
 
 test('approve on the head sha passes; a prefix sha too', async () => {
-  assert.equal(await checkMerge('gh pr merge 5', '/w', gh(view([{ body: approve(SHA), createdAt: '1' }]))), null);
-  assert.equal(await checkMerge('gh pr merge 5', '/w', gh(view([{ body: approve(SHA.slice(0, 8)), createdAt: '1' }]))), null);
-  assert.equal(await checkMerge('gh pr merge 5', '/w', gh(view([{ body: approve(SHA).replace(/\n/g, '\r\n'), createdAt: '1' }]))), null, 'CRLF');
+  assert.equal(await checkMerge('gh pr merge 5', W, gh(view([{ body: approve(SHA), createdAt: '1' }]))), null);
+  assert.equal(await checkMerge('gh pr merge 5', W, gh(view([{ body: approve(SHA.slice(0, 8)), createdAt: '1' }]))), null);
+  assert.equal(await checkMerge('gh pr merge 5', W, gh(view([{ body: approve(SHA).replace(/\n/g, '\r\n'), createdAt: '1' }]))), null, 'CRLF');
 });
 
 test('review (not comment) with approve passes', async () => {
-  assert.equal(await checkMerge('gh pr merge 5', '/w', gh({ headRefOid: SHA, comments: [], reviews: [{ body: approve(SHA), submittedAt: '1' }] })), null);
+  assert.equal(await checkMerge('gh pr merge 5', W, gh({ headRefOid: SHA, comments: [], reviews: [{ body: approve(SHA), submittedAt: '1' }] })), null);
 });
 
 test('old sha, no comment, wrong decision are blocked', async () => {
-  const none = await checkMerge('gh pr merge 5', '/w', gh(view([])));
+  const none = await checkMerge('gh pr merge 5', W, gh(view([])));
   assert.match(none!, /אין approve/);
   assert.match(none!, /skills\/reviewer/);
-  assert.match((await checkMerge('gh pr merge 5', '/w', gh(view([{ body: approve(OLD), createdAt: '1' }]))))!, /אין approve/);
-  assert.match((await checkMerge('gh pr merge 5', '/w', gh(view([{ body: 'נראה טוב\n**החלטה: approve**', createdAt: '1' }]))))!, /אין approve/);
+  assert.match((await checkMerge('gh pr merge 5', W, gh(view([{ body: approve(OLD), createdAt: '1' }]))))!, /אין approve/);
+  assert.match((await checkMerge('gh pr merge 5', W, gh(view([{ body: 'נראה טוב\n**החלטה: approve**', createdAt: '1' }]))))!, /אין approve/);
 });
 
 test('the latest comment for the sha decides', async () => {
   const a = { body: approve(SHA), createdAt: '2026-01-01T10:00' };
   const c = { body: changes(SHA), createdAt: '2026-01-01T11:00' };
-  assert.match((await checkMerge('gh pr merge 5', '/w', gh(view([c, a].reverse()))))!, /`changes`/, 'changes after approve');
-  assert.equal(await checkMerge('gh pr merge 5', '/w', gh(view([{ ...c, createdAt: '2026-01-01T09:00' }, a]))), null, 'approve after changes');
+  assert.match((await checkMerge('gh pr merge 5', W, gh(view([c, a].reverse()))))!, /`changes`/, 'changes after approve');
+  assert.equal(await checkMerge('gh pr merge 5', W, gh(view([{ ...c, createdAt: '2026-01-01T09:00' }, a]))), null, 'approve after changes');
 });
 
 test('the decision must be a whole line', async () => {
   const quoted = `reviewed: ${SHA}\n**החלטה: changes**\nלא לכתוב "**החלטה: approve**" לפני תיקון`;
-  assert.match((await checkMerge('gh pr merge 5', '/w', gh(view([{ body: quoted, createdAt: '1' }]))))!, /changes/);
+  assert.match((await checkMerge('gh pr merge 5', W, gh(view([{ body: quoted, createdAt: '1' }]))))!, /changes/);
   const inline = `reviewed: ${SHA}\nיש ממצאים, ההחלטה **החלטה: approve** נדחית`;
-  assert.ok(await checkMerge('gh pr merge 5', '/w', gh(view([{ body: inline, createdAt: '1' }]))));
+  assert.ok(await checkMerge('gh pr merge 5', W, gh(view([{ body: inline, createdAt: '1' }]))));
 });
 
 test("lumo's mark passes", async () => {
-  assert.equal(await checkMerge('gh pr merge 5', '/w', gh(view([{ body: `ship-step-4: reviewed ${SHA}`, createdAt: '1' }]))), null);
-  assert.ok(await checkMerge('gh pr merge 5', '/w', gh(view([{ body: `ship-step-4: reviewed ${OLD}`, createdAt: '1' }]))));
+  assert.equal(await checkMerge('gh pr merge 5', W, gh(view([{ body: `ship-step-4: reviewed ${SHA}`, createdAt: '1' }]))), null);
+  assert.ok(await checkMerge('gh pr merge 5', W, gh(view([{ body: `ship-step-4: reviewed ${OLD}`, createdAt: '1' }]))));
 });
 
 test('gh failure or bad output blocks, and says the check did not run', async () => {
   const boom: GhRun = async () => { throw new Error('network down'); };
-  assert.match((await checkMerge('gh pr merge 5', '/w', boom))!, /בדיקת הסקירה לא רצה/);
-  assert.match((await checkMerge('gh pr merge 5', '/w', async () => 'not json'))!, /בדיקת הסקירה לא רצה/);
+  assert.match((await checkMerge('gh pr merge 5', W, boom))!, /בדיקת הסקירה לא רצה/);
+  assert.match((await checkMerge('gh pr merge 5', W, async () => 'not json'))!, /בדיקת הסקירה לא רצה/);
 });
 
 test('gh is called only for merges, with repo and number', async () => {
   let calls: string[][] = [];
   const spy: GhRun = async (a) => { calls.push(a); return JSON.stringify(view([{ body: approve(SHA), createdAt: '1' }])); };
-  assert.equal(await checkMerge('ls && gh pr view 5', '/w', spy), null);
+  assert.equal(await checkMerge('ls && gh pr view 5', W, spy), null);
   assert.equal(calls.length, 0);
-  await checkMerge('gh pr merge 5 --repo o/r', '/w', spy);
+  await checkMerge('gh pr merge 5 --repo o/r', W, spy);
   assert.deepEqual(calls[0], ['pr', 'view', '5', '--repo', 'o/r', '--json', 'headRefOid,comments,reviews']);
   calls = [];
-  await checkMerge('gh pr merge --squash', '/w', spy);
+  await checkMerge('gh pr merge --squash', W, spy);
   assert.deepEqual(calls[0], ['pr', 'view', '--json', 'headRefOid,comments,reviews']);
 });
 
@@ -99,6 +100,31 @@ test('wrapped merges are detected', () => {
 });
 
 test('graphql merge is blocked; "xreviewed:" is not a mark', async () => {
-  assert.match((await checkMerge("gh api graphql -f query='mutation{mergePullRequest(input:{})}'", '/w', gh(view([]))))!, /graphql/);
-  assert.ok(await checkMerge('gh pr merge 5', '/w', gh(view([{ body: `xreviewed: ${SHA}\n**החלטה: approve**`, createdAt: '1' }]))));
+  assert.match((await checkMerge("gh api graphql -f query='mutation{mergePullRequest(input:{})}'", W, gh(view([]))))!, /graphql/);
+  assert.ok(await checkMerge('gh pr merge 5', W, gh(view([{ body: `xreviewed: ${SHA}\n**החלטה: approve**`, createdAt: '1' }]))));
+});
+
+const enoent = (): GhRun => async () => { throw Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' }); };
+
+test('checkMerge: a cd into a missing directory', async () => {
+  const none = () => false;
+  const calls: string[] = [];
+  const rec: GhRun = async (_a, c) => { calls.push(c); return JSON.stringify(view([{ body: approve(SHA), createdAt: '1' }])); };
+  // repo unknown without the directory: blocked, and the message says so
+  const r = await checkMerge('cd /nope/x && gh pr merge 5', '/hook', rec, none);
+  assert.match(r!, /התיקייה \/nope\/x לא קיימת, אי אפשר לזהות את ה-repo; מוסיפים `-R owner\/repo`/);
+  assert.equal(calls.length, 0);
+  // repo known via -R or GH_REPO: gh runs from the hook's own cwd
+  assert.equal(await checkMerge('cd /nope/x && gh pr merge 5 -R o/r', '/hook', rec, () => true), null);
+  assert.equal(await checkMerge('cd /nope/x && gh pr merge 5 -R o/r', '/hook', rec, (p) => p !== '/nope/x'), null);
+  assert.equal(await checkMerge('cd /nope/x && GH_REPO=o/r gh pr merge 5', '/hook', rec, (p) => p !== '/nope/x'), null);
+  assert.deepEqual(calls.slice(1), ['/hook', '/hook']);
+});
+
+test('checkMerge: ENOENT tells a missing gh from a missing directory', async () => {
+  const missingGh = await checkMerge('gh pr merge 5', W, enoent(), () => true);
+  assert.match(missingGh!, /`gh` לא נמצא ב-PATH/);
+  const missingDir = await checkMerge('gh pr merge 5 -R o/r', W, enoent(), () => false);
+  assert.match(missingDir!, /התיקייה .* לא קיימת/);
+  assert.doesNotMatch(missingDir!, /לא נמצא ב-PATH/);
 });

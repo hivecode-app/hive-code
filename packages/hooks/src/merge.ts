@@ -1,6 +1,7 @@
 // PreToolUse merge gate (dir-0011): a PR merges only when a review comment on its LAST commit says approve.
 // `detectMerges` is pure and synchronous (every Bash call pays for it); only a command that merges pays for `gh`.
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { lex, type Tok } from './guard.ts';
 
@@ -127,16 +128,30 @@ export const defaultGh: GhRun = (args, cwd, env) => new Promise((res, rej) => {
 
 /** Hebrew deny reason when the command merges a PR without an approve on its head commit; null otherwise.
  *  A failed check blocks too (no fail-open). */
-export async function checkMerge(command: string, cwd: string, run: GhRun = defaultGh): Promise<string | null> {
+export async function checkMerge(command: string, cwd: string, run: GhRun = defaultGh, exists: (p: string) => boolean = existsSync): Promise<string | null> {
   const targets = detectMerges(command, cwd);
   for (const t of targets) {
     if (t.unverifiable) return 'מיזוג דרך `gh api graphql` נחסם: אי אפשר לקשור אותו ל-PR ולבדוק עליו סקירה. ממזגים עם `gh pr merge <n>`.';
     const what = `${t.repo ?? 'ה-repo הנוכחי'}${t.ref ? `#${t.ref}` : ' (ה-PR של הענף הנוכחי)'}`;
+    // A `cd` into a directory that does not exist yet (a worktree about to be made): gh cannot start there.
+    // Run it from the hook's own cwd when the repo is known without a directory; otherwise say exactly that.
+    let runCwd = t.cwd;
+    if (!exists(t.cwd)) {
+      if (!t.repo && !t.env) {
+        return `מיזוג של ${what} נחסם: התיקייה ${t.cwd} לא קיימת, אי אפשר לזהות את ה-repo; מוסיפים \`-R owner/repo\`.`;
+      }
+      runCwd = cwd;
+    }
     let view: PrView;
     try {
       const args = ['pr', 'view', ...(t.ref ? [t.ref] : []), ...(t.repo ? ['--repo', t.repo] : []), '--json', 'headRefOid,comments,reviews'];
-      view = JSON.parse(await run(args, t.cwd, t.env ? { GH_REPO: t.env } : undefined)) as PrView;
+      view = JSON.parse(await run(args, runCwd, t.env ? { GH_REPO: t.env } : undefined)) as PrView;
     } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        return !exists(runCwd)
+          ? `מיזוג של ${what} נחסם: התיקייה ${runCwd} לא קיימת, ולכן בדיקת הסקירה לא רצה (זו לא תקלה ב-\`gh\`). מוסיפים \`-R owner/repo\` ורצים מתיקייה שקיימת.`
+          : `מיזוג של ${what} נחסם: \`gh\` לא נמצא ב-PATH, ולכן בדיקת הסקירה לא רצה. מתקינים אותו או מוסיפים אותו ל-PATH.`;
+      }
       return `מיזוג של ${what} נחסם: בדיקת הסקירה לא רצה (${e instanceof Error ? e.message.split('\n')[0] : String(e)}), ואין מיזוג בלי שהיא עברה. `
         + 'בודקים ש-`gh` מחובר ושיש רשת, ומנסים שוב.';
     }
