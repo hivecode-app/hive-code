@@ -20,6 +20,7 @@ usage() { echo "usage: scripts/deploy.sh hq|app|caddy|all [--sha <sha>]" >&2; ex
 target="${1:-}"
 case "$target" in hq | app | caddy | all) ;; *) usage ;; esac
 want_sha="${DEPLOY_SHA:-}"
+orig_args=("$@")
 shift
 while (($#)); do
   case "$1" in
@@ -56,8 +57,14 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 mkdir -p "$DSTATE"
 chmod 700 "$DSTATE"
-exec 9>"$DSTATE/lock"
-flock -n 9 || { echo "פריסה אחרת כבר רצה (נעילה ב-$DSTATE/lock)." >&2; exit 1; }
+# A re-exec (deploy_move_or_reexec) inherits fd 9 with the lock held. Reopening it would drop the lock, so it only
+# locks again, which on the same open file is a no-op.
+if [[ "${DEPLOY_REEXEC:-}" == 1 ]]; then
+  flock -n 9 2>/dev/null || { echo "DEPLOY_REEXEC=1 בלי הנעילה שעוברת בירושה (fd 9): ריצה חוזרת באה רק מ-deploy_move_or_reexec." >&2; exit 1; }
+else
+  exec 9>"$DSTATE/lock"
+  flock -n 9 || { echo "פריסה אחרת כבר רצה (נעילה ב-$DSTATE/lock)." >&2; exit 1; }
+fi
 
 summary=()
 say() { summary+=("$1"); echo "• $1"; }
@@ -133,6 +140,19 @@ fail() {
   exit 1
 }
 trap 'fail "פקודה נכשלה בשורה $LINENO: $BASH_COMMAND"' ERR
+# A refusal in the preflight: nothing to undo, unless this is a re-exec whose old copy already moved the checkout.
+refuse() {
+  if ((moved_checkout)); then fail "$1"; fi
+  echo "$1" >&2
+  if [[ -n "${2:-}" ]]; then echo "$2" >&2; fi
+  exit 1
+}
+# A re-exec (#209): the old copy moved the checkout before it handed over. Know that from here, so any failure from
+# now on (not only after deploy_move_or_reexec) puts the checkout back.
+if [[ "${DEPLOY_REEXEC:-}" == 1 && -n "${DEPLOY_PREV:-}" && "${DEPLOY_SHA_TO:-}" == "$(git -C "$repo" rev-parse HEAD)" ]]; then
+  cd "$repo"
+  prev_sha="$DEPLOY_PREV"; sha="$DEPLOY_SHA_TO"; moved_checkout="${DEPLOY_MOVED:-0}"
+fi
 
 # wait_health, active_shifts, hq_safe_restart: the same safe restart `company update` uses.
 # shellcheck source=lib/hq-restart.sh
@@ -142,12 +162,13 @@ source "$repo/scripts/lib/deploy-sha.sh"
 
 # ── preflight: only the production checkout, clean main, at origin/main (or the sha asked for) ──
 step "בדיקה מקדימה"
-[[ "$repo" == "$(cd "$PROD" && pwd -P)" ]] || { echo "רק מ-$PROD (משם hq רץ). כאן: $repo" >&2; exit 1; }
+[[ "$repo" == "$(cd "$PROD" && pwd -P)" ]] || refuse "רק מ-$PROD (משם hq רץ). כאן: $repo"
 cd "$repo"
-[[ "$(git rev-parse --abbrev-ref HEAD)" == main ]] || { echo "ה-checkout לא על main." >&2; exit 1; }
-[[ -z "$(git status --porcelain)" ]] || { echo "ה-checkout לא נקי:" >&2; git status --short >&2; exit 1; }
-git fetch -q origin main
-deploy_sha_move "$want_sha" || { echo "$DEPLOY_SHA_ERR." >&2; exit 1; }
+[[ "$(git rev-parse --abbrev-ref HEAD)" == main ]] || refuse "ה-checkout לא על main."
+[[ -z "$(git status --porcelain)" ]] || refuse "ה-checkout לא נקי:" "$(git status --short)"
+# A re-exec already has origin/main from the old copy's fetch.
+[[ "${DEPLOY_REEXEC:-}" == 1 ]] || git fetch -q origin main
+deploy_move_or_reexec "$repo/scripts/deploy.sh" "${orig_args[@]}" || refuse "$DEPLOY_SHA_ERR."
 prev_sha="$DEPLOY_PREV"; sha="$DEPLOY_SHA_TO"; moved_checkout="$DEPLOY_MOVED"
 range_log="$(git log --oneline "$prev_sha..$sha")"
 if [[ -n "$range_log" ]]; then echo "הטווח שנפרס (${prev_sha:0:7}..${sha:0:7}):"; sed 's/^/  /' <<<"$range_log"; fi

@@ -32,3 +32,33 @@ deploy_sha_move() {
   fi
   DEPLOY_SHA_TO="$(git rev-parse HEAD)"
 }
+
+# deploy_move_or_reexec <script> [args...]: deploy_sha_move (with $want_sha), and when the move brought a new
+# scripts/deploy.sh or scripts/lib/, run that version instead of this one (#209). bash reads a script as it goes, so
+# after the checkout moves the old copy would go on with the old steps (22/10: it linked a unit the new commit had
+# removed, and the deploy rolled back). The new run gets DEPLOY_PREV/DEPLOY_SHA_TO/DEPLOY_MOVED in its environment
+# and does not move again; it also inherits the lock (fd 9, which deploy.sh then does not reopen). DEPLOY_REEXEC=1 marks that run, so it cannot loop.
+# Returns 1 with DEPLOY_SHA_ERR on a refusal, like deploy_sha_move.
+deploy_move_or_reexec() {
+  local script="$1"; shift
+  if [[ "${DEPLOY_REEXEC:-}" == 1 ]]; then
+    DEPLOY_SHA_ERR=""
+    if [[ -z "${DEPLOY_PREV:-}" || "${DEPLOY_SHA_TO:-}" != "$(git rev-parse HEAD)" ]]; then
+      DEPLOY_SHA_ERR="הרצה חוזרת (DEPLOY_REEXEC) בלי DEPLOY_PREV/DEPLOY_SHA_TO שמתאימים ל-HEAD"
+      return 1
+    fi
+    # Values for this run only: the checks and builds it starts are not re-execs.
+    export -n DEPLOY_REEXEC DEPLOY_PREV DEPLOY_SHA_TO DEPLOY_MOVED
+    return 0
+  fi
+  deploy_sha_move "${want_sha:-}" || return 1
+  local rc=0
+  git diff --quiet "$DEPLOY_PREV" "$DEPLOY_SHA_TO" -- scripts/deploy.sh scripts/lib || rc=$?
+  # 1 is "changed"; anything else is git failing, and then the new copy is the safe side.
+  ((rc <= 1)) || echo "git diff על הסקריפטים נכשל (קוד $rc): ממשיך עם הגרסה החדשה ליתר ביטחון" >&2
+  if ((rc != 0)); then
+    echo "scripts/deploy.sh או scripts/lib השתנו בטווח: ממשיך עם הגרסה של ${DEPLOY_SHA_TO:0:7}"
+    export DEPLOY_REEXEC=1 DEPLOY_PREV DEPLOY_SHA_TO DEPLOY_MOVED
+    exec bash "$script" "$@"
+  fi
+}

@@ -95,3 +95,127 @@ test('deploy.sh: --sha needs a value, and an unknown argument is a usage error (
     assert.match(r.stderr, /usage: .*--sha <sha>/);
   }
 });
+
+// deploy_move_or_reexec (#209): a range that changes scripts/deploy.sh runs the new copy, once, with the lock still held.
+/** origin: A, B, then C that brings a new scripts/deploy.sh (a stub that prints what it got) and the real lib. prod at B. */
+function reexecFixture() {
+  const t = mkdtempSync(join(tmpdir(), 'deploy-reexec-'));
+  const origin = join(t, 'origin');
+  sh(t, `${git} init -q origin`);
+  const shas = {};
+  for (const c of ['A', 'B']) {
+    sh(origin, `echo ${c} >f && ${git} add f && ${git} commit -qm ${c}`);
+    shas[c] = sh(origin, 'git rev-parse HEAD');
+  }
+  sh(origin, `mkdir -p scripts/lib && cp "${LIB}" scripts/lib/ && cat >scripts/deploy.sh <<'STUB'
+set -Eeuo pipefail
+trap 'echo "ERR trap: $BASH_COMMAND"; exit 9' ERR
+source "$(dirname "$0")/lib/deploy-sha.sh"
+[[ "\${DEPLOY_REEXEC:-}" == 1 ]] || exec 9>"$LOCKFILE"
+flock -n 9 || { echo "lock refused"; exit 1; }
+deploy_move_or_reexec "$0" "$@" || { echo "refused: $DEPLOY_SHA_ERR"; exit 1; }
+echo "new run: $DEPLOY_PREV $DEPLOY_SHA_TO $DEPLOY_MOVED args=$*"
+flock -n "$LOCKFILE" true && echo "lock free" || echo "lock held"
+env | grep -c '^DEPLOY_' || true
+STUB
+${git} add scripts && ${git} commit -qm C`);
+  shas.C = sh(origin, 'git rev-parse HEAD');
+  sh(origin, `echo D >f && ${git} commit -qam D`);
+  shas.D = sh(origin, 'git rev-parse HEAD');
+  const prod = join(t, 'prod');
+  sh(t, `${git} clone -q origin prod`);
+  sh(prod, `git reset -q --hard ${shas.B}`);
+  return { prod, shas, lock: join(t, 'lock') };
+}
+
+/** The deploy.sh already running (the old copy): takes the lock on fd 9 and calls deploy_move_or_reexec. */
+function oldRun(prod, lock, want = '', env = {}) {
+  const r = spawnSync('bash', ['-c', `set -Eeuo pipefail
+trap 'echo "ERR trap: $BASH_COMMAND"; exit 9' ERR
+source "${LIB}"
+exec 9>"$LOCKFILE"; flock -n 9
+git fetch -q origin main
+want_sha="$1"
+deploy_move_or_reexec "$PWD/scripts/deploy.sh" hq --sha "$1" || { echo "refused: $DEPLOY_SHA_ERR"; exit 1; }
+echo "old run went on: $DEPLOY_PREV $DEPLOY_SHA_TO $DEPLOY_MOVED"`, '_', want], {
+    cwd: prod, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME, LOCKFILE: lock, ...env },
+  });
+  return { code: r.status, out: (r.stdout + r.stderr).trim(), head: sh(prod, 'git rev-parse HEAD') };
+}
+
+test('a range that changes scripts/deploy.sh runs the new copy once, with the move, the args and the lock', () => {
+  const { prod, shas, lock } = reexecFixture();
+  const r = oldRun(prod, lock, shas.D);
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /old run went on/);
+  assert.equal(r.out.match(/ממשיך עם הגרסה/g)?.length, 1, r.out);
+  assert.equal(r.out.match(/new run:/g)?.length, 1, r.out);
+  assert.match(r.out, new RegExp(`new run: ${shas.B} ${shas.D} 1 args=hq --sha ${shas.D}`));
+  assert.match(r.out, /lock held/);
+  // The markers are not exported to what the new run starts (checks, builds).
+  assert.match(r.out, /\n0$/);
+  assert.equal(r.head, shas.D);
+});
+
+test('a range that does not touch the scripts goes on in the same run', () => {
+  const { prod, shas, lock } = reexecFixture();
+  sh(prod, `git reset -q --hard ${shas.C}`);
+  const r = oldRun(prod, lock);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.out, `old run went on: ${shas.C} ${shas.D} 1`);
+});
+
+test('DEPLOY_REEXEC=1 without matching DEPLOY_PREV/DEPLOY_SHA_TO is refused and moves nothing', () => {
+  const { prod, shas, lock } = reexecFixture();
+  for (const env of [{ DEPLOY_REEXEC: '1' }, { DEPLOY_REEXEC: '1', DEPLOY_PREV: shas.A, DEPLOY_SHA_TO: shas.D }]) {
+    const r = oldRun(prod, lock, '', env);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /refused: הרצה חוזרת \(DEPLOY_REEXEC\)/);
+    assert.equal(r.head, shas.B);
+  }
+});
+
+test('deploy.sh: DEPLOY_REEXEC=1 without the inherited lock fd is refused', () => {
+  const t = mkdtempSync(join(tmpdir(), 'deploy-nofd-'));
+  const r = spawnSync('bash', [join(REPO, 'scripts/deploy.sh'), 'hq'], {
+    encoding: 'utf8', env: { PATH: process.env.PATH, HOME: t, DEPLOY_REEXEC: '1', XDG_RUNTIME_DIR: t },
+  });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /DEPLOY_REEXEC=1 בלי הנעילה/);
+});
+
+/** The real deploy.sh, end to end up to the move: HOME is a temp dir with the production checkout at
+ *  ~/projects/agent-company, at B (this tree's deploy.sh and lib); origin/main is C, whose deploy.sh is this one with
+ *  `edit` applied. */
+function realDeploy(edit) {
+  const home = mkdtempSync(join(tmpdir(), 'deploy-real-'));
+  const origin = join(home, 'origin');
+  sh(home, `${git} init -q origin && mkdir -p origin/scripts && cp -r "${join(REPO, 'scripts/lib')}" "${join(REPO, 'scripts/deploy.sh')}" origin/scripts/`);
+  sh(origin, `${git} add -A && ${git} commit -qm B`);
+  const B = sh(origin, 'git rev-parse HEAD');
+  sh(origin, `${edit} && ${git} commit -qam C`);
+  const C = sh(origin, 'git rev-parse HEAD');
+  const prod = join(home, 'projects/agent-company');
+  sh(home, `mkdir -p projects && ${git} clone -q origin projects/agent-company && git -C projects/agent-company reset -q --hard ${B}`);
+  const r = spawnSync('bash', [join(prod, 'scripts/deploy.sh'), 'hq', '--sha', C.slice(0, 12)], {
+    encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home, XDG_RUNTIME_DIR: home },
+  });
+  return { B, C, code: r.status, out: (r.stdout + r.stderr).trim(), head: sh(prod, 'git rev-parse HEAD') };
+}
+
+test('deploy.sh itself: the new copy takes over right after the move, with the original arguments', () => {
+  const marker = `echo "NEW RUN $prev_sha $sha $moved_checkout args=\${orig_args[*]}"; exit 0`;
+  const r = realDeploy(`sed -i '/^prev_sha="\\$DEPLOY_PREV"/a ${marker.replace(/'/g, `'\\''`)}' scripts/deploy.sh`);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.out.match(/NEW RUN/g)?.length, 1, r.out);
+  assert.match(r.out, new RegExp(`NEW RUN ${r.B} ${r.C} 1 args=hq --sha ${r.C.slice(0, 12)}`));
+  assert.equal(r.head, r.C);
+});
+
+test('deploy.sh itself: the new copy failing before it reaches the move still puts the checkout back', () => {
+  const r = realDeploy(`sed -i 's/^# ── preflight/false\\n&/' scripts/deploy.sh`);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /ממשיך עם הגרסה/);
+  assert.match(r.out, /ה-checkout חזר ל-/);
+  assert.equal(r.head, r.B);
+});
