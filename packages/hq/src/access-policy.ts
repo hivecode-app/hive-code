@@ -43,17 +43,12 @@ const KUBE_DENIED = new Set([
 
 const KUBE_TYPES = new Set(['pod', 'pods', 'po', 'deployment', 'deployments', 'deploy', 'replicaset', 'replicasets', 'rs', 'service', 'services', 'svc',
   'ingress', 'ingresses', 'ing', 'event', 'events', 'ev', 'job', 'jobs', 'cronjob', 'cronjobs', 'hpa', 'horizontalpodautoscaler', 'horizontalpodautoscalers',
-  'statefulset', 'statefulsets', 'sts', 'daemonset', 'daemonsets', 'ds', 'endpoints', 'ep', 'persistentvolumeclaim', 'persistentvolumeclaims', 'pvc']);
+  'statefulset', 'statefulsets', 'sts', 'daemonset', 'daemonsets', 'ds', 'endpoints', 'ep', 'persistentvolumeclaim', 'persistentvolumeclaims', 'pvc',
+  'secret', 'secrets', 'configmap', 'configmaps', 'cm']);
 
 type FlagKind = 'bool' | 'value';
 interface Flag { name: string; short?: string; kind: FlagKind; check?: (v: string) => boolean }
 
-/** Types whose full object never carries an env or a secret: in prod these may be read as yaml/json. */
-const KUBE_PLAIN_TYPES = new Set(['service', 'services', 'svc', 'event', 'events', 'ev', 'hpa', 'horizontalpodautoscaler', 'horizontalpodautoscalers',
-  'endpoints', 'ep', 'persistentvolumeclaim', 'persistentvolumeclaims', 'pvc']);
-/** Types whose pod template carries an env: `kubectl describe` of one prints it word for word (#287). ssh allowlists name any type, so this side is the list of what holds env. */
-const KUBE_ENV_TYPES = new Set(['pod', 'pods', 'po', 'deployment', 'deployments', 'deploy', 'replicaset', 'replicasets', 'rs', 'job', 'jobs', 'cronjob', 'cronjobs', 'cj',
-  'statefulset', 'statefulsets', 'sts', 'daemonset', 'daemonsets', 'ds', 'replicationcontroller', 'replicationcontrollers', 'rc']);
 const outputOk = (v: string) => /^(json|yaml|wide|name)$/.test(v) || /^(jsonpath|custom-columns)=\S+$/.test(v);
 const durationOk = (v: string) => /^\d+(s|m|h)?$/.test(v);
 const intOk = (v: string) => /^\d{1,6}$/.test(v);
@@ -129,12 +124,12 @@ function parseFlags(args: string[], spec: Flag[], namespace: string): Parsed | V
 
 const isVerdict = (p: Parsed | Verdict): p is Verdict => 'ok' in p;
 
-/** get/describe: `type`, `type/name` or `type name`. The types are a list (no secrets, configmaps or all); names are in the safe charset. */
+/** get/describe: `type`, `type/name` or `type name`. The types are a list (secrets and configmaps too, no all); names are in the safe charset. */
 function checkTyped(words: string[]): Verdict | null {
   const [first, second] = words;
   const parts = first!.split('/');
   if (parts.length > 2 || (parts.length === 2 && second !== undefined)) return unfit(`\`${words.join(' ')}\` לא מבנה מותר: סוג ושם אחד`);
-  for (const k of parts[0]!.split(',')) if (!KUBE_TYPES.has(k.toLowerCase())) return unfit(`סוג המשאב \`${k}\` לא ברשימה המותרת (אין secrets, configmaps או all)`);
+  for (const k of parts[0]!.split(',')) if (!KUBE_TYPES.has(k.toLowerCase())) return unfit(`סוג המשאב \`${k}\` לא ברשימה המותרת (אין all)`);
   const name = parts[1] ?? second;
   if (name !== undefined && !SAFE_ARG.test(name)) return unfit(`השם \`${name}\` לא מותר`);
   return null;
@@ -229,13 +224,6 @@ export function planKube(res: KubeResource, argv: string[]): Verdict {
   } else {
     const bad = checkTyped(p.positional);
     if (bad) return bad;
-    // Prod reads run without a card (#279): a full object (`-o yaml|json|jsonpath|custom-columns`) or `describe` of a pod, deployment, job… prints its env, so it is refused there, as in planSsh.
-    const o = p.flags.get('output');
-    const full = verb === 'describe' || (typeof o === 'string' && /^(json|yaml|jsonpath|custom-columns)/.test(o));
-    if (full && (res.env === undefined || res.env === 'prod') && !p.positional[0]!.split('/')[0]!.split(',').every((k) => KUBE_PLAIN_TYPES.has(k.toLowerCase()))) {
-      const what = verb === 'describe' ? '`describe`' : `\`-o ${String(o).split('=')[0]}\``;
-      return unfit(`${what} על המשאב הזה בפרודקשן יכול לחשוף env וסודות`, 'אפשר `get -o wide` או `-o name`, `rollout status`, או `logs --tail=N`');
-    }
   }
   const out: string[] = [verb];
   if (verb === 'scale') out.push(p.positional[0]!, `--replicas=${String(p.flags.get('replicas'))}`);
@@ -278,12 +266,6 @@ export function planSsh(res: SshResource, argv: string[]): Verdict {
   if (bad !== undefined) return unfit(`המילה \`${bad}\` מכילה תו שלא מותר (אותיות, ספרות ו-\`._:/=@,+%-\` בלבד)`, 'פקודה עם צינור, מרכאות או משתנה לא מוגשת. אפשר סקריפט שכבר נמצא בשרת');
   const hit = res.allow.find((r) => matchPattern(r.argv, argv));
   if (!hit) return unfit(`הפקודה \`${argv.join(' ')}\` לא ברשימה המותרת של המשאב`, res.allow.length ? `מותר: ${sshAllowed(res)}` : 'לרשימה של המשאב אין עדיין פקודות');
-  // A catalog may list `kubectl describe pods *` on a prod host, and prod reads run without a card: the env it prints is refused here, as in planKube.
-  const d = argv[0] === 'kubectl' ? argv.indexOf('describe') : -1;
-  const kind = d > 0 ? argv.slice(d + 1).find((a) => !a.startsWith('-')) : undefined;
-  if (kind && (res.env === undefined || res.env === 'prod') && kind.split('/')[0]!.split(',').some((k) => KUBE_ENV_TYPES.has(k.toLowerCase().split('.')[0]!))) {
-    return unfit('`describe` על המשאב הזה בפרודקשן יכול לחשוף env וסודות', 'אפשר `get` (בלי `-o yaml|json`), `rollout status`, או `logs --tail=N`');
-  }
   const target = `${res.user ? `${res.user}@` : ''}${res.host}`;
   const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(res.key ? ['-i', res.key, '-o', 'IdentitiesOnly=yes'] : []), ...(res.port ? ['-p', String(res.port)] : []), target, '--', ...argv];
   return { ok: true, plan: { kind: 'process', cmd: 'ssh', args, class: hit.class ?? 'read', shown: `ssh ${target} ${show(argv)}` } };
