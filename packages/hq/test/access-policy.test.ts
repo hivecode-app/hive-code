@@ -51,19 +51,22 @@ test('kube: --kubeconfig, --token, --as, another namespace and --server are refu
   ]) bad(argv, 'deny');
 });
 
-test('kube: in prod a full object of a type that can hold env is refused as yaml/json/jsonpath (#280)', () => {
+test('kube: in prod a full object or describe of a type that can hold env is refused (#280, #287)', () => {
   const prod: KubeResource = { type: 'kube', namespace: 'lumo-prod', kubeconfig: '/k/prod.yaml', env: 'prod' };
   const pv = (argv: string[]) => planKube(prod, argv);
   for (const a of [['get', 'deploy/api', '-o', 'yaml'], ['get', 'pods', '-o', 'json'], ['get', 'pods,svc', '-o', 'json'], ['get', 'deploy', 'api', '--output=jsonpath={.spec}'],
-    ['get', 'job', '-o', 'custom-columns=E:.spec.template.spec.containers[*].env'], ['get', 'secret', 'db', '-o', 'yaml'], ['get', 'secrets', '-o', 'json']]) {
+    ['get', 'job', '-o', 'custom-columns=E:.spec.template.spec.containers[*].env'], ['get', 'secret', 'db', '-o', 'yaml'], ['get', 'secrets', '-o', 'json'],
+    ['describe', 'pod', 'api-7d9'], ['describe', 'deploy/api'], ['describe', 'pods,svc'], ['describe', 'pods']]) {
     const v = pv(a);
     assert.ok(!v.ok && v.kind === 'unfit', `${a.join(' ')} should be refused in prod`);
   }
-  for (const a of [['get', 'pods', '-o', 'wide'], ['get', 'deploy', '-o', 'name'], ['get', 'svc', '-o', 'yaml'], ['get', 'events', '-o', 'json'], ['describe', 'pod', 'api-7d9']]) {
+  for (const a of [['get', 'pods', '-o', 'wide'], ['get', 'deploy', '-o', 'name'], ['get', 'svc', '-o', 'yaml'], ['get', 'events', '-o', 'json'], ['describe', 'svc', 'api'], ['describe', 'events']]) {
     assert.ok(pv(a).ok, `${a.join(' ')} stays allowed in prod`);
   }
   assert.ok(!planKube({ ...prod, env: undefined }, ['get', 'pods', '-o', 'yaml']).ok, 'no env counts as prod');
+  assert.ok(!planKube({ ...prod, env: undefined }, ['describe', 'pod', 'x']).ok, 'no env counts as prod');
   assert.ok(plan(['get', 'deploy/api', '-o', 'yaml']).ok, 'dev is unchanged');
+  assert.ok(plan(['describe', 'pod', 'x']).ok, 'dev describe is unchanged');
 });
 
 test('kube: secrets, follow, port-forward, apply and interactive exec are unfit, with a way out', () => {
@@ -112,6 +115,19 @@ test('ssh: only what the catalog lists, with words in the safe charset', () => {
     assert.ok(!x.ok && x.kind === 'unfit', argv.join(' '));
   }
   assert.ok(!planSsh({ ...res, allow: [] }, ['docker', 'images']).ok);
+});
+
+test('ssh: in prod kubectl describe of a type that holds env is refused even when the catalog lists it (#287)', () => {
+  const res: SshResource = { type: 'ssh', host: 'h', env: 'prod', allow: [
+    { argv: ['kubectl', '-n', '*', 'describe', 'pods', '*'], class: 'read' }, { argv: ['kubectl', '-n', 'x', 'describe', 'deploy/*'] }, { argv: ['kubectl', 'describe', 'pods'] },
+    { argv: ['kubectl', '-n', 'x', 'describe', 'svc', '*'] }, { argv: ['kubectl', 'describe', 'node', '*'] }, { argv: ['kubectl', '-n', 'x', 'describe', 'jobs.batch', '*'] }] };
+  for (const a of [['kubectl', '-n', 'lumo', 'describe', 'pods', 'api-1'], ['kubectl', '-n', 'x', 'describe', 'deploy/api'], ['kubectl', 'describe', 'pods'], ['kubectl', '-n', 'x', 'describe', 'jobs.batch', 'j']]) {
+    const v = planSsh(res, a);
+    assert.ok(!v.ok && v.kind === 'unfit', `${a.join(' ')} should be refused in prod`);
+  }
+  for (const a of [['kubectl', '-n', 'x', 'describe', 'svc', 'api'], ['kubectl', 'describe', 'node', 'n1']]) assert.ok(planSsh(res, a).ok, `${a.join(' ')} stays allowed in prod`);
+  assert.ok(!planSsh({ ...res, env: undefined }, ['kubectl', 'describe', 'pods']).ok, 'no env counts as prod');
+  assert.ok(planSsh({ ...res, env: 'dev' }, ['kubectl', 'describe', 'pods']).ok, 'dev is unchanged');
 });
 
 test('matchPattern: a literal, * for one word, ** for the rest', () => {
