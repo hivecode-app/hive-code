@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { planBuild, type BuildResource } from '../src/access-policy.ts';
-import { describeResource, matchPattern, parseCatalog, planAccess, planKube, planQuery, planSsh, redact, type KubeResource, type SshResource } from '../src/access-policy.ts';
+import { describeResource, matchPattern, parseCatalog, planAccess, planKube, planQuery, planSsh, type KubeResource, type SshResource } from '../src/access-policy.ts';
 
 const dev: KubeResource = { type: 'kube', namespace: 'lumo-dev', kubeconfig: '/k/dev.yaml', env: 'dev' };
 const plan = (argv: string[], res: KubeResource = dev) => planKube(res, argv);
@@ -155,13 +155,6 @@ test('parseCatalog keeps whole entries only; planAccess dispatches by type', () 
   assert.ok(planAccess('kube:lumo-dev', catalog['kube:lumo-dev']!, ['get', 'pods']).ok);
 });
 
-test('redact replaces a line that looks like a secret and leaves the rest', () => {
-  const out = redact('ok line\nGITHUB_TOKEN=ghp_' + 'abcdefghijklmnopqrstuvwxyz0123456789AB\nlast');
-  assert.match(out, /^ok line\n\[שורה הוסתרה/);
-  assert.match(out, /\nlast$/);
-  assert.ok(!out.includes('ghp_'));
-});
-
 test('describeResource: an ssh allowlist reads as groups, and a change in prod is marked GO', () => {
   const k3s: SshResource = { type: 'ssh', host: 'h', env: 'prod', allow: [
     ...['pods', 'deploy', 'svc'].map((t) => ({ argv: ['kubectl', '-n', 'p', 'get', t], class: 'read' as const })),
@@ -189,6 +182,15 @@ test('ssh:ci-host catalog: cgroup files of a slice and docker system df fit; oth
   assert.ok(!ok(['cat', '/etc/shadow']));
   assert.ok(!ok(['cat', '/sys/fs/cgroup/../../etc/shadow']));
   assert.ok(!ok(['docker', 'system', 'prune']));
+});
+
+test('ssh:nws catalog: docker inspect of one or more containers is a read', () => {
+  const res: SshResource = { type: 'ssh', host: '203.0.113.12', user: 'root', key: '/k/hakav', env: 'prod', allow: [{ argv: ['docker', 'inspect', '*', '**'], class: 'read' }] };
+  for (const argv of [['docker', 'inspect', 'nws-app'], ['docker', 'inspect', 'nws-app', 'kafka-1']]) {
+    const v = planSsh(res, argv);
+    assert.ok(v.ok && v.plan.class === 'read', argv.join(' '));
+  }
+  for (const argv of [['docker', 'inspect'], ['docker', 'inspect', '--format', 'x'], ['docker', 'inspect', 'a', '-f']]) assert.ok(!planSsh(res, argv).ok, argv.join(' '));
 });
 
 const buildRes: BuildResource = { type: 'build', registry: 'ghcr.io/hive-owner/', env: 'registry', script: '/s/access-build.sh' };

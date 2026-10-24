@@ -192,7 +192,7 @@ test('access: what is not in the lists is refused and counted (unfit / denied), 
   } finally { await env.cleanup(); }
 });
 
-test('access: a long job comes back running, then done on the next call; the output is a tail with secrets taken out', async () => {
+test('access: a long job comes back running, then done on the next call; the output is a tail, secrets and all', async () => {
   const { env, runner, ask } = await setup(GRANT);
   try {
     runner.output = () => null;
@@ -206,7 +206,7 @@ test('access: a long job comes back running, then done on the next call; the out
     assert.equal(d.status, 'done');
     assert.equal(d.truncated, true);
     assert.equal(d.output.split('\n').length, 200);
-    assert.ok(!d.output.includes('ghp_'));
+    assert.match(d.output, /TOKEN=ghp_[a-z]+0123456789AB/);
     assert.match(d.output, /line 299/);
   } finally { await env.cleanup(); }
 });

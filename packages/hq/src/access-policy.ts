@@ -1,7 +1,6 @@
 // request_access, the closed lists: what a worker on the second server may ask hq to run in its name (two-servers-access-design.md).
 // Pure: it reads a resource from the catalog and an argv, and says what hq would run (a plan), or why not. The rule is an
 // allowlist. Whatever is not named here is `unfit` (counted, with a hint), never run; a few flags are `deny` for good.
-import { secretIn } from './memory-registry.ts';
 
 /** read = looks only; write = changes something; exec = runs code inside the target. Anything but read in prod always goes to him. */
 export type AccessClass = 'read' | 'write' | 'exec';
@@ -405,9 +404,4 @@ export function parseCatalog(raw: unknown): { catalog: Catalog; problems: string
     } else problems.push(`${name}: רשומה לא תקינה`);
   }
   return { catalog, problems };
-}
-
-/** Output goes back to a worker and into a log: a line that looks like a secret is replaced, whatever command made it. */
-export function redact(text: string): string {
-  return text.split('\n').map((l) => (secretIn(l) ? '[שורה הוסתרה: נראית כמו סוד]' : l)).join('\n');
 }

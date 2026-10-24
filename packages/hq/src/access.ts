@@ -16,7 +16,7 @@ import type { Hq } from './hq.ts';
 import { getIdentity } from './org.ts';
 import { readCharter } from './workspace.ts';
 import type { LeaseReply } from './leases.ts';
-import { describeResource, parseCatalog, planAccess, redact, type AccessClass, type Catalog, type Plan, type Resource } from './access-policy.ts';
+import { describeResource, parseCatalog, planAccess, type AccessClass, type Catalog, type Plan, type Resource } from './access-policy.ts';
 
 /** At most this many at once: the runs are only a relay (ssh, kubectl), but the server is shared. */
 export const MAX_RUNNING = 6;
@@ -182,8 +182,7 @@ export class Access {
     const refused = (kind: 'unfit' | 'denied', why2: string, hint?: string): AccessReply => {
       const id = insert(kind, null, `${resource} ${argv.join(' ')}`.slice(0, 500), why2);
       this.hq.store.emit(kind === 'unfit' ? 'access.unfit' : 'access.denied', identity, { request: id, resource, argv, project: who.project, why: why2 });
-      // The hint quotes the catalog's allowlists: a line in it that looks like a secret is taken out, like any output.
-      return { status: kind, request: `acc-${id}`, message: `${kind === 'unfit' ? 'לא מתאים לרשימה' : 'נדחה'}: ${why2}`, ...(hint ? { hint: redact(hint) } : {}) };
+      return { status: kind, request: `acc-${id}`, message: `${kind === 'unfit' ? 'לא מתאים לרשימה' : 'נדחה'}: ${why2}`, ...(hint ? { hint } : {}) };
     };
 
     if (!res) {
@@ -364,7 +363,9 @@ export class Access {
     if (r.state === 'pending') return { status: 'pending', request: rid, message: 'מחכה לאישור' };
     if (r.state === 'running') return { status: 'running', request: rid, message: 'עדיין רץ' };
     const raw = text ?? this.readLog(r.id);
-    const lines = redact(raw).split('\n');
+    // Whole, secrets too: every worker can do everything anyway, so nothing is hidden from it («אין לי שום סיבה שעובד לא יוכל
+    // לראות לסיסמאות», רן, 24/10). The output is not stored anywhere else: the job log stays where it was written, in a 0700 directory.
+    const lines = raw.split('\n');
     let out = lines.slice(-TAIL_LINES).join('\n');
     const truncated = lines.length > TAIL_LINES || out.length > TAIL_CHARS;
     if (out.length > TAIL_CHARS) out = out.slice(-TAIL_CHARS);
