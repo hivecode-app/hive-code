@@ -137,7 +137,7 @@ export function buildReport({ run = sh, state, configDir, data, engine = engineR
   section('משאבים', [
     run('df', ['-h', '/', home, state]),
     '',
-    `hq.db: ${sizeOf(join(state, 'hq.db'))} · גיבויים: ${(() => { try { return readdirSync(join(state, 'backups')).filter((f) => f.endsWith('.db')).length; } catch { return 0; } })()}`,
+    `hq.db: ${sizeOf(join(state, 'hq.db'))} · גיבויים: ${(() => { try { return readdirSync(join(state, 'backups')).filter((f) => /\.db(\.zst)?$/.test(f)).length; } catch { return 0; } })()}`,
     run('du', ['-sh', state], { timeout: 30_000 }),
     '',
     run('free', ['-m']),

@@ -332,7 +332,7 @@ export class Hq {
       this.every(SAMPLE_EVERY_MS, 'resources', () => this.resources.sample());
       this.every(T.backupMs, 'backup', async () => {
         if (!this.store.toggle('backup')) return;
-        await backupOnce(this.store, join(this.cfg.stateDir, 'backups'), this.cfg.backupsKeep);
+        await backupOnce(this.store, join(this.cfg.stateDir, 'backups'), this.cfg.backups);
         this.probes.prune();
         this.store.pruneEvents();
       });

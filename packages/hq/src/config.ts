@@ -79,7 +79,8 @@ export interface HqConfig {
     maxSlots: number;
     maxLoad: number;             // #224: no new shift here while load1 per CPU is over this (load from outside the shifts too)
   };
-  backupsKeep: number;
+  /** B.11: hq.db backups kept (backup.ts): the newest `hourly`, and the newest of each of the last `daily` days. */
+  backups: { hourly: number; daily: number };
   /** resources-design.md §1, `reserve`: the classes of heavy work (heavy.ts parseHeavy: class, mem, cpu, disk, timeout, exclusive, env), and
    *  the memory the leases of one machine may hold together: `machines.<name>.memMb` (`local` = this one), else `budgetPct` of its total. */
   heavy: { classes: unknown[]; budgetPct: number; machines: Record<string, { memMb?: number }> };
@@ -219,7 +220,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       compactContextTokens: 250_000, compactQuietMs: 2 * 60_000 },
     batching: { enabled: true, gatherMs: 10 * 60_000 },
     capacity: { reserveMb: 4096, rssIdleMb: 400, rssWorkMb: 1300, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8, maxLoad: 1.5 },
-    backupsKeep: 48,
+    backups: { hourly: 24, daily: 7 },
     heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: {} },
     auth: {
       rpId: 'localhost',
@@ -249,6 +250,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     capacity: { ...base.capacity, ...fromFile.capacity, ...overrides.capacity },
     rotation: { ...base.rotation, ...fromFile.rotation, ...overrides.rotation },
     batching: { ...base.batching, ...fromFile.batching, ...overrides.batching },
+    backups: { ...base.backups, ...fromFile.backups, ...overrides.backups },
     auth: { ...base.auth, ...fromFile.auth, ...overrides.auth },
     tab: { ...base.tab, ...fromFile.tab, ...overrides.tab },
     dictate: { ...base.dictate, ...fromFile.dictate, ...overrides.dictate },

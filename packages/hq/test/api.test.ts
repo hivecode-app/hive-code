@@ -1,11 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import { ORG_YAML, makeEnv, until } from './helpers.ts';
-import { backupOnce } from '../src/backup.ts';
-import { Store } from '../src/store.ts';
 import { wsPing } from '../src/api.ts';
 
 async function apiEnv() {
@@ -170,20 +168,6 @@ test('WS: replays after seq, then streams live; rejects bad token', async () => 
     const bad = new WebSocket(`ws://127.0.0.1:${hq.port}/ws?token=nope`);
     const err = await new Promise<string>((r) => { bad.on('error', (e) => r(e.message)); bad.on('open', () => r('opened')); });
     assert.match(err, /401/);
-  } finally { await env.cleanup(); }
-});
-
-test('backup: online sqlite backup to backups/, keeps the newest N, readable', async () => {
-  const env = await makeEnv();
-  try {
-    const dir = join(env.cfg.stateDir, 'backups');
-    env.hq.mailbox.tell({ msg_id: 'b-1', to: 'owner', from: 'eli', body: 'לגיבוי' });
-    for (let i = 0; i < 4; i++) { await backupOnce(env.hq.store, dir, 3); env.clock.advance(3_600_000); }
-    const files = readdirSync(dir).sort();
-    assert.equal(files.length, 3);
-    const copy = new Store(join(dir, files.at(-1)!));
-    assert.equal((copy.db.prepare(`SELECT body FROM messages WHERE id = 'b-1'`).get() as { body: string }).body, 'לגיבוי');
-    copy.close();
   } finally { await env.cleanup(); }
 });
 

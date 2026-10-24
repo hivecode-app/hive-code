@@ -2,6 +2,8 @@
 // `company hq` — run the central process (B.1). Node ≥ 24 runs this TypeScript directly (type stripping).
 //   node packages/hq/src/main.ts [--port 7420] [--host 127.0.0.1] [--state DIR] [--company DIR]
 //   node packages/hq/src/main.ts backup      # one-off sqlite backup, then exit
+//   node packages/hq/src/main.ts backup-prune               # the retention policy on backups/ now, without a backup
+//   node packages/hq/src/main.ts restore <backup> <out.db>  # a backup (.db.zst or .db) to a new file, checked (RUNBOOK)
 //   node packages/hq/src/main.ts token       # print the API token (creates it on first run)
 //   node packages/hq/src/main.ts pair        # one-time pairing code + link for a new device (10 min)
 //   node packages/hq/src/main.ts pair --qr   # the same, and the link as a QR for the phone's camera (scripts/install.sh)
@@ -10,7 +12,7 @@ import { renderUnicodeCompact } from 'uqr';
 import { join } from 'node:path';
 import { loadConfig } from './config.ts';
 import { Hq, loadForeignInjector } from './hq.ts';
-import { backupOnce } from './backup.ts';
+import { backupOnce, pruneBackups, restoreBackup } from './backup.ts';
 import { loadOrCreateToken } from './api.ts';
 import { Store } from './store.ts';
 import { Auth } from './auth.ts';
@@ -48,10 +50,26 @@ if (args[0] === 'pair') {
   process.exit(0);
 }
 
+// Neither opens hq.db: safe while hq runs, and the restore works when hq.db is the thing that is broken.
+if (args[0] === 'backup-prune') {
+  const { deleted, compressed } = await pruneBackups(join(cfg.stateDir, 'backups'), cfg.backups);
+  console.log(`deleted ${deleted.length}, compressed ${compressed.length}`);
+  for (const f of deleted) console.log(`- ${f}`);
+  for (const f of compressed) console.log(`z ${f}`);
+  process.exit(0);
+}
+
+if (args[0] === 'restore') {
+  if (!args[1] || !args[2]) { console.error('usage: main.ts restore <backup.db.zst|backup.db> <out.db>'); process.exit(2); }
+  const r = await restoreBackup(args[1], args[2]);
+  console.log(`${r.out}: integrity ok, ${r.messages} messages`);
+  process.exit(0);
+}
+
 const hq = new Hq(cfg, { foreign: await loadForeignInjector() });
 
 if (args[0] === 'backup') {
-  console.log(await backupOnce(hq.store, join(cfg.stateDir, 'backups'), cfg.backupsKeep));
+  console.log(await backupOnce(hq.store, join(cfg.stateDir, 'backups'), cfg.backups));
   hq.store.close();
   process.exit(0);
 }
