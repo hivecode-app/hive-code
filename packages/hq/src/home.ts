@@ -4,13 +4,12 @@
 //   GET /api/home  → the recipe in force: the composer's, or the deterministic default (none, older than 30
 //                    minutes, or no longer valid). Live data wins: a block whose inbox item closed is gone.
 //   PUT /api/home  → a new recipe; strict validation, 400 with the reason.
-// The composer (the identity that owns the `compose-home` automation in org.yaml, today עדי) is woken to
-// compose again on what matters, at most once per 3 minutes; during night mode only for an incident or a new
-// "waiting for you", the rest is kept for one composition in the morning (07:00, or when he opens the app).
-import { g, OWNER, pre, type HqEvent } from '@company/shared';
+// The automation `home-headline` in org.yaml (on עדי, who may also compose by hand) has hq write the recipe itself,
+// from facts and without a model (`sentence`): no worker is woken for it. A recipe composed by hand (`compose_home`)
+// wins while it is fresh. Switched off: the plain default, and the app writes its own sentence.
+import { OWNER, pre, type HqEvent } from '@company/shared';
 import type { Hq } from './hq.ts';
-import { CANCELLED_SQL, isCancelled } from './scheduler.ts';
-import { hhmm, nextLocal } from './timezone.ts';
+import { CANCELLED_SQL } from './scheduler.ts';
 import { askedList, type AskedItem } from './asked.ts';
 
 export const BLOCK_TYPES = ['headline', 'alert', 'waiting', 'asked', 'awaiting', 'tasks', 'lanes', 'project', 'quiet', 'people', 'since', 'note'] as const;
@@ -42,9 +41,12 @@ export interface HomeRecipe {
   composed_by: string;
   composed_at: number;
   reason: string | null;
-  /** `agent`: the composer's recipe. `default`: hq's own, and why (none | stale | invalid | off). */
-  source: 'agent' | 'default';
-  fallback?: 'none' | 'stale' | 'invalid' | 'off';
+  /**
+   * `agent`: composed by hand (`compose_home`). `hq`: hq's own with its sentence (`home-headline` on). `default`: hq's
+   * own while it is off, the app writes the sentence. With hq or default, `fallback` says why not the hand-composed one.
+   */
+  source: 'agent' | 'hq' | 'default';
+  fallback?: 'none' | 'stale' | 'invalid';
   blocks: Block[];
   /** When what waits for him last changed (inbox.lastChange): a headline composed before it may no longer be true. */
   waiting_changed_at?: number | null;
@@ -59,29 +61,23 @@ export interface QuotaLine {
 }
 
 export const STALE_MS = 30 * 60_000;
-export const WAKE_EVERY_MS = 3 * 60_000;
 export const MAX_BLOCKS = 12;
-export const AUTOMATION = 'compose-home';
+export const AUTOMATION = 'home-headline';
+/** Before it hq woke the composer to write the recipe (switched off 24/10: 42% of עדי's use). Still names who may compose. */
+const LEGACY_AUTOMATION = 'compose-home';
+/** Opens of the app closer than this are one visit: "מאז שהיית פה" counts from the end of the one before. */
+export const VISIT_GAP_MS = 20 * 60_000;
 const DAY_MS = 24 * 3_600_000;
 
 const firstLine = (s: string, max: number): string => (s.split('\n').map((l) => l.trim()).find(Boolean) ?? '').slice(0, max);
+/** Cut at a word, with "…": a name in the sentence on top stays within its two lines. A quote it would leave open is cut before. */
+const clip = (s: string, max: number): string => {
+  if (s.length <= max) return s;
+  let c = s.slice(0, max + 1).replace(/\s+\S*$/, '');
+  if ((c.match(/"/g) ?? []).length % 2) c = c.slice(0, c.lastIndexOf('"'));
+  return `${c.replace(/[\s,;:–-]+$/, '')}…`;
+};
 
-/**
- * The default's one sentence, from the live numbers: an alert, what is running, what finished. What waits for him is
- * not here: the app puts "N החלטות מחכות לך." in front of it from the live data (task 306).
- */
-export function headline(running: number, done: number, alert = false): string {
-  const parts: string[] = [];
-  if (alert) parts.push('יש תקלה');
-  if (running) parts.push(running === 1 ? 'משימה אחת בעבודה' : `${running} משימות בעבודה`);
-  // After "בעבודה" the word "משימות" is understood, and the sentence stays within two lines on a phone.
-  if (done) parts.push(running ? (done === 1 ? 'אחת הסתיימה ביממה האחרונה' : `${done} הסתיימו ביממה האחרונה`)
-    : done === 1 ? 'משימה אחת הסתיימה ביממה האחרונה' : `${done} משימות הסתיימו ביממה האחרונה`);
-  if (!parts.length) return 'שקט: אין משימות בעבודה.';
-  const last = parts.pop()!;
-  return `${parts.length ? `${parts.join(', ')} ו${last.match(/^\d/) ? '-' : ''}${last}` : last}.`;
-}
-const MORNING = { h: 7, m: 0 };
 
 export class HomeError extends Error {
   status = 400;
@@ -236,15 +232,8 @@ export function validateBlocks(raw: unknown, refs: HomeRefs): Block[] {
 
 interface RecipeRow { version: number; composed_by: string; composed_at: number; reason: string | null; blocks: string }
 
-interface PendingEvent { at: number; kind: 'task_started' | 'task_done' | 'inbox' | 'incident' | 'deploy'; text: string; urgent: boolean }
-
-/** Night mode keeps these back for the morning; the rest wake the composer at once. */
-const URGENT_KINDS = new Set<PendingEvent['kind']>(['incident', 'inbox']);
-
 export class Home {
   private hq: Hq;
-  /** He opened the app while events were held for the morning: the next sweep composes without waiting for 07:00. */
-  private openedApp = false;
   constructor(hq: Hq) {
     this.hq = hq;
     hq.store.onEvent((e) => { try { this.observe(e); } catch { /* a listener never breaks writers */ } });
@@ -252,18 +241,24 @@ export class Home {
 
   private get db() { return this.hq.store.db; }
 
-  /** Who composes: the identity whose org.yaml automations hold `compose-home`. The manager may always. */
+  /** Who may compose by hand: the identity whose org.yaml automations hold `home-headline` (or, before it, `compose-home`). The manager may always. */
   composer(): string | null {
-    const r = this.db.prepare(`SELECT key FROM toggles WHERE key LIKE ? ORDER BY key LIMIT 1`).get(`%/${AUTOMATION}`) as { key: string } | undefined;
-    return r ? r.key.slice(0, -(AUTOMATION.length + 1)) : null;
+    for (const a of [AUTOMATION, LEGACY_AUTOMATION]) {
+      const r = this.db.prepare(`SELECT key FROM toggles WHERE key LIKE ? ORDER BY key LIMIT 1`).get(`%/${a}`) as { key: string } | undefined;
+      if (r) return r.key.slice(0, -(a.length + 1));
+    }
+    return null;
   }
 
   mayCompose(identity: string): boolean {
     return identity === this.hq.cfg.managerId || identity === this.composer() || identity === 'owner';
   }
 
-  private get toggleKey(): string | null { const c = this.composer(); return c ? `${c}/${AUTOMATION}` : null; }
-  enabled(): boolean { const k = this.toggleKey; return !!k && this.hq.store.toggle(k); }
+  /** `home-headline` is on: hq writes the sentence. */
+  enabled(): boolean {
+    const r = this.db.prepare(`SELECT enabled FROM toggles WHERE key LIKE ? ORDER BY key LIMIT 1`).get(`%/${AUTOMATION}`) as { enabled: number } | undefined;
+    return r?.enabled === 1;
+  }
 
   refs(): HomeRefs {
     return {
@@ -323,8 +318,6 @@ export class Home {
       .run(by, now, reason?.trim() || null, JSON.stringify(valid));
     const version = Number(r.lastInsertRowid);
     this.db.prepare('DELETE FROM home_recipes WHERE version <= ?').run(version - 200);
-    // What was waiting for this composition is now in it.
-    this.setPending([]);
     this.hq.store.setMeta('home.composed_at', String(now));
     this.hq.store.emit('home.composed', by, { version, reason: reason ?? null, blocks: valid.length });
     return { version, composed_by: by, composed_at: now, reason: reason?.trim() || null, source: 'agent', blocks: valid };
@@ -341,8 +334,7 @@ export class Home {
     const refs = this.refs();
     let recipe: HomeRecipe | null = null;
     let fallback: HomeRecipe['fallback'] = 'none';
-    if (row && !this.enabled() && row.composed_by === this.composer()) fallback = 'off';
-    else if (row && now - row.composed_at > STALE_MS) fallback = 'stale';
+    if (row && now - row.composed_at > STALE_MS) fallback = 'stale';
     else if (row) {
       try {
         // Inbox references are not re-checked here: a closed one is pruned below, not a reason to drop the recipe.
@@ -352,7 +344,7 @@ export class Home {
         recipe = { version: row.version, composed_by: row.composed_by, composed_at: row.composed_at, reason: row.reason, source: 'agent', blocks };
       } catch { fallback = 'invalid'; }
     }
-    recipe ??= { ...this.defaultRecipe(), version: row?.version ?? 0, fallback };
+    recipe ??= { ...this.defaultRecipe(), version: row?.version ?? 0, fallback, ...(this.enabled() ? { source: 'hq' as const } : {}) };
     return { ...recipe, blocks: this.live(recipe.blocks, refs), waiting_changed_at: this.hq.inbox.lastChange(), quota: this.hq.accounts.quota() };
   }
 
@@ -429,7 +421,7 @@ export class Home {
     const running = this.hq.openTasks().filter((t) => t.state === 'running');
     const done = this.db.prepare(`SELECT id, project, summary FROM tasks WHERE state = 'done' AND NOT ${CANCELLED_SQL} AND summary IS NOT NULL AND summary != '' AND updated_at > ?
       ORDER BY updated_at DESC, id DESC`).all(dayAgo) as { id: number; project: string | null; summary: string }[];
-    blocks.push({ type: 'headline', text: headline(running.length, done.length, !!alert) });
+    blocks.push({ type: 'headline', text: sentence(this.facts()) });
     if (alert) blocks.push(alert);
     const known = new Set(this.hq.projects().map((p) => p.id));
     const moved = (this.db.prepare(`SELECT project FROM tasks WHERE project IS NOT NULL AND updated_at > ? GROUP BY project ORDER BY MAX(updated_at) DESC`)
@@ -450,129 +442,131 @@ export class Home {
     return { version: 0, composed_by: 'hq', composed_at: now, reason: null, source: 'default', blocks: capped };
   }
 
-  // ── waking the composer ────────────────────────────────────────────────────
-
-  private pending(): PendingEvent[] {
-    try { return JSON.parse(this.hq.store.getMeta('home.pending') ?? '[]') as PendingEvent[]; } catch { return []; }
-  }
-  private setPending(p: PendingEvent[]): void { this.hq.store.setMeta('home.pending', JSON.stringify(p.slice(-40))); }
-
-  private add(e: Omit<PendingEvent, 'at' | 'urgent'>): void {
-    if (!this.enabled()) return;
-    this.setPending([...this.pending(), { ...e, at: this.hq.store.now(), urgent: URGENT_KINDS.has(e.kind) }]);
-  }
-
-  private taskLine(id: number): { title: string; summary: string | null; who: string | null; cancelled: boolean } | undefined {
-    const t = this.db.prepare('SELECT title, summary, identity, labels FROM tasks WHERE id = ?').get(id) as { title: string; summary: string | null; identity: string | null; labels: string } | undefined;
-    return t ? { title: t.title, summary: t.summary, who: t.identity ? this.hq.mailbox.label(t.identity) : null, cancelled: isCancelled(t) } : undefined;
-  }
-
-  /** The events that matter, turned into lines for the composer. Night: a task that started is not one. */
+  /** An answer came, or he read it: the "ביקשת" list changes now, not at the next sweep. */
   observe(e: HqEvent): void {
     const d = (e.data ?? {}) as Record<string, unknown>;
-    switch (e.type) {
-      // An answer came, or he read it: the list changes now, not at the next sweep.
-      case 'message.new': case 'message.state': if (d.from === OWNER || d.to === OWNER || d.from_identity === OWNER || d.to_identity === OWNER) this.askedSoon(); return;
-      case 'conv.read': this.askedSoon(); return;
-      case 'task.state': {
-        const t = typeof d.id === 'number' ? this.taskLine(d.id) : undefined;
-        if (!t) return;
-        if (d.state === 'running' && d.shift) {
-          if (this.quiet()) return;
-          this.add({ kind: 'task_started', text: `משימה התחילה: ${t.title}${t.who ? ` (${t.who})` : ''}` });
-        } else if (d.state === 'done') {
-          this.add({ kind: 'task_done', text: t.cancelled ? `משימה בוטלה: ${t.title}${t.who ? ` (${t.who})` : ''}` : `משימה הסתיימה: ${t.summary ?? t.title}${t.who ? ` (${t.who})` : ''}` });
-        }
-        return;
-      }
-      case 'inbox.new': {
-        const kind = d.kind === 'incident' ? 'incident' : 'inbox';
-        this.add({ kind, text: `${kind === 'incident' ? 'תקלה' : `מחכה ${pre('ל', this.hq.mailbox.names.owner.name)}`}: ${String(d.headline ?? d.title ?? '')} (inbox ${String(d.id)})` });
-        return;
-      }
-      case 'probe.anomaly': this.add({ kind: 'incident', text: `תקלה בניטור: ${String(d.probe ?? '')}` }); return;
-      case 'watchdog.dead': this.add({ kind: 'incident', text: `משמרת נפלה: ${e.identity ? this.hq.mailbox.label(e.identity) : ''} (${String(d.shift ?? '')})` }); return;
-      case 'deploy.recorded': this.add({ kind: 'deploy', text: `פריסה: ${String(d.project ?? '')}${d.target ? ` (${String(d.target)})` : ''}` }); return;
-      case 'hq.started': this.add({ kind: 'deploy', text: 'hq עלה מחדש (פריסה או אתחול)' }); return;
-      case 'inbox.completed': {
-        const item = typeof d.id === 'number' ? this.hq.inbox.get(d.id) : undefined;
-        // Closed for him by the worker who asked (withdraw_go): "אושר בשיחה" with his words, or "בוטל".
-        if (item?.kind === 'go' && d.how === 'chat') {
-          this.add({ kind: 'deploy', text: `אושר בשיחה: ${item.headline ?? item.title}${typeof d.quote === 'string' ? ` «${d.quote.slice(0, 120)}»` : ''}` });
-          return;
-        }
-        if (item?.kind === 'go' && d.how === 'withdrawn') {
-          this.add({ kind: 'deploy', text: `בוטל: ${item.headline ?? item.title}` });
-          return;
-        }
-        if (item?.kind === 'go' && !d.declined) {
-          const o = this.hq.mailbox.names.owner;
-          this.add({ kind: 'deploy', text: `${o.name} ${g(o, 'אישר', 'אישרה')} GO: ${item.headline ?? item.title}` });
-        }
-        return;
-      }
-    }
+    if ((e.type === 'message.new' || e.type === 'message.state') && (d.from === OWNER || d.to === OWNER || d.from_identity === OWNER || d.to_identity === OWNER)) this.askedSoon();
+    else if (e.type === 'conv.read') this.askedSoon();
   }
 
-  private tz(): string { return this.hq.timeZone(); }
-
-  /** Night mode, before 07:00 of the morning after it started, and he hasn't opened the app since. */
-  quiet(): boolean {
-    const night = this.hq.night.current();
-    if (!night) return false;
-    return this.hq.store.now() < nextLocal(night.started_at, MORNING.h, MORNING.m, this.tz());
+  /** When he opened the app last, and where the visit before it ended: "מאז שהיית פה" counts from there. */
+  visitedFrom(): number | null {
+    const v = Number(this.hq.store.getMeta('home.visit_prev') ?? 0);
+    return v > 0 ? v : null;
   }
 
-  /** He opened the app (GET /api/home from a device): a batch held for the morning goes now. */
-  opened(): void {
-    if (this.pending().length) { this.openedApp = true; this.hq.store.bg(Promise.resolve().then(() => this.sweep()), 'home.sweep'); }
-  }
-
-  /** From the scheduler loop (every minute) and on app open. Returns whether the composer was woken. */
-  sweep(): boolean {
-    if (this.hq.cfg.codexLean) return false;
-    const composer = this.composer();
-    if (!composer || !this.enabled()) { if (this.pending().length) this.setPending([]); return false; }
-    const pending = this.pending();
-    if (!pending.length) return false;
+  /**
+   * GET /api/home from a device that says he looks at it. `opened`: he opened the app or brought it to the front;
+   * more than VISIT_GAP_MS after he was last seen, that is a new visit, and the one before ended then. Else it is
+   * the minute's reload while he looks (`?looking=1`): it only keeps the visit going, so a long sitting ends where he
+   * left, not where he came in. A reload on an event (the app may be open behind) does not call this.
+   */
+  seen(opened: boolean): void {
     const now = this.hq.store.now();
-    const last = Number(this.hq.store.getMeta('home.woken_at') ?? 0);
-    if (now - last < WAKE_EVERY_MS) return false;
-    if (this.quiet() && !this.openedApp && !pending.some((p) => p.urgent)) return false;
-    this.openedApp = false;
-    this.hq.store.setMeta('home.woken_at', String(now));
-    this.setPending([]);
-    this.hq.mailbox.tell({ msg_id: `home-wake-${now}`, from: 'hq', to: composer, kind: 'system', priority: 'next', body: this.wakeBody(pending) });
-    this.hq.store.emit('home.woken', composer, { events: pending.length });
-    return true;
+    const last = Number(this.hq.store.getMeta('home.visit_at') ?? 0);
+    if (opened) {
+      if (last && now - last > VISIT_GAP_MS) this.hq.store.setMeta('home.visit_prev', String(last));
+      this.hq.store.setMeta('home.visit_at', String(now));
+    } else if (last && now - last <= VISIT_GAP_MS) this.hq.store.setMeta('home.visit_at', String(now));
   }
 
-  private hhmm(ts: number): string { return hhmm(ts, this.tz()); }
-
-  /** Everything the composer needs in one message: what happened, what the screen shows now, what it may point at. */
-  wakeBody(pending: PendingEvent[]): string {
-    const row = this.latest();
-    const cur = this.current();
-    const board = this.hq.board();
-    const working = board.filter((b) => b.status === 'working').map((b) => `${b.id} (${b.name})`);
-    const projects = this.hq.projects().map((p) => `${p.id}${p.name ? ` (${p.name})` : ''}${p.status !== 'active' ? ` · ${p.status}` : ''}`);
-    const asked = this.asked().map((a) => `${a.id}: ${this.hq.mailbox.label(a.identity)} · ${a.state === 'answered' ? 'ענו' : 'מחכה'} · ${a.body.replace(/\s+/g, ' ').slice(0, 60)}`);
-    const inbox = this.hq.inbox.open().map((i) => `${i.id}: ${i.kind}${i.blocking ? ' · חוסם' : ''}${i.snoozed_at ? ' · נדחה' : ''} · ${i.headline ?? i.title}`);
-    const open = this.hq.openTasks(board).map((t) => `${t.id}: ${t.title} · ${t.state}${t.position ? ` ${t.position} בתור` : ''}`
-      + `${t.worker ? ` · ${this.hq.mailbox.label(t.worker)}` : ''}${t.opened_by ? ` · פתח ${this.hq.mailbox.label(t.opened_by)}` : ''}`);
-    return [
-      `להרכיב מחדש את ראש מסך השיחות של ${this.hq.mailbox.names.owner.name} (\`compose_home\`). מאז ההרכבה הקודמת${row ? ` (${this.hhmm(row.composed_at)})` : ''}:`,
-      ...pending.map((p) => `- ${this.hhmm(p.at)} ${p.text}`),
-      '',
-      `מה מוצג עכשיו (${cur.source === 'agent' ? `מתכון ${cur.version}` : `ברירת המחדל${cur.fallback && cur.fallback !== 'none' ? `, ${cur.fallback}` : ''}`}):`,
-      '```json', JSON.stringify(cur.blocks), '```',
-      `inbox פתוח: ${inbox.length ? '' : 'אין'}`, ...inbox.map((l) => `- ${l}`),
-      `ביקשת (asked): ${asked.length ? '' : 'אין'}`, ...asked.map((l) => `- ${l}`),
-      `בעבודה ובתור (tasks): ${open.length ? '' : 'אין'}`, ...open.map((l) => `- ${l}`),
-      `פרויקטים: ${projects.join(', ') || 'אין'}`,
-      `עובדים עכשיו: ${working.join(', ') || 'אף אחד'}`,
-      `מכסה (מוצגת בבית לבד, מתחת לפרויקטים): ${this.hq.accounts.quota().map((q) => `${q.label} 5 שעות ${q.five_hour_pct ?? '?'}%, שבועי ${q.seven_day_pct ?? '?'}%${q.full ? ', מלא' : ''}`).join(' · ') || 'אין'}`,
-      'אם אין מה לשנות, לא צריך לקרוא לכלי. מתכון ישן מ-30 דקות מתחלף בברירת המחדל.',
-    ].join('\n');
+  /** The facts the sentence on top is written from: what waits for him, what runs and where, what finished since he was here. */
+  facts(): HomeFacts {
+    const now = this.hq.store.now();
+    const from = this.visitedFrom();
+    const names = new Map(this.hq.projects().map((p) => [p.id, p.name ?? p.id]));
+    // As the app counts them (backend.dart waitingCount): not put off, and a GO with a newer one open from the same
+    // worker is replaced by it (#258), so the sentence never contradicts the count in front of it.
+    const open = this.hq.inbox.open();
+    const superseded = (i: (typeof open)[number]) => i.kind === 'go'
+      && open.some((x) => x.id !== i.id && x.kind === 'go' && x.from_identity === i.from_identity && (x.created_at > i.created_at || (x.created_at === i.created_at && x.id > i.id)));
+    const waiting = open.filter((i) => !i.snoozed_at && !superseded(i));
+    const running = this.hq.openTasks().filter((t) => t.state === 'running');
+    const since = from ?? now - DAY_MS;
+    const done = (this.db.prepare(`SELECT COUNT(*) AS n FROM tasks WHERE state = 'done' AND NOT ${CANCELLED_SQL} AND updated_at > ?`).get(since) as { n: number }).n;
+    const stuck = (this.db.prepare(`SELECT COUNT(DISTINCT identity) AS n FROM shifts WHERE state IN ('starting','live') AND stuck_since IS NOT NULL`).get() as { n: number }).n;
+    const gos = waiting.filter((i) => i.kind === 'go');
+    // The one to name: the only thing waiting, else the only GO among them, and whether it is first in line.
+    const one = waiting.length === 1 ? waiting[0]! : gos.length === 1 ? gos[0]! : null;
+    return {
+      waiting: waiting.length,
+      gos: gos.length,
+      ...(one ? { decision: { kind: one.kind, text: clip(firstLine(one.headline ?? one.title, 200), 60), first: waiting[0] === one } } : {}),
+      running: running.length,
+      where: [...new Set(running.map((t) => t.project).filter((p): p is string => !!p))].map((p) => names.get(p) ?? p),
+      done,
+      visited: !!from,
+      stuck,
+    };
   }
+}
+
+/** What the sentence on top is written from (Home.facts). */
+export interface HomeFacts {
+  /** Open items in "מחכה לך" that were not put off; the app leads with their count. */
+  waiting: number;
+  /** How many of them are a GO. */
+  gos?: number;
+  /** The one that waits, when there is exactly one; else the only GO among them, and whether it is first in line. */
+  decision?: { kind: string; text: string; first?: boolean };
+  running: number;
+  /** The display names of the projects tasks run in. */
+  where: string[];
+  /** Tasks that finished since he was here (or in the last day). */
+  done: number;
+  /** Whether hq knows when he was here last; without it, "ביממה האחרונה". */
+  visited: boolean;
+  /** Workers who are stuck (the app puts its own sentence on top then; this is for any other reader). */
+  stuck: number;
+}
+
+const count = (n: number, one: string, two: string, many: string): string => (n === 1 ? one : n === 2 ? two : `${n} ${many}`);
+/** "ב" before a name: בלומו, ב-tiki-bot-go, and בחברה, not בהחברה (the ה is swallowed). */
+const inName = (prefix: string, name: string): string => (/^ה[֐-׿]/.test(name) ? `${prefix}${name.slice(1)}` : pre(prefix, name));
+const KIND_WORD: Record<string, string> = { go: 'GO', ask: 'שאלה', login: 'כניסה', incident: 'תקלה' };
+
+/**
+ * The sentence on top of his conversations screen, from facts, without a model. The app puts "החלטה אחת מחכה לך."
+ * in front of it from its own live count, so with something waiting this names it (when it is one) and goes on to
+ * the rest; with nothing waiting it says so. A person's sentence, not a log line: "שתי משימות רצות בלומו ובחברה, ושום
+ * דבר לא מחכה לך."
+ */
+export function sentence(f: HomeFacts, max = 100): string {
+  const build = (names: boolean, decision: boolean, finished: boolean): string => {
+    const parts: string[] = [];
+    if (f.stuck) parts.push(`${count(f.stuck, 'עובד אחד תקוע', 'שני עובדים תקועים', 'עובדים תקועים')}.`);
+    const gos = f.gos ?? 0;
+    // The one that waits, by name: "GO: …" when it is the only one, "בראש התור: …" when it is the only GO of many
+    // (two colons in a row read like code; the card itself says GO). "GO: GO: …" reads like a log: the word once.
+    const named = (lead: string | null): string => {
+      if (!f.decision) return '';
+      const w = KIND_WORD[f.decision.kind];
+      const raw = f.decision.text.replace(/[.\s]+$/, '');
+      const t = w ? raw.replace(new RegExp(`^${w}:\\s*`, 'i'), '') : raw;
+      return `${lead ?? (w ? `${w}:` : '')}${lead ?? w ? ' ' : ''}${t}${/[?!…]$/.test(t) ? '' : '.'}`;
+    };
+    if (f.waiting === 1) { if (decision) parts.push(named(null)); }
+    else if (f.waiting > 1 && gos) {
+      // What the many are: "בראש התור: …" when the one GO is first, else "אחת מהן היא בקשת GO: …"; "3 מהן GO.", "כולן GO."
+      parts.push(gos === 1 ? (decision && f.decision ? named(f.decision.first ? 'בראש התור:' : 'אחת מהן היא בקשת GO:') : 'אחת מהן היא בקשת GO.')
+        : gos === f.waiting ? (gos === 2 ? 'שתיהן GO.' : 'כולן GO.') : `${gos} מהן GO.`);
+    }
+    const said = !!f.done && finished;
+    if (said) parts.push(`${f.visited ? 'מאז שהיית פה' : 'ביממה האחרונה'} ${f.done === 1 ? 'הסתיימה משימה אחת' : `הסתיימו ${count(f.done, '', 'שתי משימות', 'משימות')}`}.`);
+    const where = !names || !f.where.length ? '' : f.where.length === 1 ? ` ${inName('ב', f.where[0]!)}`
+      : f.where.length === 2 ? ` ${inName('ב', f.where[0]!)} ${inName('וב', f.where[1]!)}` : ` ב-${f.where.length} פרויקטים`;
+    // After a sentence on what finished, "משימות" is said: "בינתיים 11 רצות", never "250 משימות. 11 משימות".
+    const run = !f.running ? '' : `${said ? count(f.running, 'אחת רצה', 'שתיים רצות', 'רצות') : count(f.running, 'משימה אחת רצה', 'שתי משימות רצות', 'משימות רצות')}${where}`;
+    if (f.waiting) { if (run) parts.push(`בינתיים ${run}.`); }
+    else if (run) parts.push(`${said ? 'בינתיים ' : ''}${run}, ושום דבר לא מחכה לך.`);
+    else parts.push(said || f.stuck ? 'שום דבר לא מחכה לך.' : 'הכול שקט, ושום דבר לא מחכה לך.');
+    return parts.join(' ');
+  };
+  // Too long for two lines on a phone: the project names go first, then what finished (it is listed below), then
+  // the name of what waits.
+  for (const [names, decision, finished] of [[true, true, true], [false, true, true], [false, true, false], [false, false, false]] as const) {
+    const s = build(names, decision, finished);
+    if (s.length <= max) return s;
+  }
+  return build(false, false, false).slice(0, max);
 }

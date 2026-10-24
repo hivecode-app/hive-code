@@ -11,7 +11,7 @@ export interface NamedPerson { id: string; name: string; gender: Gender }
 export interface CompanyNames {
   owner: NamedPerson;
   manager: NamedPerson;
-  /** Who composes the head of his conversations screen: the identity whose automations hold `compose-home`. */
+  /** Who composes the head of his conversations screen: the identity whose automations hold `home-headline` (before it, `compose-home`). */
   composer?: NamedPerson;
 }
 
@@ -36,7 +36,7 @@ export function namesFromOrg(org: unknown, managerId?: string): CompanyNames {
   ].filter((p): p is Record<string, unknown> => !!p && typeof p === 'object');
   const mId = str(o.manager) ?? managerId ?? DEFAULT_NAMES.manager.id;
   const m = people.find((p) => p.id === mId);
-  const c = people.find((p) => Array.isArray(p.automations) && p.automations.some((a: { id?: unknown }) => a?.id === 'compose-home'));
+  const c = people.find((p) => Array.isArray(p.automations) && p.automations.some((a: { id?: unknown }) => a?.id === 'home-headline' || a?.id === 'compose-home'));
   const person = (p: Record<string, unknown>): NamedPerson => ({ id: String(p.id), name: str(p.name) ?? String(p.id), gender: gender(p.gender) });
   return {
     owner: { id: str(o.owner) ?? DEFAULT_NAMES.owner.id, name: str(o.owner_name) ?? DEFAULT_NAMES.owner.name, gender: gender(o.owner_gender) },

@@ -130,9 +130,11 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   });
 
   // The head of the conversations screen (home.ts): the recipe in force, and a new one. The app says
-  // ?opened=1 when he is looking at it (start, back to the front): that releases what was held for the morning.
+  // ?opened=1 when he opens it (start, back to the front): a new visit, for "מאז שהיית פה". ?looking=1 from the
+  // minute's reload while it is in front keeps the visit going; a reload on an event says neither.
   route('GET', '/api/home', ({ caller, url }) => {
-    if (caller.kind === 'device' && url.searchParams.get('opened') === '1') hq.home.opened();
+    const p = url.searchParams;
+    if (caller.kind === 'device' && (p.get('opened') === '1' || p.get('looking') === '1')) hq.home.seen(p.get('opened') === '1');
     return hq.home.current();
   });
   // From a device it is his own arrangement; only hq's admin token may compose in someone else's name.

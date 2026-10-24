@@ -41,7 +41,9 @@ void main() {
     // A stuck worker, or a headline older than hq's 30 minutes (from the cache): live.
     expect(topSentence(quiet, recipe(), stuck: 1, now: now), 'תקלה אחת צריכה אותך עכשיו.');
     expect(topSentence(quiet, recipe(), stuck: 0, now: at.add(const Duration(minutes: 31))), 'שום דבר לא מחכה לך. הכול שקט.');
-    // hq's own default, or no recipe: live.
+    // hq's own sentence, written from facts (`home-headline` on): shown like the composer's.
+    expect(topSentence(quiet, recipe(source: 'hq'), stuck: 0, now: now), 'בוקר שקט, שתי משימות רצות');
+    // hq's plain default (switched off), or no recipe: live.
     expect(topSentence(quiet, recipe(source: 'default'), stuck: 0, now: now), 'שום דבר לא מחכה לך. הכול שקט.');
     expect(topSentence(quiet, null, stuck: 0, now: now), 'שום דבר לא מחכה לך. הכול שקט.');
     // With decisions waiting, the lead comes first and nothing else says "שום דבר".

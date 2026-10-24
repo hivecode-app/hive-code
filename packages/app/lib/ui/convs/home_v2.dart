@@ -47,11 +47,12 @@ String homeSentence(CompanyData d, {required int stuck, int decisions = 0}) {
 /// Workers who are stuck: a fault with no decision, the only thing the home still raises by itself.
 int stuckWorkers(CompanyData d) => d.identities.keys.where((id) => d.presence[id]?.status == WorkerStatus.stuck).length;
 
-/// The sentence on top after [decisionsLead]: the composer's headline while it is fresh (it says nothing of how
-/// many wait for him: the app's count is live), else [homeSentence]. A stuck worker or a headline older than hq's
-/// 30 minutes (a recipe from the cache) always gets the live sentence. Empty when the lead says it all.
+/// The sentence on top after [decisionsLead]: the composer's headline while it is fresh, or hq's own, written from
+/// facts (`source: hq`); neither says how many wait for him, the app's count is live. Else [homeSentence]. A stuck
+/// worker or a headline older than hq's 30 minutes (a recipe from the cache) always gets the live sentence. Empty
+/// when the lead says it all.
 String topSentence(CompanyData d, HomeRecipe? recipe, {required int stuck, DateTime? now}) {
-  final headline = recipe == null || !recipe.byAgent ? null : recipe.blocks.where((b) => b.type == 'headline').firstOrNull?.text?.trim();
+  final headline = recipe == null || !(recipe.byAgent || recipe.byHq) ? null : recipe.blocks.where((b) => b.type == 'headline').firstOrNull?.text?.trim();
   final fresh = recipe != null && (now ?? CompanyTime.now()).difference(recipe.composedAt) <= const Duration(minutes: 30);
   if (headline != null && headline.isNotEmpty && stuck == 0 && fresh) return headline;
   return homeSentence(d, stuck: stuck, decisions: d.waitingCount);

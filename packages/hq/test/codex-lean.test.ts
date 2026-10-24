@@ -27,7 +27,6 @@ test('lean continuity only delivers new owner messages, one identity at a time, 
     await until(() => hq.mailbox.get('owner-b')?.state === 'delivered');
     assert.equal(launcher.launches.length, 2);
     assert.equal(hq.mailbox.get('owner-a-reply')?.from_identity, 'eli');
-    assert.equal(await hq.home.sweep(), false);
     assert.deepEqual(await hq.scheduler.fill(), []);
   } finally { await env.cleanup(); }
 });

@@ -92,7 +92,6 @@ test('#128: home block tasks {tasks: [ids] | "open"}: validated, in the default,
 
     hq.home.compose([{ type: 'headline', text: 'משימה דחופה' }, { type: 'tasks', tasks: [t.id], emphasis: 'strong' }], 'yoav');
     assert.deepEqual(hq.home.current().blocks.find((b) => b.type === 'tasks'), { type: 'tasks', tasks: [t.id], emphasis: 'strong' });
-    assert.match(hq.home.wakeBody([]), new RegExp(`${t.id}: דחופה`), 'the composer sees the open tasks');
     hq.scheduler.setTaskState(t.id, 'done');
     assert.equal(hq.home.current().blocks.some((b) => b.type === 'tasks'), false, 'done: the block is gone, the recipe stays');
     assert.equal(hq.home.current().source, 'agent');

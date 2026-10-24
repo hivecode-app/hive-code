@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, ORG_YAML, type TestEnv } from './helpers.ts';
-import { validateBlocks, headline, HomeError, STALE_MS, WAKE_EVERY_MS, type HomeRefs } from '../src/home.ts';
+import { buildRoutes } from '../src/api.ts';
+import { validateBlocks, sentence, HomeError, STALE_MS, VISIT_GAP_MS, type HomeFacts, type HomeRefs } from '../src/home.ts';
 
 const ORG = ORG_YAML.replace(
   '  - {id: ac-ceo, name: שירה, title: מנכ"לית agent-company, symbol: architecture, team: agent-company, reports_to: yoav, kind: project, lifecycle: always-on}',
@@ -14,7 +15,7 @@ const ORG = ORG_YAML.replace(
     kind: project
     lifecycle: always-on
     automations:
-      - {id: compose-home, what: מרכיבה את הבית, enabled: true}`,
+      - {id: home-headline, what: hq כותב את המשפט בראש הבית, enabled: true}`,
 ) + `timezone: Asia/Bangkok
 projects:
   - {id: agent-company, name: החברה}
@@ -92,9 +93,9 @@ test('fallback: the default with no recipe, the agent one while fresh, the defau
     const { hq, clock } = env;
     const go = hq.inbox.add({ kind: 'go', title: 'GO: hq', from_identity: 'ac-ceo', blocking: true });
     let cur = hq.home.current();
-    assert.equal(cur.source, 'default');
+    assert.equal(cur.source, 'hq', 'home-headline is on: hq writes the sentence');
     assert.equal(cur.fallback, 'none');
-    assert.deepEqual(cur.blocks, [{ type: 'headline', text: 'שקט: אין משימות בעבודה.' }, { type: 'quiet', projects: ['agent-company'] }],
+    assert.deepEqual(cur.blocks, [{ type: 'headline', text: 'GO: hq.' }, { type: 'quiet', projects: ['agent-company'] }],
       'the active project that did not move folds into the last line; dormant lumo is not in it');
     // "מה לבדוק" is on the status screen: the default does not show it, a composed recipe still may.
     const t = hq.scheduler.addTask({ title: 'תמונות', project: 'agent-company' });
@@ -114,7 +115,7 @@ test('fallback: the default with no recipe, the agent one while fresh, the defau
 
     clock.advance(STALE_MS + 1);
     cur = hq.home.current();
-    assert.equal(cur.source, 'default');
+    assert.equal(cur.source, 'hq');
     assert.equal(cur.fallback, 'stale');
     assert.equal(cur.version, r.version);
 
@@ -125,8 +126,11 @@ test('fallback: the default with no recipe, the agent one while fresh, the defau
     assert.equal(hq.home.current().fallback, 'invalid');
 
     hq.home.compose([{ type: 'headline', text: 'שקט' }], 'ac-ceo');
-    hq.store.setToggle('ac-ceo/compose-home', false);
-    assert.equal(hq.home.current().fallback, 'off', 'switched off: the default stays');
+    assert.equal(hq.home.current().source, 'agent', 'composed by hand: it wins while fresh');
+    hq.store.setToggle('ac-ceo/home-headline', false);
+    assert.equal(hq.home.current().source, 'agent', 'the switch is hq\'s sentence, not the hand-composed recipe');
+    clock.advance(STALE_MS + 1);
+    assert.equal(hq.home.current().source, 'default', 'switched off: the plain default, the app writes the sentence');
   } finally { await env.cleanup(); }
 });
 
@@ -137,7 +141,7 @@ test('the default is short: a sentence, what waits, a line per project that move
     const old = hq.scheduler.addTask({ title: 'ישנה', project: 'lumo' });
     hq.store.db.prepare(`UPDATE tasks SET state = 'done', summary = 'מלפני יומיים' WHERE id = ?`).run(old.id);
     clock.advance(25 * 3_600_000);
-    assert.deepEqual(hq.home.defaultRecipe().blocks, [{ type: 'headline', text: 'שקט: אין משימות בעבודה.' }, { type: 'quiet', projects: ['agent-company'] }],
+    assert.deepEqual(hq.home.defaultRecipe().blocks, [{ type: 'headline', text: 'הכול שקט, ושום דבר לא מחכה לך.' }, { type: 'quiet', projects: ['agent-company'] }],
       'nothing moved in a day: no project line, nothing since, the project is quiet');
     hq.awaiting.mark(old.id, { awaiting: 'deploy', awaiting_note: 'לפרוס' }, 'ac-ceo');
     const done = ['הראשונה הסתיימה', 'השנייה הסתיימה\nפרטים', 'השלישית הסתיימה'].map((summary) => {
@@ -151,18 +155,76 @@ test('the default is short: a sentence, what waits, a line per project that move
     hq.store.db.prepare(`UPDATE tasks SET state = 'running', identity = 'ac-ceo', started_at = ?, updated_at = ? WHERE id = ?`).run(hq.store.now(), hq.store.now(), run.id);
     const blocks = hq.home.defaultRecipe().blocks;
     assert.deepEqual(blocks.map((b) => b.type), ['headline', 'project', 'project', 'since'], 'no tasks, lanes or awaiting; every active project moved: no quiet line');
-    assert.deepEqual(blocks[0], { type: 'headline', text: 'משימה אחת בעבודה ו-3 הסתיימו ביממה האחרונה.' });
+    assert.deepEqual(blocks[0], { type: 'headline', text: 'ביממה האחרונה הסתיימו 3 משימות. בינתיים אחת רצה בלומו, ושום דבר לא מחכה לך.' },
+      '"מה לבדוק" is not a decision: nothing waits');
     assert.deepEqual(blocks[1], { type: 'project', project: 'lumo', note: 'רצה בלומו' }, 'nothing finished there: what runs');
     assert.deepEqual(blocks[2], { type: 'project', project: 'agent-company', note: 'השלישית הסתיימה' });
     assert.deepEqual(blocks[3], { type: 'since', items: [{ text: 'השלישית הסתיימה', task: done[2] }, { text: 'השנייה הסתיימה', task: done[1] }] });
   } finally { await env.cleanup(); }
 });
 
-test('headline: one sentence from the numbers', () => {
-  assert.equal(headline(1, 0), 'משימה אחת בעבודה.');
-  assert.equal(headline(0, 3), '3 משימות הסתיימו ביממה האחרונה.');
-  assert.equal(headline(0, 0, true), 'יש תקלה.', 'never "quiet" over an alert');
-  assert.equal(headline(3, 5), '3 משימות בעבודה ו-5 הסתיימו ביממה האחרונה.');
+test('sentence: a person\'s sentence from the facts, after the app\'s "N החלטות מחכות לך."', () => {
+  const f = (o: Partial<HomeFacts>): HomeFacts => ({ waiting: 0, running: 0, where: [], done: 0, visited: true, stuck: 0, ...o });
+  assert.equal(sentence(f({})), 'הכול שקט, ושום דבר לא מחכה לך.');
+  assert.equal(sentence(f({ running: 2, where: ['לומו', 'החברה'] })), 'שתי משימות רצות בלומו ובחברה, ושום דבר לא מחכה לך.', 'בחברה, not בהחברה');
+  assert.equal(sentence(f({ running: 1, where: ['tiki-bot-go'] })), 'משימה אחת רצה ב-tiki-bot-go, ושום דבר לא מחכה לך.');
+  assert.equal(sentence(f({ running: 4, where: ['א', 'ב', 'ג'] })), '4 משימות רצות ב-3 פרויקטים, ושום דבר לא מחכה לך.');
+  assert.equal(sentence(f({ done: 3 })), 'מאז שהיית פה הסתיימו 3 משימות. שום דבר לא מחכה לך.');
+  assert.equal(sentence(f({ done: 1, visited: false })), 'ביממה האחרונה הסתיימה משימה אחת. שום דבר לא מחכה לך.');
+  // With something waiting the app leads with the count: this names the one, and goes on.
+  assert.equal(sentence(f({ waiting: 1, decision: { kind: 'go', text: 'GO: שחרור voice-bot' }, running: 1, where: ['החברה'] })),
+    'GO: שחרור voice-bot. בינתיים משימה אחת רצה בחברה.');
+  assert.equal(sentence(f({ waiting: 1, decision: { kind: 'ask', text: 'איזה שם לבוט?' } })), 'שאלה: איזה שם לבוט?');
+  assert.equal(sentence(f({ waiting: 3, running: 2, done: 2 })), 'מאז שהיית פה הסתיימו שתי משימות. בינתיים שתיים רצות.');
+  assert.equal(sentence(f({ waiting: 2 })), '', 'the lead says it all');
+  // Many: what they are, and the GO by name when it is the only one.
+  assert.equal(sentence(f({ waiting: 5, gos: 1, decision: { kind: 'go', text: 'GO: שחרור voice-bot', first: true } })), 'בראש התור: שחרור voice-bot.', 'not two colons in a row');
+  assert.equal(sentence(f({ waiting: 5, gos: 1, decision: { kind: 'go', text: 'GO: שחרור voice-bot', first: false } })), 'אחת מהן היא בקשת GO: שחרור voice-bot.');
+  assert.equal(sentence(f({ waiting: 5, gos: 1, decision: { kind: 'go', text: 'א'.repeat(60), first: false }, done: 3, running: 2 })), 'אחת מהן היא בקשת GO. בינתיים שתי משימות רצות.', 'a long name: without it');
+  assert.equal(sentence(f({ done: 250, visited: false, running: 11, where: ['א', 'ב', 'ג', 'ד'] })),
+    'ביממה האחרונה הסתיימו 250 משימות. בינתיים 11 רצות ב-4 פרויקטים, ושום דבר לא מחכה לך.', 'never a number right after a number');
+  assert.equal(sentence(f({ waiting: 6, gos: 4, running: 2 })), '4 מהן GO. בינתיים שתי משימות רצות.');
+  assert.equal(sentence(f({ waiting: 2, gos: 2 })), 'שתיהן GO.');
+  assert.equal(sentence(f({ waiting: 3, gos: 3 })), 'כולן GO.');
+  assert.equal(sentence(f({ stuck: 2 })), 'שני עובדים תקועים. שום דבר לא מחכה לך.', 'never "הכול שקט" over a stuck worker');
+  // Too long: the project names go first, then what finished, then the name of what waits.
+  const long = sentence(f({ waiting: 1, decision: { kind: 'go', text: 'א'.repeat(55) }, running: 2, where: ['לומו', 'ב'.repeat(30)] }));
+  assert.ok(long.length <= 100 && long.includes('א'.repeat(55)) && !long.includes('בלומו'), long);
+  assert.equal(sentence(f({ waiting: 1, decision: { kind: 'go', text: 'א'.repeat(40) }, running: 1, done: 30 }), 70), `GO: ${'א'.repeat(40)}. בינתיים משימה אחת רצה.`);
+  assert.equal(sentence(f({ waiting: 1, decision: { kind: 'go', text: 'א'.repeat(80) }, running: 1, done: 30 }), 60), 'בינתיים משימה אחת רצה.');
+});
+
+test('"מאז שהיית פה": from the end of his visit before this one; opens close together are one visit', async () => {
+  const env = await homeEnv();
+  try {
+    const { hq, clock } = env;
+    const finish = (title: string) => {
+      const t = hq.scheduler.addTask({ title, project: 'agent-company' });
+      hq.store.db.prepare(`UPDATE tasks SET state = 'done', summary = ?, updated_at = ? WHERE id = ?`).run(title, hq.store.now(), t.id);
+    };
+    finish('לפני הביקור');
+    clock.advance(1000);
+    hq.home.seen(true);
+    assert.equal(hq.home.facts().visited, false, 'the first open: no visit before it');
+    assert.equal(hq.home.facts().done, 1, 'the last day');
+    clock.advance(VISIT_GAP_MS + 1);
+    hq.home.seen(true);
+    assert.equal(hq.home.facts().visited, true);
+    assert.equal(hq.home.facts().done, 0, 'nothing finished since the visit before');
+    finish('בזמן שהוא פה');
+    clock.advance(60_000);
+    hq.home.seen(true);
+    assert.equal(hq.home.facts().done, 1, 'a minute later is the same visit: still counts from the one before');
+    assert.match((hq.home.current().blocks[0] as { text: string }).text, /^מאז שהיית פה הסתיימה משימה אחת\./);
+    // He stays: the reload once a minute keeps the visit going, so the next one counts from where he left.
+    for (let i = 0; i < 30; i++) { clock.advance(60_000); hq.home.seen(false); }
+    finish('לפני שהלך');
+    clock.advance(VISIT_GAP_MS + 1);
+    hq.home.seen(false);
+    clock.advance(VISIT_GAP_MS + 1);
+    hq.home.seen(true);
+    assert.equal(hq.home.facts().done, 0, 'what finished while he sat there is not news; a reload after he left did not stretch the visit');
+  } finally { await env.cleanup(); }
 });
 
 test('a block whose reference closed disappears; a list keeps what is still open', async () => {
@@ -177,75 +239,6 @@ test('a block whose reference closed disappears; a list keeps what is still open
     hq.inbox.resolve(b.id);
     assert.deepEqual(hq.home.current().blocks, [{ type: 'note', text: 'הערה', icon: 'info' }], 'decisions are not blocks of the home any more');
     assert.equal(hq.home.current().source, 'agent', 'pruning is not a reason to drop the recipe');
-  } finally { await env.cleanup(); }
-});
-
-const wakes = (env: TestEnv) => env.hq.store.db.prepare(`SELECT body FROM messages WHERE to_identity = 'ac-ceo' AND kind = 'system' AND id LIKE 'home-wake-%'
-  ORDER BY created_at`).all() as { body: string }[];
-
-test('the composer is woken on what matters, at most once per 3 minutes, with what happened since', async () => {
-  const env = await homeEnv();
-  try {
-    const { hq, clock } = env;
-    hq.home.sweep(); // hq.started on boot counts as a deploy
-    assert.equal(wakes(env).length, 1);
-    assert.match(wakes(env)[0]!.body, /hq עלה מחדש/);
-    const t = hq.scheduler.addTask({ title: 'תמונות בצ\'אט', project: 'agent-company' });
-    hq.store.db.prepare('UPDATE tasks SET summary = ? WHERE id = ?').run('התמונות בצ\'אט עולות גם מהטלפון', t.id);
-    hq.store.emit('task.state', null, { id: t.id, state: 'done' });
-    hq.inbox.add({ kind: 'go', title: 'GO: פריסה', headline: 'עדכון לאפליקציה', from_identity: 'ac-ceo' });
-    assert.equal(hq.home.sweep(), false, 'within 3 minutes of the last wake');
-    clock.advance(WAKE_EVERY_MS);
-    assert.equal(hq.home.sweep(), true);
-    const body = wakes(env)[1]!.body;
-    assert.match(body, /משימה הסתיימה: התמונות בצ'אט עולות גם מהטלפון/);
-    assert.match(body, /מחכה לרן: עדכון לאפליקציה/);
-    assert.match(body, /compose_home/);
-    clock.advance(WAKE_EVERY_MS);
-    assert.equal(hq.home.sweep(), false, 'nothing new, nobody woken');
-
-    hq.store.setToggle('ac-ceo/compose-home', false);
-    hq.inbox.add({ kind: 'incident', title: 'נפל', from_identity: 'rotem' });
-    clock.advance(WAKE_EVERY_MS);
-    assert.equal(hq.home.sweep(), false, 'switched off');
-    assert.equal(wakes(env).length, 2);
-  } finally { await env.cleanup(); }
-});
-
-test('night: only an incident or a new "waiting for you" wakes; the rest goes at 07:00 or when he opens the app', async () => {
-  const env = await homeEnv();
-  try {
-    const { hq, clock } = env;
-    hq.home.sweep();
-    // 09:00 UTC = 16:00 in Bangkok; the night started now, so the morning is 07:00 tomorrow (00:00 UTC).
-    hq.store.db.prepare('INSERT INTO nights (started_at) VALUES (?)').run(clock.now());
-    assert.equal(hq.home.quiet(), true);
-    const t = hq.scheduler.addTask({ title: 'עבודת לילה', project: 'agent-company' });
-    hq.store.emit('task.state', null, { id: t.id, state: 'running', shift: 'x-1' });
-    hq.store.emit('task.state', null, { id: t.id, state: 'done' });
-    clock.advance(WAKE_EVERY_MS);
-    assert.equal(hq.home.sweep(), false, 'a finished task waits for the morning');
-
-    hq.inbox.add({ kind: 'incident', title: 'האתר נפל', from_identity: 'rotem', urgency: 'urgent' });
-    assert.equal(hq.home.sweep(), true, 'an incident wakes at night');
-    const body = wakes(env).at(-1)!.body;
-    assert.match(body, /תקלה: האתר נפל/);
-    assert.match(body, /משימה הסתיימה: עבודת לילה/, 'what was held goes with it');
-    assert.doesNotMatch(body, /משימה התחילה/, 'a task that started at night is not news');
-
-    hq.store.emit('task.state', null, { id: t.id, state: 'done' });
-    clock.advance(WAKE_EVERY_MS);
-    assert.equal(hq.home.sweep(), false);
-    hq.home.opened();
-    await new Promise((r) => setTimeout(r, 10));
-    assert.match(wakes(env).at(-1)!.body, /משימה הסתיימה/, 'he opened the app: composed now');
-
-    hq.store.emit('task.state', null, { id: t.id, state: 'done' });
-    clock.t = Date.UTC(2026, 9, 20, 23, 59);
-    assert.equal(hq.home.sweep(), false, '06:59 in Bangkok');
-    clock.t = Date.UTC(2026, 9, 21, 0, 0);
-    assert.equal(hq.home.quiet(), false);
-    assert.equal(hq.home.sweep(), true, '07:00: the morning composition');
   } finally { await env.cleanup(); }
 });
 
@@ -290,6 +283,44 @@ test('waiting_changed_at: when what waits for him last came in, was answered or 
   } finally { await env.cleanup(); }
 });
 
+test('facts: as the app counts; the one GO among many is named when it is first in line, cut at a word', async () => {
+  const env = await homeEnv();
+  try {
+    const { hq, clock } = env;
+    hq.inbox.add({ kind: 'go', title: 'GO: להעביר את כל הנהגים לגרסה שמתקנת את "ממתין להודעה", כולל הטווחים בדקות', from_identity: 'ac-ceo', blocking: true });
+    clock.advance(1000);
+    hq.inbox.add({ kind: 'ask', title: 'שאלה', from_identity: 'yoav' });
+    let f = hq.home.facts();
+    assert.equal(f.waiting, 2);
+    assert.equal(f.gos, 1);
+    assert.equal(f.decision!.text, 'GO: להעביר את כל הנהגים לגרסה שמתקנת את "ממתין להודעה", כולל…', 'at a word');
+    assert.equal(sentence(f), 'בראש התור: להעביר את כל הנהגים לגרסה שמתקנת את "ממתין להודעה", כולל…');
+    // A newer GO from the same worker replaces the old one (#258): the app does not count it, nor does this.
+    clock.advance(1000);
+    hq.inbox.add({ kind: 'go', title: 'GO: להעביר את כל הנהגים שלנו לגרסה החדשה שמתקנת את "ממתין להודעה" בכל הטווחים', from_identity: 'ac-ceo' });
+    f = hq.home.facts();
+    assert.equal(f.waiting, 2, 'the replaced GO is not counted');
+    assert.equal(f.gos, 1);
+    assert.equal(f.decision!.first, false, 'the question is first in line: the GO is not "בראש התור"');
+    assert.equal(sentence(f), 'אחת מהן היא בקשת GO: להעביר את כל הנהגים שלנו לגרסה החדשה שמתקנת את…');
+    for (const i of hq.inbox.open()) if (!i.title.includes('החדשה')) hq.inbox.resolve(i.id);
+    assert.equal(hq.home.facts().decision!.text, 'GO: להעביר את כל הנהגים שלנו לגרסה החדשה שמתקנת את…', 'a quote is not left open');
+  } finally { await env.cleanup(); }
+});
+
+test('org.yaml of today, with compose-home only: hq does not write the sentence, עדי still may compose', async () => {
+  const env = await makeEnv({ org: ORG.replace('{id: home-headline, what: hq כותב את המשפט בראש הבית, enabled: true}', '{id: compose-home, what: מרכיבה את הבית, enabled: false}'),
+    projects: { 'agent-company': CHARTER('agent-company'), lumo: CHARTER('lumo', 'dormant') } });
+  try {
+    const { hq } = env;
+    assert.equal(hq.home.enabled(), false);
+    assert.equal(hq.home.composer(), 'ac-ceo');
+    assert.equal(hq.home.current().source, 'default');
+    assert.equal(hq.home.compose([{ type: 'headline', text: 'כותרת ביד' }], 'ac-ceo').source, 'agent');
+    assert.equal(hq.home.current().source, 'agent');
+  } finally { await env.cleanup(); }
+});
+
 test('quota: every account with both windows and their resets comes with the home, live; a duplicate is not one', async () => {
   const env = await homeEnv();
   try {
@@ -304,7 +335,23 @@ test('quota: every account with both windows and their resets comes with the hom
     assert.equal(q!.full, true);
     assert.equal(q!.reopens_at, clock.now() + 86_400_000);
     assert.equal(q!.usable, true);
-    // The composer is told what the home shows by itself.
-    assert.match(hq.home.wakeBody([]), /מכסה \(מוצגת בבית לבד, מתחת לפרויקטים\): Claude 5 שעות 17%, שבועי 100%, מלא/);
+  } finally { await env.cleanup(); }
+});
+
+test('GET /api/home: only opened=1 or looking=1 from a device moves the visit; a reload on an event does not', async () => {
+  const env = await homeEnv();
+  try {
+    const { hq, clock } = env;
+    const [, , get] = buildRoutes(hq).find(([m, re]) => m === 'GET' && re.test('/api/home'))!;
+    const call = (q: string) => get({ caller: { kind: 'device' }, url: new URL(`http://hq/api/home${q}`) } as never);
+    const at = () => Number(hq.store.getMeta('home.visit_at') ?? 0);
+    call('?opened=1');
+    const opened = at();
+    assert.equal(opened, clock.now());
+    clock.advance(60_000);
+    call('');
+    assert.equal(at(), opened, 'the app open behind, reloading on an event: he is not there');
+    call('?looking=1');
+    assert.equal(at(), clock.now(), 'the minute\'s reload while in front: the visit goes on');
   } finally { await env.cleanup(); }
 });

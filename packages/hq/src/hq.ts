@@ -301,7 +301,7 @@ export class Hq {
       this.every(5_000, 'spool', () => this.shifts.collectSpools());
       this.every(T.watchdogMs, 'watchdog', async () => { await this.watchdog.sweep(); await this.shifts.releaseEnded(); });
       this.every(T.livenessMs, 'liveness', () => this.shifts.pingAll());
-      this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); if (!this.cfg.codexLean) { await this.night.sweep(); this.home.sweep(); this.home.watchAsked(); } this.awaiting.sweep(); });
+      this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); if (!this.cfg.codexLean) { await this.night.sweep(); this.home.watchAsked(); } this.awaiting.sweep(); });
       this.every(5_000, 'probes', () => this.probes.tick());
       // reserve (leases.ts): the ceiling of a class, a company-run that stopped answering, a place nobody takes; then whoever waits is served.
       this.every(5_000, 'leases', () => this.leases.sweep());

@@ -180,12 +180,16 @@ class HomeRecipe {
   final DateTime composedAt;
   final List<HomeBlock> blocks;
 
-  /// `agent` or `default`; [fallback] says why the default (none | stale | invalid | off).
+  /// `agent` (composed by hand), `hq` (hq's own with its sentence) or `default`; [fallback] says why not the
+  /// hand-composed one (none | stale | invalid).
   final String source;
   final String? fallback;
   final String? reason;
 
   bool get byAgent => source == 'agent';
+
+  /// hq's own, its sentence written from facts without a model (`home-headline` on).
+  bool get byHq => source == 'hq';
 
   factory HomeRecipe.fromJson(Map<String, dynamic> j) => HomeRecipe(
         version: (j['version'] as num?)?.toInt() ?? 0,

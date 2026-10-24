@@ -160,7 +160,7 @@ class HqBackend extends Backend {
       unawaited(_loadHome(opened: true));
       _connect();
       _homeTick = Timer.periodic(const Duration(minutes: 1), (_) {
-        if (_visible && !_disposed) unawaited(_loadHome());
+        if (_visible && !_disposed) unawaited(_loadHome(looking: true));
       });
     } catch (_) {
       _setDown();
@@ -367,11 +367,12 @@ class HqBackend extends Backend {
   /// on every snapshot reload and once a minute while the app is in front (a recipe goes stale after 30 minutes).
   Map<String, dynamic>? _homeRaw;
   Timer? _homeTick;
-  /// [opened]: he is looking at the app now (it started, or came to the front). hq lets what it held for the
-  /// morning go to the composer on that, so a reload in the background must not say it.
-  Future<void> _loadHome({bool opened = false}) async {
+  /// [opened]: he is looking at the app now (it started, or came to the front). hq counts a new visit from it
+  /// ("מאז שהיית פה"), so a reload in the background must not say it. [looking]: the minute's reload while he is
+  /// in front, which keeps the visit going; a reload on an event says neither (the app may be open behind).
+  Future<void> _loadHome({bool opened = false, bool looking = false}) async {
     try {
-      final j = (await _get(opened ? '/api/home?opened=1' : '/api/home')) as Map<String, dynamic>;
+      final j = (await _get(opened ? '/api/home?opened=1' : looking ? '/api/home?looking=1' : '/api/home')) as Map<String, dynamic>;
       final d = _data;
       if (d == null) return;
       d.home = HomeRecipe.fromJson(j);
