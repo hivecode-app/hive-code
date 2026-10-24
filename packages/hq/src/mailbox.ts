@@ -264,9 +264,9 @@ export class Mailbox {
    * `retry` asks the host to write a fresh stdin line for a message it never got accepted (written/failed).
    * Without it a re-send is idempotent in the host and only reports the stored state.
    */
-  async deliver(id: string, retry = false): Promise<void> {
+  async deliver(id: string, retry = false, force = false): Promise<void> {
     if (this.deliveryPaused) return;
-    if (!this.cfg.codexLean) return this.deliverOne(id, retry);
+    if (!this.cfg.codexLean) return this.deliverOne(id, retry, force);
     const m = this.get(id);
     if (!m || m.state !== 'queued') return;
     if (m.to_identity === OWNER || m.to_identity === 'hq') return this.deliverOne(id, retry);
@@ -289,9 +289,11 @@ export class Mailbox {
     return run;
   }
 
-  private async deliverOne(id: string, retry = false): Promise<void> {
+  private async deliverOne(id: string, retry = false, force = false): Promise<void> {
     const m = this.get(id);
     if (!m || m.state !== 'queued') return;
+    // Gathered (24/10, quota): a worker's message that can wait waits for the batch, and wakes the worker once for all of it.
+    if (!force && this.heldUntil(m) > this.store.now()) return;
     this.store.db.prepare('UPDATE messages SET attempts = attempts + 1, last_attempt_at = ? WHERE id = ?').run(this.store.now(), id);
 
     if (m.to_identity === 'hq') {
@@ -359,11 +361,46 @@ export class Mailbox {
     // shift exists but not live yet: `live` → flush() delivers it.
   }
 
-  /** Deliver everything still queued for an identity (called when its shift goes live). */
+  /** Deliver everything still queued for an identity (called when its shift goes live): what was gathered goes with it. */
   async flush(identity: string): Promise<void> {
     const rows = this.store.db.prepare(`SELECT id FROM messages WHERE to_identity = ? AND state = 'queued' ORDER BY created_at, rowid`)
       .all(identity) as { id: string }[];
-    for (const r of rows) await this.deliver(r.id);
+    for (const r of rows) await this.deliver(r.id, false, true);
+  }
+
+  /**
+   * A message one worker sends another that can wait (not `now`, not his, not an answer or an escalation) to a standing
+   * worker goes in at once when nothing of the kind went to that worker in the last `gatherMs`: the first one may be a
+   * question its sender waits on (yoav 24/10), and so does a reply to what the recipient sent. What follows inside that window is gathered, and goes in together when it
+   * ends (the CLI folds lines that wait behind a turn into it), or at once with anything that goes in sooner: a shift
+   * that comes up, a turn already running. Each one used to wake a lead for a whole turn (task-496: 214 of 334 lead
+   * wakes in 3 days were such messages). 0 = not held.
+   */
+  heldUntil(m: Pick<MessageRow, 'from_identity' | 'to_identity' | 'priority' | 'kind' | 'state' | 'ref'>): number {
+    const gather = this.cfg.batching.enabled ? this.cfg.batching.gatherMs : 0;
+    if (!gather || !this.gathers(m)) return 0;
+    const cur = this.shifts.current(m.to_identity);
+    if (cur && cur.kind !== 'foreign' && cur.state === 'live' && cur.in_turn) return 0;
+    // The window opens at the last such message (a reply that went in at once is not one) that went in before the oldest one still waiting came: a batch going in
+    // now (its first line moves that "last") is all due together.
+    const waiting = (this.store.db.prepare(`SELECT from_identity, to_identity, priority, kind, state, ref, created_at FROM messages
+      WHERE to_identity = ? AND state = 'queued' AND last_attempt_at IS NULL ORDER BY created_at, rowid`).all(m.to_identity) as
+      (Pick<MessageRow, 'from_identity' | 'to_identity' | 'priority' | 'kind' | 'state' | 'ref'> & { created_at: number })[]).find((o) => this.gathers(o));
+    if (!waiting) return 0;
+    const last = this.store.db.prepare(`SELECT MAX(delivered_at) AS t FROM messages WHERE to_identity = ? AND delivered_at IS NOT NULL
+      AND delivered_at <= ? AND priority != 'now' AND kind NOT IN ('answer','escalation') AND from_identity NOT IN (?, 'hq')
+      AND NOT EXISTS (SELECT 1 FROM messages o WHERE o.id = messages.ref AND o.from_identity = messages.to_identity)`)
+      .get(m.to_identity, waiting.created_at, OWNER) as { t: number | null };
+    return last.t == null ? 0 : last.t + gather;
+  }
+
+  private gathers(m: Pick<MessageRow, 'from_identity' | 'to_identity' | 'priority' | 'kind' | 'state' | 'ref'>): boolean {
+    if (m.state !== 'queued' || m.priority === 'now' || m.kind === 'answer' || m.kind === 'escalation') return false;
+    if (m.from_identity === OWNER || m.from_identity === 'hq' || !getIdentity(this.store, m.from_identity)) return false;
+    // A reply to what the recipient itself sent: it may be waiting on it.
+    if (m.ref && this.get(m.ref)?.from_identity === m.to_identity) return false;
+    const to = getIdentity(this.store, m.to_identity);
+    return !!to && to.active === 1 && to.team_kind !== 'task';
   }
 
   /**
@@ -488,6 +525,10 @@ export class Mailbox {
       for (const r of rows) await this.deliver(r.id);
       return;
     }
+    // What was gathered and is due now (or rides with a turn that began): never attempted yet, so not stale either.
+    const held = this.store.db.prepare(`SELECT id FROM messages WHERE state = 'queued' AND last_attempt_at IS NULL ORDER BY created_at, rowid`)
+      .all() as { id: string }[];
+    for (const r of held) await this.deliver(r.id);
     const cutoff = this.store.now() - this.cfg.timers.deliveryTimeoutMs;
     let stale = (this.store.db.prepare(`SELECT * FROM messages WHERE state = 'queued' AND last_attempt_at IS NOT NULL AND last_attempt_at <= ?
       ORDER BY created_at, rowid`).all(cutoff) as StoredRow[]).map(hydrate);

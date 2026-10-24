@@ -320,3 +320,67 @@ test('tokenless: no text and no tokens in or out', () => {
   assert.equal(tokenless({ text: 'x' }), false);
   assert.equal(tokenless({ usage: { output_tokens: 3 } }), false);
 });
+
+test('a worker\'s message that can wait: the first goes at once, what follows inside the window goes in together', async () => {
+  const env = await makeEnv({ cfg: { batching: { enabled: true, gatherMs: 10 * 60_000 } } });
+  try {
+    const { hq, launcher, clock } = env;
+    hq.mailbox.tell({ msg_id: 'g-0', from: 'amit', to: 'eli', body: 'אפשר למזג?' });
+    await until(() => hq.mailbox.get('g-0')!.state === 'delivered', 3000, 'the first one at once: its sender may be waiting');
+    const host = launcher.hosts.get('eli-1')!;
+    host.event({ kind: 'result', subtype: 'success', isError: false } as never);
+    await until(() => hq.shifts.current('eli')!.in_turn === 0, 3000, 'turn over');
+
+    clock.advance(3 * 60_000);
+    hq.mailbox.tell({ msg_id: 'g-1', from: 'amit', to: 'eli', body: 'סיימתי את הדוח' });
+    clock.advance(3 * 60_000);
+    hq.mailbox.tell({ msg_id: 'g-2', from: 'rotem', to: 'eli', body: 'לידיעה: הפריסה עברה' });
+    await hq.mailbox.sweep();
+    assert.equal(hq.mailbox.get('g-1')!.state, 'queued', 'gathered');
+    assert.equal(hq.mailbox.get('g-1')!.attempts, 0, 'never attempted: the stale-retry sweep leaves it alone');
+    assert.deepEqual(host.sent.map((x) => x.msgId), ['g-0']);
+
+    clock.advance(4 * 60_000);
+    await hq.mailbox.sweep();
+    await until(() => hq.mailbox.get('g-2')!.state === 'delivered', 3000, 'both delivered');
+    assert.deepEqual(host.sent.map((x) => x.msgId), ['g-0', 'g-1', 'g-2'], 'ten minutes after the first, together');
+    assert.equal(launcher.launches.length, 1);
+
+    // A reply to what eli itself sent: eli may be waiting on it.
+    hq.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, body, state, created_at) VALUES ('q-1', 'eli', 'amit', 'מתי?', 'handled', ?)`).run(clock.now());
+    hq.mailbox.tell({ msg_id: 'g-5', from: 'amit', to: 'eli', body: 'מחר', ref: 'q-1' });
+    await until(() => hq.mailbox.get('g-5')!.state === 'delivered', 3000, 'a reply at once');
+    hq.mailbox.markHandled('g-5');
+    hq.store.db.prepare(`UPDATE messages SET delivered_at = ? WHERE id IN ('g-0', 'g-1', 'g-2')`).run(clock.now() - 20 * 60_000);
+    hq.mailbox.tell({ msg_id: 'g-6', from: 'rotem', to: 'eli', body: 'משהו חדש' });
+    await until(() => hq.mailbox.get('g-6')!.state === 'delivered', 3000, 'a reply opens no window: this one is the first');
+
+    // Urgent from a worker, and anything from him: no wait.
+    hq.mailbox.tell({ msg_id: 'g-3', from: 'amit', to: 'eli', body: 'דחוף', urgency: 'urgent' });
+    await until(() => hq.mailbox.get('g-3')!.state === 'delivered', 3000, 'urgent at once');
+    hq.mailbox.tell({ msg_id: 'g-4', to: 'eli', body: 'מה המצב?' });
+    await until(() => hq.mailbox.get('g-4')!.state === 'delivered', 3000, 'owner at once');
+  } finally { await env.cleanup(); }
+});
+
+test('a gathered message rides along with a shift that comes up, and with a turn already running', async () => {
+  const env = await makeEnv({ cfg: { batching: { enabled: true, gatherMs: 10 * 60_000 } } });
+  try {
+    const { hq, launcher } = env;
+    // eli had a worker's message a minute ago: this one is gathered (eli rests meanwhile).
+    hq.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, body, state, created_at, delivered_at) VALUES ('r-0', 'rotem', 'eli', 'x', 'handled', ?, ?)`)
+      .run(env.clock.now() - 60_000, env.clock.now() - 60_000);
+    hq.mailbox.tell({ msg_id: 'r-1', from: 'amit', to: 'eli', body: 'לידיעה' });
+    await hq.mailbox.sweep();
+    assert.equal(launcher.launches.length, 0);
+    hq.mailbox.tell({ msg_id: 'r-2', to: 'eli', body: 'תבדוק את הביטוח' });
+    await until(() => hq.mailbox.get('r-1')!.state === 'delivered', 3000, 'gathered went in with his');
+    assert.equal(launcher.launches.length, 1);
+
+    const host = launcher.hosts.get('eli-1')!;
+    host.event({ kind: 'text', text: 'עובד' });
+    await until(() => hq.shifts.current('eli')!.in_turn === 1, 3000, 'in a turn');
+    hq.mailbox.tell({ msg_id: 'r-3', from: 'rotem', to: 'eli', body: 'עוד משהו' });
+    await until(() => hq.mailbox.get('r-3')!.state === 'delivered', 3000, 'into the running turn');
+  } finally { await env.cleanup(); }
+});

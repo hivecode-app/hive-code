@@ -2,6 +2,12 @@
 //   rest — a lead about to rest with a context over restContextTokens writes a handoff first, while the prompt cache is warm.
 //          Woken within restIdleMs it resumes as always (the cache is still there). Woken later, the resume would write the
 //          whole conversation to the cache again: it starts a clean shift from the handoff and its memory instead (shifts.ts).
+//   compact — a standing shift over compactContextTokens compacts in its next quiet moment (watchdog: no turn, no tool, no
+//          background work, no mail, nothing waiting on him, for compactQuietMs), while the prompt cache is still warm.
+//          `/compact` is a plain user line (no control_request); the session id stays, so a resume continues from the summary.
+//          Task-496 research: at 250k a compaction is ~$0.3-0.5 against ~$0.05 of every later call that no longer reads the
+//          dropped context; on 21-24/10 that was ~26% of what the leads spent, against 13% for the 600k cap alone.
+//          It keeps the conversation (a summary), so it needs no handoff turn, and never cuts a turn.
 //   cap  — the safety net: a working shift over maxContextTokens writes a handoff at the end of its turn, and is replaced.
 // Never while background work runs, or while it waits on him (an open ask, an open GO of its own): it goes on as before.
 // `shift.rotated` carries the context the rotation dropped, for the weekly report.
@@ -45,6 +51,10 @@ interface Pending { why: 'rest' | 'cap'; startedAt: number; askedAt: number; con
 
 const k = (n: number) => `${Math.round(n / 1000)} אלף`;
 
+/** What the summary keeps: what a lead works from between turns (its open threads, who waits on what, his decisions). */
+export const COMPACT_INSTRUCTIONS = 'שמור במדויק: מה פתוח אצלך ומה הצעד הבא בכל דבר; מי מחכה למה (משימות, PRים, שאלות ובקשות GO לרן) '
+  + 'עם המזהים; הכרעות והוראות של רן עם הציטוט; הודעות שעוד לא ענית עליהן, עם ה-msg_id. פרטי כלים וקבצים שכבר נסגרו לא צריך.';
+
 export class Rotator {
   /** Shifts asked for a handoff (id → what for). In memory: after an hq restart the next rest or turn asks again. */
   private pending = new Map<string, Pending>();
@@ -52,6 +62,11 @@ export class Rotator {
   private cooldown = new Map<string, number>();
   /** Deferrals already told (shift:why), so a turn after turn under an open ask is one event, not one per turn. */
   private deferred = new Set<string>();
+
+  /** `/compact` sent (id → when, for which run); cleared by the compaction's boundary, or given up after handoffWaitMs. */
+  private compacting = new Map<string, { at: number; startedAt: number }>();
+  /** Not compacted again before this (id → ms): after a compaction, or one that never came. */
+  private compactCooldown = new Map<string, number>();
 
   private store: Store;
   private cfg: HqConfig;
@@ -64,6 +79,7 @@ export class Rotator {
     this.mailbox = mailbox;
     shifts.on('frame', (row, f, live) => {
       // Replayed frames (a reattach after an hq restart) are history: nothing to act on now.
+      if (live && f.t === 'event' && f.ev.kind === 'compact') this.onCompacted(row, f.ev);
       if (!live || f.t !== 'event' || f.ev.kind !== 'result') return;
       // On the next tick, like waitTurnEnd: what the other listeners fold from this result (the owner reply) is stored first.
       setImmediate(() => this.store.bg(this.onTurnEnd(row.id), 'rotation'));
@@ -71,6 +87,8 @@ export class Rotator {
     shifts.on('ended', (row) => {
       this.pending.delete(row.id);
       this.cooldown.delete(row.id);
+      this.compacting.delete(row.id);
+      this.compactCooldown.delete(row.id);
       for (const key of this.deferred) if (key.startsWith(`${row.id}:`)) this.deferred.delete(key);
     });
   }
@@ -95,6 +113,50 @@ export class Rotator {
     this.ask(s, 'rest', context, `המשמרת שלך עומדת לנוח, וה-context שלה ${k(context)} טוקנים. כתוב עכשיו \`handoff\`: מה פתוח, מה הצעד הבא, ומה מחכה למי. `
       + 'אל תתחיל עבודה חדשה. אם תתעורר תוך שעה, תמשיך באותה שיחה. אחרי יותר משעה תקום משמרת נקייה מה-handoff ומהזיכרון.');
     return true;
+  }
+
+  /**
+   * The watchdog found `s` quiet (no turn, no background work, compactQuietMs since its last event). A big context compacts
+   * now: true = asked (or still compacting). Nothing else happens to the shift on this sweep.
+   */
+  compactIfDue(s: ShiftRow): boolean {
+    const r = this.cfg.rotation;
+    const now = this.store.now();
+    const c = this.compacting.get(s.id);
+    if (c && c.startedAt === s.started_at) {
+      if (now - c.at < r.handoffWaitMs) return true;
+      this.compacting.delete(s.id);
+      this.compactCooldown.set(s.id, now + r.handoffWaitMs * 3);
+      this.store.emit('shift.compact_failed', s.identity, { shift: s.id, context_tokens: s.context_tokens });
+      return false;
+    }
+    const context = s.context_tokens ?? 0;
+    if (!r.enabled || !r.compactContextTokens || context < r.compactContextTokens || s.kind === 'foreign' || s.task_id != null
+      || s.account === 'codex' || s.state !== 'live' || s.in_turn) return false;
+    if ((this.compactCooldown.get(s.id) ?? 0) > now || this.pending.has(s.id)) return false;
+    if (now - (s.last_event_at ?? s.started_at) < r.compactQuietMs) return false;
+    // A quiet moment only: nothing it is in the middle of, and nothing on the way to it that the compaction would delay.
+    if (this.blocker(s) || this.hasPending(s.identity)) return false;
+    const conn = this.shifts.connection(s.id);
+    if (!conn?.isLive) return false;
+    this.compacting.set(s.id, { at: now, startedAt: s.started_at });
+    this.store.emit('shift.compact_asked', s.identity, { shift: s.id, context_tokens: context });
+    const failed = (error: string) => {
+      this.compacting.delete(s.id);
+      this.compactCooldown.set(s.id, this.store.now() + r.handoffWaitMs * 3);
+      this.store.emit('shift.compact_failed', s.identity, { shift: s.id, error });
+    };
+    conn.send(`compact-${s.id}-${now}`, `/compact ${COMPACT_INSTRUCTIONS}`, 'next')
+      .then((reply) => { if (reply?.state === 'failed') failed('the host did not take the line'); })
+      .catch((e: Error) => failed(e.message));
+    return true;
+  }
+
+  private onCompacted(row: ShiftRow, ev: { trigger?: string; preTokens?: number; postTokens?: number }): void {
+    const asked = this.compacting.delete(row.id);
+    this.compactCooldown.set(row.id, this.store.now() + this.cfg.rotation.handoffWaitMs * 3);
+    this.store.emit('shift.compacted', row.identity, { shift: row.id, trigger: asked ? 'hq' : (ev.trigger ?? 'auto'),
+      pre_tokens: ev.preTokens ?? null, post_tokens: ev.postTokens ?? null });
   }
 
   private async onTurnEnd(id: string): Promise<void> {

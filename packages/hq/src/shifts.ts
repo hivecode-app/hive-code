@@ -524,6 +524,8 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
   }
 
   private heldExits = new Map<string, Extract<LoggedFrame, { t: 'lifecycle' }>[]>();
+  /** Shifts whose turn compacted (rotation.ts): that turn's result does not set the context back to its pre-compaction size. */
+  private compacted = new Set<string>();
 
   private onFrame(id: string, f: LoggedFrame, live = true): void {
     const row = this.get(id);
@@ -544,7 +546,16 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       else if (ev.kind === 'result') {
         fields.in_turn = 0; fields.long_tool = 0;
         const ctx = contextTokens(ev.usage);
-        if (ctx != null) fields.context_tokens = ctx;
+        // A compaction's own result reports the summary call, which read the whole conversation: the boundary said what is left.
+        const compacted = this.compacted.delete(id);
+        if (ctx != null && !compacted) fields.context_tokens = ctx;
+      }
+      else if (ev.kind === 'compact') {
+        // A manual compaction (hq's `/compact`) is a turn of its own, and its result reports the summary call over the
+        // whole conversation; the transcripts of 2.1.303 often carry no post_tokens for it: unknown until the next turn.
+        // An automatic one mid-turn is followed by calls on the compacted context, which the result's last call reads.
+        fields.context_tokens = typeof ev.postTokens === 'number' && ev.postTokens > 0 ? ev.postTokens : null;
+        if (ev.trigger !== 'auto') this.compacted.add(id);
       }
       else if (ev.kind === 'init' && ev.sessionId && ev.sessionId !== row.session_id) fields.session_id = ev.sessionId;
       else if (ev.kind === 'rate_limit') {
@@ -592,6 +603,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     this.patch(id, { state, ended_at: this.store.now(), end_reason: reason, in_turn: 0, bg_tasks: '[]' });
     this.conns.get(id)?.close();
     this.conns.delete(id);
+    this.compacted.delete(id);
     this.store.emit('shift.state', row.identity, { shift: id, state, reason });
     this.emit('ended', this.get(id)!, reason);
   }

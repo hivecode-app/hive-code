@@ -31,6 +31,9 @@ async function liveEli(env: TestEnv, ctx: number) {
   await new Promise((r) => setImmediate(r));
 }
 
+/** claude answered its liveness ping just now (the watchdog would take a clock jump for a frozen process). */
+const pinged = (env: TestEnv) => env.hq.shifts.setFields('eli-1', { last_ping_ok_at: env.clock.now() });
+
 const flush = () => new Promise((r) => setTimeout(r, 30));
 
 test('contextTokens: the last iteration of the turn, not the turn\'s sum', () => {
@@ -246,5 +249,87 @@ test('rest: background work started in the handoff turn keeps the shift up', asy
     await flush();
     assert.equal(hq.shifts.get('eli-1')!.state, 'live');
     assert.equal(hq.shifts.get('eli-1')!.rest_handoff_at, null);
+  } finally { await env.cleanup(); }
+});
+
+test('compact: a big standing shift compacts in a quiet moment, keeps its session, and its context is the summary\'s', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    await liveEli(env, 300_000);
+    const host = launcher.hosts.get('eli-1')!;
+    // Not quiet yet: nothing.
+    await hq.watchdog.sweep();
+    assert.equal(host.sent.filter((x) => x.text.startsWith('/compact')).length, 0);
+    // Mail on the way: it waits (the mail goes first).
+    hq.mailbox.tell({ msg_id: 'm-q', to: 'eli', body: 'עוד' });
+    await until(() => hq.mailbox.get('m-q')?.state === 'delivered');
+    clock.advance(3 * 60_000);
+    pinged(env);
+    await hq.watchdog.sweep();
+    assert.equal(host.sent.filter((x) => x.text.startsWith('/compact')).length, 0, 'not with mail on the way');
+    hq.mailbox.markHandled('m-q');
+    host.event(result(300_000));
+    await until(() => hq.shifts.get('eli-1')!.in_turn === 0, 3000, 'turn over');
+    await hq.watchdog.sweep();
+    assert.equal(host.sent.filter((x) => x.text.startsWith('/compact')).length, 0, 'a turn just ended: not quiet yet');
+    clock.advance(3 * 60_000);
+    pinged(env);
+    await hq.watchdog.sweep();
+    await until(() => host.sent.some((x) => x.text.startsWith('/compact ')), 3000, 'compact sent');
+    assert.equal(events(env, 'shift.compact_asked').length, 1);
+    await hq.watchdog.sweep();
+    assert.equal(host.sent.filter((x) => x.text.startsWith('/compact')).length, 1, 'asked once');
+
+    host.event({ kind: 'compact', trigger: 'manual', preTokens: 300_000, postTokens: 12_000 } as EngineEvent);
+    host.event(result(300_500)); // the compaction's own result reports the summary call over the whole conversation
+    await until(() => events(env, 'shift.compacted').length === 1, 3000, 'compacted');
+    await flush();
+    assert.equal(hq.shifts.get('eli-1')!.context_tokens, 12_000);
+    assert.equal(hq.shifts.get('eli-1')!.state, 'live', 'the same shift, the same session');
+    host.event(result(40_000));
+    await until(() => hq.shifts.get('eli-1')!.context_tokens === 40_000, 3000, 'the next turn counts again');
+  } finally { await env.cleanup(); }
+});
+
+test('compact: never while an ask to him is open, and not under the threshold', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    await liveEli(env, 200_000);
+    clock.advance(3 * 60_000);
+    pinged(env);
+    await hq.watchdog.sweep();
+    const host = launcher.hosts.get('eli-1')!;
+    assert.equal(host.sent.filter((x) => x.text.startsWith('/compact')).length, 0, 'under 250k');
+    host.event(result(260_000));
+    await until(() => hq.shifts.get('eli-1')!.context_tokens === 260_000);
+    hq.store.db.prepare(`INSERT INTO asks (id, from_identity, question, created_at) VALUES ('ask-c', 'eli', 'לשלם?', ?)`).run(clock.now());
+    clock.advance(3 * 60_000);
+    pinged(env);
+    await hq.watchdog.sweep();
+    assert.equal(host.sent.filter((x) => x.text.startsWith('/compact')).length, 0, 'waiting on him');
+    hq.store.db.prepare(`UPDATE asks SET state = 'answered' WHERE id = 'ask-c'`).run();
+    await hq.watchdog.sweep();
+    await until(() => host.sent.some((x) => x.text.startsWith('/compact ')), 3000, 'compact once the ask is answered');
+    assert.equal(hq.shifts.get('eli-1')!.state, 'live');
+  } finally { await env.cleanup(); }
+});
+
+test('compact: a manual compaction without post_tokens leaves the context unknown until the next turn, not its old size', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    await liveEli(env, 300_000);
+    const host = launcher.hosts.get('eli-1')!;
+    host.event({ kind: 'compact', trigger: 'manual', preTokens: 300_000 } as EngineEvent);
+    host.event(result(300_500));
+    await until(() => events(env, 'shift.compacted').length === 1, 3000, 'compacted');
+    await flush();
+    assert.equal(hq.shifts.get('eli-1')!.context_tokens, null);
+    // An automatic one mid-turn: the result's last call is on the compacted context, and counts.
+    host.event({ kind: 'compact', trigger: 'auto', preTokens: 960_000, postTokens: 15_000 } as EngineEvent);
+    host.event(result(30_000));
+    await until(() => hq.shifts.get('eli-1')!.context_tokens === 30_000, 3000, 'auto: the turn counts');
   } finally { await env.cleanup(); }
 });

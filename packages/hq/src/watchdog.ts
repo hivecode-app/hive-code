@@ -17,8 +17,8 @@ export type Health = 'alive' | 'progressing' | 'stuck' | 'dead' | 'suspect';
 
 export class Watchdog {
   procCheck: (pid: number) => string | null = procStart;
-  /** rotation.ts (set by hq): asks a big lead for its handoff before the rest. */
-  rotator: { beforeRest(s: ShiftRow): boolean } | null = null;
+  /** rotation.ts (set by hq): asks a big lead for its handoff before the rest, and compacts it in a quiet moment. */
+  rotator: { beforeRest(s: ShiftRow): boolean; compactIfDue(s: ShiftRow): boolean } | null = null;
 
   private store: Store;
   private cfg: HqConfig;
@@ -102,6 +102,8 @@ export class Watchdog {
     }
     // Background work still running (CI, a simulator): its end is told only to a live process, so a rest loses it (#175).
     const bg = s.bg_tasks !== '[]' && quiet < this.cfg.timers.restBgMaxMs;
+    // A quiet moment with a big context: it compacts now, while the cache is warm (rotation.ts), and rests later if idle.
+    if (!s.in_turn && !bg && this.rotator?.compactIfDue(s)) return 'alive';
     if (!s.in_turn && !bg && s.kind !== 'resident' && quiet >= this.cfg.timers.restAfterMs && !this.hasPending(s.identity)) {
       // A big context writes its handoff first, and rests after that turn (rotation.ts).
       if (this.rotator?.beforeRest(s)) return 'alive';

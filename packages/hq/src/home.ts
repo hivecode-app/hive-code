@@ -11,6 +11,7 @@ import { OWNER, pre, type HqEvent } from '@company/shared';
 import type { Hq } from './hq.ts';
 import { CANCELLED_SQL } from './scheduler.ts';
 import { askedList, type AskedItem } from './asked.ts';
+import { usage, type Usage } from './usage.ts';
 
 export const BLOCK_TYPES = ['headline', 'alert', 'waiting', 'asked', 'awaiting', 'tasks', 'lanes', 'project', 'quiet', 'people', 'since', 'note'] as const;
 export type BlockType = (typeof BLOCK_TYPES)[number];
@@ -52,6 +53,8 @@ export interface HomeRecipe {
   waiting_changed_at?: number | null;
   /** The Claude accounts' quota, live (accounts.ts quota()): the app's "המכסה" card under the projects. */
   quota?: QuotaLine[];
+  /** How fast the quota goes and on what (usage.ts): the app's "השימוש" card next to "המכסה". */
+  usage?: Usage;
 }
 
 export interface QuotaLine {
@@ -345,7 +348,18 @@ export class Home {
       } catch { fallback = 'invalid'; }
     }
     recipe ??= { ...this.defaultRecipe(), version: row?.version ?? 0, fallback, ...(this.enabled() ? { source: 'hq' as const } : {}) };
-    return { ...recipe, blocks: this.live(recipe.blocks, refs), waiting_changed_at: this.hq.inbox.lastChange(), quota: this.hq.accounts.quota() };
+    return { ...recipe, blocks: this.live(recipe.blocks, refs), waiting_changed_at: this.hq.inbox.lastChange(), quota: this.hq.accounts.quota(),
+      usage: this.usage() };
+  }
+
+  /** usage.ts reads a day of events: once a minute is enough for a card that moves with the 10-minute quota read. */
+  private usageMemo: Usage | null = null;
+  private usage(): Usage {
+    const now = this.hq.store.now();
+    if (this.usageMemo && now - this.usageMemo.measured_at < 60_000) return this.usageMemo;
+    const accounts = this.hq.accounts.quota().filter((q) => q.usable).map((q) => q.name);
+    this.usageMemo = usage(this.hq.store, accounts, (id) => this.hq.mailbox.label(id));
+    return this.usageMemo;
   }
 
   /** Every inbox (or task) id a stored recipe mentions, so re-validation accepts ones that closed since. */

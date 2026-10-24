@@ -63,6 +63,13 @@ export interface HqConfig {
     restContextTokens: number;   // ... when its context was over this; it is asked for that handoff before it rests
     maxContextTokens: number;    // safety net: a working shift over this rotates at the end of its turn (0 = never)
     handoffWaitMs: number;       // the handoff hq asked for comes within this, or the shift goes on (rests / keeps working) as before
+    compactContextTokens: number; // a standing shift over this compacts in its next quiet moment, while its cache is warm (0 = never)
+    compactQuietMs: number;      // ... quiet = no turn, no tool, no background work, no mail, nothing waiting on him, this long
+  };
+  /** mailbox.ts heldUntil: a worker's message that can wait is gathered with the others, one wake for all of them. */
+  batching: {
+    enabled: boolean;
+    gatherMs: number;            // the oldest gathered message waits at most this long
   };
   capacity: {
     reserveMb: number;           // B.5: 4GB reserve
@@ -208,7 +215,9 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       turnEndWaitMs: 3 * 60_000,
       accountsMs: 10 * 60_000,
     },
-    rotation: { enabled: true, restIdleMs: 60 * 60_000, restContextTokens: 150_000, maxContextTokens: 600_000, handoffWaitMs: 10 * 60_000 },
+    rotation: { enabled: true, restIdleMs: 60 * 60_000, restContextTokens: 150_000, maxContextTokens: 600_000, handoffWaitMs: 10 * 60_000,
+      compactContextTokens: 250_000, compactQuietMs: 2 * 60_000 },
+    batching: { enabled: true, gatherMs: 10 * 60_000 },
     capacity: { reserveMb: 4096, rssIdleMb: 400, rssWorkMb: 1300, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8, maxLoad: 1.5 },
     backupsKeep: 48,
     heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: {} },
@@ -239,6 +248,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     timers: { ...base.timers, ...fromFile.timers, ...overrides.timers },
     capacity: { ...base.capacity, ...fromFile.capacity, ...overrides.capacity },
     rotation: { ...base.rotation, ...fromFile.rotation, ...overrides.rotation },
+    batching: { ...base.batching, ...fromFile.batching, ...overrides.batching },
     auth: { ...base.auth, ...fromFile.auth, ...overrides.auth },
     tab: { ...base.tab, ...fromFile.tab, ...overrides.tab },
     dictate: { ...base.dictate, ...fromFile.dictate, ...overrides.dictate },
