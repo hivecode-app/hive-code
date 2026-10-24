@@ -56,6 +56,14 @@ export interface HqConfig {
     turnEndWaitMs: number;       // status done mid-turn: the turn ends first (its text may be his reply, #118), at most this long
     accountsMs: number;          // B.7: quota read per account (get_usage), 10 min
   };
+  /** rotation.ts: a clean shift from the handoff instead of a resume that re-reads (or re-writes to the cache) a whole long conversation. */
+  rotation: {
+    enabled: boolean;
+    restIdleMs: number;          // a lead woken after resting this long (the prompt cache is gone) starts clean, from its handoff
+    restContextTokens: number;   // ... when its context was over this; it is asked for that handoff before it rests
+    maxContextTokens: number;    // safety net: a working shift over this rotates at the end of its turn (0 = never)
+    handoffWaitMs: number;       // the handoff hq asked for comes within this, or the shift goes on (rests / keeps working) as before
+  };
   capacity: {
     reserveMb: number;           // B.5: 4GB reserve
     rssIdleMb: number;           // p90 of an idle lead's anon (measured 22/10); the reference, not in the slot formula
@@ -200,6 +208,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       turnEndWaitMs: 3 * 60_000,
       accountsMs: 10 * 60_000,
     },
+    rotation: { enabled: true, restIdleMs: 60 * 60_000, restContextTokens: 150_000, maxContextTokens: 600_000, handoffWaitMs: 10 * 60_000 },
     capacity: { reserveMb: 4096, rssIdleMb: 400, rssWorkMb: 1300, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8, maxLoad: 1.5 },
     backupsKeep: 48,
     heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: {} },
@@ -229,6 +238,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     ...base, ...fromFile, ...overrides,
     timers: { ...base.timers, ...fromFile.timers, ...overrides.timers },
     capacity: { ...base.capacity, ...fromFile.capacity, ...overrides.capacity },
+    rotation: { ...base.rotation, ...fromFile.rotation, ...overrides.rotation },
     auth: { ...base.auth, ...fromFile.auth, ...overrides.auth },
     tab: { ...base.tab, ...fromFile.tab, ...overrides.tab },
     dictate: { ...base.dictate, ...fromFile.dictate, ...overrides.dictate },

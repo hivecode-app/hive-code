@@ -14,6 +14,7 @@ import { getIdentity, isStandingWorker, type IdentityRow } from './org.ts';
 import { buildSystemPrompt, writeSystemPrompt } from './system-prompt.ts';
 import { prMergedFrom, recordPrMerged } from './merged.ts';
 import { noWorkers, readCharter, Workspaces } from './workspace.ts';
+import { contextTokens, restRotationDue } from './rotation.ts';
 
 export type ShiftKind = 'work' | 'resident' | 'foreign';
 
@@ -33,6 +34,10 @@ export interface ShiftRow {
   unit_released_at: number | null; run_start_seq: number | null; cwd: string | null;
   /** JSON [task_id]: background work of this run still going (bgTasks below). */
   bg_tasks: string;
+  /** The session's context at its last turn's end (rotation.ts contextTokens); kept across resumes. */
+  context_tokens: number | null;
+  /** This run rested after writing the handoff hq asked for (rotation.ts): a late wake starts clean from it. */
+  rest_handoff_at: number | null;
 }
 
 export interface LaunchSpec {
@@ -276,8 +281,10 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     const ownTask = opts.taskId == null ? this.standingTask(identity) : undefined;
     // A shift number whose session never ran (launch/stop failed before any frame) is reused as new.
     const neverRan = !!last && last.host_seq === 0 && last.run_start_seq == null;
+    // A lead that rested past its prompt cache with a big context: a resume would write all of it to the cache again (rotation.ts).
+    const restRotate = !!last && !opts.forceNew && !neverRan && !cur && restRotationDue(this.cfg, this.store, last, this.store.now());
     const wouldResume = !!last && (last.account === 'codex') === !!this.cfg.codexLean && !neverRan && !opts.forceNew && !NEW_SHIFT_REASONS.has(last.end_reason ?? '')
-      && !this.pastTask(identity, last.task_id) && (!ownTask || last.task_id === ownTask.id);
+      && !restRotate && !this.pastTask(identity, last.task_id) && (!ownTask || last.task_id === ownTask.id);
     let cwd = opts.cwd ?? this.taskCwd(opts.taskId ?? ownTask?.id ?? (wouldResume ? last!.task_id : null), identity) ?? this.projectCwd(identity) ?? this.cfg.defaultCwd;
     // A task placed on a node (nodes.ts) runs there, every run; everything else runs here.
     const taskMachine = this.taskMachine(opts.taskId ?? ownTask?.id ?? (wouldResume ? last!.task_id : null), identity);
@@ -300,9 +307,14 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       ON CONFLICT(id) DO UPDATE SET state='starting', kind=excluded.kind, started_at=excluded.started_at, ended_at=NULL,
         end_reason=NULL, last_event_at=excluded.last_event_at, in_turn=0, long_tool=0, stuck_since=NULL, nudged_at=NULL,
         interrupted_at=NULL, dead_signals=0, pid=NULL, host_pid=NULL, proc_start=NULL, last_ping_ok_at=NULL,
-        unit_released_at=NULL, run_start_seq=NULL, bg_tasks='[]', task_id=excluded.task_id, cwd=excluded.cwd, machine=excluded.machine`)
-      .run(shiftId, identity, shiftNo, sessionId, kind, socketPath, taskId, now, now, cwd, machine);
+        unit_released_at=NULL, run_start_seq=NULL, bg_tasks='[]', task_id=excluded.task_id, cwd=excluded.cwd, machine=excluded.machine,
+        context_tokens=CASE WHEN ? THEN shifts.context_tokens END, rest_handoff_at=NULL`)
+      .run(shiftId, identity, shiftNo, sessionId, kind, socketPath, taskId, now, now, cwd, machine, resume ? 1 : 0);
     const row = this.get(shiftId)!;
+    if (restRotate) {
+      this.store.emit('shift.rotated', identity, { shift: last!.id, next: shiftId, trigger: 'rest', context_tokens: last!.context_tokens,
+        idle_ms: now - (last!.ended_at ?? now) });
+    }
     this.store.emit('shift.state', identity, { shift: shiftId, state: 'starting', resume, reason: opts.reason,
       ...(machine !== LOCAL ? { machine } : {}), ...(moved && wouldResume ? { moved_from: last!.cwd, cwd } : {}) });
     const unit = shiftUnit(shiftId);
@@ -529,7 +541,11 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       if (ev.kind === 'tool_use') { fields.in_turn = 1; fields.long_tool = 1; }
       else if (ev.kind === 'tool_result') fields.long_tool = 0;
       else if (ev.kind === 'text' || ev.kind === 'text_delta' || ev.kind === 'thinking_delta' || ev.kind === 'user_echo') fields.in_turn = 1;
-      else if (ev.kind === 'result') { fields.in_turn = 0; fields.long_tool = 0; }
+      else if (ev.kind === 'result') {
+        fields.in_turn = 0; fields.long_tool = 0;
+        const ctx = contextTokens(ev.usage);
+        if (ctx != null) fields.context_tokens = ctx;
+      }
       else if (ev.kind === 'init' && ev.sessionId && ev.sessionId !== row.session_id) fields.session_id = ev.sessionId;
       else if (ev.kind === 'rate_limit') {
         fields.rate_limited_until = ev.status === 'rejected' && ev.resetsAt ? ev.resetsAt * (ev.resetsAt < 1e12 ? 1000 : 1) : null;

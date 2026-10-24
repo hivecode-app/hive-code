@@ -21,6 +21,7 @@ import { AppReleases } from './app-release.ts';
 import { Scheduler } from './scheduler.ts';
 import { Night, type IssueSource } from './night.ts';
 import { Watchdog } from './watchdog.ts';
+import { Rotator } from './rotation.ts';
 import { ProbeRunner } from './probes.ts';
 import { Pusher, loadOrCreateVapid, telegramVia, type TelegramSend, type WebPushSend } from './push.ts';
 import { backupOnce } from './backup.ts';
@@ -100,6 +101,7 @@ export class Hq {
   readonly scheduler: Scheduler;
   readonly night: Night;
   readonly watchdog: Watchdog;
+  readonly rotator: Rotator;
   readonly probes: ProbeRunner;
   readonly pusher: Pusher;
   readonly ingest: Ingest;
@@ -144,6 +146,8 @@ export class Hq {
     this.night = new Night(this.store, cfg, this.scheduler, this.mailbox, this.inbox, deps.issues);
     this.accounts = new AccountManager(this.store, cfg, this.shifts, this.mailbox, this.inbox, deps.accounts);
     this.watchdog = new Watchdog(this.store, cfg, this.shifts, this.mailbox, this.inbox);
+    this.rotator = new Rotator(this.store, cfg, this.shifts, this.mailbox);
+    this.watchdog.rotator = this.rotator;
     this.probes = new ProbeRunner(this.store, cfg, this.mailbox);
     this.pusher = new Pusher(this.store, this.inbox, this.auth, cfg, loadOrCreateVapid(cfg.stateDir, cfg.pushContact),
       deps.telegram ?? telegramVia(cfg.telegramCmd, cfg.telegramChat), deps.webPush);

@@ -574,6 +574,12 @@ const MIGRATIONS: string[] = [
   `
   CREATE TABLE IF NOT EXISTS estimate_frozen (estimate_id INTEGER PRIMARY KEY, by TEXT NOT NULL);
   `,
+  // v30: rotation.ts. The context of the session's last turn (usage.iterations of engine.result), and when a resting lead wrote
+  // the handoff hq asked for before its rest: a wake after the cache expired starts a clean shift from it instead of a resume.
+  `
+  ALTER TABLE shifts ADD COLUMN context_tokens INTEGER;
+  ALTER TABLE shifts ADD COLUMN rest_handoff_at INTEGER;
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */
