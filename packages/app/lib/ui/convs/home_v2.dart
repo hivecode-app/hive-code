@@ -24,6 +24,7 @@ import '../nav.dart';
 import 'head.dart';
 import 'home_blocks.dart';
 import 'home_quota.dart';
+import 'home_usage.dart';
 
 /// "שני דברים", "3 דברים": a count in words for one and two, as people say it.
 String _count(int n, String one, String two, String many) => n == 1 ? one : n == 2 ? two : '$n $many';
@@ -125,6 +126,8 @@ class HomeV2 extends StatelessWidget {
     final usable = [for (final q in quota) if (q.usable) q];
     final allFull = usable.isNotEmpty && usable.every((q) => q.full);
     final quotaCard = BlockCard(label: 'המכסה', child: QuotaCard(quota: quota, now: now));
+    // 6. How fast it goes and on what (task 496): right under the quota, and folds with the home.
+    final usage = switch (recipe?.usage) { final u? when !u.isEmpty => u, _ => null };
 
     final lead = decisionsLead(d.waitingCount);
     final sentence = topSentence(d, recipe, stuck: stuck.length, now: now);
@@ -159,6 +162,8 @@ class HomeV2 extends StatelessWidget {
       if (done.isNotEmpty && !folded) ('done', BlockCard(label: 'הסתיים לאחרונה', child: _Done(items: done.take(3).toList(), now: now))),
       if (quota.isNotEmpty && !allFull && !folded) ('quota:label', const _Label('המכסה')),
       if (quota.isNotEmpty && !allFull && !folded) ('quota', quotaCard),
+      if (usage != null && !folded) ('usage:label', const _Label('השימוש')),
+      if (usage != null && !folded) ('usage', BlockCard(label: 'השימוש', child: UsageCard(usage: usage))),
       if (quiet.isNotEmpty && !folded) ('quiet', Padding(padding: const EdgeInsets.only(top: 8), child: QuietBlock(projects: quiet, data: d, color: p.bg))),
     ];
     return Semantics(

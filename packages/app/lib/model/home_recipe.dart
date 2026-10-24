@@ -164,12 +164,67 @@ class QuotaLine {
       };
 }
 
+/// How fast the quota goes and on what (GET /api/home `usage`, hq usage.ts): the last hour and day, by kind and worker.
+class UsageData {
+  const UsageData({this.hourPct, this.dayPct, this.kinds = const [], this.people = const [], this.parallelNow = 0, this.parallelAvg = 0, this.parallelPeak = 0, this.measuredAt});
+
+  /// % of the weekly quota, all accounts as one (hq averages them); null when hq had no quota read for it.
+  final num? hourPct;
+  final num? dayPct;
+
+  /// The day's spend by kind (`tasks`, `leads_owner`, `leads_workers`, `leads_hq`, `leads_other`), shares 0..1, largest first.
+  final List<(String, num)> kinds;
+
+  /// The top workers of the day's spend: (name, share, a task worker).
+  final List<(String, num, bool)> people;
+  final int parallelNow;
+  final num parallelAvg;
+  final num parallelPeak;
+  final DateTime? measuredAt;
+
+  bool get isEmpty => hourPct == null && dayPct == null && kinds.isEmpty && people.isEmpty && parallelNow == 0 && parallelAvg == 0 && parallelPeak == 0;
+
+  static UsageData? fromJson(Object? v) {
+    if (v is! Map) return null;
+    final j = v.cast<String, dynamic>();
+    final par = (j['parallel'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return UsageData(
+      hourPct: j['hour_pct'] as num?,
+      dayPct: j['day_pct'] as num?,
+      kinds: [
+        for (final k in (j['kinds'] as List? ?? const []).whereType<Map>())
+          if (k['kind'] is String && k['share'] is num) (k['kind'] as String, k['share'] as num),
+      ],
+      people: [
+        for (final p in (j['people'] as List? ?? const []).whereType<Map>())
+          if (p['name'] is String && p['share'] is num) (p['name'] as String, p['share'] as num, p['task'] == true),
+      ],
+      parallelNow: (par['now'] as num?)?.toInt() ?? 0,
+      parallelAvg: par['avg'] as num? ?? 0,
+      parallelPeak: par['peak'] as num? ?? 0,
+      measuredAt: j['measured_at'] is num ? DateTime.fromMillisecondsSinceEpoch((j['measured_at'] as num).toInt()) : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'hour_pct': hourPct,
+        'day_pct': dayPct,
+        'kinds': [for (final (k, s) in kinds) {'kind': k, 'share': s}],
+        'people': [for (final (n, s, t) in people) {'name': n, 'share': s, 'task': t}],
+        'parallel': {'now': parallelNow, 'avg': parallelAvg, 'peak': parallelPeak},
+        if (measuredAt != null) 'measured_at': measuredAt!.millisecondsSinceEpoch,
+      };
+}
+
 class HomeRecipe {
-  const HomeRecipe({required this.version, required this.composedBy, required this.composedAt, required this.blocks, this.source = 'agent', this.fallback, this.reason, this.waitingChangedAt, this.quota = const []});
+  const HomeRecipe({required this.version, required this.composedBy, required this.composedAt, required this.blocks, this.source = 'agent', this.fallback, this.reason, this.waitingChangedAt, this.quota = const [], this.usage});
   final int version;
 
   /// The Claude accounts' quota, live from hq; empty from an older hq.
   final List<QuotaLine> quota;
+
+  /// How fast it goes and on what; null from an older hq.
+  final UsageData? usage;
 
   /// When what waits for him last changed in hq (an item came in, was answered or put off); null from an
   /// older hq, or when nothing ever waited. A headline composed before it may no longer be true.
@@ -207,6 +262,7 @@ class HomeRecipe {
           for (final q in (j['quota'] as List? ?? const []).whereType<Map>())
             ?QuotaLine.fromJson(q.cast<String, dynamic>()),
         ],
+        usage: UsageData.fromJson(j['usage']),
       );
 
   Map<String, dynamic> toJson() => {
@@ -219,5 +275,6 @@ class HomeRecipe {
         if (waitingChangedAt != null) 'waiting_changed_at': waitingChangedAt!.millisecondsSinceEpoch,
         'blocks': [for (final b in blocks) b.toJson()],
         if (quota.isNotEmpty) 'quota': [for (final q in quota) q.toJson()],
+        if (usage != null) 'usage': usage!.toJson(),
       };
 }
