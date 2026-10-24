@@ -11,12 +11,13 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { g, type LoggedFrame, type UsageReply } from '@company/shared';
+import { g, OWNER, type LoggedFrame, type UsageReply } from '@company/shared';
 import type { AccountDef, HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import type { AccountChoice, ShiftManager, ShiftRow } from './shifts.ts';
 import type { Mailbox } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
+import { readTimeZone, whenLocal } from './timezone.ts';
 
 export interface Profile { email: string; accountUuid: string | null; org: string | null; plan: string | null }
 
@@ -48,7 +49,11 @@ export interface AccountRow {
 const SHARED = ['projects', 'sessions', 'skills', 'file-history', 'hooks', 'agents'];
 const PIN_KEY = 'accounts.pinned';
 const LOGIN_TTL_MS = 12 * 3600_000;
+/** "All accounts full" (23/10: both at 100% weekly, the company stood ~36 hours and nobody told him): one item, by ref. */
+export const ALL_FULL_REF = 'accounts-all-full';
+const ALL_FULL_META = 'accounts.all_full_since';
 
+const QUOTA_FAILED = 'קריאת מכסה נכשלה:';
 const ms = (iso?: string): number | null => { const t = iso ? Date.parse(iso) : NaN; return Number.isFinite(t) ? t : null; };
 const toMs = (sec?: number): number | null => (typeof sec === 'number' ? sec * (sec < 1e12 ? 1000 : 1) : null);
 
@@ -107,6 +112,10 @@ export class AccountManager {
         ON CONFLICT(name) DO UPDATE SET label = excluded.label, expect = excluded.expect, config_dir = excluded.config_dir`)
         .run(d.name, d.label, d.expect, dir, dir && !existsSync(join(dir, '.credentials.json')) ? 'needs_login' : 'unknown');
     }
+    // A row no longer in hq.config.json (the default `claude` of before the accounts were configured) is not an
+    // account: it would show as capacity anywhere that reads the table.
+    const names = this.cfg.accounts.map((a) => a.name);
+    if (names.length) this.store.db.prepare(`DELETE FROM accounts WHERE name NOT IN (${names.map(() => '?').join(',')})`).run(...names);
     // A login ask from before a restart has no `claude auth login` behind it any more: close it, don't let a code vanish.
     const stale = this.store.db.prepare(`SELECT id FROM asks WHERE from_identity = 'hq' AND id LIKE 'account-login-%' AND state IN ('open','escalated')`).all() as { id: string }[];
     for (const { id } of stale) {
@@ -134,16 +143,45 @@ export class AccountManager {
   }
 
   // ── placement ────────────────────────────────────────────────────────────
-  /** The CLI's own login is always usable (it is what every shift ran on before); a managed one only once verified. */
-  usable(r: AccountRow): boolean { return r.config_dir == null || r.health === 'ok'; }
+  /** The CLI's own login is always usable (it is what every shift ran on before); a managed one only once verified.
+   *  Never a duplicate: the same Claude account twice is one account's quota, not two. */
+  usable(r: AccountRow, rows?: AccountRow[]): boolean { return (r.config_dir == null || r.health === 'ok') && !this.duplicateOf(r, rows); }
+  /** The account registered earlier (hq.config.json order) with the same account_uuid; the first one is the real one. */
+  duplicateOf(r: Pick<AccountRow, 'name' | 'account_uuid'>, rows = this.rows()): AccountRow | undefined {
+    if (!r.account_uuid) return undefined;
+    const i = rows.findIndex((o) => o.name === r.name);
+    return rows.slice(0, i < 0 ? rows.length : i).find((o) => o.account_uuid === r.account_uuid);
+  }
   blocked(r: AccountRow): boolean { return r.blocked_until != null && r.blocked_until > this.store.now(); }
   /** Percent left in the tighter window. Unknown counts as full: no percentage ever stops work (dir-0003). */
   room(r: AccountRow): number { return 100 - Math.max(r.five_hour_pct ?? 0, r.seven_day_pct ?? 0); }
 
   pinned(): string | null { return this.store.getMeta(PIN_KEY) || null; }
 
+  /** A window at 100% counts while its reset is ahead; a rejection counts until blocked_until. */
+  full(r: AccountRow): boolean {
+    const now = this.store.now();
+    const at100 = (pct: number | null, reset: number | null) => (pct ?? 0) >= 100 && (reset == null || reset > now);
+    return this.blocked(r) || at100(r.five_hour_pct, r.five_hour_resets_at) || at100(r.seven_day_pct, r.seven_day_resets_at);
+  }
+
+  /** When a full account takes work again (the latest of what holds it); null = unknown, or not full. */
+  reopensAt(r: AccountRow): number | null {
+    const now = this.store.now();
+    const t = [this.blocked(r) ? r.blocked_until : null,
+      (r.five_hour_pct ?? 0) >= 100 ? r.five_hour_resets_at : null,
+      (r.seven_day_pct ?? 0) >= 100 ? r.seven_day_resets_at : null].filter((x): x is number => x != null && x > now);
+    return t.length ? Math.max(...t) : null;
+  }
+
+  /** The accounts that are capacity: configured, connected, not a duplicate. */
+  capacity(): AccountRow[] { const rows = this.rows(); return rows.filter((r) => this.usable(r, rows)); }
+
+  /** Every account the company can run on is full: nothing starts until one resets. */
+  allFull(): boolean { const c = this.capacity(); return c.length > 0 && c.every((r) => this.full(r)); }
+
   pick(want?: string): AccountRow | null {
-    const all = this.rows().filter((r) => this.usable(r));
+    const all = this.capacity();
     if (want) { const w = all.find((r) => r.name === want); if (w) return w; }
     const open = all.filter((r) => !this.blocked(r));
     const pin = open.find((r) => r.name === this.pinned());
@@ -157,11 +195,13 @@ export class AccountManager {
     const active = this.pick()?.name ?? null;
     const counts = new Map<string, number>();
     for (const s of this.shifts.active()) if (s.kind !== 'foreign') counts.set(s.account ?? this.primary, (counts.get(s.account ?? this.primary) ?? 0) + 1);
+    const rows = this.rows();
     return {
       pinned: this.pinned(), active,
-      accounts: this.rows().map((r) => ({
+      accounts: rows.map((r) => ({
         name: r.name, label: r.label, email: r.email, plan: r.plan, health: r.health, note: r.note, verified_at: r.verified_at,
-        managed: r.config_dir != null, usable: this.usable(r), blocked_until: this.blocked(r) ? r.blocked_until : null,
+        managed: r.config_dir != null, usable: this.usable(r, rows), blocked_until: this.blocked(r) ? r.blocked_until : null,
+        duplicate_of: this.duplicateOf(r, rows)?.name ?? null,
         five_hour_pct: r.five_hour_pct, seven_day_pct: r.seven_day_pct, five_hour_resets_at: r.five_hour_resets_at,
         seven_day_resets_at: r.seven_day_resets_at, snapshot_at: r.snapshot_at, room: this.room(r), shifts: counts.get(r.name) ?? 0,
         login_pending: this.pending.has(r.name),
@@ -174,6 +214,8 @@ export class AccountManager {
     if (name) {
       const r = this.get(name);
       if (!r || !this.def(name)) throw new Error(`אין חשבון ${name}`);
+      const dup = this.duplicateOf(r);
+      if (dup) throw new Error(`${r.label} הוא אותו חשבון כמו ${dup.label}`);
       if (!this.usable(r)) throw new Error(`החשבון ${r.label} עוד לא מחובר`);
       this.store.setMeta(PIN_KEY, name);
     } else this.store.setMeta(PIN_KEY, '');
@@ -212,6 +254,7 @@ export class AccountManager {
     fields.blocked_until = until;
     this.set(name, fields);
     this.store.emit('account.exhausted', row.identity, { account: name, until, shift: row.id });
+    this.watchFull();
     if (this.store.toggle('yoav/accounts')) this.store.bg(this.switchAway(row), 'accounts.switch');
   }
 
@@ -259,12 +302,76 @@ export class AccountManager {
         const five = ms(u.resetsAt.fiveHour), seven = ms(u.resetsAt.sevenDay);
         const full = (u.fiveHour ?? 0) >= 100 ? five : (u.sevenDay ?? 0) >= 100 ? seven : null;
         this.set(r.name, { five_hour_pct: u.fiveHour, seven_day_pct: u.sevenDay, five_hour_resets_at: five, seven_day_resets_at: seven,
-          snapshot_at: this.store.now(), blocked_until: full ?? (this.blocked(r) ? r.blocked_until : null) });
+          snapshot_at: this.store.now(), blocked_until: full ?? (this.blocked(r) ? r.blocked_until : null),
+          // A failed read from before is no longer true.
+          ...(r.note?.startsWith(QUOTA_FAILED) ? { note: null } : {}) });
       } catch (e) {
-        this.set(r.name, { note: `קריאת מכסה נכשלה: ${(e as Error).message.slice(0, 160)}` });
+        this.set(r.name, { note: `${QUOTA_FAILED} ${(e as Error).message.slice(0, 160)}` });
       }
     }
+    this.watchFull();
+    this.store.emit('accounts.quota', null, { full: this.allFull() });
     if (this.store.toggle('yoav/accounts')) await this.rebalance();
+  }
+
+  /** Each account as the home shows it (home.ts): both windows, when they reset, and whether it is full now. */
+  quota() {
+    const rows = this.rows();
+    return rows.filter((r) => !this.duplicateOf(r, rows)).map((r) => ({
+      name: r.name, label: r.label, usable: this.usable(r, rows), full: this.full(r), reopens_at: this.reopensAt(r),
+      five_hour_pct: r.five_hour_pct, seven_day_pct: r.seven_day_pct, five_hour_resets_at: r.five_hour_resets_at,
+      seven_day_resets_at: r.seven_day_resets_at, snapshot_at: r.snapshot_at,
+    }));
+  }
+
+  /**
+   * All accounts full → one urgent item in his "החלטות" (pushed), with when the first one reopens, in his time.
+   * It stays one item while it lasts (new words if the times move), closes by itself once an account takes work
+   * again, and then he gets a short message that we are back. Part of the `accounts` automation.
+   */
+  watchFull(): void {
+    const now = this.store.now();
+    const since = Number(this.store.getMeta(ALL_FULL_META) || 0);
+    // Turned off: nothing is read any more, so an open item would only grow stale. It closes without a "חזרנו".
+    if (!this.store.toggle('yoav/accounts')) {
+      if (since) { this.store.setMeta(ALL_FULL_META, ''); this.inbox.resolveByRef('incident', ALL_FULL_REF, 'dismissed'); }
+      return;
+    }
+    const cap = this.capacity();
+    const tz = readTimeZone(this.cfg.companyDir);
+    if (this.allFull()) {
+      const times = cap.map((r) => this.reopensAt(r)).filter((x): x is number => x != null);
+      const first = times.length ? Math.min(...times) : null;
+      const title = first ? `כל החשבונות של Claude מלאים, והעבודה עומדת עד ${whenLocal(first, now, tz)}` : 'כל החשבונות של Claude מלאים, והעבודה עומדת';
+      const pct = (v: number | null) => (v == null ? 'לא ידוע' : `${Math.round(v)}%`);
+      const body = [
+        ...cap.map((r) => { const at = this.reopensAt(r); return `- ${r.label}: 5 שעות ${pct(r.five_hour_pct)}, שבועי ${pct(r.seven_day_pct)}. ${at ? `נפתח ${whenLocal(at, now, tz)}` : 'שעת האיפוס לא ידועה'}.`; }),
+        // An account that is not capacity (waiting for a login) is named too: the title speaks of all of them.
+        ...this.rows().filter((r) => !cap.some((c) => c.name === r.name) && !this.duplicateOf(r)).map((r) => `- ${r.label}: לא מחובר.`),
+        '',
+        'שום משימה לא מתחילה עד שחשבון נפתח. כשזה קורה הפריט נסגר לבד ותגיע הודעה.',
+      ].join('\n');
+      if (!since) {
+        this.store.setMeta(ALL_FULL_META, String(now));
+        // One at a time is the meta key's job; no dedupe key, so a new episode in the same millisecond is still new.
+        this.inbox.add({ kind: 'incident', urgency: 'urgent', from_identity: this.cfg.managerId, ref: ALL_FULL_REF, title, body });
+        this.store.emit('accounts.all_full', null, { reopens_at: first });
+      } else {
+        const open = this.inbox.open().find((i) => i.kind === 'incident' && i.ref === ALL_FULL_REF);
+        if (open && (open.title !== title || open.body !== body)) this.inbox.updateByRef('incident', ALL_FULL_REF, { title, body });
+      }
+      return;
+    }
+    // Back means an account takes work: none usable at all (every login lost) is not back.
+    if (!since || !cap.some((r) => !this.full(r))) return;
+    this.store.setMeta(ALL_FULL_META, '');
+    this.inbox.resolveByRef('incident', ALL_FULL_REF);
+    const back = cap.find((r) => !this.full(r));
+    const h = Math.round((now - since) / 3600_000);
+    const stood = h >= 1 ? ` (עמדנו ${h === 1 ? 'שעה' : h === 2 ? 'שעתיים' : `${h} שעות`})` : '';
+    this.mailbox.tell({ msg_id: `${ALL_FULL_REF}-back-${now}`, from: this.cfg.managerId, to: OWNER, priority: 'now',
+      body: `חזרנו: ${back ? `החשבון ${back.label} פתוח שוב` : 'יש שוב חשבון פתוח'}, והעבודה ממשיכה${stood}.` });
+    this.store.emit('accounts.back', null, { account: back?.name ?? null, since });
   }
 
   /** Live shifts still on a blocked account (a rejection missed while hq was down) move if another account is open. */
@@ -288,7 +395,8 @@ export class AccountManager {
       this.set(name, r.config_dir ? { health: 'needs_login', note: `אין התחברות תקפה (${(e as Error).message.slice(0, 120)})` } : { note: (e as Error).message.slice(0, 160) });
       return this.get(name)!;
     }
-    const dup = p.accountUuid ? this.rows().find((o) => o.name !== name && o.account_uuid === p.accountUuid) : undefined;
+    // Only an account registered before this one: two rows that verify each other must not both turn wrong.
+    const dup = this.duplicateOf({ name, account_uuid: p.accountUuid });
     const base = { email: p.email, org: p.org, plan: p.plan, account_uuid: p.accountUuid, verified_at: this.store.now() };
     if (!matchesExpect(p.email, r.expect)) {
       this.set(name, { ...base, health: 'wrong_account', note: `התחברת כ-${p.email}, ביקשת ${r.expect}. נסה שוב.` });

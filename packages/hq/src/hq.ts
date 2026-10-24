@@ -145,6 +145,7 @@ export class Hq {
     this.scheduler.pollNode = (n) => this.pollNode(n);
     this.night = new Night(this.store, cfg, this.scheduler, this.mailbox, this.inbox, deps.issues);
     this.accounts = new AccountManager(this.store, cfg, this.shifts, this.mailbox, this.inbox, deps.accounts);
+    this.night.accountsFull = () => this.accounts.allFull();
     this.watchdog = new Watchdog(this.store, cfg, this.shifts, this.mailbox, this.inbox);
     this.rotator = new Rotator(this.store, cfg, this.shifts, this.mailbox);
     this.watchdog.rotator = this.rotator;
@@ -310,7 +311,8 @@ export class Hq {
       this.store.bg(this.tab.clearStale(), 'tab.clearStale');
       // B.7: quota per account every 10 minutes (get_usage, no inference) + the identity check again.
       this.every(T.accountsMs, 'accounts', async () => {
-        if (!this.store.toggle('yoav/accounts')) return;
+        // Off: an "all full" item left open closes quietly (accounts.watchFull), nothing else runs.
+        if (!this.store.toggle('yoav/accounts')) { this.accounts.watchFull(); return; }
         for (const a of this.accounts.rows()) if (a.config_dir && a.health !== 'needs_login') await this.accounts.verify(a.name);
         await this.accounts.refresh();
       });

@@ -126,4 +126,5 @@ const Map<String, IconData> kIcons = {
   'running_with_errors': Symbols.running_with_errors_rounded,
   'forward_to_inbox': Symbols.forward_to_inbox_rounded,
   'arrow_back': Symbols.arrow_back_rounded,
+  'data_usage': Symbols.data_usage_rounded,
 };

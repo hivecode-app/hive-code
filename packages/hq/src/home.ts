@@ -48,6 +48,14 @@ export interface HomeRecipe {
   blocks: Block[];
   /** When what waits for him last changed (inbox.lastChange): a headline composed before it may no longer be true. */
   waiting_changed_at?: number | null;
+  /** The Claude accounts' quota, live (accounts.ts quota()): the app's "המכסה" card under the projects. */
+  quota?: QuotaLine[];
+}
+
+export interface QuotaLine {
+  name: string; label: string; usable: boolean; full: boolean; reopens_at: number | null;
+  five_hour_pct: number | null; seven_day_pct: number | null; five_hour_resets_at: number | null; seven_day_resets_at: number | null;
+  snapshot_at: number | null;
 }
 
 export const STALE_MS = 30 * 60_000;
@@ -345,7 +353,7 @@ export class Home {
       } catch { fallback = 'invalid'; }
     }
     recipe ??= { ...this.defaultRecipe(), version: row?.version ?? 0, fallback };
-    return { ...recipe, blocks: this.live(recipe.blocks, refs), waiting_changed_at: this.hq.inbox.lastChange() };
+    return { ...recipe, blocks: this.live(recipe.blocks, refs), waiting_changed_at: this.hq.inbox.lastChange(), quota: this.hq.accounts.quota() };
   }
 
   /** Every inbox (or task) id a stored recipe mentions, so re-validation accepts ones that closed since. */
@@ -563,6 +571,7 @@ export class Home {
       `בעבודה ובתור (tasks): ${open.length ? '' : 'אין'}`, ...open.map((l) => `- ${l}`),
       `פרויקטים: ${projects.join(', ') || 'אין'}`,
       `עובדים עכשיו: ${working.join(', ') || 'אף אחד'}`,
+      `מכסה (מוצגת בבית לבד, מתחת לפרויקטים): ${this.hq.accounts.quota().map((q) => `${q.label} 5 שעות ${q.five_hour_pct ?? '?'}%, שבועי ${q.seven_day_pct ?? '?'}%${q.full ? ', מלא' : ''}`).join(' · ') || 'אין'}`,
       'אם אין מה לשנות, לא צריך לקרוא לכלי. מתכון ישן מ-30 דקות מתחלף בברירת המחדל.',
     ].join('\n');
   }

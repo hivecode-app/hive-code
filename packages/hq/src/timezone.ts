@@ -56,6 +56,20 @@ export function hhmm(ts: number, tz: string): string {
   return new Intl.DateTimeFormat('he-IL', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(ts);
 }
 
+const WEEKDAYS = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+
+/** "היום ב-14:59", "מחר ב-07:00", "יום ראשון 25/10 ב-14:59": a time ahead, in `tz`, as he says it. */
+export function whenLocal(ts: number, now: number, tz: string): string {
+  const local = (t: number) => new Date(t + tzOffsetMs(t, tz));
+  const day = (t: number) => { const l = local(t); return Date.UTC(l.getUTCFullYear(), l.getUTCMonth(), l.getUTCDate()); };
+  const diff = Math.round((day(ts) - day(now)) / 86_400_000);
+  const at = `ב-${hhmm(ts, tz)}`;
+  if (diff === 0) return `היום ${at}`;
+  if (diff === 1) return `מחר ${at}`;
+  const l = local(ts);
+  return `יום ${WEEKDAYS[l.getUTCDay()]} ${l.getUTCDate()}/${l.getUTCMonth() + 1} ${at}`;
+}
+
 /** What the app gets in /api/org and /api/board: the zone, and its offset now (the app has no tz database). */
 export function clockOf(tz: string, now: number): { name: string; offset_min: number } {
   return { name: tz, offset_min: Math.round(tzOffsetMs(now, tz) / 60_000) };

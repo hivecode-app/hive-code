@@ -289,3 +289,22 @@ test('waiting_changed_at: when what waits for him last came in, was answered or 
     assert.equal(hq.home.current().waiting_changed_at, clock.now(), 'taken back from "לא עכשיו"');
   } finally { await env.cleanup(); }
 });
+
+test('quota: every account with both windows and their resets comes with the home, live; a duplicate is not one', async () => {
+  const env = await homeEnv();
+  try {
+    const { hq, clock } = env;
+    const q0 = hq.home.current().quota!;
+    assert.deepEqual(q0.map((q) => q.name), ['claude']);
+    hq.store.db.prepare(`UPDATE accounts SET five_hour_pct = 17, seven_day_pct = 100, five_hour_resets_at = ?, seven_day_resets_at = ? WHERE name = 'claude'`)
+      .run(clock.now() + 3600_000, clock.now() + 86_400_000);
+    const [q] = hq.home.current().quota!;
+    assert.equal(q!.five_hour_pct, 17);
+    assert.equal(q!.seven_day_pct, 100);
+    assert.equal(q!.full, true);
+    assert.equal(q!.reopens_at, clock.now() + 86_400_000);
+    assert.equal(q!.usable, true);
+    // The composer is told what the home shows by itself.
+    assert.match(hq.home.wakeBody([]), /מכסה \(מוצגת בבית לבד, מתחת לפרויקטים\): Claude 5 שעות 17%, שבועי 100%, מלא/);
+  } finally { await env.cleanup(); }
+});

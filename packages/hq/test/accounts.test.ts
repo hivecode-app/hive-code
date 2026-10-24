@@ -8,6 +8,8 @@ import { makeEnv, until } from './helpers.ts';
 import { hostArgs } from '../src/shifts.ts';
 import { matchesExpect, readProfile, type LoginProcess, type Profile } from '../src/accounts.ts';
 import { buildEnv } from '../../adapter/src/spec.ts';
+import { whenLocal } from '../src/timezone.ts';
+import { pushWorthy } from '../src/inbox.ts';
 
 const PRIMARY: Profile = { email: 'owner-account@example.com', accountUuid: 'uuid-aklat', org: 'hive-owner', plan: 'default_claude_max_20x' };
 const SECOND: Profile = { email: 'hive-owner@example.com', accountUuid: 'uuid-1132', org: 'Ran', plan: 'default_claude_max_5x' };
@@ -293,4 +295,124 @@ test('adapter: a managed account runs with its own CLAUDE_CONFIG_DIR; no account
   const spec = { identity: 'x', shift: 'x-1', sessionId: 's', resume: false, cwd: '/', settingsFile: '', stateRoot: '/s' };
   assert.equal(buildEnv({ ...spec, configDir: '/s/accounts/hive-owner' }, { CLAUDE_CONFIG_DIR: '/other' }).CLAUDE_CONFIG_DIR, '/s/accounts/hive-owner');
   assert.equal(buildEnv(spec, { CLAUDE_CONFIG_DIR: '/other' }).CLAUDE_CONFIG_DIR, undefined);
+});
+
+test('all accounts full: one urgent item with the first reset, kept as one, closed by itself with a "חזרנו" message', async () => {
+  const e = await env();
+  try {
+    e.hq.store.db.prepare(`UPDATE accounts SET health = 'ok' WHERE name = 'hive-owner'`).run();
+    const items = () => e.hq.store.db.prepare(`SELECT * FROM inbox WHERE ref = 'accounts-all-full'`).all() as { id: number; state: string; title: string; body: string; urgency: string; kind: string }[];
+    const back = () => e.hq.store.db.prepare(`SELECT body, from_identity, priority FROM messages WHERE to_identity = 'owner' AND id LIKE 'accounts-all-full-back-%'`).all() as { body: string; from_identity: string; priority: string }[];
+
+    // One full, one open: nothing for him.
+    e.f.usage.set('owner-account', { fiveHour: 40, sevenDay: 100, resetsAt: { sevenDay: '2026-10-22T04:00:00Z' } });
+    e.f.usage.set('hive-owner', { fiveHour: 10, sevenDay: 60, resetsAt: { sevenDay: '2026-10-21T12:00:00Z' } });
+    await e.acct.refresh();
+    assert.equal(e.acct.allFull(), false);
+    assert.equal(items().length, 0);
+
+    // Both full (the 23/10 case): one item, urgent, with the earliest reset in his words.
+    e.f.usage.set('hive-owner', { fiveHour: 10, sevenDay: 100, resetsAt: { sevenDay: '2026-10-21T12:00:00Z' } });
+    await e.acct.refresh();
+    assert.equal(e.acct.allFull(), true);
+    let it = items();
+    assert.equal(it.length, 1);
+    assert.equal(it[0]!.kind, 'incident');
+    assert.equal(it[0]!.urgency, 'urgent');
+    assert.equal(it[0]!.title, 'כל החשבונות של Claude מלאים, והעבודה עומדת עד מחר ב-12:00');
+    assert.match(it[0]!.body, /hive-owner: 5 שעות 10%, שבועי 100%\. נפתח מחר ב-12:00\./);
+    assert.match(it[0]!.body, /החשבון הראשי: 5 שעות 40%, שבועי 100%\. נפתח יום חמישי 22\/10 ב-04:00\./);
+    assert.ok(pushWorthy(e.hq.inbox.get(it[0]!.id)!, false), 'an urgent incident is pushed');
+
+    // Still full on the next sweeps: still the same one item.
+    await e.acct.refresh();
+    e.clock.advance(3600_000);
+    await e.acct.refresh();
+    assert.equal(items().length, 1);
+    assert.equal(items()[0]!.state, 'open');
+
+    // The night's empty-slot reason reads the same.
+    assert.equal(e.hq.night.accountsFull(), true);
+
+    // A reset passes: the item closes and he is told once.
+    e.clock.t = Date.parse('2026-10-21T12:05:00Z');
+    e.f.usage.set('hive-owner', { fiveHour: 0, sevenDay: 0, resetsAt: { sevenDay: '2026-10-28T12:00:00Z' } });
+    await e.acct.refresh();
+    it = items();
+    assert.equal(it[0]!.state, 'resolved');
+    const b = back();
+    assert.equal(b.length, 1);
+    assert.equal(b[0]!.from_identity, 'yoav');
+    assert.equal(b[0]!.priority, 'now');
+    assert.equal(b[0]!.body, 'חזרנו: החשבון hive-owner פתוח שוב, והעבודה ממשיכה (עמדנו 27 שעות).');
+    await e.acct.refresh();
+    assert.equal(back().length, 1, 'once');
+
+    // Full again later: a new item. Its account losing its login meanwhile is no "חזרנו", and is named in the item.
+    e.f.usage.set('owner-account', { fiveHour: 100, sevenDay: 5, resetsAt: { fiveHour: '2026-10-21T16:00:00Z' } });
+    e.f.usage.set('hive-owner', { fiveHour: 100, sevenDay: 5, resetsAt: { fiveHour: '2026-10-21T15:00:00Z' } });
+    await e.acct.refresh();
+    assert.equal(items().filter((i) => i.state === 'open').length, 1);
+    e.hq.store.db.prepare(`UPDATE accounts SET health = 'needs_login' WHERE name = 'hive-owner'`).run();
+    e.f.usage.set('owner-account', { fiveHour: 100, sevenDay: 5, resetsAt: { fiveHour: '2026-10-21T16:00:00Z' } });
+    await e.acct.refresh();
+    assert.equal(back().length, 1, 'no false "back"');
+    assert.match(items().find((i) => i.state === 'open')!.body, /- hive-owner: לא מחובר\./);
+    // The automation turned off: the item closes quietly.
+    e.hq.store.setToggle('yoav/accounts', false);
+    e.acct.watchFull();
+    assert.equal(items().filter((i) => i.state === 'open').length, 0);
+    assert.equal(back().length, 1);
+    e.hq.store.setToggle('yoav/accounts', true);
+    e.hq.store.db.prepare(`UPDATE accounts SET health = 'ok' WHERE name = 'hive-owner'`).run();
+    e.f.usage.set('owner-account', { fiveHour: 0, sevenDay: 5 });
+    e.f.usage.set('hive-owner', { fiveHour: 0, sevenDay: 5 });
+    await e.acct.refresh();
+    // A third time full.
+    e.f.usage.set('owner-account', { fiveHour: 100, sevenDay: 5, resetsAt: { fiveHour: '2026-10-21T16:00:00Z' } });
+    e.f.usage.set('hive-owner', { fiveHour: 100, sevenDay: 5, resetsAt: { fiveHour: '2026-10-21T15:00:00Z' } });
+    await e.acct.refresh();
+    assert.equal(items().filter((i) => i.state === 'open').length, 1);
+    assert.equal(items().length, 3);
+  } finally { await e.cleanup(); }
+});
+
+test('the same Claude account twice is one account: a stale row is dropped, a configured duplicate is not capacity', async () => {
+  const f = fakes();
+  // The second configured account turns out to be the global login again (same account_uuid).
+  f.profiles.set(join(mkdtempSync(join(tmpdir(), 'x-')), 'unused'), PRIMARY);
+  const e = await makeEnv({ cfg: { claudeHome: f.claudeHome, accounts: [...ACCOUNTS, { name: 'claude', label: 'Claude', expect: '', managed: false }] }, deps: { accounts: f.deps } });
+  try {
+    e.hq.store.setToggle('yoav/accounts', true);
+    await until(() => e.hq.accounts.get('claude')?.account_uuid === PRIMARY.accountUuid && e.hq.accounts.get('owner-account')?.account_uuid === PRIMARY.accountUuid, 2000, 'both verified');
+    const acct = e.hq.accounts;
+    // Registered first, it stays the real one; the later one is the duplicate.
+    assert.equal(acct.get('owner-account')!.health, 'ok');
+    assert.equal(acct.get('claude')!.health, 'wrong_account');
+    assert.equal(acct.duplicateOf(acct.get('claude')!)?.name, 'owner-account');
+    assert.deepEqual(acct.capacity().map((r) => r.name), ['owner-account']);
+    assert.equal(acct.view().accounts.find((a) => a.name === 'claude')!.usable, false);
+    assert.equal(acct.view().accounts.find((a) => a.name === 'claude')!.duplicate_of, 'owner-account');
+    assert.deepEqual(acct.quota().map((q) => q.name), ['owner-account', 'hive-owner']);
+    assert.throws(() => acct.setPinned('claude'), /אותו חשבון כמו החשבון הראשי/);
+
+    // A full primary: the duplicate's room is not counted, so everything is full.
+    e.hq.store.db.prepare(`UPDATE accounts SET seven_day_pct = 100, seven_day_resets_at = ? WHERE name = 'owner-account'`).run(e.clock.now() + 3600_000);
+    e.hq.store.db.prepare(`UPDATE accounts SET seven_day_pct = 0 WHERE name = 'claude'`).run();
+    assert.equal(acct.allFull(), true);
+
+    // Taken out of hq.config.json (hq-host, 21/10): its row goes at the next start.
+    e.cfg.accounts = ACCOUNTS;
+    acct.sync();
+    assert.equal(acct.get('claude'), undefined);
+  } finally { await e.cleanup(); }
+});
+
+test('whenLocal: today, tomorrow, or the weekday and date, in the company zone', () => {
+  const now = Date.parse('2026-10-24T09:00:00Z'); // Saturday 12:00 in Jerusalem
+  assert.equal(whenLocal(Date.parse('2026-10-24T18:30:00Z'), now, 'Asia/Jerusalem'), 'היום ב-21:30');
+  assert.equal(whenLocal(Date.parse('2026-10-25T11:59:59Z'), now, 'Asia/Jerusalem'), 'מחר ב-13:59');
+  // Summer time until 25/10 (+3): after 21:00 UTC it is already the next day; the 25th onwards is +2.
+  assert.equal(whenLocal(Date.parse('2026-10-24T21:30:00Z'), now, 'Asia/Jerusalem'), 'מחר ב-00:30');
+  assert.equal(whenLocal(Date.parse('2026-10-31T04:00:00Z'), now, 'Asia/Jerusalem'), 'יום שבת 31/10 ב-06:00');
 });

@@ -5,7 +5,9 @@
 //    else one from live data;
 // 2. a fault with no decision (a stuck worker);
 // 3. a line per project: its tone, icon and name, what runs and who, and how many wait for him;
-// 4. what finished lately.
+// 4. what finished lately;
+// 5. the Claude accounts' quota (home_quota.dart). When every account is full, it moves up under the sentence and
+//    stays when the home is folded: that is why nothing runs.
 // The recipe stays the structure (home_blocks.dart): its project and since blocks, in its words.
 // Identity is tone, a state is an icon and a word. Nothing moves while the screen rests.
 import 'package:flutter/material.dart';
@@ -21,6 +23,7 @@ import '../entity_link.dart';
 import '../nav.dart';
 import 'head.dart';
 import 'home_blocks.dart';
+import 'home_quota.dart';
 
 /// "שני דברים", "3 דברים": a count in words for one and two, as people say it.
 String _count(int n, String one, String two, String many) => n == 1 ? one : n == 2 ? two : '$n $many';
@@ -116,6 +119,12 @@ class HomeV2 extends StatelessWidget {
           ]
         : SinceData.of(d, since: now.subtract(const Duration(hours: 24))).items;
 
+    // 5. The quota: up top while every account is full (nothing can run), else after what finished.
+    final quota = recipe?.quota ?? const <QuotaLine>[];
+    final usable = [for (final q in quota) if (q.usable) q];
+    final allFull = usable.isNotEmpty && usable.every((q) => q.full);
+    final quotaCard = BlockCard(label: 'המכסה', child: QuotaCard(quota: quota, now: now));
+
     final lead = decisionsLead(d.waitingCount);
     final sentence = topSentence(d, recipe, stuck: stuck.length, now: now);
 
@@ -129,6 +138,8 @@ class HomeV2 extends StatelessWidget {
             child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: AlertBlock(items: const [], stuck: stuck, now: now)),
           )
         ),
+      if (allFull) ('quota:label', const _Label('המכסה')),
+      if (allFull) ('quota', quotaCard),
       if (projects.isNotEmpty && !folded) ('projects:label', const _Label('הפרויקטים')),
       if (projects.isNotEmpty && !folded)
         (
@@ -145,6 +156,8 @@ class HomeV2 extends StatelessWidget {
         ),
       if (done.isNotEmpty && !folded) ('done:label', const _Label('הסתיים לאחרונה')),
       if (done.isNotEmpty && !folded) ('done', BlockCard(label: 'הסתיים לאחרונה', child: _Done(items: done.take(3).toList(), now: now))),
+      if (quota.isNotEmpty && !allFull && !folded) ('quota:label', const _Label('המכסה')),
+      if (quota.isNotEmpty && !allFull && !folded) ('quota', quotaCard),
       if (quiet.isNotEmpty && !folded) ('quiet', Padding(padding: const EdgeInsets.only(top: 8), child: QuietBlock(projects: quiet, data: d, color: p.bg))),
     ];
     return Semantics(

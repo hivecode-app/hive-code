@@ -125,6 +125,8 @@ export class Night {
   issues: IssueSource;
   /** Set by hq once the estimates register exists; the morning summary reads yesterday's from it. */
   estimates: Estimates | null = null;
+  /** Set by hq: every account the company runs on is full (accounts.ts). */
+  accountsFull: () => boolean = () => false;
   /** How often GitHub is re-read during the night (new issues, labels changed by the CEOs). */
   refreshMs = 10 * 60_000;
   private lastRefreshAt = 0;
@@ -303,8 +305,7 @@ export class Night {
 
   private reason(queue: TaskRow[], slots: { total: number; free: number; pressure?: 'load' | 'memory' | null }): string {
     if (!this.store.toggle('scheduler')) return 'המתזמן כבוי';
-    const accounts = this.store.db.prepare('SELECT health FROM accounts').all() as { health: string }[];
-    if (accounts.length && accounts.every((a) => /block|limit|exhaust|expired/i.test(a.health))) return 'כל החשבונות חסומים';
+    if (this.accountsFull()) return 'כל החשבונות חסומים';
     if (slots.pressure === 'load') return BUSY_REASON;
     if (slots.total === 0 || slots.free <= 0) return 'אין זיכרון פנוי במחשב';
     if (queue.every((t) => this.scheduler.inBackoff(t.id))) {

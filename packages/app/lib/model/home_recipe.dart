@@ -113,9 +113,63 @@ class SinceText {
   Object toJson() => task == null ? text : {'text': text, 'task': task};
 }
 
+/// One Claude account's quota as hq read it (GET /api/home `quota`, accounts.ts): both windows and their resets.
+class QuotaLine {
+  const QuotaLine({required this.name, required this.label, this.usable = true, this.full = false, this.reopensAt, this.fiveHour, this.sevenDay, this.fiveHourResets, this.sevenDayResets, this.measuredAt});
+  final String name;
+  final String label;
+
+  /// Connected and not a duplicate; a managed account waiting for a login is not.
+  final bool usable;
+
+  /// No work runs on it now: a window at 100%, or a rejection; [reopensAt] when it takes work again, if known.
+  final bool full;
+  final DateTime? reopensAt;
+  final num? fiveHour;
+  final num? sevenDay;
+  final DateTime? fiveHourResets;
+  final DateTime? sevenDayResets;
+  final DateTime? measuredAt;
+
+  static DateTime? _t(Object? v) => v is num ? DateTime.fromMillisecondsSinceEpoch(v.toInt()) : null;
+
+  static QuotaLine? fromJson(Map<String, dynamic> j) {
+    final name = j['name'];
+    if (name is! String) return null;
+    return QuotaLine(
+      name: name,
+      label: j['label'] as String? ?? name,
+      usable: j['usable'] != false,
+      full: j['full'] == true,
+      reopensAt: _t(j['reopens_at']),
+      fiveHour: j['five_hour_pct'] as num?,
+      sevenDay: j['seven_day_pct'] as num?,
+      fiveHourResets: _t(j['five_hour_resets_at']),
+      sevenDayResets: _t(j['seven_day_resets_at']),
+      measuredAt: _t(j['snapshot_at']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'label': label,
+        'usable': usable,
+        'full': full,
+        'reopens_at': reopensAt?.millisecondsSinceEpoch,
+        'five_hour_pct': fiveHour,
+        'seven_day_pct': sevenDay,
+        'five_hour_resets_at': fiveHourResets?.millisecondsSinceEpoch,
+        'seven_day_resets_at': sevenDayResets?.millisecondsSinceEpoch,
+        'snapshot_at': measuredAt?.millisecondsSinceEpoch,
+      };
+}
+
 class HomeRecipe {
-  const HomeRecipe({required this.version, required this.composedBy, required this.composedAt, required this.blocks, this.source = 'agent', this.fallback, this.reason, this.waitingChangedAt});
+  const HomeRecipe({required this.version, required this.composedBy, required this.composedAt, required this.blocks, this.source = 'agent', this.fallback, this.reason, this.waitingChangedAt, this.quota = const []});
   final int version;
+
+  /// The Claude accounts' quota, live from hq; empty from an older hq.
+  final List<QuotaLine> quota;
 
   /// When what waits for him last changed in hq (an item came in, was answered or put off); null from an
   /// older hq, or when nothing ever waited. A headline composed before it may no longer be true.
@@ -145,6 +199,10 @@ class HomeRecipe {
           for (final b in (j['blocks'] as List? ?? const []).whereType<Map>())
             ?HomeBlock.fromJson(b.cast<String, dynamic>()),
         ],
+        quota: [
+          for (final q in (j['quota'] as List? ?? const []).whereType<Map>())
+            ?QuotaLine.fromJson(q.cast<String, dynamic>()),
+        ],
       );
 
   Map<String, dynamic> toJson() => {
@@ -156,5 +214,6 @@ class HomeRecipe {
         if (reason != null) 'reason': reason,
         if (waitingChangedAt != null) 'waiting_changed_at': waitingChangedAt!.millisecondsSinceEpoch,
         'blocks': [for (final b in blocks) b.toJson()],
+        if (quota.isNotEmpty) 'quota': [for (final q in quota) q.toJson()],
       };
 }
