@@ -128,7 +128,13 @@ export class HostClient extends EventEmitter<HostClientEvents> implements HostCo
   private command(body: CommandBody<Extract<HqToHost, { id: string }>>, timeoutMs = 5000): Promise<Reply> {
     const id = randomUUID();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`${body.t} timeout`)); }, timeoutMs);
+      // After hq's own event loop stalls past the deadline, timers run before the socket is read, so a reply already
+      // waiting in the buffer would lose to its own timeout. setImmediate runs after that read: only a reply that
+      // truly did not come is a timeout.
+      const timer = setTimeout(() => setImmediate(() => {
+        if (!this.pending.has(id)) return;
+        this.pending.delete(id); reject(new Error(`${body.t} timeout`));
+      }), timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       try { this.write({ ...body, id } as HqToHost); } catch (e) { clearTimeout(timer); this.pending.delete(id); reject(e as Error); }
     });
