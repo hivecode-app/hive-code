@@ -212,8 +212,8 @@ test('free text on a GO that is neither a yes nor a no does not close it: it is 
 
 test('goVerdict: a yes is only approval words; a qualified yes, a question or "לא הבנתי" never closes a GO', async () => {
   const { goVerdict } = await import('../src/mailbox.ts');
-  for (const t of ['אשר', 'כן', 'GO', 'בסדר, תפרוס עכשיו', 'yes', 'יאללה נתקן', 'יאללה, נתקן!']) assert.equal(goVerdict(t), 'yes', t);
-  for (const t of ['בסדר אבל לא עכשיו', 'תפרוס רק אחרי 18:00', 'ok אבל מחר', 'תודה', 'עכשיו', 'זה', 'לא ממש הבנתי', 'לא כל כך ברור', 'no problem', 'no idea', 'כן, אבל רק אחרי 18:00', 'לא הבנתי מה הכוונה', 'למה?', 'תגיד אתה רציני מי צריך את זה', 'נתקן', 'תתקן', 'יאללה נתקן אחרי החג', 'יאללה נתקן? לא בטוח', 'יאללה נתקן רק את הראשון']) {
+  for (const t of ['אשר', 'כן', 'GO', 'בסדר, תפרוס עכשיו', 'yes', 'יאללה נתקן', 'יאללה, נתקן!', 'יאללה תריץ. מהר', 'כן תריץ']) assert.equal(goVerdict(t), 'yes', t);
+  for (const t of ['בסדר אבל לא עכשיו', 'תפרוס רק אחרי 18:00', 'ok אבל מחר', 'תודה', 'עכשיו', 'זה', 'לא ממש הבנתי', 'לא כל כך ברור', 'no problem', 'no idea', 'כן, אבל רק אחרי 18:00', 'לא הבנתי מה הכוונה', 'למה?', 'תגיד אתה רציני מי צריך את זה', 'נתקן', 'תתקן', 'יאללה נתקן אחרי החג', 'יאללה נתקן? לא בטוח', 'יאללה נתקן רק את הראשון', 'תריץ', 'מהר', 'יאללה תריץ מחר']) {
     assert.equal(goVerdict(t), 'other', t);
   }
   for (const t of ['לא', 'לא, בלי הבוטים', 'דחה']) assert.equal(goVerdict(t), 'no', t);
@@ -330,5 +330,59 @@ test('closeGo: approved_in_chat needs his real message after the card opened; wi
     assert.equal(close('acc-7', 'withdrawn', 'eli'), 409);
     assert.equal(hq.inbox.get(acc.id)!.state, 'open');
     assert.equal(close('missing', 'withdrawn', 'eli'), 404);
+  } finally { await env.cleanup(); }
+});
+
+test('#297: his yes in the chat closes the worker\'s one open GO; with a ref it is his answer on that card; never an access card', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    const go = hq.inbox.add({ kind: 'go', from_identity: 'eli', title: 'GO: צי ההסעות', headline: 'להחליט אם לסדר את צי ההסעות', blocking: true, ref: 'eli-1:go' });
+    // Not a clear yes, and no ref: an ordinary message, the card stays open.
+    let m = hq.mailbox.tell({ msg_id: 'c-1', from: 'owner', to: 'eli', body: 'לא במוצאי שבת, אעדכן אותך', chat: true });
+    assert.equal(m.id, 'c-1');
+    assert.equal(hq.inbox.get(go.id)!.state, 'open');
+    // Another worker's conversation: not this card.
+    hq.mailbox.tell({ msg_id: 'c-2', from: 'owner', to: 'noa', body: 'יאללה', chat: true });
+    assert.equal(hq.inbox.get(go.id)!.state, 'open');
+    // 25/10: "יאללה תריץ. מהר" in eli's conversation is the GO.
+    m = hq.mailbox.tell({ msg_id: 'c-3', from: 'owner', to: 'eli', body: 'יאללה תריץ. מהר', chat: true });
+    assert.equal(hq.inbox.get(go.id)!.state, 'resolved');
+    assert.equal(m.to_identity, 'eli');
+    assert.equal(m.kind, 'answer');
+    assert.match(m.body, /יאללה תריץ/);
+    const done = env.hq.store.eventsAfter(0, 1000).filter((e) => e.type === 'inbox.completed').at(-1)!;
+    assert.equal((done.data as any).id, go.id);
+    assert.equal((done.data as any).declined, false);
+
+    // Two open: a bare yes without a ref is not taken for either.
+    const a = hq.inbox.add({ kind: 'go', from_identity: 'eli', title: 'GO: א', blocking: true, ref: 'eli-1:a' });
+    const b = hq.inbox.add({ kind: 'go', from_identity: 'eli', title: 'GO: ב', blocking: true, ref: 'eli-1:b' });
+    hq.mailbox.tell({ msg_id: 'c-4', from: 'owner', to: 'eli', body: 'כן', chat: true });
+    assert.deepEqual([a, b].map((x) => hq.inbox.get(x.id)!.state), ['open', 'open']);
+    // With a ref: his answer on that card. A question keeps it open, a no closes it.
+    m = hq.mailbox.tell({ msg_id: 'c-5', from: 'owner', to: 'eli', ref: 'eli-1:b', body: 'למה?', chat: true });
+    assert.equal(hq.inbox.get(b.id)!.state, 'open');
+    assert.match(m.body, /עדיין פתוחה/);
+    hq.mailbox.tell({ msg_id: 'c-6', from: 'owner', to: 'eli', ref: `inbox-${b.id}`, body: 'לא', chat: true });
+    assert.equal(hq.inbox.get(b.id)!.state, 'resolved');
+    assert.equal(hq.inbox.get(a.id)!.state, 'open');
+
+    // Two questions of eli's open: a bare "כן" may answer either, so it is not taken for the GO.
+    hq.inbox.resolve(b.id);
+    hq.mailbox.ask({ msg_id: 'ask-q1', from: 'eli', question: 'א?', blocking: true });
+    hq.mailbox.ask({ msg_id: 'ask-q2', from: 'eli', question: 'ב?', blocking: true });
+    m = hq.mailbox.tell({ msg_id: 'c-8', from: 'owner', to: 'eli', body: 'כן', chat: true });
+    assert.equal(m.id, 'c-8');
+    assert.equal(hq.inbox.get(a.id)!.state, 'open');
+    hq.mailbox.withdraw('ask-q1');
+    hq.mailbox.withdraw('ask-q2');
+
+    // An access card is decided only on the card.
+    hq.inbox.resolve(a.id);
+    const acc = hq.inbox.add({ kind: 'go', from_identity: 'eli', title: 'גישה', blocking: true, ref: 'acc-7' });
+    m = hq.mailbox.tell({ msg_id: 'c-7', from: 'owner', to: 'eli', body: 'כן', chat: true });
+    assert.equal(m.id, 'c-7');
+    assert.equal(hq.inbox.get(acc.id)!.state, 'open');
   } finally { await env.cleanup(); }
 });

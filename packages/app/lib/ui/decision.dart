@@ -164,5 +164,5 @@ class DecisionLine extends StatelessWidget {
 /// The line while it can still be taken back: "אישרת · 02:14".
 String pendingLine(PendingAnswer p) => '${p.line ?? 'נשלח'} · ${hm(p.at)}';
 
-/// Its icon: `close` for "לא עובד" (#219), `check_circle` for the rest.
-String pendingIcon(PendingAnswer p) => p.line == 'לא עובד' ? 'close' : 'check_circle';
+/// Its icon: `close` for "לא עובד" (#219), `do_not_disturb_on` for "לא רלוונטי" (#297), `check_circle` for the rest.
+String pendingIcon(PendingAnswer p) => switch (p.line) { 'לא עובד' => 'close', 'לא רלוונטי' => 'do_not_disturb_on', _ => 'check_circle' };

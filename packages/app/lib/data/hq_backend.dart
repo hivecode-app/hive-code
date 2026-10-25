@@ -1201,10 +1201,10 @@ class HqBackend extends Backend {
   }
 
   @override
-  Future<CommandResult> awaitingOutcome(WaitItem item, bool done) async {
+  Future<CommandResult> awaitingOutcome(WaitItem item, String outcome) async {
     final stale = await _stale(null, item.inboxId);
     if (stale != null) return stale;
-    final r = await _send('POST', '/api/inbox/${item.inboxId}/${done ? 'done' : 'failed'}', {});
+    final r = await _send('POST', '/api/inbox/${item.inboxId}/$outcome', {});
     if (r.ok) item.state = WaitState.answered;
     return _after(r);
   }

@@ -227,3 +227,87 @@ test('waitingDeploy: merged PRs waiting for GO or a deploy, for drift-check; dep
     assert.deepEqual(awaiting.waitingDeploy('shop').prs, ['64']);
   } finally { await env.cleanup(); }
 });
+
+test('#297: "לא רלוונטי" takes the card off without "נכשל"; the opener hears it was closed as not relevant', async () => {
+  const env = await makeEnv({ noStart: true });
+  try {
+    await env.hq.start({ listen: true, timers: false });
+    const token = readFileSync(join(env.cfg.stateDir, 'api-token'), 'utf8').trim();
+    const call = async (method: string, path: string) => {
+      const res = await fetch(`http://127.0.0.1:${env.hq.port}${path}`, { method, headers: { authorization: `Bearer ${token}` } });
+      return { status: res.status, json: (await res.json()) as Record<string, any> };
+    };
+    const { scheduler, awaiting, inbox, mailbox } = env.hq;
+    const t = scheduler.addTask({ title: 'קוליות בוואטסאפ', project: 'shop', labels: ['opened-by:eli'] });
+    scheduler.setTaskState(t.id, 'done');
+    awaiting.mark(t.id, { awaiting: 'check', awaiting_note: 'לפתוח את וואטסאפ בשביל קוליות' }, 'w');
+    const id = inbox.open().find((i) => i.ref === `task-${t.id}`)!.id;
+    const r = await call('POST', `/api/inbox/${id}/irrelevant`);
+    assert.equal(r.status, 200);
+    assert.equal(r.json.item.state, 'dismissed');
+    assert.equal(awaiting.get(t.id), null);
+    assert.equal(mailbox.get(`inbox-${id}-failed`), undefined, 'nothing says it failed');
+    const told = mailbox.get(`inbox-${id}-irrelevant`)!;
+    assert.equal(told.to_identity, 'eli');
+    assert.match(told.body, /"לא רלוונטי"/);
+    assert.doesNotMatch(told.body, /נכשל/);
+    const ev = env.hq.store.eventsAfter(0, 1000).filter((e) => e.type === 'task.awaiting').at(-1)!;
+    assert.equal((ev.data as any).why, 'irrelevant');
+    assert.equal((await call('POST', `/api/inbox/${id}/irrelevant`)).status, 409, 'twice: already handled');
+  } finally { await env.cleanup(); }
+});
+
+test('#297: a deploy clears once its follow-ups ("משימה <id>: …") are closed and none waits on a deploy, up the chain', async () => {
+  const env = await makeEnv({ noStart: true });
+  try {
+    const { scheduler, awaiting } = env.hq;
+    const mk = (title: string, project = 'bot') => scheduler.addTask({ title, project }).id;
+    const done = (id: number, a: Record<string, unknown> = {}) => { awaiting.mark(id, a, 'w'); scheduler.setTaskState(id, 'done'); };
+    const p = mk('דיוק: נסיעה פנימית בלי מחיר');
+    done(p, { awaiting: 'deploy', pr: '296' });
+    const worker = mk(`משימה ${p}: שחרור וורקר 1.2.52 לכל הצי`);
+    const matcher = mk(`משימה ${p}: פריסת ride-matcher`);
+    const more = mk(`משימה ${p}, המשך: מה שהכלל מפספס`);
+    const other = mk(`משימה ${p}: משהו בפרויקט אחר`, 'lumo');
+    done(other);
+    done(worker);
+    assert.equal(awaiting.get(p)?.awaiting, 'deploy', 'the matcher is still open');
+    done(matcher);
+    assert.equal(awaiting.get(p)?.awaiting, 'deploy', 'the follow-up "המשך" is still open');
+    done(more, { awaiting: 'deploy', pr: '302' });
+    assert.equal(awaiting.get(p)?.awaiting, 'deploy', 'the follow-up waits on its own deploy');
+    const w2 = mk(`משימה ${more}: שחרור וורקר 1.2.53`);
+    const m2 = mk(`משימה ${more}: פריסת ride-matcher`);
+    done(w2);
+    assert.equal(awaiting.get(more)?.awaiting, 'deploy');
+    done(m2);
+    assert.equal(awaiting.get(more), null, 'its follow-ups closed');
+    assert.equal(awaiting.get(p), null, 'and so the first one too');
+    const ev = env.hq.store.eventsAfter(0, 1000).filter((e) => e.type === 'task.awaiting' && (e.data as any).id === p).at(-1)!;
+    assert.equal((ev.data as any).why, 'followups');
+
+    // A deploy that reports the follow-up clears it, and its parent with it.
+    const q = mk('q');
+    done(q, { awaiting: 'deploy' });
+    const f = mk(`t${q}: המשך`);
+    done(f, { awaiting: 'deploy' });
+    assert.equal(awaiting.get(q)?.awaiting, 'deploy');
+    awaiting.deployed({ project: 'bot', sha: 'abc', tasks: [f] });
+    assert.equal(awaiting.get(q), null);
+
+    // No follow-ups: nothing changes. A "check" parent is not touched.
+    const solo = mk('solo');
+    done(solo, { awaiting: 'deploy' });
+    const c = mk('c');
+    done(c, { awaiting: 'check' });
+    done(mk(`משימה ${c}: x`));
+    assert.equal(awaiting.get(solo)?.awaiting, 'deploy');
+    assert.equal(awaiting.get(c)?.awaiting, 'check');
+    // Not a follow-up: "t3.micro", "משימה 2 מתוך 3".
+    const r = mk('r');
+    done(r, { awaiting: 'deploy' });
+    done(mk(`שרת t${r}.micro`));
+    done(mk(`משימה ${r} מתוך 3`));
+    assert.equal(awaiting.get(r)?.awaiting, 'deploy');
+  } finally { await env.cleanup(); }
+});

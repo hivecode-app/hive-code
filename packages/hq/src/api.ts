@@ -11,6 +11,7 @@ import { createReadStream, existsSync, readFileSync, writeFileSync, mkdirSync } 
 import { join } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Hq } from './hq.ts';
+import type { AwaitingOutcome } from './awaiting.ts';
 import { AuthError, type Caller } from './auth.ts';
 import { proxyDictate } from './dictate.ts';
 import { MUTE_FOR } from './conversations.ts';
@@ -216,7 +217,9 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   });
   // #219: "נכשל" on a finished task's card. No details here: he writes them in the conversation, if at all.
   route('POST', '/api/inbox/:id/failed', ({ params }) => awaitingOutcome(Number(params[0]), 'failed'));
-  function awaitingOutcome(id: number, outcome: 'done' | 'failed') {
+  // #297: "לא רלוונטי": off the list without telling anyone it failed.
+  route('POST', '/api/inbox/:id/irrelevant', ({ params }) => awaitingOutcome(Number(params[0]), 'irrelevant'));
+  function awaitingOutcome(id: number, outcome: AwaitingOutcome) {
     const item = hq.inbox.get(id);
     if (!item || item.kind !== 'awaiting') throw new HttpError(404, `no awaiting inbox item ${id}`);
     if (item.state !== 'open') throw new HttpError(409, `inbox item ${id} is already handled`);

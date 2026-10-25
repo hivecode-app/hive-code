@@ -200,9 +200,9 @@ abstract class Backend extends ChangeNotifier {
   /// Takes back a "לא עכשיו" (its "ביטול").
   Future<CommandResult> resume(WaitItem item);
 
-  /// "בוצע" ([done]) or "נכשל" on a finished task's card (#219): it leaves "מחכה לך" and "מה לבדוק", and
-  /// whoever opened the task is told which.
-  Future<CommandResult> awaitingOutcome(WaitItem item, bool done) async {
+  /// "בוצע" (`done`), "נכשל" (`failed`) or "לא רלוונטי" (`irrelevant`, #297) on a finished task's card (#219): it
+  /// leaves "מחכה לך" and "מה לבדוק", and on the last two whoever opened the task is told which.
+  Future<CommandResult> awaitingOutcome(WaitItem item, String outcome) async {
     item.state = WaitState.answered;
     final d = data;
     final task = int.tryParse(item.ref?.replaceFirst('task-', '') ?? '');

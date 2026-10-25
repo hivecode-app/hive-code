@@ -525,7 +525,7 @@ List<DecisionButton> answersOf(BuildContext context, WaitItem item, {bool keys =
     store.answerWait(item, o);
     final key = AppStore.decisionKey(item.askId, item.id);
     final line = item.kind == WaitKind.awaiting ? o.label : AppStore.decidedLine(o);
-    decisionQueue.decided(item, line, icon: o.id == 'failed' ? 'close' : 'check_circle', undo: () => store.cancelUndo(key));
+    decisionQueue.decided(item, line, icon: switch (o.id) { 'failed' => 'close', 'irrelevant' => 'do_not_disturb_on', _ => 'check_circle' }, undo: () => store.cancelUndo(key));
   }
 
   void notNow() {

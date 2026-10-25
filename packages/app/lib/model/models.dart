@@ -242,10 +242,18 @@ class WaitItem {
 
   /// He tapped "נכשל" on a finished task's card (#219): its folded line gets `close`, not `check`.
   bool failed = false;
+
+  /// The option he tapped on a finished task's card (`done`, `failed`, `irrelevant`), for its folded line's icon.
+  String? outcome;
 }
 
 /// "עובד" and "לא עובד" on a task he was asked to check (#219). One tap each; "לא עובד" asks for nothing more.
-const kAwaitingOptions = [AskOption(id: 'done', label: 'עובד', primary: true), AskOption(id: 'failed', label: 'לא עובד')];
+// #297: "לא רלוונטי" takes it off without telling anyone it failed.
+const kAwaitingOptions = [
+  AskOption(id: 'done', label: 'עובד', primary: true),
+  AskOption(id: 'failed', label: 'לא עובד'),
+  AskOption(id: 'irrelevant', label: 'לא רלוונטי'),
+];
 
 class DecisionByManager {
   const DecisionByManager({required this.by, required this.text, required this.time});

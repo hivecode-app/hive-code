@@ -293,7 +293,7 @@ void main() {
     expect([find.text('אישור'), find.text('לא עכשיו')].map((f) => f.evaluate().length), [1, 1]);
 
     await tab(tester, [check()]);
-    expect([find.text('עובד'), find.text('לא עובד')].map((f) => f.evaluate().length), [1, 1]);
+    expect([find.text('עובד'), find.text('לא עובד'), find.text('לא רלוונטי')].map((f) => f.evaluate().length), [1, 1, 1]);
     expect(find.text('אישור'), findsNothing);
     expect(findShown('לבדוק בטלפון שתמונה נשלחת'), findsWidgets, reason: 'the headline says what is asked');
 
@@ -316,6 +316,21 @@ void main() {
     expect(store.decision(null, 'c-1'), isNotNull);
     await tester.pump(const Duration(seconds: 6));
   });
+
+  // #297: a check that no longer matters closes as such, not as "לא עובד".
+  for (final (look, dark) in [('light', false), ('dark', true)]) {
+    testWidgets('"לא רלוונטי" closes a check with its own line and "ביטול" ($look)', (tester) async {
+      final store = await tab(tester, [check()], dark: dark);
+      await tester.tap(find.text('לא רלוונטי'));
+      await tester.pump();
+      expect(findShown('לא רלוונטי · 14:06'), findsOneWidget);
+      expect(find.text('ביטול'), findsOneWidget);
+      expect(store.decision(null, 'c-1')?.line, 'לא רלוונטי');
+      await tester.pump(const Duration(milliseconds: 600));
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/decisions_tab/phone-check-irrelevant-$look.png'));
+      await tester.pump(const Duration(seconds: 6));
+    });
+  }
 
   // 22/10, on the live build: "לא עכשיו" is sent at once, so no store change comes 5 seconds later to rebuild the
   // line, and it stayed with a "ביטול" that did nothing.

@@ -175,9 +175,15 @@ export class Hq {
       .find((id): id is string => !!id && id !== OWNER && !!getIdentity(this.store, id)?.active && !this.mailbox.taskClosed(id)) ?? null;
     // #219: "נכשל" on a task's card reaches the opener at once, with no details: if he has any, he writes them in
     // that conversation afterwards, as a message of his own. "בוצע" only takes the task off; nobody is woken for it.
-    this.awaiting.onOutcome = (t, itemId, to) => {
+    // #297: "לא רלוונטי" takes it off too, and the opener hears that it was closed as such, not that something broke.
+    this.awaiting.onOutcome = (t, itemId, to, outcome) => {
       const o = this.mailbox.names.owner;
       const what = t.awaiting_note ?? t.summary ?? t.title;
+      if (outcome === 'irrelevant') {
+        this.mailbox.tell({ msg_id: `inbox-${itemId}-irrelevant`, from: OWNER, to, kind: 'answer', ref: `task-${t.id}`, priority: 'next',
+          body: `${o.name} ${g(o, 'סגר', 'סגרה')} כ"לא רלוונטי" את מה שחיכה ${g(o, 'לו', 'לה')} במשימה ${t.id} (${t.title}): ${what}\nזה לא דיווח על תקלה: אין מה לתקן. המשימה ירדה מ"מחכה לך".` });
+        return;
+      }
       this.mailbox.tell({ msg_id: `inbox-${itemId}-failed`, from: OWNER, to, kind: 'answer', ref: `task-${t.id}`, priority: 'now',
         body: `${o.name} ${g(o, 'סימן', 'סימנה')} "נכשל" על משימה ${t.id} (${t.title}): ${what}\nאם יש פרטים, הם יגיעו ${g(o, 'ממנו', 'ממנה')} בהודעה נפרדת. המשימה ירדה מ"מחכה לך".` });
     };
@@ -187,7 +193,7 @@ export class Hq {
     this.scheduler.heldMb = () => this.leases.heldMb(LOCAL);
     this.shifts.on('ended', (row) => this.leases.releaseShift(row.id));
     this.night.estimates = this.estimates;
-    this.scheduler.onTaskDone = (id) => this.estimates.cancelForTask(id);
+    this.scheduler.onTaskDone = (id) => { this.estimates.cancelForTask(id); this.awaiting.followUpDone(id); };
     this.scheduler.onTaskFrozen = (id, by) => this.estimates.freezeForTask(id, by);
     this.scheduler.onSweep = () => {
       if (!this.store.toggle('scheduler')) return;

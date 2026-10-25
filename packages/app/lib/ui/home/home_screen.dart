@@ -56,7 +56,7 @@ class WaitRow extends StatelessWidget {
 
     Widget tail;
     if (item.state == WaitState.answered) {
-      tail = DoneLine(item.answerLine ?? item.doneLine ?? 'טופל · ${hm(CompanyTime.now())}', top: 8, icon: item.failed ? 'close' : 'check');
+      tail = DoneLine(item.answerLine ?? item.doneLine ?? 'טופל · ${hm(CompanyTime.now())}', top: 8, icon: item.failed ? 'close' : item.outcome == 'irrelevant' ? 'do_not_disturb_on' : 'check');
     } else if (decided != null) {
       // Decided in one tap: folded at once, "ביטול" for 5 seconds (#258).
       tail = Padding(

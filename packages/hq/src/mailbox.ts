@@ -225,6 +225,17 @@ export class Mailbox {
         this.answer(open[0]!.id, req.body ?? '', 'owner', undefined, req.attachments);
         return this.lastAnswer(open[0]!.id)!;
       }
+      // #297 (25/10: "יאללה תריץ" in the chat, and the GO card stayed open): his words on an open GO of this worker's close
+      // it as on the card. With a ref to the card they are his answer on it (only a clear yes or no closes it, as reply);
+      // without one, only a clear yes, only when it is the worker's one open GO and no question of its is open (that "כן" may be
+      // the answer to one of them). A no without a ref may be about anything.
+      const go = this.chatGo(req.to, req.ref);
+      if (go && (go.byRef || (goVerdict(req.body ?? '') === 'yes' && !open.some((a) => a.from_identity === req.to)))) {
+        // No one to answer for it (the worker is gone): his words go on as an ordinary message.
+        let r: ReturnType<Mailbox['reply']> | null = null;
+        try { r = this.reply(go.id, req.body ?? '', req.attachments ?? []); } catch { /* falls through */ }
+        if (r?.message) return r.message;
+      }
     }
     const now = this.store.now();
     this.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, ref, text_ref, attachments, created_at)
@@ -653,6 +664,19 @@ export class Mailbox {
     return null;
   }
 
+  /**
+   * The open GO card of [identity] his chat message is about: the one its ref names (the card's ref or `inbox-<id>`), else
+   * its only open GO. Never a request_access card: its yes runs a command, and only his tap on it decides.
+   */
+  private chatGo(identity: string, ref?: string | null): { id: number; byRef: boolean } | null {
+    const gos = this.openGos(identity).filter((x): x is NonNullable<typeof x> => !!x && !x.ref?.startsWith('acc-'));
+    if (ref) {
+      const hit = gos.find((x) => x.ref === ref || `inbox-${x.id}` === ref);
+      return hit ? { id: hit.id, byRef: true } : null;
+    }
+    return gos.length === 1 ? { id: gos[0]!.id, byRef: false } : null;
+  }
+
   /** His GO requests from [identity] that are still open (since [since]): a task with one is not done. */
   openGos(identity: string, since = 0): ReturnType<Inbox['get']>[] {
     return (this.store.db.prepare(`SELECT id FROM inbox WHERE kind = 'go' AND state = 'open' AND from_identity = ? AND created_at >= ? ORDER BY id`)
@@ -709,7 +733,7 @@ export class Mailbox {
    * A reply in his own words (`inbox-<n>-reply`) still is: those words never arrived.
    */
   private fromInboxClose(m: MessageRow): boolean {
-    return m.from_identity === OWNER && m.kind === 'answer' && /^inbox-\d+-(done|declined|failed)$/.test(m.id);
+    return m.from_identity === OWNER && m.kind === 'answer' && /^inbox-\d+-(done|declined|failed|irrelevant)$/.test(m.id);
   }
 
   private fail(m: MessageRow): void {
@@ -1040,7 +1064,9 @@ export function waitingLine(msgs: Pick<MessageRow, 'body'>[], owner: string): st
 const YES_WORDS = new Set(['go', 'ok', 'okay', 'yes', 'y', 'approve', 'approved', 'confirm', 'אשר', 'מאשר', 'מאושר', 'אישור', 'אושר', 'אשרתי',
   'כן', 'בסדר', 'סבבה', 'יאללה', 'תפרוס', 'תפרסו', 'פרוס', 'בצע', 'קדימה', 'שחרר']);
 // "יאללה נתקן" (22/10): a yes word with a plain "let's do it" verb is still a bare yes. A verb alone, or any other word, is not.
-const YES_FILLER = new Set(['עכשיו', 'תודה', 'לך', 'על', 'זה', 'please', 'now', 'נתקן', 'תתקן', 'תתקנו', 'נפרוס', 'נשחרר', 'נעלה', 'נעשה', 'תעשה', 'תעשו', 'נמשיך', 'תמשיך']);
+// "יאללה תריץ. מהר" (25/10): running it, and now, are the same yes.
+const YES_FILLER = new Set(['עכשיו', 'תודה', 'לך', 'על', 'זה', 'please', 'now', 'נתקן', 'תתקן', 'תתקנו', 'נפרוס', 'נשחרר', 'נעלה', 'נעשה', 'תעשה', 'תעשו', 'נמשיך', 'תמשיך',
+  'תריץ', 'תריצו', 'נריץ', 'הרץ', 'תעלה', 'תעלו', 'תשחרר', 'תשחררו', 'תפעיל', 'תפעילו', 'נפעיל', 'תתחיל', 'תתחילו', 'נתחיל', 'מהר', 'מיד']);
 export function goVerdict(text: string): 'yes' | 'no' | 'other' {
   const t = text.trim().toLowerCase().replace(/[.!,"'״]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t || /[?؟]/.test(text)) return 'other';

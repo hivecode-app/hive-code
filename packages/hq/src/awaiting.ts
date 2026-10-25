@@ -5,8 +5,12 @@
 // he clears any of them with "בדקתי".
 //
 // #219: whatever waits on him is also in "מחכה לך", one inbox item (kind `awaiting`, ref `task-<id>`) per task,
-// with "בוצע" and "נכשל". `check` and `verify` at once. `deploy` is not his until it is stuck: only after
+// with "בוצע", "נכשל" and "לא רלוונטי" (#297). `check` and `verify` at once. `deploy` is not his until it is stuck: only after
 // DEPLOY_STUCK_MS with no GO about it (a GO asked is already his card there; a GO given waits on the deployer).
+//
+// #297: a `deploy` also clears when its follow-ups are through. A follow-up names the task in its title ("משימה 500:
+// פריסת ride-matcher"), as leads open them; once every follow-up is closed and none of them waits on a deploy itself,
+// the deploy they were opened for is done, even when the deploy report named only them.
 import type { Inbox } from './inbox.ts';
 import type { Store } from './store.ts';
 
@@ -21,8 +25,11 @@ export interface AwaitingTask {
 /** A `deploy` with no GO about it shows up in "מחכה לך" after this long without a deploy. */
 export const DEPLOY_STUCK_MS = 6 * 3600_000;
 
-/** "נכשל" on the task's card: [to] (its opener) hears it. */
-export type AwaitingTell = (t: AwaitingTask, itemId: number, to: string) => void;
+/** What he tapped on the task's card. */
+export type AwaitingOutcome = 'done' | 'failed' | 'irrelevant';
+
+/** "נכשל" or "לא רלוונטי" on the task's card: [to] (its opener) hears which. */
+export type AwaitingTell = (t: AwaitingTask, itemId: number, to: string, outcome: Exclude<AwaitingOutcome, 'done'>) => void;
 
 export interface DeployReport {
   project: string; sha: string; target?: string | null;
@@ -94,20 +101,42 @@ export class AwaitingBoard {
   }
 
   /** He checked it ("בדקתי"), or a deploy took it: off the list. False if it wasn't on it. */
-  clear(taskId: number, by: string, why: 'checked' | 'deployed' | 'cleared' | 'failed' = 'cleared'): boolean {
+  clear(taskId: number, by: string, why: 'checked' | 'deployed' | 'cleared' | 'failed' | 'irrelevant' | 'followups' = 'cleared'): boolean {
     const t = this.get(taskId);
     if (!t) return false;
     this.store.db.prepare('UPDATE tasks SET awaiting = NULL, awaiting_note = NULL, awaiting_at = NULL WHERE id = ?').run(taskId);
     this.store.emit('task.awaiting', t.identity, { id: taskId, awaiting: null, was: t.awaiting, why, by });
     this.sync(taskId);
+    // A follow-up no longer waiting on a deploy may be the last thing its parent waited for.
+    if (t.awaiting === 'deploy') this.followUpDone(taskId);
     return true;
   }
 
   /**
-   * "בוצע" or "נכשל" on the task's card in "מחכה לך": the task leaves both lists; on "נכשל" its opener hears it.
+   * A task closed, or stopped waiting on a deploy: each task it is a follow-up of (named in its title) and that waits on a
+   * deploy is cleared once all its follow-ups are closed and none of them waits on a deploy. Returns the ids cleared.
+   */
+  followUpDone(taskId: number): number[] {
+    const t = this.store.db.prepare('SELECT id, title, project, state, awaiting FROM tasks WHERE id = ?').get(taskId) as FollowUp | undefined;
+    if (!t || t.state !== 'done' || t.awaiting === 'deploy') return [];
+    const cleared: number[] = [];
+    for (const pid of parentsOf(t)) {
+      const p = this.get(pid);
+      if (!p || p.awaiting !== 'deploy' || (p.project && t.project && p.project !== t.project)) continue;
+      const kids = this.store.db.prepare(`SELECT id, title, project, state, awaiting FROM tasks WHERE id > ? AND title LIKE ?`)
+        .all(pid, `%${pid}%`) as FollowUp[];
+      const mine = kids.filter((k) => parentsOf(k).includes(pid) && (!p.project || !k.project || k.project === p.project));
+      if (mine.every((k) => k.state === 'done' && k.awaiting !== 'deploy') && this.clear(pid, `task:${taskId}`, 'followups')) cleared.push(pid);
+    }
+    return cleared;
+  }
+
+  /**
+   * "בוצע", "נכשל" or "לא רלוונטי" on the task's card in "מחכה לך": the task leaves both lists; on "נכשל" and on
+   * "לא רלוונטי" its opener hears which (#297: "לא רלוונטי" closes it without saying anything failed).
    * Null when the item is not an open `awaiting` item (handled on another device a moment ago).
    */
-  outcome(itemId: number, outcome: 'done' | 'failed'): AwaitingTask | null {
+  outcome(itemId: number, outcome: AwaitingOutcome): AwaitingTask | null {
     const item = this.inbox?.get(itemId);
     if (!item || item.kind !== 'awaiting' || item.state !== 'open') return null;
     const taskId = taskOf(item.ref);
@@ -115,9 +144,9 @@ export class AwaitingBoard {
     // The item first: clear() → sync() would close it as `resolved` either way.
     this.inbox!.resolve(itemId, outcome === 'done' ? 'resolved' : 'dismissed');
     if (!t) return null;
-    this.clear(t.id, 'owner', outcome === 'done' ? 'checked' : 'failed');
-    const to = outcome === 'failed' ? this.openerOf(this.taskRow(t.id)) : null;
-    if (to) this.onOutcome(t, itemId, to);
+    this.clear(t.id, 'owner', outcome === 'done' ? 'checked' : outcome);
+    const to = outcome === 'done' ? null : this.openerOf(this.taskRow(t.id));
+    if (to && outcome !== 'done') this.onOutcome(t, itemId, to, outcome);
     return t;
   }
 
@@ -240,6 +269,15 @@ export class AwaitingBoard {
 }
 
 const COLS = 'id, ref, project, title, summary, identity, awaiting, awaiting_note, awaiting_at, pr';
+
+interface FollowUp { id: number; title: string; project: string | null; state: string; awaiting: string | null }
+
+/** The tasks a task follows up on: "משימה 500: …", "t500", "task-500" in its title, older than it. */
+function parentsOf(t: Pick<FollowUp, 'id' | 'title'>): number[] {
+  // Not "t3.micro" or "משימה 2 מתוך 3".
+  const ids = [...t.title.matchAll(/(?:משימה |\bt|task-)(\d+)(?![\d.])(?! מתוך)/g)].map((m) => Number(m[1]));
+  return [...new Set(ids)].filter((n) => n < t.id);
+}
 
 /** `task-12` → 12. */
 const taskOf = (ref: string | null): number | null => { const m = /^task-(\d+)$/.exec(ref ?? ''); return m ? Number(m[1]) : null; };
