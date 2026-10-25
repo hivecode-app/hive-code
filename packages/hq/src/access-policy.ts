@@ -295,6 +295,8 @@ export function planSsh(res: SshResource, argv: string[]): Verdict {
 /** psql flags a read may carry: output shape and where to connect. `-f`, `-o`, `-v`, `-1` and the rest make it an exec again. */
 const PSQL_BARE = new Set(['-A', '-t', '-x', '-X', '-q', '--csv', '--no-psqlrc', '--no-align', '--tuples-only', '--expanded', '--quiet']);
 const PSQL_VALUE = new Set(['-U', '-d', '-h', '-p', '-P', '-F']);
+/** Bare short flags in one word (`-At`, `-qAt`), and `-c` may close it (`-Atc "<sql>"`), as getopt reads it. */
+const PSQL_CLUSTER = /^-[AtxXq]+c?$/;
 /** Where to connect is a plain name: psql reads a database name with `=` in it as a connection string, whose `options` would undo the guard. */
 const PSQL_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 const PSQL_CONNECT = new Set(['-U', '-d', '-h', '-p']);
@@ -312,7 +314,13 @@ export function readPsql(argv: string[]): string[] | null {
   let sql: string | undefined;
   let db = false;
   for (let i = 1; i < tail.length; i++) {
-    const a = tail[i]!;
+    let a = tail[i]!;
+    // `-At` is `-A -t`, as psql reads it: short output flags written together, only letters that take no value.
+    if (a.length > 2 && PSQL_CLUSTER.test(a)) {
+      flags.push(...[...a.slice(1).replace(/c$/, '')].map((l) => `-${l}`));
+      if (!a.endsWith('c')) continue;
+      a = '-c';
+    }
     if (a === '-c' || a === '--command') {
       if (sql !== undefined || tail[i + 1] === undefined) return null;
       sql = tail[++i]!;

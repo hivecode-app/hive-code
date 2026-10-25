@@ -314,3 +314,21 @@ test('readPsql: only `kubectl … exec … -- psql` with known flags and one -c'
   assert.equal(readPsql(['docker', 'exec', 'p', '--', 'psql', '-c', 'select 1']), null);
   assert.equal(readPsql(['kubectl', 'exec', 'p', '--', 'env', 'psql', '-c', 'select 1']), null);
 });
+
+test('ssh: the exact field command (#302, acc-141): `psql -X -At -d tinode -c "SELECT …"` in lumo-db-1 is a read', () => {
+  const argv = ['kubectl', '-n', 'lumo-prod', 'exec', 'lumo-db-1', '-c', 'postgres', '--', 'psql', '-X', '-At', '-d', 'tinode', '-c', 'SELECT pg_is_in_recovery(), now()::timestamp(0)'];
+  const p = sshPlan(argv);
+  assert.equal(p.class, 'read', 'runs now, no GO card');
+  assert.deepEqual(farSide(p.args).slice(8), ['env', 'PGOPTIONS=-c default_transaction_read_only=on -c standard_conforming_strings=on', 'psql', '-X', '-A', '-t', '-d', 'tinode', '-c', 'SELECT pg_is_in_recovery(), now()::timestamp(0)']);
+  const head = argv.slice(0, 8);
+  for (const tail of [['sh'], ['sh', '-c', 'psql -c "select 1"'], ['bash', '-lc', 'id'], ['psql', '-X', '-At', '-d', 'tinode', '-c', `UPDATE users SET name = 'x'`],
+    ['psql', '-At', '-c', 'select 1; delete from t'], ['psql', '-Atf', '/tmp/x.sql'], ['psql', '-Ao', '/tmp/out', '-c', 'select 1'], ['psql', '-Av', 'x=1', '-c', 'select 1'],
+    ['psql', '-A1', '-c', 'select 1'], ['psql', '-U', '-At', '-c', 'select 1'], ['psql', '-At'], ['psql', '-AT', 'x', '-c', 'select 1'], ['psql', '-Aa', '-c', 'select 1'],
+    ['psql', '-AtL', '/tmp/log', '-c', 'select 1'], ['psql', '-AF,', '-c', 'select 1'], ['psql', '-Ati', '-c', 'select 1'], ['psql', '-Acc', 'select 1'], ['psql', '-cA', 'select 1'],
+    ['psql', '-Atc', 'select 1', '-c', 'select 2'], ['psql', '-Atc'], ['psql', '-Atc', 'delete from t']]) {
+    assert.equal(sshPlan([...head, ...tail]).class, 'exec', JSON.stringify(tail));
+  }
+  assert.equal(readPsql(['kubectl', 'exec', 'p', '--', 'psql', '-c', '-At']), null, 'the word after -c is the sql, not flags');
+  assert.deepEqual(readPsql(['kubectl', 'exec', 'p', '--', 'psql', '-d', 'tinode', '-Atc', 'select 1'])?.slice(7), ['-X', '-d', 'tinode', '-A', '-t', '-c', 'select 1'], '`-Atc` closes with the sql');
+  assert.deepEqual(readPsql(['kubectl', 'exec', 'p', '--', 'psql', '-qAtXc', 'select 1'])?.slice(7), ['-X', '-q', '-A', '-t', '-c', 'select 1'], 'one -X, whatever the cluster');
+});
