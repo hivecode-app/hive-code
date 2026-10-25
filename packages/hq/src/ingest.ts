@@ -27,7 +27,7 @@ import { GoCloseError, waitingLine } from './mailbox.ts';
 import { FILE_MODES, memoryFilePath } from './memory-files.ts';
 import { blobSha, MAX_TEXT_BYTES, secretIn } from './memory-registry.ts';
 import { guarded, requestUrl } from './http-guard.ts';
-import { EstimateError, parseEta } from './estimates.ts';
+import { EstimateError, longEtaWarning, parseEta } from './estimates.ts';
 import { AccessError } from './access.ts';
 import { LeaseError } from './leases.ts';
 
@@ -376,7 +376,9 @@ export class Ingest {
     }
     if (taskDone) return out.closed ? out : undefined; // no new estimate with done
     let eta;
-    try { eta = parseEta(a, store.now(), this.hq.timeZone(), fallbackWhat); }
+    const now = store.now();
+    const tz = this.hq.etaTimeZone();
+    try { eta = parseEta(a, now, tz, fallbackWhat); }
     catch (err) {
       if (!(err instanceof EstimateError)) throw err;
       say('estimate-rejected', err.he);
@@ -391,6 +393,8 @@ export class Ingest {
       // A suggestion that equals what the worker wrote is not worth a message.
       if (r.suggestion.minutes !== r.estimate.estimated_min) say('estimate', r.suggestion.line);
       out.id = r.estimate.id; out.suggestion = r.suggestion; out.updated = r.updated;
+      const long = longEtaWarning(a, eta, now, tz);
+      if (long) { say('estimate-long', long); out.warning = long; }
     }
     return Object.keys(out).length ? out : undefined;
   }

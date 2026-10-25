@@ -36,9 +36,10 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
 
   // הערכות זמן (estimates.ts): a promise of "X יהיה מוכן תוך Y" goes in these fields, not only in the text. hq keeps the register,
   // answers with the company's calibration in a message, and closes it with the real time.
+  // eta_at's "Israel time" is hq's default etaTimeZone (hq.config.json, #301); a company that changes it changes this text too.
   const etaArgs: Record<string, Schema> = {
     eta_min: { type: 'number', description: 'הערכה: בעוד כמה דקות יהיה מוכן מה שב-eta_what. או eta_at / estimate: minutes until eta_what is ready (or eta_at)' },
-    eta_at: s('הערכה: באיזו שעה יהיה מוכן, HH:MM או תאריך ושעה מלאים. או eta_min / estimate: the time it will be ready, HH:MM or full ISO (or eta_min)'),
+    eta_at: s('הערכה: באיזו שעה יהיה מוכן, HH:MM או תאריך ושעה מלאים. שעה בלי אזור זמן נקראת לפי שעון ישראל (Asia/Jerusalem), לא לפי שעון השרת. או eta_min / estimate: the time it will be ready, HH:MM or full ISO; a time with no zone is Israel time (Asia/Jerusalem), not the server\'s (or eta_min)'),
     eta_kind: oneOf(['small-fix', 'feature', 'investigation', 'report', 'build', 'deploy', 'release'],
       'סוג העבודה של ההערכה. release = שחרור לחנויות או שרשרת release, deploy = rollout לשרת, build = build או CI / kind of work; release = store release chain, deploy = server rollout'),
     eta_what: s('מה יהיה מוכן, בשורה אחת בעברית, e.g. "ה-PR מוכן לסקירה" / what will be ready, one line'),

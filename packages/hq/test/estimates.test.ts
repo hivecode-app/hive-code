@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WalEntry } from '@company/shared';
 import { makeEnv, type TestEnv } from './helpers.ts';
-import { Estimates, median, parseEta } from '../src/estimates.ts';
+import { Estimates, longEtaWarning, median, parseEta } from '../src/estimates.ts';
 import { Store } from '../src/store.ts';
 
 const MIN = 60_000;
@@ -27,6 +27,49 @@ test('parseEta: minutes, HH:MM and ISO become a due time; kind and a time are re
   assert.throws(() => parseEta({ eta_min: 5, eta_kind: 'build' }, now, 'UTC', null), /eta_what/);
   assert.equal(median([3, 1, 2]), 2);
   assert.equal(median([1, 2, 3, 10]), 2.5);
+});
+
+test('#301: HH:MM is Israel time, not the server\'s: 22:00 at 21:40 in Israel (03:40 in +07) is 20 minutes', () => {
+  // 25/10/2026 19:40 UTC: 21:40 in Israel (+02 after the clocks went back), 02:40 in Bangkok.
+  const now = Date.UTC(2026, 9, 25, 19, 40);
+  const prev = process.env.TZ;
+  process.env.TZ = 'Asia/Bangkok';
+  try {
+    const at = (v: string) => parseEta({ eta_at: v, eta_kind: 'deploy', eta_what: 'פריסה' }, now, 'Asia/Jerusalem', null)!.dueAt;
+    assert.equal(at('22:00'), now + 20 * MIN);
+    assert.equal(at('2026-10-25T22:00'), now + 20 * MIN, 'a date and time with no zone is Israel time too');
+    assert.equal(at('2026-10-25 22:00:00'), now + 20 * MIN);
+    assert.equal(at('2026-10-26T9:00'), Date.UTC(2026, 9, 26, 7, 0), 'a one-digit hour too');
+    assert.equal(at('2026-10-26T22:00:00+07:00'), Date.UTC(2026, 9, 26, 15, 0), 'an explicit zone is kept');
+    // The night the clocks go back (25/10 02:00 IDT → 01:00 IST): at 22:00 IDT, "09:00" is 09:00 IST (07:00 UTC), not 08:00.
+    const eve = Date.UTC(2026, 9, 24, 19, 0);
+    assert.equal(parseEta({ eta_at: '09:00', eta_kind: 'deploy', eta_what: 'x' }, eve, 'Asia/Jerusalem', null)!.dueAt, Date.UTC(2026, 9, 25, 7, 0));
+    // Summer (+03): 26/07 18:40 UTC is 21:40 in Israel.
+    const summer = Date.UTC(2026, 6, 26, 18, 40);
+    assert.equal(parseEta({ eta_at: '2026-07-26T22:00', eta_kind: 'deploy', eta_what: 'x' }, summer, 'Asia/Jerusalem', null)!.dueAt, summer + 20 * MIN);
+  } finally { if (prev === undefined) delete process.env.TZ; else process.env.TZ = prev; }
+});
+
+test('#301: an estimate over 6 hours is kept, and the worker hears how hq read it', async () => {
+  const now = Date.UTC(2026, 9, 25, 19, 40);
+  const eta = parseEta({ eta_at: '04:00', eta_kind: 'deploy', eta_what: 'x' }, now, 'Asia/Jerusalem', null)!;
+  assert.match(longEtaWarning({ eta_at: '04:00' }, eta, now, 'Asia/Jerusalem')!, /`eta_at: 04:00` הוא 04:00 לפי שעון ישראל, בעוד 6\.3 שעות.*`eta_min`/);
+  assert.equal(longEtaWarning({ eta_min: 360 }, { ...eta, dueAt: now + 360 * MIN }, now, 'Asia/Jerusalem'), null, 'six hours exactly is fine');
+  const env = await makeEnv();
+  try {
+    assert.equal(env.hq.etaTimeZone(), 'Asia/Jerusalem', 'the default, whatever org.yaml says');
+    const ack = op(env, 'status', { state: 'working', eta_min: 400, eta_kind: 'investigation', eta_what: 'חקירה ארוכה' });
+    const [e] = env.hq.estimates.list({ identity: 'ac-ceo' });
+    assert.equal(e!.estimated_min, 400, 'kept as given');
+    assert.match(said(env, `${ack.id}-estimate-long`)!, /`eta_min: 400` הוא 6\.7 שעות/);
+    const short = op(env, 'status', { state: 'working', eta_min: 30, eta_kind: 'feature', eta_what: 'קצר' });
+    assert.equal(said(env, `${short.id}-estimate-long`), undefined);
+    // The reminders show the due time in the zone it was given in, not org.yaml's: 09:30 UTC is 12:30 in Israel.
+    const due = env.hq.estimates.list({ identity: 'ac-ceo', state: 'open' }).find((x) => x.what === 'קצר')!;
+    env.clock.advance(31 * MIN);
+    env.hq.scheduler.onSweep?.();
+    assert.match(said(env, `estimate-${due.id}-missed`)!, /\(12:30\) עבר/);
+  } finally { await env.cleanup(); }
 });
 
 test('tell with eta: recorded with message_id, the calibration line comes back in Hebrew and the worker\'s number is untouched', async () => {

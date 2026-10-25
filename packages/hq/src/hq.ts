@@ -191,7 +191,7 @@ export class Hq {
     this.scheduler.onTaskFrozen = (id, by) => this.estimates.freezeForTask(id, by);
     this.scheduler.onSweep = () => {
       if (!this.store.toggle('scheduler')) return;
-      this.estimates.remind((to, msg_id, body) => { this.mailbox.tell({ msg_id, from: 'hq', to, kind: 'system', priority: 'next', body }); }, this.timeZone(),
+      this.estimates.remind((to, msg_id, body) => { this.mailbox.tell({ msg_id, from: 'hq', to, kind: 'system', priority: 'next', body }); }, this.etaTimeZone(),
         (id) => { const m = getIdentity(this.store, id)?.reports_to ?? this.cfg.managerId; return m === 'owner' || m === id ? null : m; });
     };
     this.conversations = new Conversations(this.store, (id) => this.conversationTitle(id));
@@ -205,6 +205,10 @@ export class Hq {
 
   /** The company's time zone, org.yaml `timezone` (#121). Everything that knows what hour it is for him reads this. */
   timeZone(): string { return readTimeZone(this.cfg.companyDir); }
+
+  /** #301: the zone a worker's `eta_at` without a zone is read in (hq.config.json `etaTimeZone`). Workers think in Israel time,
+   *  wherever he is: org.yaml's `timezone` follows him, this does not. */
+  etaTimeZone(): string { return this.cfg.etaTimeZone; }
 
   /** For the app: the zone and its offset now. */
   clock() { return clockOf(this.timeZone(), this.store.now()); }

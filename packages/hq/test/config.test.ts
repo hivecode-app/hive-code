@@ -69,6 +69,22 @@ test('no hq.config.json and no org.yaml: generic values, nothing of one particul
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('#301: etaTimeZone is Asia/Jerusalem unless hq.config.json gives a valid IANA zone', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hq-config-'));
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const load = (file: Record<string, unknown> | null) => {
+      if (file) writeFileSync(join(dir, 'hq.config.json'), JSON.stringify(file));
+      return loadConfig({ stateDir: dir, companyDir: join(dir, 'company') }).etaTimeZone;
+    };
+    assert.equal(load(null), 'Asia/Jerusalem');
+    assert.equal(load({ etaTimeZone: 'Europe/London' }), 'Europe/London');
+    assert.equal(load({ etaTimeZone: 'Mars/Olympus' }), 'Asia/Jerusalem');
+    assert.equal(load({ etaTimeZone: 7 }), 'Asia/Jerusalem');
+  } finally { console.warn = warn; rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('org.yaml gives manager, monitoring lead and residents; hq.config.json still wins', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hq-config-'));
   try {

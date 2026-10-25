@@ -42,13 +42,18 @@ export function tzOffsetMs(ts: number, tz: string): number {
   return Date.UTC(+p.year!, +p.month! - 1, +p.day!, +p.hour!, +p.minute!, +p.second!) - Math.floor(ts / 1000) * 1000;
 }
 
+/** The instant whose wall clock in `tz` is `wall` (a wall-clock time written as if it were UTC). Uses the offset at the
+ *  target, not at now: across a DST change the two differ by an hour. A time the spring change skips moves an hour on. */
+export function wallToUtc(wall: number, tz: string): number {
+  return wall - tzOffsetMs(wall - tzOffsetMs(wall, tz), tz);
+}
+
 /** The next time it is HH:MM in `tz`, after `now`. */
 export function nextLocal(now: number, h: number, m: number, tz: string): number {
-  const off = tzOffsetMs(now, tz);
-  const l = new Date(now + off);
-  let t = Date.UTC(l.getUTCFullYear(), l.getUTCMonth(), l.getUTCDate(), h, m) - off;
-  if (t <= now) t += 86_400_000;
-  return t;
+  const l = new Date(now + tzOffsetMs(now, tz));
+  const at = (days: number) => wallToUtc(Date.UTC(l.getUTCFullYear(), l.getUTCMonth(), l.getUTCDate() + days, h, m), tz);
+  const t = at(0);
+  return t > now ? t : at(1);
 }
 
 /** "07:05" in `tz`. */

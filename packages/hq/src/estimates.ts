@@ -9,7 +9,7 @@
 // A new estimate of the same worker on the same `what` is an update: the old row stays as given, closed as cancelled
 // with superseded_by pointing at the new one.
 import type { Store } from './store.ts';
-import { hhmm, nextLocal, tzOffsetMs } from './timezone.ts';
+import { hhmm, nextLocal, tzOffsetMs, wallToUtc } from './timezone.ts';
 
 export const ETA_KINDS = ['small-fix', 'feature', 'investigation', 'report', 'build', 'deploy', 'release'] as const;
 export type EtaKind = (typeof ETA_KINDS)[number];
@@ -108,9 +108,13 @@ export function parseEta(a: Record<string, unknown>, now: number, tz: string, fa
     const v = a.eta_at;
     let t = NaN;
     const hm = typeof v === 'string' ? /^(\d{1,2}):(\d{2})$/.exec(v.trim()) : null;
+    // #301: a date and time with no zone is in `tz` too, not in the server's zone (Date.parse would read it as local).
+    const bare = typeof v === 'string' ? /^(\d{4}-\d{2}-\d{2})[T ](\d{1,2}):(\d{2}(:\d{2}(\.\d+)?)?)$/.exec(v.trim()) : null;
     if (hm && +hm[1]! < 24 && +hm[2]! < 60) t = nextLocal(now, +hm[1]!, +hm[2]!, tz);
     else if (typeof v === 'number') t = v < 1e11 ? v * 1000 : v;
-    else if (typeof v === 'string') t = Date.parse(v);
+    else if (bare) {
+      t = wallToUtc(Date.parse(`${bare[1]}T${bare[2]!.padStart(2, '0')}:${bare[3]}Z`), tz);
+    } else if (typeof v === 'string') t = Date.parse(v);
     if (!Number.isFinite(t) || t <= now || t - now > MAX_ETA_MIN * 60_000) {
       bad('eta: eta_at must be a time in the next two weeks (HH:MM or ISO)', 'ההערכה לא נרשמה: `eta_at` צריך להיות שעה עתידית (HH:MM, או תאריך ושעה מלאים).');
     }
@@ -119,6 +123,25 @@ export function parseEta(a: Record<string, unknown>, now: number, tz: string, fa
   const what = oneLine(a.eta_what) ?? fallbackWhat;
   if (!what) bad('eta: eta_what is required', 'ההערכה לא נרשמה: חסר `eta_what`, מה יהיה מוכן, בשורה אחת.');
   return { dueAt, kind: a.eta_kind as EtaKind, what: what! };
+}
+
+/** #301: an estimate further than this is kept, and the worker is told how hq read it (most often a time read in the wrong zone). */
+export const LONG_ETA_MIN = 6 * 60;
+
+/** The Hebrew warning for an estimate over LONG_ETA_MIN, or null. `tz` is the zone `eta_at` was read in. */
+export function longEtaWarning(a: Record<string, unknown>, eta: EtaFields, now: number, tz: string): string | null {
+  const min = Math.round((eta.dueAt - now) / 60_000);
+  if (min <= LONG_ETA_MIN) return null;
+  const hours = num(min / 60);
+  const read = a.eta_min != null
+    ? `\`eta_min: ${a.eta_min}\` הוא ${hours} שעות`
+    : `\`eta_at: ${String(a.eta_at)}\` הוא ${hhmm(eta.dueAt, tz)} לפי ${tzName(tz)}, בעוד ${hours} שעות`;
+  return `ההערכה נרשמה, אבל היא ארוכה: ${read}. אם לא לזה התכוונת, שלח אותה שוב עם \`eta_min\` (דקות מעכשיו).`;
+}
+
+/** "שעון ישראל" for the zone workers think in, the IANA name for any other. */
+export function tzName(tz: string): string {
+  return tz === 'Asia/Jerusalem' ? 'שעון ישראל' : `\`${tz}\``;
 }
 
 export interface EstimateFilter {

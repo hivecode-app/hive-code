@@ -12,6 +12,10 @@ import type { TabConfig } from './tab/handoffs.ts';
 import type { DictateConfig } from './dictate.ts';
 import type { NodeDef } from './nodes.ts';
 import { DEFAULT_HEAVY } from './heavy.ts';
+import { validTimeZone } from './timezone.ts';
+
+/** #301: the workers write in Hebrew and think in Israel time, wherever the server or he is. */
+export const DEFAULT_ETA_TIME_ZONE = 'Asia/Jerusalem';
 
 export interface HqConfig {
   /** Temporary, owner-message-only Codex continuity. Off unless explicitly enabled. */
@@ -34,6 +38,7 @@ export interface HqConfig {
   /** Extra listener serving only GET /health (for the ci-host heartbeat), e.g. "0.0.0.0:7421". Off by default. */
   healthListen: string | null;
   morningFromHour: number;       // night mode ends on his first message from this hour (org.yaml `timezone`)
+  etaTimeZone: string;           // #301: `eta_at` HH:MM (or a date and time with no zone) is read in this IANA zone, not org.yaml's
   timers: {
     retryGraceMs: number;        // #237: an empty zero-token error result waits this long for a new `init` of the same shift (the CLI's own retry)
     deliveryTimeoutMs: number;   // B.4: 60s without `delivered` → retry with resurrection → visible failure
@@ -194,6 +199,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     shiftTemplate: resolve(import.meta.dirname, '..', '..', 'shift-host', 'systemd', 'company-shift@.service'),
     healthListen: null,
     morningFromHour: 5,
+    etaTimeZone: DEFAULT_ETA_TIME_ZONE,
     timers: {
       retryGraceMs: 8_000,
       deliveryTimeoutMs: 60_000,
@@ -264,6 +270,10 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
   cfg.companyDir = companyDir;
   if (!cfg.auth.origins.includes(APK_ORIGIN)) cfg.auth.origins = [...cfg.auth.origins, APK_ORIGIN];
   if (!overrides.dbPath && !fromFile.dbPath) cfg.dbPath = join(cfg.stateDir, 'hq.db');
+  if (!validTimeZone(cfg.etaTimeZone)) {
+    console.warn(`[hq] etaTimeZone ${JSON.stringify(cfg.etaTimeZone)} is not an IANA zone; using ${DEFAULT_ETA_TIME_ZONE}`);
+    cfg.etaTimeZone = DEFAULT_ETA_TIME_ZONE;
+  }
   if (process.env.HQ_PORT) cfg.port = Number(process.env.HQ_PORT);
   if (process.env.HQ_HOST) cfg.host = process.env.HQ_HOST;
   return cfg;

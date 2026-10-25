@@ -84,7 +84,7 @@ export function taskSteps(project: string | null, companyDir: string, o: { stand
       : `מדווחים במשפט-שניים ב-\`tell\` ${to} (עם קישור ל-PR), ואז \`status\` עם \`state: "done"\` ו-\`summary\`: ${done} זה סוגר את המשימה ואת המשמרת.`,
   ];
   // Not a numbered step of its own: the steps keep their numbers (the project rules and the app refer to them).
-  const eta = 'הערכת זמן ("יהיה מוכן בעוד שעה") נרשמת בשדות של `tell` או `status`, לא רק בטקסט: `eta_min` (דקות) או `eta_at` (שעה), `eta_kind` (`small-fix`, `feature`, `investigation`, `report`, `build`, `deploy`, `release`; `release` הוא שחרור לחנויות או שרשרת release, `deploy` הוא rollout לשרת) ו-`eta_what` (מה יהיה מוכן, שורה אחת). hq מחזיר הצעה לפי איך שהערכות כאלה יוצאות בחברה; ההחלטה שלך. כשזה מוכן: `eta_done: true`. `status` עם `state: "done"` סוגר את ההערכות הפתוחות לבד.';
+  const eta = 'הערכת זמן ("יהיה מוכן בעוד שעה") נרשמת בשדות של `tell` או `status`, לא רק בטקסט: `eta_min` (דקות) או `eta_at` (שעה לפי שעון ישראל, לא לפי השרת), `eta_kind` (`small-fix`, `feature`, `investigation`, `report`, `build`, `deploy`, `release`; `release` הוא שחרור לחנויות או שרשרת release, `deploy` הוא rollout לשרת) ו-`eta_what` (מה יהיה מוכן, שורה אחת). hq מחזיר הצעה לפי איך שהערכות כאלה יוצאות בחברה; ההחלטה שלך. כשזה מוכן: `eta_done: true`. `status` עם `state: "done"` סוגר את ההערכות הפתוחות לבד.';
   steps[steps.length - 1] += ` ${eta}`;
   return steps.map((x, n) => `${n + 1}. ${x}`);
 }
