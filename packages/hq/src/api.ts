@@ -459,7 +459,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
 
   route('GET', '/api/events', ({ url }) => ({
     events: hq.store.eventsAfter(Number(url.searchParams.get('after') ?? 0), Math.min(2000, Number(url.searchParams.get('limit') ?? 500)),
-      url.searchParams.get('identity') ?? undefined),
+      url.searchParams.get('identity') ?? undefined, url.searchParams.get('tail') === '1'),
   }));
 
   route('GET', '/api/push/vapid', () => ({ publicKey: hq.pusher.publicKey }));

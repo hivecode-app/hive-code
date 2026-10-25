@@ -659,11 +659,15 @@ export class Store {
     return () => this.listeners.delete(l);
   }
 
-  eventsAfter(seq: number, limit = 500, identity?: string): HqEvent[] {
+  /** Events after [seq], oldest first. [tail]: the newest [limit] of them (still oldest first), for a history that must
+   *  end at now: a busy conversation has more than [limit] in its window, and its first ones hid its latest text (lumo-t552 25/10). */
+  eventsAfter(seq: number, limit = 500, identity?: string, tail = false): HqEvent[] {
+    const order = tail ? 'DESC' : 'ASC';
     const rows = (identity
-      ? this.db.prepare('SELECT * FROM events WHERE seq > ? AND identity = ? ORDER BY seq LIMIT ?').all(seq, identity, limit)
-      : this.db.prepare('SELECT * FROM events WHERE seq > ? ORDER BY seq LIMIT ?').all(seq, limit)) as
+      ? this.db.prepare(`SELECT * FROM events WHERE seq > ? AND identity = ? ORDER BY seq ${order} LIMIT ?`).all(seq, identity, limit)
+      : this.db.prepare(`SELECT * FROM events WHERE seq > ? ORDER BY seq ${order} LIMIT ?`).all(seq, limit)) as
       { seq: number; ts: number; type: string; identity: string | null; data: string }[];
+    if (tail) rows.reverse();
     return rows.map((r) => ({ ...r, data: JSON.parse(r.data) as unknown }));
   }
 

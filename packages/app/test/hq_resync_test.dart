@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 class _FakeHq {
   final wsQueries = <Map<String, String>>[];
+  final eventQueries = <Map<String, String>>[];
   final sockets = <WebSocket>[];
   late HttpServer server;
   int boards = 0;
@@ -54,6 +55,7 @@ class _FakeHq {
           {'id': 'm-1', 'from_identity': 'owner', 'to_identity': 'adi', 'kind': 'text', 'body': 'מה המצב?', 'state': msgState, 'priority': 'next', 'created_at': 1000},
         ]});
       } else if (path == '/api/events' && req.uri.queryParameters['identity'] == 'adi') {
+        eventQueries.add(req.uri.queryParameters);
         body = jsonEncode({'events': events});
       } else {
         body = jsonEncode({'messages': [], 'events': []});
@@ -91,6 +93,11 @@ Future<(_FakeHq, HqBackend)> opened() async {
 }
 
 void main() {
+  test('opening a conversation loads its newest events: a busy one\'s latest text is not cut off (lumo-t552 25/10)', () async {
+    final (fake, _) = await opened();
+    expect(fake.eventQueries.last['tail'], '1');
+  });
+
   test('a socket that goes silent is replaced, and what changed meanwhile shows', () async {
     final (fake, hq) = await opened();
     hq.silence = const Duration(milliseconds: 600);

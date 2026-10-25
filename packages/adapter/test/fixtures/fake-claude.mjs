@@ -34,9 +34,20 @@ function runNext() {
   out({ type: 'command_lifecycle', command_uuid: m.uuid, state: 'started', uuid: randomUUID() });
   out({ type: 'user', message: m.message, parent_tool_use_id: null, uuid: m.uuid, isReplay: true });
   const text = 'ECHO:' + (typeof m.message.content === 'string' ? m.message.content : '');
-  out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } });
-  if (dieMidTurn) { setTimeout(() => process.exit(3), 30); return; }
   const content = typeof m.message.content === 'string' ? m.message.content : '';
+  // `WRITE <ms>`: the model streams its text for ms. As seen on lumo-t552 25/10, a `now` line meanwhile cuts the
+  // text where it is and ends the turn as a success, with the cut text as its message.
+  if (content.startsWith('WRITE ')) {
+    const delta = (t) => out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: t } } });
+    m.written = 'ECHO:';
+    delta(m.written);
+    m.writing = true;
+    m.tick = setInterval(() => { m.written += 'x'; delta('x'); }, 10);
+    m.timer = setTimeout(() => { clearInterval(m.tick); m.writing = false; endTurn(m, m.written + ':END'); }, Number(content.slice(6)) || 1000);
+    return;
+  }
+  if (!content.startsWith('THINK ')) out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } });
+  if (dieMidTurn) { setTimeout(() => process.exit(3), 30); return; }
   if (content.startsWith('TOOL ')) {
     const tool = JSON.parse(content.slice(5));
     const id = 'toolu_' + m.uuid.slice(0, 8);
@@ -90,6 +101,11 @@ rl.on('line', (line) => {
   if (o.type === 'user') {
     out({ type: 'command_lifecycle', command_uuid: o.uuid, state: 'queued', uuid: randomUUID() });
     if (o.priority === 'now') queue.unshift(o); else queue.push(o);
+    if (o.priority === 'now' && current?.writing) {
+      clearTimeout(current.timer); clearInterval(current.tick);
+      endTurn(current, current.written);
+      return;
+    }
     if (o.priority === 'now' && current?.thinking) {
       clearTimeout(current.timer);
       out({ type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 1 });

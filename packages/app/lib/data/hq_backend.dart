@@ -1,6 +1,6 @@
 // Backend against packages/hq (HTTP + one WebSocket, token auth, B.8). Endpoints as on the hq
 // lane's branch (packages/hq/src/api.ts):
-//   GET  /api/org /api/board /api/inbox /api/asks /api/toggles /api/messages?identity= /api/events?identity=&after=
+//   GET  /api/org /api/board /api/inbox /api/asks /api/toggles /api/messages?identity= /api/events?identity=&after=[&tail=1]
 //   POST /api/asks/:id/answer  /api/inbox/:id/{done,dismiss,snooze,ack}  /api/messages/tell  /api/shifts/:id/interrupt
 //   POST /api/uploads (raw image bytes) → {upload:{id,…}}  ·  GET /api/uploads/:id (the bytes)
 //   PUT  /api/toggles/:key
@@ -1050,7 +1050,7 @@ class HqBackend extends Backend {
     try {
       final res = await Future.wait([
         _get('/api/messages?identity=${Uri.encodeQueryComponent(identityId)}&limit=200'),
-        _get('/api/events?identity=${Uri.encodeQueryComponent(identityId)}&after=${_seq > 20000 ? _seq - 20000 : 0}&limit=2000'),
+        _get('/api/events?identity=${Uri.encodeQueryComponent(identityId)}&after=${_seq > 20000 ? _seq - 20000 : 0}&limit=2000&tail=1'),
       ]);
       final old = d.chats[identityId];
       final chat = Conversation(identityId: identityId, items: [], draft: old?.draft ?? '');

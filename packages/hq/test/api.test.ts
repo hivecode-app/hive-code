@@ -333,3 +333,16 @@ test('API: the app\'s device token on the three routes the "החלטות" tab se
     assert.match(a2.body, /GO/);
   } finally { await env.cleanup(); }
 });
+
+test('API: a busy conversation\'s history ends at now (tail=1): its latest text is in it, not cut by the limit (lumo-t552 25/10)', async () => {
+  const env = await apiEnv();
+  try {
+    for (let i = 0; i < 30; i++) env.hq.store.emit('engine.text', 'busy', { shift: 'busy-1', ev: { kind: 'text', text: `t${i}` } });
+    env.hq.store.emit('engine.text', 'other', { shift: 'other-1', ev: { kind: 'text', text: 'x' } });
+    const texts = (r: { json: Record<string, any> }) => (r.json.events as { data: { ev: { text: string } } }[]).map((e) => e.data.ev.text);
+    const head = await env.call('GET', '/api/events?identity=busy&after=0&limit=5');
+    assert.deepEqual(texts(head), ['t0', 't1', 't2', 't3', 't4'], 'without tail: paging forward, as the WS replay does');
+    const tail = await env.call('GET', '/api/events?identity=busy&after=0&limit=5&tail=1');
+    assert.deepEqual(texts(tail), ['t25', 't26', 't27', 't28', 't29'], 'the newest, oldest first');
+  } finally { await env.cleanup(); }
+});

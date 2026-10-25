@@ -134,3 +134,32 @@ test('a turn that fails by itself is still a failure: no `interrupted`, its line
     await h.wait((f) => f.t === 'delivery' && f.msgId === 'm' && f.state === 'failed');
   } finally { await h.close(); }
 });
+
+test('lumo-t552 25/10: his `now` while the worker writes to him waits for the text to close, and never cuts it', async () => {
+  const h = await hostWithClient();
+  try {
+    h.send({ t: 'send', id: 'a', msgId: 'reply', text: 'WRITE 600', priority: 'next' });
+    await h.wait((f) => f.t === 'delivery' && f.msgId === 'reply' && f.state === 'started');
+    await new Promise((r) => setTimeout(r, 100)); // mid-text
+    h.send({ t: 'send', id: 'b', msgId: 'his', text: 'ועוד דבר', priority: 'now', stopIfSafe: true });
+    const r = await h.wait((f) => f.t === 'reply' && f.re === 'b');
+    assert.equal(r.ok, true);
+    const first = await h.wait((f) => f.t === 'event' && f.ev.kind === 'result');
+    assert.match(first.ev.text ?? '', /:END$/, 'the text he was reading is whole');
+    assert.equal(first.ev.interrupted, undefined);
+    await h.wait((f) => f.t === 'delivery' && f.msgId === 'his' && f.state === 'completed');
+  } finally { await h.close(); }
+});
+
+test('a worker\'s `now` while the model writes goes in after the text, not through it', async () => {
+  const h = await hostWithClient();
+  try {
+    h.send({ t: 'send', id: 'a', msgId: 'reply', text: 'WRITE 400', priority: 'next' });
+    await h.wait((f) => f.t === 'delivery' && f.msgId === 'reply' && f.state === 'started');
+    await new Promise((r) => setTimeout(r, 100));
+    h.send({ t: 'send', id: 'b', msgId: 'dana-note', text: 'עדכון', priority: 'now' });
+    const first = await h.wait((f) => f.t === 'event' && f.ev.kind === 'result');
+    assert.match(first.ev.text ?? '', /:END$/);
+    await h.wait((f) => f.t === 'delivery' && f.msgId === 'dana-note' && f.state === 'completed');
+  } finally { await h.close(); }
+});

@@ -34,6 +34,10 @@ const MAX_CLIENT_BUFFER = 50_000;
 export const EXIT_LOCKED = 75;        // another host holds this shift
 export const EXIT_UNRECOVERABLE = 76; // session_id_in_use / spawn_failed: needs hq, not a restart
 
+/** How long his `now` waits for a text block to close. With the interrupt after it (up to 10 s) it stays under hq's 15 s
+ *  for a stopIfSafe send (host-client.ts); a longer text gets the line as `next`, still without cutting it. */
+const NOW_HOLD_MS = 4_000;
+
 const RANK: Record<DeliveryState, number> = { written: 0, delivered: 1, started: 2, completed: 3, failed: 4 };
 
 export class ShiftHost {
@@ -63,6 +67,10 @@ export class ShiftHost {
    *  one by ending the turn): its `error_during_execution` is no failure, and the result says `interrupted`. */
   private cutAsked = false;
   private nowLines = new Set<string>();   // msgIds of `now` lines sent while this turn was open
+  /** The model is streaming a text block (a delta came, the block has not closed). A `now` line the CLI takes now cuts
+   *  that text mid-word and ends the turn as a success: lumo-t552 25/10, the reply he read ended "**את מ". */
+  private writing = false;
+  private readonly onBlockEnd: Array<() => void> = [];
   private sawInit = false;
   private exitDone: Promise<void> | null = null;          // a turn started and has not produced a result
   private closing = false;
@@ -109,7 +117,9 @@ export class ShiftHost {
 
   private onEngineEvent(ev: EngineEvent): void {
     this.lastEventAt = new Date().toISOString();
+    if (ev.kind === 'text_delta') this.writing = true;
     if (ev.kind === 'text_delta' || ev.kind === 'thinking_delta') { this.sendLive({ t: 'delta', ev }); return; }
+    if (ev.kind === 'text' || ev.kind === 'tool_use' || ev.kind === 'result' || ev.kind === 'init') this.blockEnded();
     switch (ev.kind) {
       case 'init': this.claudeVersion = ev.version ?? this.claudeVersion; this.setState('busy'); this.turnOpen = true; break;
       case 'tool_use': this.activeTools.set(ev.toolUseId, { name: ev.name, preview: JSON.stringify(ev.input ?? '').slice(0, 300), input: ev.input, since: this.lastEventAt! }); break;
@@ -180,6 +190,7 @@ export class ShiftHost {
     // A turn that ends without a `result` is a failure, never an empty success (bet 1).
     const error = this.claude?.failureReason ?? (this.turnOpen ? 'no_result' : (code !== 0 && !this.closing ? 'crashed' : undefined));
     const interruptedTools = [...this.activeTools.values()].map(({ name, preview }) => ({ name, preview, sideEffect: SIDE_EFFECT.test(`${name} ${preview}`) }));
+    this.blockEnded();
     this.state = 'exited';
     this.record({ t: 'lifecycle', state: 'exited', exitCode: code, signal, ...(error ? { error } : {}),
       ...(interruptedTools.length ? { interruptedTools } : {}),
@@ -247,6 +258,8 @@ export class ShiftHost {
    * the running tool, before the next step, and the reply says which tool that is, for the bubble.
    */
   private async sendNow(msgId: string, text: string, retry: boolean): Promise<SendReply> {
+    // Mid-text, the line waits for the block to close (seconds), so it never cuts what he is reading; then as below.
+    if (this.writing && !retry && !this.deliveries.has(msgId)) await this.blockEnd(NOW_HOLD_MS);
     const known = this.deliveries.get(msgId);
     if (!this.turnOpen || retry || known) return this.send(msgId, text, 'now', retry);
     const running = [...this.activeTools.values()];
@@ -274,9 +287,12 @@ export class ShiftHost {
     // retry only re-sends what never got accepted; anything accepted stays single.
     if (existing && !(retry && (existing.state === 'written' || existing.state === 'failed'))) return { ...existing };
     if (!this.claude || this.claude.exited) throw new HostError('not_running', 'claude is not running');
+    // Still mid-text (a worker's `now`, or his past the hold): `next`, read at the next step or when the turn ends,
+    // never by cutting the text.
+    const wire = priority === 'now' && this.writing ? 'next' : priority;
     // The CLI takes a `now` line by ending the open turn (error_during_execution): that end is ours.
-    if (priority === 'now' && this.turnOpen) this.nowLines.add(msgId);
-    const uuid = this.claude.sendUser(text, priority);
+    if (wire === 'now' && this.turnOpen) this.nowLines.add(msgId);
+    const uuid = this.claude.sendUser(text, wire);
     if (existing) this.byUuid.delete(existing.uuid);
     this.deliveries.set(msgId, { uuid, state: 'written' });
     this.byUuid.set(uuid, msgId);
@@ -433,6 +449,19 @@ export class ShiftHost {
       const he = e instanceof HostError ? e : null;
       this.replyErr(c, f.id, he?.code ?? (String(e).includes('timed out') ? 'timeout' : 'internal'), (e as Error).message);
     }
+  }
+
+  private blockEnded(): void {
+    this.writing = false;
+    for (const f of this.onBlockEnd.splice(0)) f();
+  }
+
+  /** Resolves when the text block being written closes, or after [ms] at most. */
+  private blockEnd(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      this.onBlockEnd.push(() => { clearTimeout(timer); resolve(); });
+    });
   }
 
   /** Every interrupt hq or the host asks for goes through here, so the turn's end reads as cut, not failed. */
