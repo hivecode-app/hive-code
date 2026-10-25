@@ -72,6 +72,10 @@ test('normalize: wire shapes observed on 2.1.303', () => {
   assert.deepEqual(normalize({ type: 'stream_event', parent_tool_use_id: 't9', event: { type: 'message_start', message: { id: 'msg_sub' } } }, st).events, []);
   assert.deepEqual(normalize({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '!' } } }, st).events,
     [{ kind: 'text_delta', text: '!', messageId: 'msg_b' }], 'a subagent message_start does not take over');
+  assert.deepEqual(normalize({ type: 'assistant', parent_tool_use_id: 't9', message: { id: 'msg_sub', content: [{ type: 'text', text: 'דוח' }] } }).events,
+    [{ kind: 'text', text: 'דוח', messageId: 'msg_sub', parentToolUseId: 't9' }], 'a subagent\'s text says whose it is');
+  assert.deepEqual(normalize({ type: 'assistant', message: { id: 'msg_top', content: [{ type: 'text', text: 'שלי' }] } }).events,
+    [{ kind: 'text', text: 'שלי', messageId: 'msg_top' }]);
   const tr = normalize({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } });
   assert.deepEqual(tr.events, [{ kind: 'tool_result', toolUseId: 't1', isError: false, preview: 'ok' }]);
   const cr = normalize({ type: 'control_response', response: { subtype: 'success', request_id: 'r', response: { a: 1 } } });

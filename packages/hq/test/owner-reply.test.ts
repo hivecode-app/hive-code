@@ -119,7 +119,7 @@ test('his message left from an errored turn does not make a later, unrelated tur
   } finally { await env.cleanup(); }
 });
 
-test('a turn nobody from the owner started stores nothing for him', async () => {
+test('lumo-t552 25/10: the text of a turn he did not start, that he saw stream in, stays in his conversation as a quiet note', async () => {
   const env = await makeEnv();
   try {
     const { hq, launcher } = env;
@@ -128,10 +128,112 @@ test('a turn nobody from the owner started stores nothing for him', async () => 
     const host = launcher.hosts.get('eli-1')!;
     host.deliveryState('r-1', 'started');
     await until(() => hq.mailbox.get('r-1')!.state === 'seen');
-    host.event({ kind: 'text', text: 'בדקתי', messageId: 'msg_e' });
-    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'בדקתי' });
-    await new Promise((r) => setTimeout(r, 100));
-    assert.equal(toOwner(env).length, 0);
+    host.event({ kind: 'text', text: 'הנה הודעת הפרומו:', messageId: 'msg_e' });
+    host.event({ kind: 'tool_use', toolUseId: 't1', name: 'Bash', input: { command: 'ls' } });
+    host.event({ kind: 'tool_result', toolUseId: 't1', isError: false, preview: '' });
+    host.event({ kind: 'text', text: 'כשענבל תאשר, אעדכן אותך.', messageId: 'msg_f' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'כשענבל תאשר, אעדכן אותך.' });
+    const notes = () => hq.mailbox.list('eli').filter((m) => m.kind === 'note');
+    await until(() => notes().length === 1, 3000, 'note stored');
+    const [n] = notes();
+    assert.equal(n!.to_identity, 'owner');
+    assert.equal(n!.body, 'כשענבל תאשר, אעדכן אותך.', 'the final text only, not what came before the tools');
+    assert.equal(n!.id, 'eli-note-msg_f', 'keyed by the block, the same however the log is replayed');
+    assert.equal(n!.text_ref, 'msg_f', 'the app shows it once, over the streamed bubble');
+    assert.equal(n!.state, 'handled');
+    assert.equal(toOwner(env).length, 0, 'not a line in his conversation list');
+    assert.equal(hq.conversations.get('eli').unread, 0, 'not unread');
+    assert.ok(!hq.store.eventsAfter(0, 5000).some((e) => e.type === 'conv.alert'), 'no alert');
+    // A replay of the same result (hq restart) keeps one.
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'כשענבל תאשר, אעדכן אותך.' });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(notes().length, 1);
+  } finally { await env.cleanup(); }
+});
+
+test('no note for a turn that only wrote "בודק" before its tools, or that reached him itself (a message stored to him)', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    const turn = async (id: string) => {
+      hq.mailbox.tell({ msg_id: id, from: 'rotem', to: 'eli', body: 'תבדוק' });
+      await until(() => hq.mailbox.get(id)!.state === 'delivered');
+      const host = launcher.hosts.get('eli-1')!;
+      host.deliveryState(id, 'started');
+      await until(() => hq.mailbox.get(id)!.state === 'seen');
+      return host;
+    };
+    let host = await turn('r-4');
+    host.event({ kind: 'text', text: 'בודק', messageId: 'msg_h' });
+    host.event({ kind: 'tool_use', toolUseId: 't2', name: 'Bash', input: { command: 'ls' } });
+    host.event({ kind: 'tool_result', toolUseId: 't2', isError: false, preview: '' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: '' });
+    await until(() => hq.shifts.get('eli-1')!.in_turn === 0, 3000, 'turn over');
+    host = await turn('r-5');
+    hq.mailbox.tell({ msg_id: 'eli-api', from: 'eli', to: 'owner', body: 'הפרומו יצא.' }); // the API from Bash: no tool call to see
+    host.event({ kind: 'text', text: 'שלחתי לרן שהפרומו יצא.', messageId: 'msg_i' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'שלחתי לרן שהפרומו יצא.' });
+    await new Promise((r) => setTimeout(r, 150));
+    assert.deepEqual(hq.mailbox.list('eli').filter((m) => m.kind === 'note').map((m) => m.body), []);
+  } finally { await env.cleanup(); }
+});
+
+test('a note is the worker\'s own final text: a subagent\'s report after its Agent call is not in it', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    hq.mailbox.tell({ msg_id: 'r-6', from: 'rotem', to: 'eli', body: 'תבדוק' });
+    await until(() => hq.mailbox.get('r-6')!.state === 'delivered');
+    const host = launcher.hosts.get('eli-1')!;
+    host.deliveryState('r-6', 'started');
+    await until(() => hq.mailbox.get('r-6')!.state === 'seen');
+    host.event({ kind: 'tool_use', toolUseId: 'a1', name: 'Agent', input: { prompt: 'x' } });
+    host.event({ kind: 'text', text: '## דוח ארוך של הסוכן', messageId: 'msg_sub', parentToolUseId: 'a1' });
+    host.event({ kind: 'tool_result', toolUseId: 'a1', isError: false, preview: '' });
+    host.event({ kind: 'text', text: 'הסוכן סיים, הכול תקין.', messageId: 'msg_top' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'הסוכן סיים, הכול תקין.' });
+    await until(() => hq.mailbox.list('eli').some((m) => m.kind === 'note'), 3000, 'note stored');
+    assert.deepEqual(hq.mailbox.list('eli').filter((m) => m.kind === 'note').map((m) => m.body), ['הסוכן סיים, הכול תקין.']);
+  } finally { await env.cleanup(); }
+});
+
+test('his message mid-turn: the text before it is a note, unless the turn already sent him a message', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    hq.mailbox.tell({ msg_id: 'r-7', from: 'rotem', to: 'eli', body: 'תבדוק' });
+    await until(() => hq.mailbox.get('r-7')!.state === 'delivered');
+    const host = launcher.hosts.get('eli-1')!;
+    host.deliveryState('r-7', 'started');
+    await until(() => hq.mailbox.get('r-7')!.state === 'seen');
+    host.event({ kind: 'text', text: 'רותם, בדקתי: תקין.', messageId: 'msg_pre' });
+    hq.mailbox.tell({ msg_id: 'm-mid', to: 'eli', body: 'מה קורה?' });
+    await until(() => hq.mailbox.get('m-mid')!.state === 'delivered');
+    host.deliveryState('m-mid', 'started');
+    await until(() => hq.mailbox.get('m-mid')!.state === 'seen');
+    host.event({ kind: 'text', text: 'הכול תקין אצלי.', messageId: 'msg_ans' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'הכול תקין אצלי.' });
+    await until(() => hq.mailbox.get('m-mid-reply') != null, 3000, 'reply stored');
+    assert.equal(hq.mailbox.get('m-mid-reply')!.body, 'הכול תקין אצלי.');
+    assert.deepEqual(hq.mailbox.list('eli').filter((m) => m.kind === 'note').map((m) => m.body), ['רותם, בדקתי: תקין.']);
+  } finally { await env.cleanup(); }
+});
+
+test('a note answers nothing: his message waiting from an errored turn stays unanswered', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    const host = await ownerTurn(env, 'm-wait', 'היי');
+    host.event({ kind: 'result', subtype: 'error_during_execution', isError: true });
+    await until(() => hq.shifts.get('eli-1')!.in_turn === 0, 3000, 'turn over');
+    hq.mailbox.tell({ msg_id: 'r-3', from: 'rotem', to: 'eli', body: 'תבדוק' });
+    await until(() => hq.mailbox.get('r-3')!.state === 'delivered');
+    host.deliveryState('r-3', 'started');
+    await until(() => hq.mailbox.get('r-3')!.state === 'seen');
+    host.event({ kind: 'text', text: 'בודק לרותם.', messageId: 'msg_g' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'בודק לרותם.' });
+    await until(() => hq.mailbox.list('eli').some((m) => m.kind === 'note'), 3000, 'note stored');
+    assert.deepEqual(hq.mailbox.unanswered('eli').map((m) => m.id), ['m-wait']);
   } finally { await env.cleanup(); }
 });
 

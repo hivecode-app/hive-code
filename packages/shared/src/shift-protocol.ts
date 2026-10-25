@@ -87,7 +87,7 @@ export type EngineEvent =
   | { kind: 'init'; sessionId: string; model: string; cwd: string; tools: string[];
       permissionMode?: string; messagingSocketPath?: string; memoryPaths?: unknown;
       version?: string }
-  | { kind: 'text'; text: string; messageId?: string }
+  | { kind: 'text'; text: string; messageId?: string; parentToolUseId?: string }   // parentToolUseId: a subagent's text
   | { kind: 'tool_use'; toolUseId: string; name: string; input: unknown; parentToolUseId?: string }
   | { kind: 'tool_result'; toolUseId: string; isError: boolean; preview: string }
   /** --replay-user-messages echo of a user line; basis of `delivered`. */

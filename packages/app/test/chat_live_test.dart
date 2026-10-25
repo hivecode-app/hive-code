@@ -87,6 +87,19 @@ void main() {
   // hq's texts in these fixtures name רן: the names his org.yaml gives (an older hq's board has none).
   setUpAll(() => companyNames = const CompanyNames(ownerId: 'ran', owner: 'רן', ownerGender: Gender.m, managerId: 'yoav', manager: 'יואב', managerGender: Gender.m));
 
+  test('lumo-t552 25/10: a note (a turn he did not start) shows in the chat, but is not unread and does not move it to the top', () async {
+    final (b, hq) = await up();
+    await b.openConversation('yoav');
+    final before = b.data!.conversations.where((c) => c.identityId == 'yoav').firstOrNull;
+    hq.send(msgNew('note-1', 'yoav', 'owner', 'כשענבל תאשר, אעדכן אותך.', kind: 'note', at: 9000));
+    await until(() => ids(b).contains('msg:note-1'));
+    expect(ids(b), contains('msg:note-1'), reason: 'what he saw stream in stays in the conversation');
+    final after = b.data!.conversations.where((c) => c.identityId == 'yoav').firstOrNull;
+    expect(after?.unread, before?.unread);
+    expect(after?.lastLine, before?.lastLine);
+    expect(hq.requests.where((p) => p.contains('note-1')), isEmpty, reason: 'hq stored it handled');
+  }, timeout: const Timeout(Duration(seconds: 20)));
+
   test('a reply that arrives while the history loads is kept', () async {
     final (b, hq) = await up();
     hq.messagesDelay = const Duration(milliseconds: 400);

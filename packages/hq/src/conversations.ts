@@ -18,9 +18,9 @@ export const PRESENCE_TTL_MS = 60_000;
 /** The others in his conversations: never him, never hq (the system has no conversation, #55). */
 const NOT_A_CONVERSATION = new Set([OWNER, 'hq']);
 
-/** Only what a worker says to him counts: not system lines (shown as event lines, not messages). */
+/** Only what a worker says to him counts: not system lines (shown as event lines, not messages), not a turn's kept text (`note`). */
 const counts = (m: Pick<MessageLike, 'from_identity' | 'to_identity' | 'kind'>) =>
-  m.to_identity === OWNER && !NOT_A_CONVERSATION.has(m.from_identity) && m.kind !== 'system';
+  m.to_identity === OWNER && !NOT_A_CONVERSATION.has(m.from_identity) && m.kind !== 'system' && m.kind !== 'note';
 
 export type MessageAlert = (a: { identity: string; title: string; body: string; message: string; priority?: string }) => void;
 
@@ -121,7 +121,7 @@ export class Conversations {
     const row = this.row(identity);
     const readAt = row?.read_at ?? 0;
     const unread = this.store.db.prepare(`SELECT id, body, created_at FROM messages WHERE from_identity = ? AND to_identity = ?
-      AND kind != 'system' AND created_at > ? ORDER BY created_at DESC, rowid DESC`).all(identity, OWNER, readAt) as
+      AND kind NOT IN ('system','note') AND created_at > ? ORDER BY created_at DESC, rowid DESC`).all(identity, OWNER, readAt) as
       { id: string; body: string; created_at: number }[];
     const last = lastAt !== undefined ? lastAt : (this.store.db.prepare(`SELECT MAX(created_at) AS t FROM messages
       WHERE (from_identity = ? AND to_identity = ?) OR (from_identity = ? AND to_identity = ?)`).get(identity, OWNER, OWNER, identity) as { t: number | null }).t;

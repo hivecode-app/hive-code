@@ -32,7 +32,7 @@ export function askedList(store: Store): AskedItem[] {
   const now = store.now();
   const mine = db.prepare(`SELECT id, to_identity, body, created_at, state FROM messages WHERE from_identity = ? AND kind = 'tell'
     AND to_identity != 'hq' AND created_at >= ? ORDER BY created_at, rowid`).all(OWNER, now - ASKED_WINDOW_MS) as Row[];
-  const replyStmt = db.prepare(`SELECT id, body, created_at FROM messages WHERE from_identity = ? AND to_identity = ? AND kind != 'system'
+  const replyStmt = db.prepare(`SELECT id, body, created_at FROM messages WHERE from_identity = ? AND to_identity = ? AND kind NOT IN ('system','note')
     AND created_at >= ? ORDER BY created_at, rowid LIMIT 1`);
   const readStmt = db.prepare('SELECT read_at FROM conversations WHERE identity = ?');
   const readAt = (identity: string) => (readStmt.get(identity) as { read_at: number } | undefined)?.read_at ?? 0;

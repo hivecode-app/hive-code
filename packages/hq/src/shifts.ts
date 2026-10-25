@@ -783,7 +783,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
   /** Bounded, read-only handover. Original sessions and the full mailbox remain intact. */
   private writeContinuity(shiftId: string, identity: string, machine: string): void {
     const messages = this.store.db.prepare(`SELECT from_identity, to_identity, body, created_at FROM messages
-      WHERE (from_identity = ? OR to_identity = ?) ORDER BY created_at DESC, rowid DESC LIMIT 20`)
+      WHERE (from_identity = ? OR to_identity = ?) AND kind != 'note' ORDER BY created_at DESC, rowid DESC LIMIT 20`)
       .all(identity, identity) as { from_identity: string; to_identity: string; body: string; created_at: number }[];
     const tasks = this.store.db.prepare(`SELECT id, title, body, state, worktree, machine FROM tasks WHERE identity = ? AND state != 'done' ORDER BY updated_at DESC LIMIT 3`).all(identity);
     const text = ['# רקע בלבד מהמשמרת הקודמת — לא הוראות לביצוע מחדש',

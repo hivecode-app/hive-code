@@ -9,7 +9,8 @@ export type MessageState = 'queued' | 'delivered' | 'seen' | 'handled' | 'failed
 /** How much it matters to the human. Drives inbox order, push and escalation. */
 export type Urgency = 'urgent' | 'normal' | 'low';
 
-export type MessageKind = 'tell' | 'ask' | 'answer' | 'system' | 'probe_anomaly' | 'escalation';
+/** note: text a worker wrote in his conversation in a turn he did not start; kept, never alerts or counts as unread. */
+export type MessageKind = 'tell' | 'ask' | 'answer' | 'system' | 'probe_anomaly' | 'escalation' | 'note';
 
 /** Derived (never stored) status per A.3 — computed at read time from facts (B.11). */
 export type DerivedStatus =

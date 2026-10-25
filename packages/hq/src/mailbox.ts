@@ -175,9 +175,10 @@ export class Mailbox {
     return r && hydrate(r);
   }
 
+  /** His (OWNER) is the last line of every conversation: a note is not one, or a busy worker's notes push the others out. */
   list(identity: string, limit = 200, beforeTs?: number): MessageRow[] {
     return (this.store.db.prepare(`SELECT * FROM messages WHERE (to_identity = ? OR from_identity = ?) AND created_at < ?
-      ORDER BY created_at DESC, rowid DESC LIMIT ?`).all(identity, identity, beforeTs ?? Number.MAX_SAFE_INTEGER, limit) as StoredRow[]).map(hydrate);
+      ${identity === OWNER ? "AND kind != 'note'" : ''} ORDER BY created_at DESC, rowid DESC LIMIT ?`).all(identity, identity, beforeTs ?? Number.MAX_SAFE_INTEGER, limit) as StoredRow[]).map(hydrate);
   }
 
   private setState(id: string, state: MessageState, extra: Record<string, unknown> = {}): void {
@@ -450,15 +451,6 @@ export class Mailbox {
       .map((r) => ({ seq: r.seq, type: r.type, data: JSON.parse(r.data) as Record<string, any> }));
     // Text of work that began before his message arrived mid-turn is not part of the reply to it.
     const firstTriggerSeq = window.find((e) => e.type === 'message.state' && e.data.state === 'seen' && e.data.from === OWNER)?.seq ?? 0;
-    const triggers = window
-      .filter((e) => e.type === 'message.state' && e.data.state === 'seen' && e.data.from === OWNER)
-      .map((e) => this.get(String(e.data.id)))
-      .filter((m): m is MessageRow => !!m && m.state === 'seen' && m.shift_id === row.id);
-    if (!triggers.length) return;
-    // Reached him in this turn: a stored message to him (any path: MCP, API from Bash), or the tool call itself
-    // (its op may be ingested after the result).
-    const stored = db.prepare(`SELECT 1 FROM messages WHERE from_identity = ? AND to_identity = ? AND created_at >= ? LIMIT 1`)
-      .get(row.identity, OWNER, Math.min(...triggers.map((t) => t.seen_at ?? t.created_at)));
     // The first tool call of the turn that reached him; the turn's text before it he already saw.
     const reached = window.find((e) => {
       if (e.type !== 'engine.tool_use' || e.data.shift !== row.id || e.data.ev?.parentToolUseId) return false;
@@ -469,6 +461,18 @@ export class Mailbox {
       const to = typeof input?.to === 'string' ? input.to : '';
       return to === OWNER || (to !== 'hq' && !getIdentity(this.store, to));
     });
+    const triggers = window
+      .filter((e) => e.type === 'message.state' && e.data.state === 'seen' && e.data.from === OWNER)
+      .map((e) => this.get(String(e.data.id)))
+      .filter((m): m is MessageRow => !!m && m.state === 'seen' && m.shift_id === row.id);
+    if (!triggers.length) { this.saveNote(row, cur.seq, window, !!reached, start?.ts ?? 0); return; }
+    // What it wrote before his message came mid-turn is not the reply to it, and stays in his conversation as such a note.
+    const before = window.filter((e) => e.seq < firstTriggerSeq);
+    if (before.length) this.saveNote(row, cur.seq, before, !!reached && reached.seq < firstTriggerSeq, start?.ts ?? 0);
+    // Reached him in this turn: a stored message to him (any path: MCP, API from Bash), or the tool call itself
+    // (its op may be ingested after the result).
+    const stored = db.prepare(`SELECT 1 FROM messages WHERE from_identity = ? AND to_identity = ? AND kind != 'note' AND created_at >= ? LIMIT 1`)
+      .get(row.identity, OWNER, Math.min(...triggers.map((t) => t.seen_at ?? t.created_at)));
     const told = !!stored || !!reached;
     let answered = told;
     if (!ev.isError && (!told || reached)) {
@@ -491,13 +495,40 @@ export class Mailbox {
   }
 
   /**
+   * A turn he did not start (a teammate's message, hq, a task) still streams its text into his conversation, and he reads
+   * it as it is written (lumo-t552 25/10: the Easy promo, written after inbal's message). Its final text is kept as a
+   * `note`: in the conversation for good, after the event window has moved on, but no alert, not unread, and it answers
+   * nothing. Only the final text (after the last tool): a turn that wrote "בודק" and went on with tools keeps nothing. A
+   * turn that reached him itself (a tool, or a message stored to him in the turn, e.g. the API from Bash) keeps nothing:
+   * that message is what he gets. The id is the final block's engine messageId, the same however the log is replayed.
+   */
+  private saveNote(row: Pick<ShiftRow, 'id' | 'identity'>, turnSeq: number, window: { seq: number; type: string; data: Record<string, any> }[],
+    reached: boolean, sinceTs: number): void {
+    if (reached) return;
+    const stored = this.store.db.prepare(`SELECT 1 FROM messages WHERE from_identity = ? AND to_identity = ? AND kind != 'note'
+      AND id NOT LIKE '%-reply' AND created_at >= ? LIMIT 1`).get(row.identity, OWNER, sinceTs);
+    if (stored) return;
+    const mine = window.filter((e) => e.data.shift === row.id);
+    const lastTool = mine.filter((e) => e.type === 'engine.tool_use' && !e.data.ev?.parentToolUseId).at(-1)?.seq ?? 0;
+    const blocks = mine
+      .filter((e) => e.type === 'engine.text' && e.seq > lastTool && !e.data.ev?.parentToolUseId) // a subagent's report is not his
+      .map((e) => e.data.ev as { text?: string; messageId?: string })
+      .filter((b) => (b.text ?? '').trim());
+    if (!blocks.length) return;
+    const key = blocks.at(-1)!.messageId ?? String(turnSeq);
+    const m = this.tell({ msg_id: `${row.identity}-note-${key}`, from: row.identity, to: OWNER, kind: 'note',
+      body: blocks.map((b) => b.text!.trim()).join('\n\n'), text_ref: blocks.at(-1)?.messageId });
+    if (m.state !== 'handled') this.setState(m.id, 'handled');
+  }
+
+  /**
    * His messages to this worker since [since] that nothing answered (#118), oldest first: not handled (a reply, a tell
    * with ref, an ask or a GO all mark it), and no message of the worker to him after it.
    */
   unanswered(identity: string, since = 0): MessageRow[] {
     return (this.store.db.prepare(`SELECT * FROM messages m WHERE m.from_identity = @owner AND m.to_identity = @identity AND m.kind = 'tell'
       AND m.created_at >= @since AND m.state != 'handled' AND NOT EXISTS (SELECT 1 FROM messages r WHERE r.from_identity = m.to_identity
-        AND r.to_identity = @owner AND r.kind != 'system' AND r.created_at >= m.created_at)
+        AND r.to_identity = @owner AND r.kind NOT IN ('system','note') AND r.created_at >= m.created_at)
       ORDER BY m.created_at, m.rowid`).all({ owner: OWNER, identity, since }) as StoredRow[]).map(hydrate);
   }
 

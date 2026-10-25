@@ -87,7 +87,9 @@ export function normalize(o: J, st: StreamState = {}): Normalized {
     case 'assistant': {
       const m = o.message ?? {};
       for (const b of (Array.isArray(m.content) ? m.content : []) as J[]) {
-        if (b.type === 'text') ev.push({ kind: 'text', text: b.text, messageId: m.id });
+        if (b.type === 'text') {
+          ev.push({ kind: 'text', text: b.text, messageId: m.id, ...(o.parent_tool_use_id ? { parentToolUseId: o.parent_tool_use_id } : {}) });
+        }
         else if (b.type === 'tool_use') {
           ev.push({ kind: 'tool_use', toolUseId: b.id, name: b.name, input: b.input,
             parentToolUseId: o.parent_tool_use_id ?? undefined });

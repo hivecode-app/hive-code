@@ -776,11 +776,14 @@ class HqBackend extends Backend {
           } else if (streamed.attachments.isEmpty) {
             streamed.attachments = attachmentsOf(m);
           }
-          if (openIdentity == from) {
-            unawaited(_send('POST', '/api/messages/${Uri.encodeComponent(m['id'] as String)}/handled'));
-            if (_visible) _markRead(from);
+          // A note is what he already saw stream in a turn he did not start, kept: no unread, no move to the top.
+          if (m['kind'] != 'note') {
+            if (openIdentity == from) {
+              unawaited(_send('POST', '/api/messages/${Uri.encodeComponent(m['id'] as String)}/handled'));
+              if (_visible) _markRead(from);
+            }
+            _bumpConversation(from, m['body'] as String, m['created_at'] as int);
           }
-          _bumpConversation(from, m['body'] as String, m['created_at'] as int);
           notifyListeners();
         }
       } else {

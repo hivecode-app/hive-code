@@ -43,7 +43,8 @@ export function companyDay(store: Store, companyDir: string, tz: string, date: s
   const now = store.now();
   const q = <T>(sql: string, ...a: unknown[]) => store.db.prepare(sql).all(...a) as T[];
 
-  const msgs = q<MsgRow>(`SELECT id, from_identity f, to_identity t, kind, created_at ts FROM messages WHERE created_at >= ? AND created_at < ? ORDER BY created_at, rowid`, start, end);
+  const msgs = q<MsgRow>(`SELECT id, from_identity f, to_identity t, kind, created_at ts FROM messages WHERE created_at >= ? AND created_at < ?
+    AND kind != 'note' ORDER BY created_at, rowid`, start, end); // a note is a turn's text kept, not a message sent
   const shifts = q<ShiftRowLite>(`SELECT identity, started_at, COALESCE(ended_at, last_event_at, ?) ended_at FROM shifts WHERE started_at < ? AND COALESCE(ended_at, last_event_at, ?) >= ?`, Math.min(now, end), end, Math.min(now, end), start);
 
   const ids = new Map(listIdentities(store).map((i) => [i.id, i]));
