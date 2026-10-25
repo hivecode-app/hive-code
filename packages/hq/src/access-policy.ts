@@ -243,7 +243,10 @@ export function matchPattern(pattern: string[], argv: string[]): boolean {
   const wild = (a: string) => !a.startsWith('-') && noUp(a);
   for (let i = 0; i < pattern.length; i++) {
     const p = pattern[i]!;
-    if (p === '**') return i === pattern.length - 1 && argv.slice(i).every(wild);
+    // After a literal `--` the rest belongs to the command inside (`kubectl exec pod -- psql -c "…"`): its flags and free text
+    // are that command's, so a `**` there takes them as they are. Before it, a flag would be the outer command's, and stays out.
+    if (p === '**') return i === pattern.length - 1 && (pattern.slice(0, i).includes('--') ? argv.slice(i).every(TEXT_ARG) : argv.slice(i).every((a) => SAFE_ARG.test(a) && wild(a)));
+    if (!SAFE_ARG.test(argv[i] ?? '')) return false;
     const a = argv[i];
     if (a === undefined) return false;
     if (p === '*') { if (!wild(a)) return false; continue; }
@@ -258,16 +261,149 @@ export function matchPattern(pattern: string[], argv: string[]): boolean {
   return argv.length === pattern.length;
 }
 
-/** `ssh` for the resource, running only what the catalog lists. Every word is in the safe charset, so the remote shell has nothing to interpret. */
+/** Free text (a space, quotes, `;`) may stand only where a pattern hands the words to the command inside; never a control character. */
+const TEXT_ARG = (a: string) => !/[\x00-\x08\x0b-\x1f\x7f]/.test(a);
+
+/** One word for the remote shell: ssh joins its words with spaces and the far side parses them again, so a word that is not plain goes in single quotes. */
+export const shQuote = (a: string) => (SAFE_ARG.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`);
+
+/** `ssh` for the resource, running only what the catalog lists. Every word reaches the far side as one word, as it was written. */
 export function planSsh(res: SshResource, argv: string[]): Verdict {
   if (!argv.length) return unfit('חסרה פקודה');
-  const bad = argv.find((a) => !SAFE_ARG.test(a));
-  if (bad !== undefined) return unfit(`המילה \`${bad}\` מכילה תו שלא מותר (אותיות, ספרות ו-\`._:/=@,+%-\` בלבד)`, 'פקודה עם צינור, מרכאות או משתנה לא מוגשת. אפשר סקריפט שכבר נמצא בשרת');
   const hit = res.allow.find((r) => matchPattern(r.argv, argv));
-  if (!hit) return unfit(`הפקודה \`${argv.join(' ')}\` לא ברשימה המותרת של המשאב`, res.allow.length ? `מותר: ${sshAllowed(res)}` : 'לרשימה של המשאב אין עדיין פקודות');
+  if (!hit) {
+    const bad = argv.find((a) => !SAFE_ARG.test(a));
+    if (bad !== undefined && !res.allow.some((r) => r.argv.includes('--') && r.argv.at(-1) === '**')) {
+      return unfit(`המילה \`${bad}\` מכילה תו שלא מותר (אותיות, ספרות ו-\`._:/=@,+%-\` בלבד)`, 'רווחים ומרכאות מותרים רק בפקודה שרצה בתוך pod, אחרי `--`. אפשר סקריפט שכבר נמצא בשרת');
+    }
+    return unfit(`הפקודה ${show(argv)} לא ברשימה המותרת של המשאב`, res.allow.length ? `מותר: ${sshAllowed(res)}` : 'לרשימה של המשאב אין עדיין פקודות');
+  }
+  // The class is decided on the words as the far side will get them: a quote cannot hide a write, since nothing is parsed twice.
+  let words = argv;
+  let cls: AccessClass = hit.class ?? 'read';
+  if (cls === 'exec') {
+    const sql = readPsql(argv);
+    if (sql) { words = sql; cls = 'read'; }
+  }
   const target = `${res.user ? `${res.user}@` : ''}${res.host}`;
-  const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(res.key ? ['-i', res.key, '-o', 'IdentitiesOnly=yes'] : []), ...(res.port ? ['-p', String(res.port)] : []), target, '--', ...argv];
-  return { ok: true, plan: { kind: 'process', cmd: 'ssh', args, class: hit.class ?? 'read', shown: `ssh ${target} ${show(argv)}` } };
+  const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(res.key ? ['-i', res.key, '-o', 'IdentitiesOnly=yes'] : []), ...(res.port ? ['-p', String(res.port)] : []), target, '--', ...words.map(shQuote)];
+  return { ok: true, plan: { kind: 'process', cmd: 'ssh', args, class: cls, shown: `ssh ${target} ${show(words)}` } };
+}
+
+// ── psql inside a pod: a read query is a read ─────────────────────────────
+
+/** psql flags a read may carry: output shape and where to connect. `-f`, `-o`, `-v`, `-1` and the rest make it an exec again. */
+const PSQL_BARE = new Set(['-A', '-t', '-x', '-X', '-q', '--csv', '--no-psqlrc', '--no-align', '--tuples-only', '--expanded', '--quiet']);
+const PSQL_VALUE = new Set(['-U', '-d', '-h', '-p', '-P', '-F']);
+/** Where to connect is a plain name: psql reads a database name with `=` in it as a connection string, whose `options` would undo the guard. */
+const PSQL_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+const PSQL_CONNECT = new Set(['-U', '-d', '-h', '-p']);
+
+/**
+ * `kubectl … exec <pod> [-c <c>] -- psql … -c "<sql>"` with one read-only statement: the same command, run in a read-only
+ * transaction (PGOPTIONS, so even a function that writes is refused by postgres itself). Anything else: null, it stays an exec.
+ */
+export function readPsql(argv: string[]): string[] | null {
+  const sep = argv.indexOf('--');
+  if (argv[0] !== 'kubectl' || sep < 0 || !argv.slice(0, sep).includes('exec')) return null;
+  const tail = argv.slice(sep + 1);
+  if (tail[0] !== 'psql') return null;
+  const flags: string[] = [];
+  let sql: string | undefined;
+  let db = false;
+  for (let i = 1; i < tail.length; i++) {
+    const a = tail[i]!;
+    if (a === '-c' || a === '--command') {
+      if (sql !== undefined || tail[i + 1] === undefined) return null;
+      sql = tail[++i]!;
+    } else if (PSQL_BARE.has(a)) flags.push(a);
+    else if (PSQL_VALUE.has(a)) {
+      const v = tail[++i];
+      if (v === undefined || !(PSQL_CONNECT.has(a) ? PSQL_NAME : SAFE_ARG).test(v) || v.startsWith('-')) return null;
+      flags.push(a, v);
+    } else if (!db && PSQL_NAME.test(a)) { db = true; flags.push(a); }
+    else return null;
+  }
+  if (sql === undefined || !isReadSql(sql)) return null;
+  // -X: no psqlrc of the pod's user either, so nothing runs before the query but what the card shows.
+  return [...argv.slice(0, sep + 1), 'env', 'PGOPTIONS=-c default_transaction_read_only=on -c standard_conforming_strings=on', 'psql', '-X', ...flags.filter((f) => f !== '-X' && f !== '--no-psqlrc'), '-c', sql];
+}
+
+/** First words of a statement that only reads. */
+const SQL_READ_HEAD = new Set(['select', 'with', 'show', 'explain', 'table', 'values']);
+/** Words that make a statement write, lock, change the session or leave the transaction. `into` is `SELECT … INTO new_table`. */
+const SQL_WRITE = new Set([
+  'insert', 'update', 'delete', 'merge', 'truncate', 'drop', 'alter', 'create', 'grant', 'revoke', 'copy', 'call', 'do', 'vacuum',
+  'analyze', 'analyse', 'lock', 'set', 'reset', 'begin', 'start', 'commit', 'rollback', 'abort', 'savepoint', 'release', 'prepare',
+  'execute', 'deallocate', 'discard', 'listen', 'notify', 'unlisten', 'cluster', 'reindex', 'refresh', 'comment', 'security', 'load',
+  'import', 'checkpoint', 'into',
+]);
+/** Functions that act on the server rather than read it (a sequence, a setting, a backend, a file, a lock, replication). */
+const SQL_WRITE_FN = new Set(['nextval', 'setval', 'set_config', 'txid_current', 'pg_current_xact_id']);
+const SQL_WRITE_PREFIX = ['pg_terminate', 'pg_cancel', 'pg_reload', 'pg_rotate', 'pg_read', 'pg_ls_', 'pg_stat_file', 'pg_file', 'pg_switch',
+  'pg_create', 'pg_drop', 'pg_promote', 'pg_backup', 'pg_start_backup', 'pg_stop_backup', 'pg_logical', 'pg_replication_origin', 'pg_wal_replay',
+  'pg_notify', 'pg_import', 'pg_advisory', 'pg_try_advisory', 'pg_sleep', 'pg_stat_reset', 'pg_stat_statements_reset', 'lo_', 'dblink'];
+
+/**
+ * One statement that only reads, judged on its words outside strings and comments. Strict on purpose: a read that does not
+ * fit stays an exec and goes to GO, it is not refused. A quoted name is never a keyword, but it may be a function (`"pg_terminate_backend"(1)`); `U&` escapes are out.
+ */
+export function isReadSql(sql: string): boolean {
+  const words: string[] = [];
+  const names: string[] = [];
+  const n = sql.length;
+  let i = 0;
+  let ended = false;
+  while (i < n) {
+    const c = sql[i]!;
+    if (/\s/.test(c)) { i++; continue; }
+    if (ended) return false; // something after the `;`: a second statement
+    if (c === '-' && sql[i + 1] === '-') { const e = sql.indexOf('\n', i); i = e < 0 ? n : e + 1; continue; }
+    if (c === '/' && sql[i + 1] === '*') {
+      let depth = 1; i += 2;
+      while (i < n && depth) { if (sql.startsWith('/*', i)) { depth++; i += 2; } else if (sql.startsWith('*/', i)) { depth--; i += 2; } else i++; }
+      if (depth) return false;
+      continue;
+    }
+    if (c === ';') { ended = true; i++; continue; }
+    if (c === '\\') return false; // a psql meta-command
+    if (c === '&' && /^u$/i.test(words.at(-1) ?? '') && /['"]/.test(sql[i + 1] ?? '')) return false;
+    if (c === "'") {
+      // E'…' takes backslash escapes; a plain string only doubles its quote (standard_conforming_strings is on: the
+      // connection cannot turn it off, since the database and its options are plain names, see PSQL_NAME, and PGOPTIONS sets it).
+      const esc = /^e$/i.test(words.at(-1) ?? '') && /[eE]/.test(sql[i - 1] ?? '');
+      if (esc) words.pop();
+      i++;
+      for (;;) {
+        if (i >= n) return false;
+        if (esc && sql[i] === '\\') { i += 2; continue; }
+        if (sql[i] === "'") { if (sql[i + 1] === "'") { i += 2; continue; } i++; break; }
+        i++;
+      }
+      continue;
+    }
+    if (c === '"') {
+      const e = sql.indexOf('"', i + 1);
+      if (e < 0) return false;
+      let name = sql.slice(i + 1, e);
+      i = e + 1;
+      // "a""b" is one name with a quote in it: read on as the same name.
+      while (sql[i] === '"') { const e2 = sql.indexOf('"', i + 1); if (e2 < 0) return false; name += `"${sql.slice(i + 1, e2)}`; i = e2 + 1; }
+      names.push(name);
+      words.push('"');
+      continue;
+    }
+    if (c === '$') {
+      const m = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
+      if (m) { const e = sql.indexOf(m[0], i + m[0].length); if (e < 0) return false; i = e + m[0].length; continue; }
+    }
+    const w = /^[A-Za-z_][A-Za-z0-9_$]*/.exec(sql.slice(i));
+    if (w) { words.push(w[0].toLowerCase()); i += w[0].length; continue; }
+    i++;
+  }
+  if (!words.length || !SQL_READ_HEAD.has(words[0]!)) return false;
+  const fn = (w: string) => SQL_WRITE_FN.has(w) || SQL_WRITE_PREFIX.some((p) => w.startsWith(p));
+  return !words.some((w) => SQL_WRITE.has(w) || fn(w)) && !names.some(fn);
 }
 
 /** The allowlist in a few lines, so a worker reads what fits instead of guessing: one group per command head, its tails in braces. */

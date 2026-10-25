@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { planBuild, type BuildResource } from '../src/access-policy.ts';
-import { describeResource, matchPattern, parseCatalog, planAccess, planKube, planQuery, planSsh, type KubeResource, type SshResource } from '../src/access-policy.ts';
+import { describeResource, matchPattern, parseCatalog, planAccess, planKube, planQuery, planSsh, type KubeResource, type Plan, type SshResource } from '../src/access-policy.ts';
 
 const dev: KubeResource = { type: 'kube', namespace: 'lumo-dev', kubeconfig: '/k/dev.yaml', env: 'dev' };
 const plan = (argv: string[], res: KubeResource = dev) => planKube(res, argv);
@@ -229,4 +229,88 @@ test('build: the catalog entry loads with the default registry, and a registry o
   const { catalog } = parseCatalog({ resources: { 'build:hq-host': { type: 'build', env: 'registry' }, 'build:evil': { type: 'build', registry: 'evil.io/x/' } } });
   assert.equal((catalog['build:hq-host'] as BuildResource).registry, 'ghcr.io/hive-owner/');
   assert.equal((catalog['build:evil'] as BuildResource).registry, 'ghcr.io/hive-owner/');
+});
+
+// ── #302: words with spaces and quotes reach the far side as they were, and a read query in a pod is a read ──
+
+import { execFileSync } from 'node:child_process';
+import { isReadSql, readPsql, shQuote } from '../src/access-policy.ts';
+
+const prod: SshResource = { type: 'ssh', host: '203.0.113.15', user: 'root', env: 'prod', allow: [
+  { argv: ['kubectl', '-n', 'lumo-prod', 'get', 'pods'], class: 'read' },
+  { argv: ['kubectl', '-n', 'lumo-prod', 'exec', '*', '--', '**'], class: 'exec' },
+  { argv: ['kubectl', '-n', 'lumo-prod', 'exec', '*', '-c', '*', '--', '**'], class: 'exec' },
+  { argv: ['docker', 'inspect', '*', '**'], class: 'read' }] };
+const sshPlan = (argv: string[]) => {
+  const v = planSsh(prod, argv);
+  assert.ok(v.ok && v.plan.kind === 'process', `${argv.join(' ')} → ${v.ok ? '' : v.why}`);
+  return v.plan as Extract<Plan, { kind: 'process' }>;
+};
+/** What the remote shell does with the words after `--`: ssh joins them with spaces, and sh parses them again. */
+const farSide = (args: string[]) => {
+  const remote = args.slice(args.indexOf('--') + 1).join(' ');
+  return JSON.parse(execFileSync('/bin/sh', ['-c', `node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' -- ${remote}`], { encoding: 'utf8' })) as string[];
+};
+
+test('ssh: spaces, single and double quotes, `;`, `$` and backslashes arrive as the same words', () => {
+  const tricky = [`a b`, `it's`, `say "hi"`, `x; rm -rf /tmp/never`, `$(id) \`id\` $HOME`, `back\\slash`, `'`, `"`, `''`, `a\nb`];
+  for (const w of tricky) assert.deepEqual(farSide(['--', shQuote(w)]), [w], JSON.stringify(w));
+  const argv = ['kubectl', '-n', 'lumo-prod', 'exec', 'db-1', '--', 'sh', '-c', `echo "it's"; echo 'a b'`];
+  const p = sshPlan(argv);
+  assert.equal(p.class, 'exec');
+  assert.deepEqual(farSide(p.args), argv, 'nothing split, nothing run by the remote shell');
+  assert.ok(p.shown.includes(JSON.stringify(`echo "it's"; echo 'a b'`)), 'the card shows the word as one word');
+});
+
+test('ssh: free text only where the pattern hands words to the command inside the pod', () => {
+  for (const argv of [['kubectl', '-n', 'lumo-prod', 'get', 'pods;', 'id'], ['kubectl', '-n', 'lumo-prod', 'exec', 'db 1', '--', 'ls'],
+    ['docker', 'inspect', 'api', 'a b'], ['docker', 'inspect', 'api', '--format', 'x'], ['kubectl', '-n', 'lumo-prod', 'exec', 'db-1', '--', 'ls\u0001']]) {
+    const v = planSsh(prod, argv);
+    assert.ok(!v.ok && v.kind === 'unfit', JSON.stringify(argv));
+  }
+  assert.ok(matchPattern(['exec', '*', '--', '**'], ['exec', 'p', '--', 'psql', '-c', 'select 1']));
+  assert.ok(!matchPattern(['describe', '**'], ['describe', '--kubeconfig=/x']), 'before a `--` a flag stays out');
+});
+
+test('ssh: `psql -c` with a read query in a prod pod is a read, run in a read-only transaction', () => {
+  const sql = `select id, name from users where email = 'a@b.co' and note <> 'it''s "x"; y' order by id limit 5;`;
+  const argv = ['kubectl', '-n', 'lumo-prod', 'exec', 'lumo-db-1', '-c', 'postgres', '--', 'psql', '-U', 'postgres', '-d', 'lumo', '-A', '-c', sql];
+  const p = sshPlan(argv);
+  assert.equal(p.class, 'read', 'runs now, no GO');
+  const far = farSide(p.args);
+  assert.deepEqual(far.slice(0, 8), argv.slice(0, 8));
+  assert.deepEqual(far.slice(8), ['env', 'PGOPTIONS=-c default_transaction_read_only=on -c standard_conforming_strings=on', 'psql', '-X', '-U', 'postgres', '-d', 'lumo', '-A', '-c', sql]);
+  assert.ok(p.shown.includes('default_transaction_read_only=on'), 'the card shows the read-only guard');
+  // The same words that write, or a psql that could, stay an exec: a GO card, not a refusal.
+  for (const tail of [['-c', `delete from users where id = 1`], ['-c', `select 1; delete from users`], ['-c', `select 1;`, '-c', 'select 2'],
+    ['options=-cdefault_transaction_read_only=off', '-c', 'select 1'], ['-d', 'dbname=x options=-cstandard_conforming_strings=off', '-c', 'select 1'],
+    ['-d', 'options=-cstandard_conforming_strings=off', '-c', `select '\\'' ; delete from users; -- '`], ['-h', 'a=b', '-c', 'select 1'],
+    ['-f', '/tmp/x.sql'], ['-o', '/tmp/out', '-c', 'select 1'], ['-v', 'x=1', '-c', 'select 1'], ['-c', `\\! id`], []]) {
+    assert.equal(sshPlan([...argv.slice(0, 8), 'psql', ...tail]).class, 'exec', JSON.stringify(tail));
+  }
+  assert.equal(sshPlan(['kubectl', '-n', 'lumo-prod', 'exec', 'db-1', '--', 'sh', '-c', 'psql -c "select 1"']).class, 'exec');
+});
+
+test('isReadSql: one statement that only reads, judged outside strings and comments', () => {
+  for (const s of [`select 1`, `SELECT * FROM t WHERE a = 'delete'`, `with x as (select 1) select * from x`, `show server_version`,
+    `explain select 1`, `select count(*) from pg_stat_activity`, `select 'a;b'`, `select "update" from t`, `select $$ drop $$`,
+    `select 1 -- ; drop table t\n`, `select /* insert */ 1;  `, `select case when a then 1 else 2 end from t`, `select E'it\\'s; drop'`]) {
+    assert.ok(isReadSql(s), s);
+  }
+  for (const s of [`delete from t`, `select 1; select 2`, `select 1; drop table t`, `update t set a = 1`, `insert into t values (1)`,
+    `with d as (delete from t returning *) select * from d`, `select * into t2 from t`, `explain analyze delete from t`,
+    `select pg_terminate_backend(1)`, `select "pg_terminate_backend"(1)`, `select pg_catalog.set_config('x', 'y', false)`,
+    `select nextval('s')`, `select pg_sleep_for('1 hour')`, `select pg_stat_reset()`, `select pg_stat_statements_reset()`, `select lo_import('/etc/passwd')`, `select pg_read_file('/etc/passwd')`, `select * from t for update`,
+    `copy t to stdout`, `set role x`, `\\! id`, `select U&"pg\\005fsleep"(1)`, `select 'unclosed`, `select /* open`, `vacuum`, ``, `;`]) {
+    assert.ok(!isReadSql(s), s);
+  }
+});
+
+test('readPsql: only `kubectl … exec … -- psql` with known flags and one -c', () => {
+  assert.equal(readPsql(['kubectl', 'exec', 'p', '--', 'psql', '-c', 'select 1'])?.at(-1), 'select 1');
+  assert.equal(readPsql(['kubectl', 'exec', 'p', '--', 'psql', 'lumo', '-c', 'select 1'])?.includes('lumo'), true);
+  assert.equal(readPsql(['kubectl', 'exec', 'p', '--', 'psql', 'a', 'b', '-c', 'select 1']), null, 'one database name');
+  assert.equal(readPsql(['kubectl', 'exec', 'p', '--', 'psql', '-U', '-c', 'select 1']), null);
+  assert.equal(readPsql(['docker', 'exec', 'p', '--', 'psql', '-c', 'select 1']), null);
+  assert.equal(readPsql(['kubectl', 'exec', 'p', '--', 'env', 'psql', '-c', 'select 1']), null);
 });
