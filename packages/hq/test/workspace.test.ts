@@ -7,7 +7,8 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { charter, git, makeEnv, repo, until } from './helpers.ts';
-import { readCharter, Workspaces } from '../src/workspace.ts';
+import { readCharter, runGit, Workspaces, type Git } from '../src/workspace.ts';
+import { runOp } from '../src/workspace-cli.ts';
 
 test('readCharter: checkouts, commands and ci_check from the frontmatter; ~ is expanded', () => {
   const d = mkdtempSync(join(tmpdir(), 'ch-'));
@@ -210,4 +211,152 @@ test('repoOfWorktree: the checkout the worktree lives in; one checkout is the pr
   assert.equal(repoOfWorktree(two, null), null);
   assert.equal(repoOfWorktree(ch([co('a', '/r/a', 'o/a')]), null), 'o/a');
   assert.equal(repoOfWorktree(null, '/r/a/.worktrees/x'), null);
+});
+
+test('close() finishes a worktree whose remove was cut off midway (.git gone, the record still there)', async () => {
+  const r = repo();
+  try {
+    const d = mkdtempSync(join(r.dir, 'company-'));
+    execFileSync('mkdir', ['-p', join(d, 'projects')]);
+    writeFileSync(join(d, 'projects', 'proj.md'), charter(r.checkout));
+    const ch = readCharter(d, 'proj')!;
+    const ws = new Workspaces();
+    const w = await ws.create(ch, ws.checkout(ch)!, 'company-t7');
+    writeFileSync(join(w.path, 'left.txt'), 'still here\n');
+    rmSync(join(w.path, '.git'));
+    rmSync(join(w.path, 'README.md'));
+    const c = await ws.close(w.path);
+    assert.equal(c.error, undefined, c.error);
+    assert.equal(c.repaired, true);
+    assert.equal(c.removed, true);
+    assert.equal(existsSync(w.path), false);
+    assert.equal(git(r.checkout, 'show', 'refs/company/preserved/company-t7:left.txt'), 'still here');
+    assert.equal(git(r.checkout, 'worktree', 'list').split('\n').length, 1);
+
+    // A directory with no worktree record is still refused, and left as it is.
+    const stray = join(r.checkout, '.worktrees', 'company-t8');
+    execFileSync('mkdir', ['-p', stray]);
+    writeFileSync(join(stray, 'x.txt'), 'x\n');
+    const s = await ws.close(stray);
+    assert.match(s.error!, /not a linked worktree/);
+    assert.equal(s.repaired, undefined);
+    assert.equal(existsSync(join(stray, '.git')), false);
+    assert.equal(existsSync(join(stray, 'x.txt')), true);
+  } finally { r.cleanup(); }
+});
+
+test('close() after a cut-off close keeps the preserved ref it had already written', async () => {
+  const r = repo();
+  try {
+    const d = mkdtempSync(join(r.dir, 'company-'));
+    execFileSync('mkdir', ['-p', join(d, 'projects')]);
+    writeFileSync(join(d, 'projects', 'proj.md'), charter(r.checkout));
+    const ch = readCharter(d, 'proj')!;
+    const ws = new Workspaces();
+    // What a close did before the remove was cut off: the work in the ref, then reset and clean.
+    const cutOff = async (task: string) => {
+      const w = await ws.create(ch, ws.checkout(ch)!, task);
+      writeFileSync(join(w.path, 'wip.txt'), 'real work\n');
+      git(w.path, 'add', 'wip.txt');
+      const saved = git(w.path, 'stash', 'create');
+      git(w.path, 'update-ref', `refs/company/preserved/${task}`, saved);
+      git(w.path, 'reset', '--hard', '--quiet');
+      rmSync(join(w.path, '.git'));
+      rmSync(join(w.path, 'README.md'));
+      return { w, saved };
+    };
+
+    const a = await cutOff('company-t5');
+    const ca = await ws.close(a.w.path);
+    assert.equal(ca.error, undefined, ca.error);
+    assert.equal(ca.repaired, true);
+    assert.equal(ca.removed, true);
+    assert.equal(git(r.checkout, 'rev-parse', 'refs/company/preserved/company-t5'), a.saved, 'files the remove deleted are not work: the ref stays');
+    assert.equal(git(r.checkout, 'show', 'refs/company/preserved/company-t5:wip.txt'), 'real work');
+
+    const b = await cutOff('company-t6');
+    writeFileSync(join(b.w.path, 'later.txt'), 'later\n');
+    const cb = await ws.close(b.w.path);
+    assert.equal(cb.removed, true, cb.error);
+    assert.equal(git(r.checkout, 'show', 'refs/company/preserved/company-t6:later.txt'), 'later');
+    assert.equal(git(r.checkout, 'show', 'refs/company/preserved/company-t6:README.md'), 'hi', 'the deletion is not recorded');
+    assert.equal(git(r.checkout, 'rev-parse', 'refs/company/preserved/company-t6^2'), b.saved, 'the earlier ref is kept as a parent');
+  } finally { r.cleanup(); }
+});
+
+test('close(): an existing ref is kept as a parent; a detached HEAD is kept even when the dirty tree matches it', async () => {
+  const r = repo();
+  try {
+    const d = mkdtempSync(join(r.dir, 'company-'));
+    execFileSync('mkdir', ['-p', join(d, 'projects')]);
+    writeFileSync(join(d, 'projects', 'proj.md'), charter(r.checkout));
+    const ch = readCharter(d, 'proj')!;
+    const ws = new Workspaces();
+    const c = ws.checkout(ch)!;
+    const earlier = git(r.checkout, 'commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'earlier');
+
+    // A plain dirty close, with a ref already there.
+    const a = await ws.create(ch, c, 'company-t11');
+    git(a.path, 'update-ref', 'refs/company/preserved/company-t11', earlier);
+    writeFileSync(join(a.path, 'new.txt'), 'new\n');
+    assert.equal((await ws.close(a.path)).removed, true);
+    assert.equal(git(r.checkout, 'show', 'refs/company/preserved/company-t11:new.txt'), 'new');
+    assert.equal(git(r.checkout, 'rev-parse', 'refs/company/preserved/company-t11^2'), earlier);
+
+    // A clean detached HEAD, with a different ref already there.
+    const b = await ws.create(ch, c, 'company-t12');
+    git(b.path, 'update-ref', 'refs/company/preserved/company-t12', earlier);
+    git(b.path, 'checkout', '--quiet', '--detach');
+    writeFileSync(join(b.path, 'x.txt'), 'x\n');
+    git(b.path, 'add', 'x.txt');
+    git(b.path, 'commit', '--quiet', '-m', 'on no branch');
+    const bHead = git(b.path, 'rev-parse', 'HEAD');
+    assert.equal((await ws.close(b.path)).removed, true);
+    assert.equal(git(r.checkout, 'rev-parse', 'refs/company/preserved/company-t12^1'), bHead);
+    assert.equal(git(r.checkout, 'rev-parse', 'refs/company/preserved/company-t12^2'), earlier);
+
+    // A detached HEAD whose only change is staged and then undone in the tree: dirty, but the tree is HEAD's.
+    const e = await ws.create(ch, c, 'company-t13');
+    git(e.path, 'checkout', '--quiet', '--detach');
+    writeFileSync(join(e.path, 'y.txt'), 'y\n');
+    git(e.path, 'add', 'y.txt');
+    git(e.path, 'commit', '--quiet', '-m', 'detached work');
+    const eHead = git(e.path, 'rev-parse', 'HEAD');
+    writeFileSync(join(e.path, 'README.md'), 'staged\n');
+    git(e.path, 'add', 'README.md');
+    writeFileSync(join(e.path, 'README.md'), 'hi\n');
+    const ce = await ws.close(e.path);
+    assert.equal(ce.removed, true, ce.error);
+    assert.equal(ce.preserved, 'refs/company/preserved/company-t13');
+    assert.equal(git(r.checkout, 'rev-parse', 'refs/company/preserved/company-t13'), eHead);
+  } finally { r.cleanup(); }
+});
+
+test('workspace-cli close (a node): a repaired worktree reports the earlier ref and its own branch', async () => {
+  const r = repo();
+  try {
+    const d = mkdtempSync(join(r.dir, 'company-'));
+    execFileSync('mkdir', ['-p', join(d, 'company', 'projects')]);
+    writeFileSync(join(d, 'company', 'projects', 'proj.md'), charter(r.checkout));
+    const ch = readCharter(join(d, 'company'), 'proj')!;
+    const ws = new Workspaces();
+    const w = await ws.create(ch, ws.checkout(ch)!, 'company-t14');
+    writeFileSync(join(w.path, 'b.txt'), 'b\n');
+    git(w.path, 'add', 'b.txt');
+    git(w.path, 'commit', '--quiet', '-m', 'b');
+    const saved = git(w.path, 'commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'saved');
+    git(w.path, 'update-ref', 'refs/company/preserved/company-t14', saved);
+    rmSync(join(w.path, '.git'));
+    rmSync(join(w.path, 'README.md'));
+    // The company checkout is a stand-in: syncCompany's git calls in it do nothing.
+    execFileSync('mkdir', ['-p', join(d, '.git')]);
+    const g: Git = (cwd, args, env) => (cwd === d ? Promise.resolve('') : runGit(cwd, args, env));
+    const res = await runOp({ op: 'close', path: w.path, defaultBranch: 'main', keepBranch: false, companyHome: d } as Parameters<typeof runOp>[0], g, ws) as Record<string, unknown>;
+    assert.equal(res.error, undefined, String(res.error));
+    assert.equal(res.removed, true);
+    assert.equal(res.preserved, 'refs/company/preserved/company-t14');
+    assert.equal(res.branch, 'company-t14');
+    assert.equal(res.branchDeleted, false, 'it has a commit beyond main');
+    assert.equal(git(r.checkout, 'rev-parse', 'refs/company/preserved/company-t14'), saved);
+  } finally { r.cleanup(); }
 });

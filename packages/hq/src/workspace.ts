@@ -3,7 +3,7 @@
 // on close preserves anything uncommitted under refs/company/preserved/<task> before removing the
 // worktree without --force.
 import { execFile, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parse } from 'yaml';
@@ -162,7 +162,7 @@ export const runSetup: Setup = (cwd, command, checkout, timeoutMs = 15 * 60_000)
 });
 
 export interface Worktree { path: string; branch: string; checkout: string; base: string }
-export interface CloseResult { path: string; preserved: string | null; removed: boolean; branchDeleted: boolean; ignored: string[]; error?: string }
+export interface CloseResult { path: string; preserved: string | null; removed: boolean; branchDeleted: boolean; ignored: string[]; repaired?: boolean; error?: string }
 
 export class Workspaces {
   private git: Git;
@@ -247,6 +247,32 @@ export class Workspaces {
   }
 
   /**
+   * A worktree whose `.git` file is gone while its directory and git's record of it are still there: a
+   * `git worktree remove` cut off midway (hq restarted under it deletes the files in readdir order, `.git`
+   * among the first). The `.git` file is written back from the record, so close() preserves what is left
+   * and removes it as usual. Nothing happens unless the repository holds a worktree record for exactly
+   * this path; true when the file was written.
+   */
+  async repairGitFile(path: string): Promise<boolean> {
+    const dotGit = join(path, '.git');
+    if (existsSync(dotGit)) return false;
+    try {
+      const common = (await this.git(dirname(path), ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim();
+      const records = join(common, 'worktrees');
+      const real = realpathSync(path);
+      for (const name of readdirSync(records)) {
+        const admin = join(records, name);
+        const gitdir = (() => { try { return readFileSync(join(admin, 'gitdir'), 'utf8').trim(); } catch { return ''; } })();
+        const same = (() => { try { return resolve(admin, gitdir) === resolve(dotGit) || realpathSync(dirname(resolve(admin, gitdir))) === real; } catch { return false; } })();
+        if (!gitdir || !same) continue;
+        writeFileSync(dotGit, `gitdir: ${admin}\n`);
+        return true;
+      }
+    } catch { /* not inside a repository, or no worktree records */ }
+    return false;
+  }
+
+  /**
    * A worktree that went missing (removed by hand) comes back on its branch, if the branch is still there.
    * `checkout` is the repository it belongs to (from the charter); without it, <checkout>/<dir>/<task> is assumed.
    * With the charter, a worktree brought back gets its commands.worktree_setup again; if that fails, the
@@ -275,10 +301,15 @@ export class Workspaces {
    * --force. Commits on a detached HEAD that no branch holds go to the same ref. Ignored files
    * (node_modules, *.db, .env…) are not preserved: they are listed in the result.
    * The branch is deleted only when it holds no commit beyond the default branch.
+   * A preserved ref already there (an earlier close that was cut off) is never overwritten: the new
+   * commit gets it as a second parent. After repairGitFile, files missing from the tree are what the
+   * cut-off remove deleted, not work: only added and changed files are preserved. `repaired`: the
+   * caller ran repairGitFile itself (workspace-cli, to read the branch first).
    */
-  async close(path: string, defaultBranch = 'main', keepBranch = false): Promise<CloseResult> {
+  async close(path: string, defaultBranch = 'main', keepBranch = false, repaired = false): Promise<CloseResult> {
     const out: CloseResult = { path, preserved: null, removed: false, branchDeleted: false, ignored: [] };
     if (!existsSync(path)) return { ...out, error: 'missing' };
+    if (repaired || await this.repairGitFile(path)) out.repaired = true;
     if (!(await this.isLinkedWorktree(path))) return { ...out, error: 'not a linked worktree: refusing to reset, clean or remove it' };
     const task = path.split('/').pop()!;
     const ref = `refs/company/preserved/${task}`;
@@ -287,24 +318,36 @@ export class Workspaces {
       const branch = (await this.git(path, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
       out.ignored = (await this.git(path, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'])).split('\n').filter(Boolean);
       const dirty = (await this.git(path, ['status', '--porcelain', '--untracked-files=all'])).trim() !== '';
-      if (!dirty && branch === 'HEAD') {
+      const head = (await this.git(path, ['rev-parse', 'HEAD'])).trim();
+      const old = await this.git(path, ['rev-parse', '--verify', '--quiet', ref]).then((o) => o.trim(), () => '');
+      // Writes `tree` on HEAD to the ref, keeping a different commit already there as a second parent.
+      const keep = async (tree: string, message: string) => {
+        const parents = old && old !== head ? ['-p', 'HEAD', '-p', old] : ['-p', 'HEAD'];
+        const commit = (await this.git(path, ['commit-tree', tree, ...parents, '-m', message], HQ_AUTHOR)).trim();
+        await this.git(path, ['update-ref', ref, commit]);
+        if ((await this.git(path, ['rev-parse', ref])).trim() !== commit) throw new Error(`${ref} was not written`);
+        out.preserved = ref;
+      };
+      // Commits on a detached HEAD that no branch holds: HEAD itself goes to the ref.
+      const keepDetached = async () => {
+        if (branch !== 'HEAD') return;
         const held = (await this.git(path, ['for-each-ref', '--contains', 'HEAD', '--format=%(refname)', 'refs/heads', 'refs/remotes'])).trim();
-        if (!held) {
-          await this.git(path, ['update-ref', ref, 'HEAD']);
-          out.preserved = ref;
-        }
-      }
+        if (held) return;
+        if (old && old !== head) return keep(`${head}^{tree}`, `preserved: detached HEAD of ${task}`);
+        await this.git(path, ['update-ref', ref, 'HEAD']);
+        out.preserved = ref;
+      };
+      if (!dirty) await keepDetached();
       if (dirty) {
         const tmp = mkdtempSync(join(tmpdir(), 'company-preserve-'));
         try {
           const env = { GIT_INDEX_FILE: join(tmp, 'index') };
           await this.git(path, ['read-tree', 'HEAD'], env);
-          await this.git(path, ['add', '-A'], env);
+          await this.git(path, out.repaired ? ['add', '--ignore-removal', '.'] : ['add', '-A'], env);
           const tree = (await this.git(path, ['write-tree'], env)).trim();
-          const commit = (await this.git(path, ['commit-tree', tree, '-p', 'HEAD', '-m', `preserved: uncommitted work of ${task} (${branch})`], HQ_AUTHOR)).trim();
-          await this.git(path, ['update-ref', ref, commit]);
-          if ((await this.git(path, ['rev-parse', ref])).trim() !== commit) throw new Error(`${ref} was not written`);
-          out.preserved = ref;
+          const same = tree === (await this.git(path, ['rev-parse', 'HEAD^{tree}'])).trim();
+          if (!same) await keep(tree, `preserved: uncommitted work of ${task} (${branch})`);
+          else await keepDetached();
         } finally {
           rmSync(tmp, { recursive: true, force: true });
         }
@@ -312,6 +355,8 @@ export class Workspaces {
         await this.git(path, ['reset', '--hard', '--quiet']);
         await this.git(path, ['clean', '-fd', '--quiet']);
       }
+      // A ref left by an earlier close that was cut off holds work too: callers (a node's close) fetch it.
+      if (old) out.preserved = ref;
       await this.git(repo, ['worktree', 'remove', path]);
       out.removed = true;
       // The worktree dir itself (e.g. .worktrees/) goes too when this was its last worktree.

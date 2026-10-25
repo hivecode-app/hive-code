@@ -62,10 +62,13 @@ export async function runOp(o: WorkspaceOp, git: Git = runGit, ws?: Workspaces):
     case 'ensure':
       return (ws ?? new Workspaces(git)).ensure(o.path!, o.checkout ?? undefined, charter(o.project) ?? undefined);
     case 'close': {
-      // The repository, read before the worktree goes: hq fetches the preserved ref from it.
+      // The repository, read before the worktree goes: hq fetches the preserved ref from it. A worktree whose
+      // .git a cut-off remove took gets it back first, or git would answer for the main checkout around it.
+      const w = ws ?? new Workspaces(git);
+      const repaired = await w.repairGitFile(o.path!);
       const common = await git(o.path!, ['rev-parse', '--path-format=absolute', '--git-common-dir']).then((s) => s.trim(), () => null);
       const branch = await git(o.path!, ['rev-parse', '--abbrev-ref', 'HEAD']).then((s) => s.trim(), () => null);
-      const r = await (ws ?? new Workspaces(git)).close(o.path!, o.defaultBranch, o.keepBranch);
+      const r = await w.close(o.path!, o.defaultBranch, o.keepBranch, repaired);
       return { ...r, ...(common ? { repo: dirname(common) } : {}), ...(branch ? { branch } : {}) };
     }
     default: throw new Error(`unknown op ${String((o as { op?: unknown }).op)}`);
