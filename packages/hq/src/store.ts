@@ -580,6 +580,12 @@ const MIGRATIONS: string[] = [
   ALTER TABLE shifts ADD COLUMN context_tokens INTEGER;
   ALTER TABLE shifts ADD COLUMN rest_handoff_at INTEGER;
   `,
+  // v31: one worker's messages to one identity, by time. asked.ts looked up the answer to each of his messages of the week
+  // (1,100 on 25/10) through messages_to, i.e. every message to him: ~6s of a frozen hq per call, on every /api/home and
+  // /api/board (the event_loop_stall of #313). conversations.ts asks the same question for his unread.
+  `
+  CREATE INDEX IF NOT EXISTS messages_pair ON messages(from_identity, to_identity, created_at);
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

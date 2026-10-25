@@ -67,9 +67,15 @@ export class HostClient extends EventEmitter<HostClientEvents> implements HostCo
   open(since: number, logId: string | null = null, timeoutMs = 3000): Promise<void> {
     return new Promise((resolve, reject) => {
       const sock = connect(this.socketPath);
-      const t = setTimeout(() => { sock.destroy(); reject(new Error(`connect timeout ${this.socketPath}`)); }, timeoutMs);
+      let settled = false;
+      // As in command(): after a stall of hq past the deadline, a connect already completed is read first. (With awaitHello,
+      // hq sends its hello only after that, so a host's hello can't be waiting yet.)
+      const t = setTimeout(() => setImmediate(() => {
+        if (settled) return;
+        sock.destroy(); reject(new Error(`connect timeout ${this.socketPath}`));
+      }), timeoutMs);
       const split = new LineSplitter((line) => this.onLine(line), undefined, () => { /* oversized frame dropped */ });
-      const up = () => { clearTimeout(t); this.connected = true; resolve(); };
+      const up = () => { settled = true; clearTimeout(t); this.connected = true; resolve(); };
       sock.on('connect', () => {
         this.sock = sock;
         if (this.awaitHello) this.onHello = () => { this.onHello = null; up(); };
@@ -81,10 +87,10 @@ export class HostClient extends EventEmitter<HostClientEvents> implements HostCo
       });
       sock.on('error', (e) => {
         clearTimeout(t);
-        if (!this.connected) reject(e);
+        if (!this.connected) { settled = true; reject(e); }
       });
       sock.on('close', () => {
-        if (this.onHello) { this.onHello = null; clearTimeout(t); reject(new Error(`host closed before hello ${this.socketPath}`)); }
+        if (this.onHello) { this.onHello = null; settled = true; clearTimeout(t); reject(new Error(`host closed before hello ${this.socketPath}`)); }
         const wasConnected = this.connected;
         this.connected = false;
         this.isLive = false;

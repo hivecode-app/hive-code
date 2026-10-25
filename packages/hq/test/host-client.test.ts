@@ -60,3 +60,19 @@ test('a host that never answers still times out', async () => {
     await assert.rejects(c.ackSpool('0:0'), /spool_ack timeout/);
   } finally { c.close(); h.close(); }
 });
+
+test('a connect that completed while hq was stalled past the deadline is not a connect timeout', async () => {
+  const h = await host();
+  const c = new HostClient('s', h.sock);
+  try {
+    // From the check phase, like a loop's callback: when the stall ends the next turn starts with timers, before the
+    // pending and poll phases that deliver the connect (completed in the kernel at once, for a unix socket).
+    const opened = await new Promise<Promise<void>>((r) => setImmediate(() => {
+      const p = c.open(0, null, 30);
+      block(100, () => true);
+      r(p);
+    }));
+    await opened;
+    assert.equal(await c.ping(), true);
+  } finally { c.close(); h.close(); }
+});

@@ -43,6 +43,7 @@ import { TabHandoffs } from './tab/handoffs.ts';
 import { CdpTabBrowser, type TabBrowser } from './tab/browser.ts';
 import { startTabServer, type TabServer } from './tab/server.ts';
 import { clockOf, readTimeZone } from './timezone.ts';
+import { LoopWatch } from './loop-watch.ts';
 import { LOCAL, Nodes, RoutingLauncher, nodeToggle, type RemoteNode, type SshRun } from './nodes.ts';
 
 /** The phone view's own diagnostics go to the journal, not the event log (frames and taps are not events). */
@@ -116,6 +117,8 @@ export class Hq {
   readonly diskWatch: DiskWatch;
   readonly resources: Resources;
   readonly nodes: Nodes;
+  /** hq's own event loop, frozen (loop-watch.ts): `hq.event_loop_stall`. */
+  readonly loopWatch = new LoopWatch((r) => this.store.emit('hq.event_loop_stall', null, r));
   private tabServer: TabServer | null = null;
   private ingestServer: Server | null = null;
   private timers: NodeJS.Timeout[] = [];
@@ -281,8 +284,9 @@ export class Hq {
     const t = setInterval(async () => {
       if (running) return;
       running = true;
+      const done = this.loopWatch.begin(`loop ${name}`);
       try { await fn(); } catch (e) { this.store.emit('loop.error', null, { loop: name, error: (e as Error).message }); }
-      finally { running = false; }
+      finally { running = false; done(); }
     }, ms);
     t.unref();
     this.timers.push(t);
@@ -306,6 +310,7 @@ export class Hq {
     this.store.emit('hq.started', null, { pid: process.pid });
     if (opts.timers !== false) {
       const T = this.cfg.timers;
+      this.loopWatch.start();
       this.every(5_000, 'mailbox', () => this.mailbox.sweep());
       if (this.nodes.list.length) this.every(30_000, 'nodes', () => this.pollNodes());
       this.every(5_000, 'spool', () => this.shifts.collectSpools());
@@ -443,6 +448,7 @@ export class Hq {
   }
 
   async stop(): Promise<void> {
+    this.loopWatch.stop();
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     this.accounts.stop();

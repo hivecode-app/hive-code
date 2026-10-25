@@ -68,7 +68,9 @@ export class Cdp {
   private raw(method: string, params: object = {}, sessionId?: string): Promise<any> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { if (this.pending.delete(id)) reject(new Error(`timeout ${method}`)); }, 15_000);
+      // After a stall of hq past the deadline, timers run before the socket is read: setImmediate lets a reply already
+      // waiting settle first (host-client.ts command(), #313).
+      const timer = setTimeout(() => setImmediate(() => { if (this.pending.delete(id)) reject(new Error(`timeout ${method}`)); }), 15_000);
       this.pending.set(id, { resolve, reject, timer });
       this.ws!.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });

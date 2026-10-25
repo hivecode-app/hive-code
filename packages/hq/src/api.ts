@@ -548,7 +548,9 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
       if (m !== req.method) continue;
       const match = re.exec(url.pathname);
       if (!match) continue;
-      json(res, 200, await h({ req, url, params: match.slice(1), body: () => readBody(req), caller: c! }));
+      const done = hq.loopWatch.begin(`${req.method} ${url.pathname}`);
+      try { json(res, 200, await h({ req, url, params: match.slice(1), body: () => readBody(req), caller: c! })); }
+      finally { done(); }
       return true;
     }
     return false;
