@@ -110,6 +110,9 @@ export function buildArgs(spec: ShiftSpec): string[] {
   return a;
 }
 
+/** Tokens: the CLI compacts on its own as the context nears this (CLAUDE_CODE_AUTO_COMPACT_WINDOW, 100k-1M). */
+export const AUTO_COMPACT_WINDOW = 300_000;
+
 export function buildEnv(spec: ShiftSpec, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base };
   // Never let a parent session's identity leak into a worker.
@@ -118,6 +121,10 @@ export function buildEnv(spec: ShiftSpec, base: NodeJS.ProcessEnv = process.env)
   }
   Object.assign(env, {
     DISABLE_AUTOUPDATER: '1',
+    // The CLI's own compaction: on a 1M-context model it would wait for ~1M, so a turn that never pauses (a task worker
+    // between CI runs and reviews) grew to 625k (27/10). hq compacts a quiet shift at 250k with its own instructions
+    // (rotation.ts); this catches the rest a little above it. spec.env can override it.
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(AUTO_COMPACT_WINDOW),
     COMPANY_IDENTITY: spec.identity,
     COMPANY_SHIFT: spec.shift,
     COMPANY_SESSION_ID: spec.sessionId,

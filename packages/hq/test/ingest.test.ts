@@ -599,3 +599,14 @@ test('withdraw_go over the socket: a GO closed in chat keeps his quote and shows
     assert.equal((await post(sock, '/v1/ops', entry('withdraw_go', { ref: 'eli-1:70', outcome: 'maybe' }, 'eli-1:73'))).status, 400);
   } finally { await env.cleanup(); }
 });
+
+test('tell: fyi from the worker, or a bare thank-you, is for the record only; anything else is a message as before', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq } = env;
+    hq.ingest.op(entry('tell', { to: 'rotem', body: 'העברתי לדנה', fyi: true }, 'eli-1:f1'));
+    hq.ingest.op(entry('tell', { to: 'rotem', body: 'קיבלתי, תודה!' }, 'eli-1:f2'));
+    hq.ingest.op(entry('tell', { to: 'rotem', body: 'תודה, מוזג' }, 'eli-1:f3'));
+    assert.deepEqual(['eli-1:f1', 'eli-1:f2', 'eli-1:f3'].map((id) => hq.mailbox.get(id)!.fyi), [1, 1, 0]);
+  } finally { await env.cleanup(); }
+});

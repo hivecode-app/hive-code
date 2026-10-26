@@ -115,7 +115,9 @@ export class Watchdog {
   }
 
   private hasPending(identity: string): boolean {
-    return !!this.store.db.prepare(`SELECT 1 FROM messages WHERE to_identity = ? AND state IN ('queued','delivered') LIMIT 1`).get(identity);
+    // A message for the record waiting for its next turn is not work: it keeps no shift up (mailbox.ts heldFyi).
+    return !!this.store.db.prepare(`SELECT 1 FROM messages WHERE to_identity = ? AND state IN ('queued','delivered')
+      AND NOT (state = 'queued' AND fyi = 1) LIMIT 1`).get(identity);
   }
 
   /** nudge → interrupt → new shift with handoff; each step waits one more stuck window. */

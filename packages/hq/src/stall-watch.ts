@@ -115,7 +115,8 @@ export class StallWatch {
     if (!ids.length) return false;
     const inIds = `(${ids.map(() => '?').join(',')})`;
     if (this.db.prepare(`SELECT 1 FROM shifts WHERE identity IN ${inIds} AND (state = 'starting' OR (state = 'live' AND in_turn = 1)) LIMIT 1`).get(...ids)) return true;
-    return !!this.db.prepare(`SELECT 1 FROM messages WHERE to_identity IN ${inIds} AND state IN ('queued','delivered') LIMIT 1`).get(...ids);
+    return !!this.db.prepare(`SELECT 1 FROM messages WHERE to_identity IN ${inIds} AND state IN ('queued','delivered')
+      AND NOT (state = 'queued' AND fyi = 1) LIMIT 1`).get(...ids);
   }
 
   /** The last news the project got: his answer or message to one of it, or a task of it starting or ending. */

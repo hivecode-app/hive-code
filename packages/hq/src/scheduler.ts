@@ -85,7 +85,7 @@ const STANDING_SHIFT = `(i.source = 'org' AND i.active = 1 AND COALESCE(i.team_k
  * moved on since it took it in: one left `delivered` by an earlier shift (closed before it saw it) is not work waiting
  * here, and would keep an idle standing worker up for good.
  */
-const PENDING = `SELECT 1 FROM messages m WHERE m.to_identity = s.identity AND (m.state = 'queued'
+const PENDING = `SELECT 1 FROM messages m WHERE m.to_identity = s.identity AND ((m.state = 'queued' AND m.fyi = 0)
   OR (m.state = 'delivered' AND m.shift_id = s.id AND m.delivered_at >= COALESCE(s.last_event_at, s.started_at)))`;
 
 /** #175: how many times hq wakes one task whose worker rested before it leaves it for a message. */
@@ -1129,7 +1129,8 @@ export class Scheduler {
     const rows = this.store.db.prepare(`SELECT t.id, t.identity, t.updated_at FROM tasks t WHERE t.state = 'resting' AND t.identity IS NOT NULL
         AND t.updated_at <= ?
         AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.identity = t.identity AND s.state IN ('starting','live'))
-        AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.to_identity = t.identity AND m.state IN ('queued','delivered'))
+        AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.to_identity = t.identity AND m.state IN ('queued','delivered')
+          AND NOT (m.state = 'queued' AND m.fyi = 1))
         AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.from_identity = t.identity AND a.state IN ('open','escalated'))`)
       .all(cutoff) as { id: number; identity: string; updated_at: number }[];
     const woke: number[] = [];

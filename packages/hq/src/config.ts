@@ -68,7 +68,7 @@ export interface HqConfig {
     restContextTokens: number;   // ... when its context was over this; it is asked for that handoff before it rests
     maxContextTokens: number;    // safety net: a working shift over this rotates at the end of its turn (0 = never)
     handoffWaitMs: number;       // the handoff hq asked for comes within this, or the shift goes on (rests / keeps working) as before
-    compactContextTokens: number; // a standing shift over this compacts in its next quiet moment, while its cache is warm (0 = never)
+    compactContextTokens: number; // a shift (standing, or a task's) over this compacts in its next quiet moment, while its cache is warm (0 = never)
     compactQuietMs: number;      // ... quiet = no turn, no tool, no background work, no mail, nothing waiting on him, this long
   };
   /** mailbox.ts heldUntil: a worker's message that can wait is gathered with the others, one wake for all of them. */

@@ -12,6 +12,18 @@ import type { ShiftManager, ShiftRow } from './shifts.ts';
 import { getIdentity, isStandingWorker, projectLead } from './org.ts';
 import { toDTO, type AttachmentDTO, type Uploads } from './uploads.ts';
 
+/**
+ * A message that is nothing but a thank-you or a receipt ("תודה.", "קיבלתי, תודה!"): it asks nothing, so it waits for the
+ * recipient's next turn like one sent with `fyi` (27/10: 274 such wakes a day). Anything more, a question, a number, a
+ * second clause, is a message like any other, and so is a yes ("סגור", "בסדר", "מעולה"): it may be the go-ahead someone waits on.
+ */
+const ACK_WORD = '(?:קיבלתי|תודה(?: רבה)?|ראיתי|הבנתי)';
+const BARE_ACK = new RegExp(`^(?:${ACK_WORD}[\\s,.!]*){1,3}$`, 'u');
+export function isBareAck(body: string): boolean {
+  const t = body.replace(/[\u200e\u200f]/g, '').trim();
+  return t.length > 0 && t.length <= 40 && BARE_ACK.test(t);
+}
+
 export interface MessageRow {
   id: string; from_identity: string; to_identity: string; kind: MessageKind; body: string; urgency: Urgency;
   priority: Priority; ref: string | null; state: MessageState; attempts: number; resurrected: number; shift_id: string | null;
@@ -23,6 +35,8 @@ export interface MessageRow {
   attachments: AttachmentDTO[] | null;
   /** His `now` waits for this running tool (not safe to stop); the bubble says so until the worker reads it. */
   waiting_on: WaitingOn | null;
+  /** 1 = for the record only: never wakes the recipient, goes in with its next turn or shift (heldFyi). */
+  fyi: number;
 }
 
 type StoredRow = Omit<MessageRow, 'attachments' | 'waiting_on'> & { attachments: string | null; waiting_on: string | null };
@@ -197,7 +211,7 @@ export class Mailbox {
   }
 
   /** Store then deliver. Idempotent by msg_id: a retried request returns the existing message. */
-  tell(req: TellRequest & { kind?: MessageKind; text_ref?: string; attachments?: string[]; chat?: boolean }): MessageRow {
+  tell(req: TellRequest & { kind?: MessageKind; text_ref?: string; attachments?: string[]; chat?: boolean; fyi?: boolean }): MessageRow {
     const id = req.msg_id ?? `m-${randomUUID()}`;
     const existing = this.get(id);
     if (existing) return existing;
@@ -238,10 +252,14 @@ export class Mailbox {
       }
     }
     const now = this.store.now();
-    this.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, ref, text_ref, attachments, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, from, req.to, req.kind ?? 'tell', req.body ?? '', req.urgency ?? 'normal',
-      req.priority ?? (req.urgency === 'urgent' ? 'now' : 'next'), req.ref ?? null, req.text_ref ?? null,
-      files.length ? JSON.stringify(files) : null, now);
+    const priority = req.priority ?? (req.urgency === 'urgent' ? 'now' : 'next');
+    // For the record only: a worker's plain tell to another worker. His words, hq's notes, answers and `now` always wake.
+    // Nor a reply to what the recipient itself sent: it may be waiting on it (as in gathers()).
+    const fyi = req.fyi === true && from !== OWNER && from !== 'hq' && req.to !== OWNER && req.to !== 'hq'
+      && (req.kind ?? 'tell') === 'tell' && priority !== 'now' && !(req.ref && this.get(req.ref)?.from_identity === req.to);
+    this.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, ref, text_ref, attachments, created_at, fyi)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, from, req.to, req.kind ?? 'tell', req.body ?? '', req.urgency ?? 'normal',
+      priority, req.ref ?? null, req.text_ref ?? null, files.length ? JSON.stringify(files) : null, now, fyi ? 1 : 0);
     const m = this.get(id)!;
     this.store.emit('message.new', req.to, m);
     // A reply that references a message marks that message handled (B.4 `handled`).
@@ -304,6 +322,8 @@ export class Mailbox {
   private async deliverOne(id: string, retry = false, force = false): Promise<void> {
     const m = this.get(id);
     if (!m || m.state !== 'queued') return;
+    // For the record only (27/10, quota): it waits for the recipient's next turn or shift, and never starts one.
+    if (!force && this.heldFyi(m)) return;
     // Gathered (24/10, quota): a worker's message that can wait waits for the batch, and wakes the worker once for all of it.
     if (!force && this.heldUntil(m) > this.store.now()) return;
     this.store.db.prepare('UPDATE messages SET attempts = attempts + 1, last_attempt_at = ? WHERE id = ?').run(this.store.now(), id);
@@ -348,6 +368,8 @@ export class Mailbox {
         if (r?.state === 'failed' && !retry && !this.cfg.codexLean) r = await conn.send(id, this.envelope(m), m.priority, true);
         if (r?.waitingOn) this.setWaiting(id, r.waitingOn);
         if (r) this.onDelivery(shift, id, r.state);
+        // A turn this message starts (or joins) carries what waited for the record: the CLI folds it into the same turn.
+        if (r && !m.fyi) await this.flushFyi(m.to_identity);
       } catch (e) {
         // A timeout/disconnect is not proof of rejection: the host may already be running this prompt.
         // Keep the durable slot until its delivery/result/exit is reconciled.
@@ -371,6 +393,28 @@ export class Mailbox {
       }
     }
     // shift exists but not live yet: `live` → flush() delivers it.
+  }
+
+  /**
+   * A message for the record waits while its recipient is not in a turn: no live shift (resting, its task not started),
+   * or a live one that is idle. It goes in with the next turn (a message that starts one, a turn already running) or the
+   * next shift (flush on `live`): the wake hq schedules anyway (a task's rest wake, the manager's rounds). One to a task
+   * that closed meanwhile is dropped quietly: it asked nothing of anyone.
+   */
+  heldFyi(m: Pick<MessageRow, 'id' | 'fyi' | 'state' | 'to_identity'>): boolean {
+    if (!m.fyi || m.state !== 'queued') return false;
+    const cur = this.shifts.current(m.to_identity);
+    if (cur?.kind === 'foreign') return false;
+    if (cur && cur.state === 'live' && cur.in_turn && this.shifts.connection(cur.id)?.isLive) return false;
+    if (!cur && this.taskClosed(m.to_identity)) { this.setState(m.id, 'failed', { error: 'לידיעה בלבד, והמשימה נסגרה לפני שנמסרה' }); return true; }
+    return true;
+  }
+
+  /** What waited for the record goes in now, behind a turn that began. */
+  private async flushFyi(identity: string): Promise<void> {
+    const rows = this.store.db.prepare(`SELECT id FROM messages WHERE to_identity = ? AND state = 'queued' AND fyi = 1 ORDER BY created_at, rowid`)
+      .all(identity) as { id: string }[];
+    for (const r of rows) await this.deliver(r.id, false, true);
   }
 
   /** Deliver everything still queued for an identity (called when its shift goes live): what was gathered goes with it. */

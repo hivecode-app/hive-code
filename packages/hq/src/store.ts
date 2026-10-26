@@ -605,6 +605,9 @@ const MIGRATIONS: string[] = [
     first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, rounds INTEGER NOT NULL, misses INTEGER NOT NULL DEFAULT 0, alone INTEGER NOT NULL DEFAULT 0,
     lead_at INTEGER, owner_at INTEGER, PRIMARY KEY (cluster, key));
   `,
+  // v34: a message for the record only (an update that asks nothing of its reader): it never wakes anyone, and goes in with
+  // the recipient's next turn or shift (mailbox.ts heldFyi). Not work waiting either: a queued one keeps no shift up.
+  `ALTER TABLE messages ADD COLUMN fyi INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

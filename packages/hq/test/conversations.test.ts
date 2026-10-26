@@ -176,6 +176,7 @@ test('migration: what was there before counts as read', () => {
     s.db.exec('ALTER TABLE asks DROP COLUMN manager_note'); // v25
     for (const c of ['context_tokens', 'rest_handoff_at']) s.db.exec(`ALTER TABLE shifts DROP COLUMN ${c}`); // v30
     for (const c of ['jitter', 'loss_percent', 'avg_ms', 'mdev_ms']) s.db.exec(`ALTER TABLE probe_results DROP COLUMN ${c}`); // v32
+    s.db.exec('ALTER TABLE messages DROP COLUMN fyi'); // v34
     s.db.pragma('user_version = 10');
     s.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, body, created_at) VALUES ('a', 'eli', 'owner', 'ישן', 100), ('b', 'eli', 'owner', 'ישן יותר', 50)`).run();
     (s as unknown as { migrate(): void }).migrate();

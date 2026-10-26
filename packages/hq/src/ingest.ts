@@ -23,7 +23,7 @@ import { getIdentity, isStandingWorker } from './org.ts';
 import { prNumber } from './awaiting.ts';
 import { HandoffError } from './tab/handoffs.ts';
 import { HomeError } from './home.ts';
-import { GoCloseError, waitingLine } from './mailbox.ts';
+import { GoCloseError, isBareAck, waitingLine } from './mailbox.ts';
 import { FILE_MODES, memoryFilePath } from './memory-files.ts';
 import { blobSha, MAX_TEXT_BYTES, secretIn } from './memory-registry.ts';
 import { guarded, requestUrl } from './http-guard.ts';
@@ -126,7 +126,9 @@ export class Ingest {
           throw new IngestError(400, `tell: unknown identity ${to} (use the id, e.g. ${n.manager.id}, or ${OWNER} for ${n.owner.name})`,
             `ההודעה ל-"${to}" לא נשלחה: אין identity כזה. שלח שוב עם ה-id (מה שבסוגריים בכותרת ההודעה), למשל ${n.manager.id}, או ${OWNER} ${pre('ל', n.owner.name)}.`);
         }
-        const m = mailbox.tell({ msg_id: e.id, from: e.identity, to, body: need('body'), priority: pr, urgency, ref: s(a.ref) });
+        // For the record only: the sender says so (`fyi`), or the whole message is a thank-you or an "ok" (27/10, quota).
+        const body = need('body');
+        const m = mailbox.tell({ msg_id: e.id, from: e.identity, to, body, priority: pr, urgency, ref: s(a.ref), fyi: a.fyi === true || isBareAck(body) });
         const estimate = this.estimate(e, a, s(a.body)?.split('\n').map((x) => x.trim()).find(Boolean)?.slice(0, 200) ?? null, false);
         return { ok: true, id: e.id, ref: m.id, ...(estimate ? { result: { estimate } } : {}) };
       }

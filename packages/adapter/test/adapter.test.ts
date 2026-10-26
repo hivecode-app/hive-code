@@ -184,3 +184,10 @@ test('every shift gets the owner\'s global MCP servers (browser), and company st
   // The shift still gets company alone.
   assert.deepEqual(Object.keys((buildMcpConfig(['/n', '/s'], ownerMcpServers(f)) as any).mcpServers), ['company']);
 });
+
+test('buildEnv: the CLI compacts on its own near AUTO_COMPACT_WINDOW, not near a 1M window; spec.env overrides it', async () => {
+  const { buildEnv, AUTO_COMPACT_WINDOW } = await import('../src/spec.ts');
+  const base = { identity: 'eli', shift: 'eli-1', sessionId: 's', cwd: '/tmp', stateRoot: '/tmp' } as Parameters<typeof buildEnv>[0];
+  assert.equal(buildEnv(base, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '900000' }).CLAUDE_CODE_AUTO_COMPACT_WINDOW, String(AUTO_COMPACT_WINDOW));
+  assert.equal(buildEnv({ ...base, env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '400000' } }, {}).CLAUDE_CODE_AUTO_COMPACT_WINDOW, '400000');
+});

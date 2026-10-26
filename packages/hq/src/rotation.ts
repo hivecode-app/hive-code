@@ -2,12 +2,14 @@
 //   rest — a lead about to rest with a context over restContextTokens writes a handoff first, while the prompt cache is warm.
 //          Woken within restIdleMs it resumes as always (the cache is still there). Woken later, the resume would write the
 //          whole conversation to the cache again: it starts a clean shift from the handoff and its memory instead (shifts.ts).
-//   compact — a standing shift over compactContextTokens compacts in its next quiet moment (watchdog: no turn, no tool, no
+//   compact — a shift over compactContextTokens compacts in its next quiet moment (watchdog: no turn, no tool, no
 //          background work, no mail, nothing waiting on him, for compactQuietMs), while the prompt cache is still warm.
 //          `/compact` is a plain user line (no control_request); the session id stays, so a resume continues from the summary.
 //          Task-496 research: at 250k a compaction is ~$0.3-0.5 against ~$0.05 of every later call that no longer reads the
 //          dropped context; on 21-24/10 that was ~26% of what the leads spent, against 13% for the 600k cap alone.
-//          It keeps the conversation (a summary), so it needs no handoff turn, and never cuts a turn.
+//          It keeps the conversation (a summary), so it needs no handoff turn, and never cuts a turn. A task's shift too
+//          (27/10: lumo-t586 ran 81 turns up to 625k, at 454k on average, with no compaction): its task can outlive many turns.
+//          A turn that never pauses is the CLI's own: the adapter sets CLAUDE_CODE_AUTO_COMPACT_WINDOW (spec.ts).
 //   cap  — the safety net: a working shift over maxContextTokens writes a handoff at the end of its turn, and is replaced.
 // Never while background work runs, or while it waits on him (an open ask, an open GO of its own): it goes on as before.
 // `shift.rotated` carries the context the rotation dropped, for the weekly report.
@@ -54,6 +56,11 @@ const k = (n: number) => `${Math.round(n / 1000)} אלף`;
 /** What the summary keeps: what a lead works from between turns (its open threads, who waits on what, his decisions). */
 export const COMPACT_INSTRUCTIONS = 'שמור במדויק: מה פתוח אצלך ומה הצעד הבא בכל דבר; מי מחכה למה (משימות, PRים, שאלות ובקשות GO לרן) '
   + 'עם המזהים; הכרעות והוראות של רן עם הציטוט; הודעות שעוד לא ענית עליהן, עם ה-msg_id. פרטי כלים וקבצים שכבר נסגרו לא צריך.';
+
+/** A task's worker works from its brief: the task, where it stands, and what each open thread waits on. */
+export const TASK_COMPACT_INSTRUCTIONS = 'שמור במדויק: המשימה כמו שנשלחה (מי שלח, msg_id, מה התבקש ומתי היא גמורה); ה-worktree והענף; '
+  + 'כל PR עם מספר, קישור ומצב (סקירה, CI, סקירת עיצוב, מיזוג); מה כבר נעשה ומה הצעד הבא; מי מחכה למה ועל מה אתה מחכה; '
+  + 'הכרעות והוראות של רן עם הציטוט; הודעות שעוד לא ענית עליהן, עם ה-msg_id. פלט של כלים וקבצים שכבר נסגרו לא צריך.';
 
 export class Rotator {
   /** Shifts asked for a handoff (id → what for). In memory: after an hq restart the next rest or turn asks again. */
@@ -131,7 +138,7 @@ export class Rotator {
       return false;
     }
     const context = s.context_tokens ?? 0;
-    if (!r.enabled || !r.compactContextTokens || context < r.compactContextTokens || s.kind === 'foreign' || s.task_id != null
+    if (!r.enabled || !r.compactContextTokens || context < r.compactContextTokens || s.kind === 'foreign'
       || s.account === 'codex' || s.state !== 'live' || s.in_turn) return false;
     if ((this.compactCooldown.get(s.id) ?? 0) > now || this.pending.has(s.id)) return false;
     if (now - (s.last_event_at ?? s.started_at) < r.compactQuietMs) return false;
@@ -146,7 +153,7 @@ export class Rotator {
       this.compactCooldown.set(s.id, this.store.now() + r.handoffWaitMs * 3);
       this.store.emit('shift.compact_failed', s.identity, { shift: s.id, error });
     };
-    conn.send(`compact-${s.id}-${now}`, `/compact ${COMPACT_INSTRUCTIONS}`, 'next')
+    conn.send(`compact-${s.id}-${now}`, `/compact ${s.task_id != null ? TASK_COMPACT_INSTRUCTIONS : COMPACT_INSTRUCTIONS}`, 'next')
       .then((reply) => { if (reply?.state === 'failed') failed('the host did not take the line'); })
       .catch((e: Error) => failed(e.message));
     return true;
@@ -239,6 +246,6 @@ export class Rotator {
   /** Mail on the way to it, other than hq's own ask for the handoff. */
   private hasPending(identity: string): boolean {
     return !!this.store.db.prepare(`SELECT 1 FROM messages WHERE to_identity = ? AND state IN ('queued','delivered')
-      AND NOT (from_identity = 'hq' AND id LIKE 'rotate-%') LIMIT 1`).get(identity);
+      AND NOT (from_identity = 'hq' AND id LIKE 'rotate-%') AND NOT (state = 'queued' AND fyi = 1) LIMIT 1`).get(identity);
   }
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, until } from './helpers.ts';
-import { neverRan, tokenless } from '../src/mailbox.ts';
+import { isBareAck, neverRan, tokenless } from '../src/mailbox.ts';
 
 test('tell to a resting identity wakes a shift, delivers, then seen → handled on reply', async () => {
   const env = await makeEnv();
@@ -383,4 +383,61 @@ test('a gathered message rides along with a shift that comes up, and with a turn
     hq.mailbox.tell({ msg_id: 'r-3', from: 'rotem', to: 'eli', body: 'עוד משהו' });
     await until(() => hq.mailbox.get('r-3')!.state === 'delivered', 3000, 'into the running turn');
   } finally { await env.cleanup(); }
+});
+
+test('fyi: never wakes a resting worker, goes in with the next shift; never with his words, hq\'s or an urgent one', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    hq.mailbox.tell({ msg_id: 'f-1', from: 'amit', to: 'eli', body: 'מחכה לסקירה של רותם', fyi: true });
+    await hq.mailbox.sweep();
+    await hq.watchdog.sweep();
+    assert.equal(launcher.launches.length, 0, 'nobody woken');
+    assert.equal(hq.mailbox.get('f-1')!.state, 'queued');
+    assert.equal(hq.mailbox.get('f-1')!.attempts, 0, 'never attempted: not stale, not resurrected');
+    // The next wake (a message that needs eli) carries it.
+    hq.mailbox.tell({ msg_id: 'f-2', from: 'amit', to: 'eli', body: 'אפשר למזג?' });
+    await until(() => ['f-1', 'f-2'].every((id) => hq.mailbox.get(id)!.state === 'delivered'), 3000, 'with the shift that came up');
+    assert.equal(launcher.launches.length, 1);
+    assert.deepEqual(launcher.hosts.get('eli-1')!.sent.map((x) => x.msgId), ['f-1', 'f-2'], 'in the order they came');
+
+    // His words, hq's notes, `now`: fyi is ignored, they go in at once.
+    assert.equal(hq.mailbox.tell({ msg_id: 'f-3', to: 'eli', body: 'תודה', fyi: true }).fyi, 0);
+    assert.equal(hq.mailbox.tell({ msg_id: 'f-4', from: 'hq', to: 'eli', kind: 'system', body: 'תזכורת', fyi: true }).fyi, 0);
+    assert.equal(hq.mailbox.tell({ msg_id: 'f-5', from: 'amit', to: 'eli', body: 'עצור', priority: 'now', fyi: true }).fyi, 0);
+    // A reply to what eli itself sent ("אפשר למזג?" → "תודה"): eli may be waiting on it, so it is never held.
+    hq.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, body, state, created_at) VALUES ('f-q', 'eli', 'amit', 'אפשר למזג?', 'handled', ?)`).run(env.clock.now());
+    assert.equal(hq.mailbox.tell({ msg_id: 'f-6', from: 'amit', to: 'eli', body: 'תודה', ref: 'f-q', fyi: true }).fyi, 0);
+  } finally { await env.cleanup(); }
+});
+
+test('fyi: an idle live shift is not woken; a turn that begins takes it; queued it keeps no shift up', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    hq.mailbox.tell({ msg_id: 'i-0', from: 'amit', to: 'eli', body: 'אפשר למזג?' });
+    await until(() => hq.mailbox.get('i-0')!.state === 'delivered', 3000, 'delivered');
+    const host = launcher.hosts.get('eli-1')!;
+    host.event({ kind: 'result', subtype: 'success', isError: false } as never);
+    await until(() => hq.shifts.current('eli')!.in_turn === 0, 3000, 'turn over');
+    hq.mailbox.markHandled('i-0');
+
+    hq.mailbox.tell({ msg_id: 'i-1', from: 'rotem', to: 'eli', body: 'העברתי לדנה', fyi: true });
+    await hq.mailbox.sweep();
+    assert.equal(hq.mailbox.get('i-1')!.state, 'queued', 'idle: not woken for it');
+    assert.deepEqual(host.sent.map((x) => x.msgId), ['i-0']);
+    assert.equal(hq.store.db.prepare(`SELECT 1 FROM shifts s WHERE s.id = 'eli-1' AND EXISTS (SELECT 1 FROM messages m WHERE m.to_identity = s.identity
+      AND ((m.state = 'queued' AND m.fyi = 0) OR m.state = 'delivered'))`).get(), undefined, 'not work waiting');
+
+    host.event({ kind: 'text', text: 'עובד' });
+    await until(() => hq.shifts.current('eli')!.in_turn === 1, 3000, 'in a turn');
+    await hq.mailbox.sweep();
+    await until(() => hq.mailbox.get('i-1')!.state === 'delivered', 3000, 'into the running turn');
+  } finally { await env.cleanup(); }
+});
+
+test('isBareAck: a thank-you or a receipt alone, nothing more; never a yes', () => {
+  for (const t of ['תודה', 'תודה.', 'קיבלתי, תודה!', 'ראיתי, תודה רבה', '\u200fקיבלתי.', 'הבנתי']) assert.equal(isBareAck(t), true, t);
+  for (const t of ['סגור', 'בסדר', 'מקובל', 'אוקיי', 'מעולה', 'יופי, תודה', 'תודה, מוזג', 'קיבלתי. תפרוס אחרי GO', 'תודה?', 'תודה. אכתוב לך כשה-tag יוצא.', '', 'מחכה ל-CI'])
+    assert.equal(isBareAck(t), false, t);
 });

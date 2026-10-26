@@ -333,3 +333,18 @@ test('compact: a manual compaction without post_tokens leaves the context unknow
     await until(() => hq.shifts.get('eli-1')!.context_tokens === 30_000, 3000, 'auto: the turn counts');
   } finally { await env.cleanup(); }
 });
+
+test('compact: a task\'s shift compacts too, with what its task needs kept', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher, clock } = env;
+    await liveEli(env, 300_000);
+    hq.shifts.setFields('eli-1', { task_id: 7 });
+    const host = launcher.hosts.get('eli-1')!;
+    clock.advance(3 * 60_000);
+    pinged(env);
+    await hq.watchdog.sweep();
+    await until(() => host.sent.some((x) => x.text.startsWith('/compact ')), 3000, 'compact sent');
+    assert.match(host.sent.find((x) => x.text.startsWith('/compact '))!.text, /המשימה כמו שנשלחה/);
+  } finally { await env.cleanup(); }
+});
