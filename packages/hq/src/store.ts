@@ -594,6 +594,17 @@ const MIGRATIONS: string[] = [
   ALTER TABLE probe_results ADD COLUMN avg_ms REAL;
   ALTER TABLE probe_results ADD COLUMN mdev_ms REAL;
   `,
+  // v33: root signals (root-signals.ts). root_samples: what a cluster looked like each round (a queue's oldest age, a node's
+  // shell-loop time, OOM restarts), the baselines the next rounds compare to. root_findings: what is wrong now, how long it has
+  // lasted, and whether רותם and the owner were told.
+  `
+  CREATE TABLE IF NOT EXISTS root_samples (cluster TEXT NOT NULL, key TEXT NOT NULL, ts INTEGER NOT NULL, value REAL NOT NULL);
+  CREATE INDEX IF NOT EXISTS root_samples_key ON root_samples(cluster, key, ts);
+  CREATE TABLE IF NOT EXISTS root_findings (
+    cluster TEXT NOT NULL, key TEXT NOT NULL, signal TEXT NOT NULL, subject TEXT NOT NULL, text TEXT NOT NULL,
+    first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, rounds INTEGER NOT NULL, misses INTEGER NOT NULL DEFAULT 0, alone INTEGER NOT NULL DEFAULT 0,
+    lead_at INTEGER, owner_at INTEGER, PRIMARY KEY (cluster, key));
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

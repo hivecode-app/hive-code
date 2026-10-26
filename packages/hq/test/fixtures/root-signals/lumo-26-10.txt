@@ -1,0 +1,91 @@
+@@ now
+1793030700
+
+@@ version
+{"clientVersion":{"major":"1","minor":"34","gitVersion":"v1.34.3+k3s1","gitCommit":"48ffa7b6893f21b919b3029d54c9d9838ae426a1","gitTreeState":"clean","buildDate":"2025-12-19T18:40:57Z","goVersion":"go1.24.11","compiler":"gc","platform":"linux/amd64"},"kustomizeVersion":"v5.7.1","serverVersion":{"major":"1","minor":"34","emulationMajor":"1","emulationMinor":"34","minCompatibilityMajor":"1","minCompatibilityMinor":"33","gitVersion":"v1.34.3+k3s1","gitCommit":"48ffa7b6893f21b919b3029d54c9d9838ae426a1","gitTreeState":"clean","buildDate":"2025-12-19T18:40:57Z","goVersion":"go1.24.11","compiler":"gc","platform":"linux/amd64"}}
+
+@@ nodes
+vmi1000003	v1.34.3+k3s1	203.0.113.15
+vmi1000014	v1.34.3+k3s1	203.0.113.29
+vmi1000020	v1.34.3+k3s1	203.0.113.27
+
+@@ pods
+lumo-prod	alertmanager-76757c96bf-jcsmn	vmi1000014	ReplicaSet	2026-10-22T16:58:44Z	Running	alertmanager,0,,,;	alertmanager=128Mi;
+lumo-prod	blackbox-74dcb54545-nbxpb	vmi1000020	ReplicaSet	2026-10-18T16:51:30Z	Running	blackbox,0,,,;	blackbox=64Mi;
+lumo-prod	botgw-5867b6df7f-jqrrb	vmi1000003	ReplicaSet	2026-10-25T23:24:03Z	Running	botgw,0,,,;	botgw=512Mi;
+lumo-prod	kube-state-metrics-79457f8977-cbvmd	vmi1000020	ReplicaSet	2026-10-18T16:51:30Z	Running	kube-state-metrics,0,,,;	kube-state-metrics=192Mi;
+lumo-prod	node-exporter-qxjps	vmi1000020	DaemonSet	2026-10-07T22:33:13Z	Running	node-exporter,1,,Unknown,2026-10-18T14:38:21Z;	node-exporter=64Mi;
+lumo-prod	node-exporter-vspvv	vmi1000003	DaemonSet	2026-10-07T22:33:13Z	Running	node-exporter,1,,Unknown,2026-10-18T11:51:27Z;	node-exporter=64Mi;
+lumo-prod	node-exporter-xtvpp	vmi1000014	DaemonSet	2026-10-07T22:33:13Z	Running	node-exporter,1,,Unknown,2026-10-18T17:04:24Z;	node-exporter=64Mi;
+lumo-prod	prometheus-68d9fff8b5-n74hz	vmi1000020	ReplicaSet	2026-10-25T11:06:12Z	Running	prometheus,0,,,;	prometheus=512Mi;
+lumo-prod	lumo-db-1	vmi1000003	Cluster	2026-10-18T11:51:43Z	Running	postgres,0,,,;	postgres=8Gi;
+lumo-prod	lumo-db-2	vmi1000020	Cluster	2026-10-18T14:38:39Z	Running	postgres,0,,,;	postgres=8Gi;
+lumo-prod	lumo-db-3	vmi1000014	Cluster	2026-10-18T17:04:39Z	Running	postgres,0,,,;	postgres=8Gi;
+lumo-prod	lumo-stats-cf776ddcd-sw2zb	vmi1000020	ReplicaSet	2026-10-18T16:51:30Z	Running	stats,0,,,;	stats=768Mi;
+lumo-prod	lumo-tinode-0	vmi1000003	StatefulSet	2026-10-26T15:00:21Z	Running	tinode,1,,Error,2026-10-26T15:40:39Z;	tinode=2Gi;
+lumo-prod	lumo-tinode-1	vmi1000020	StatefulSet	2026-10-26T15:41:28Z	Running	tinode,0,,,;	tinode=2Gi;
+lumo-prod	lumo-turn-cpv7g	vmi1000020	DaemonSet	2026-10-18T14:38:39Z	Running	coturn,0,,,;	coturn=512Mi;
+lumo-prod	lumo-turn-ds9rj	vmi1000003	DaemonSet	2026-10-18T11:51:44Z	Running	coturn,0,,,;	coturn=512Mi;
+lumo-prod	lumo-turn-wcqhj	vmi1000014	DaemonSet	2026-10-18T17:04:39Z	Running	coturn,0,,,;	coturn=512Mi;
+lumo-prod	lumo-web-5499cd9c8c-9jbgz	vmi1000003	ReplicaSet	2026-10-25T15:24:56Z	Running	web,0,,,;	web=128Mi;
+lumo-prod	lumo-webapp-dd8d66dc6-jrndp	vmi1000003	ReplicaSet	2026-10-22T16:58:44Z	Running	web,0,,,;	web=64Mi;
+lumo-prod	tinode-handover-29883820-jslt2	vmi1000003	Job	2026-10-26T15:40:00Z	Failed	handover,0,,,;	handover=64Mi;
+lumo-prod	tinode-handover-29883844-m2fnv	vmi1000003	Job	2026-10-26T16:04:00Z	Succeeded	handover,0,,,;	handover=64Mi;
+lumo-prod	tinode-handover-29883845-ftpsm	vmi1000003	Job	2026-10-26T16:05:00Z	Pending	handover,0,ContainerCreating,,;	handover=64Mi;
+lumo-prod	tinode-prepull-4cjcm	vmi1000020	DaemonSet	2026-10-26T14:59:15Z	Running	hold,0,,,;	hold=16Mi;
+lumo-prod	tinode-prepull-rlmk7	vmi1000014	DaemonSet	2026-10-26T14:59:15Z	Running	hold,0,,,;	hold=16Mi;
+lumo-prod	tinode-prepull-z992h	vmi1000003	DaemonSet	2026-10-26T14:59:15Z	Running	hold,0,,,;	hold=16Mi;
+lumo-prod	wabridge-9bb5dbf7d-jq7j2	vmi1000003	ReplicaSet	2026-10-26T15:53:39Z	Running	wabridge,0,,,;	wabridge=1Gi;
+lumo-prod	waimport-676b5271544f7564344673-q9zx9	vmi1000014	Job	2026-10-26T09:19:36Z	Failed	worker,0,,,;	worker=1Gi;
+lumo-prod	waimport-6e65537a6433484c315338-9qnhw	vmi1000014	Job	2026-10-26T13:29:51Z	Failed	worker,0,,,;	worker=1Gi;
+lumo-prod	waimport-supervisor-6899f7d8b8-rdgnr	vmi1000020	ReplicaSet	2026-10-18T16:50:46Z	Running	supervisor,0,,,;	supervisor=128Mi;
+lumo-prod	waverify-59864bb696-zkp5z	vmi1000003	ReplicaSet	2026-10-26T14:53:49Z	Running	waverify,0,,,;	waverify=192Mi;
+@@ apiserver
+527273
+
+@@ node vmi1000003
+requests 533496
+cpu  67609757 13117 30236471 423984555 8177931 0 19860981 0 0 0
+bench 706437.49 706439.86
+
+@@ node vmi1000014
+requests 1532355
+cpu  10772808 8690 15424519 478653988 11632984 0 6907932 0 0 0
+bench 687650.30 687651.79
+
+@@ node vmi1000020
+requests 2221985
+cpu  40307482 16374 23521441 450942492 4657563 0 16292530 0 0 0
+bench 696412.72 696414.28
+
+@@ pg lumo-prod/lumo-db
+@@@ app
+now	1793030708
+@@@ tinode
+now	1793030708
+maint	public.users	1793029864	1793029119
+maint	public.voip_tokens	1793028999	0
+maint	public.wa_group_roster	1793029865	1793014535
+maint	public.automation_filters	1793027199	1792882453
+maint	public.msg_origin	1793030707	1792761258
+maint	botgw.deliveries	1793030160	1793028754
+maint	public.kvmeta	1793029924	1793030404
+maint	public.user_reach	1793030644	1793030707
+maint	public.bot_outbox	1793030705	1793030705
+maint	botgw.watermarks	1793030705	1793030044
+maint	public.lumo_leases	1793026959	1793027919
+maint	public.topics	1793030704	1793030704
+maint	public.device_app_versions	1793030705	1793029924
+maint	public.subscriptions	1793030705	1793030705
+maint	public.devices	1793030704	1793030644
+maint	public.wa_pending_msgs	1793022525	1793026972
+maint	public.wa_bridge_msgs	1792993336	1793024049
+maint	public.wa_roster_raw	1793028222	1793011657
+queue	botgw.deliveries (delivered_at IS NULL)	0	0
+queue	public.reports (handledat IS NULL)	0	0
+
+@@ pg lumobot/lumobot-db
+@@@ lumobot
+now	1793030709
+maint	public.priority_members	1793029094	1793025432
+queue	public.code_requests (decided_at IS NULL)	0	0

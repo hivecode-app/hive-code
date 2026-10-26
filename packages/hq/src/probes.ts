@@ -14,6 +14,7 @@
 // Latency (memory/company/monitoring/probe-alerts-spec.md, 26/10): over avg/mdev with the loss under its threshold is jitter,
 // recorded and counted in a daily digest by node; it wakes רותם only when it lasts JITTER_SUSTAIN_ROUNDS samples in a row. More than SHARED_MIN_NODES nodes losing pings in one round
 // is one event; it reaches the owner only when it lasts past SHARED_PERSIST_MS and http fails too or there is no witness.
+// `cluster` reads the layer under the services of a whole k3s cluster over one ssh (root-signals.ts): its findings and messages are its own.
 import { OWNER, pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -26,17 +27,19 @@ import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import type { Mailbox } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
+import { RootWatch, isSshTarget, type ClusterSpec } from './root-signals.ts';
 
 export interface ProbeSpec {
   key: string;              // <project>/<id>
   project: string;
   id: string;
-  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'whatsapp_log' | 'unsupported';
+  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'whatsapp_log' | 'cluster' | 'unsupported';
   url?: string;
   disk?: { target: string; host: string | null; path: string; identityFile: string | null; maxPercent: number };  // host null = local
   latency?: { host: string; maxAvgMs: number; maxMdevMs: number; maxLossPercent: number };
   kubelet?: { target: string; identityFile: string | null };  // ssh target of a machine with kubectl for the cluster (its master)
   whatsappLog?: WhatsappLogSpec;
+  cluster?: ClusterSpec;     // root signals (root-signals.ts): the k3s master to read the cluster from, over ssh
   method: string;
   expect: number[];
   maxLatencyMs: number | null;
@@ -120,18 +123,21 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     // `root@host`: never something ssh could read as an option.
     const kubelet = typeof r.kubelet === 'string' && /^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(r.kubelet.trim())
       ? { target: r.kubelet.trim(), identityFile } : undefined;
+    const cluster: ClusterSpec | undefined = typeof r.cluster === 'string' && isSshTarget(r.cluster.trim())
+      ? { ssh: r.cluster.trim(), identityFile, ignore: Array.isArray(r.ignore) ? r.ignore.map(String) : [] }
+      : undefined;
     out.push({
       key: `${project}/${id}`, project, id,
-      kind: typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : 'unsupported',
+      kind: typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : 'unsupported',
       url: typeof r.http === 'string' ? r.http : undefined,
-      disk, latency, kubelet, whatsappLog,
+      disk, latency, kubelet, whatsappLog, cluster,
       // Observe-only: a probe may only read. Anything but GET/HEAD in a charter is ignored.
       method: typeof r.method === 'string' && r.method.toUpperCase() === 'HEAD' ? 'HEAD' : 'GET',
       expect: (Array.isArray(exp) ? exp : [exp]).map(Number),
       maxLatencyMs: r.max_latency_ms != null ? Number(r.max_latency_ms) : (r.max_latency != null ? parseDuration(r.max_latency, 0) : null),
-      everyMs: parseDuration(r.every, 60_000),
+      everyMs: parseDuration(r.every, cluster ? 300_000 : 60_000),
       // 20 pings at 0.2s with -W 2 end within ~6s; the default leaves room so a dead host ends in ping's summary, not a kill.
-      timeoutMs: parseDuration(r.timeout, latency ? 20_000 : kubelet || whatsappLog ? 30_000 : 10_000),
+      timeoutMs: parseDuration(r.timeout, cluster ? 180_000 : latency ? 20_000 : kubelet || whatsappLog ? 30_000 : 10_000),
       failAfter: Number(r.fail_after ?? 3),
       raw: r,
     });
@@ -548,6 +554,8 @@ export class ProbeRunner {
   /** The same second vantage point for latency: ping from ci-host. null = none configured (then a shared event has no witness). */
   pingWitness: PingWitness | null;
   host: () => { load1: number; cpus: number; freeMb: number } = hostLoad;
+  /** Root signals of the `cluster:` probes: their own findings and messages, not probe_results. */
+  readonly roots: RootWatch;
   private measurerEpisode = false;
   private outageLoaded: SharedOutage | null | undefined;
   private inflight = new Set<string>();
@@ -563,6 +571,8 @@ export class ProbeRunner {
     this.inbox = inbox;
     this.witness = cfg.probeWitness ? sshWitness(cfg.probeWitness) : null;
     this.pingWitness = cfg.probeWitness ? sshPingWitness(cfg.probeWitness) : null;
+    this.roots = new RootWatch(store, mailbox, inbox, cfg.monitoringLeadId);
+    this.roots.failingHttp = () => this.failingHttp().map((p) => p.key);
   }
 
   get toggleKey(): string { return `${this.cfg.monitoringLeadId}/prod-probes`; }
@@ -586,7 +596,9 @@ export class ProbeRunner {
     if (!this.store.toggle(this.toggleKey)) return;
     const now = this.store.now();
     const isDue = (p: ProbeSpec, slack = 0) => { const s = this.state(p.key); return !s?.last_run_at || now - s.last_run_at >= p.everyMs - slack; };
-    const runnable = this.probes.filter((p) => p.kind !== 'unsupported' && !this.inflight.has(p.key));
+    // Root signals: a round per cluster, on its own (a 3-minute ssh doesn't hold the other probes back).
+    for (const p of this.probes.filter((x) => x.kind === 'cluster' && !this.inflight.has(x.key) && isDue(x))) void this.clusterRound(p, now);
+    const runnable = this.probes.filter((p) => p.kind !== 'unsupported' && p.kind !== 'cluster' && !this.inflight.has(p.key));
     // A round of latency is one tick: one that is due takes along those almost due, and they all record this tick's time.
     const latencyDue = runnable.some((p) => p.kind === 'latency' && isDue(p));
     const due = runnable.filter((p) => isDue(p) || (latencyDue && p.kind === 'latency' && isDue(p, ROUND_SLACK_MS)));
@@ -613,6 +625,18 @@ export class ProbeRunner {
     // The measurer episode is about http (the witness): a disk or a jittery node failing for days must not keep it muted.
     else if (!crossed.length && !this.probes.some((p) => p.kind === 'http' && (this.state(p.key)?.consecutive_failures ?? 0) > 0)) this.measurerEpisode = false;
     this.digest(now);
+  }
+
+  /** One round of root signals on a cluster. Its time is noted in probe_state (when it is due); its findings live in root_findings. */
+  async clusterRound(p: ProbeSpec, now = this.store.now()): Promise<void> {
+    this.inflight.add(p.key);
+    try {
+      this.store.db.prepare(`INSERT INTO probe_state (probe_id, project, last_run_at) VALUES (?, ?, ?)
+        ON CONFLICT(probe_id) DO UPDATE SET last_run_at = excluded.last_run_at`).run(p.key, p.project, now);
+      await this.roots.round(p.key, p.cluster!, p.timeoutMs);
+    } catch (e) {
+      this.store.emit('roots.error', this.cfg.monitoringLeadId, { probe: p.key, error: (e as Error).message });
+    } finally { this.inflight.delete(p.key); }
   }
 
   /** The daily jitter digest to רותם, once a day from DIGEST_HOUR Israel time (part of prod-probes, its switch). */
@@ -917,10 +941,13 @@ export class ProbeRunner {
   }
 
   summary() {
-    return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}), ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.whatsappLog ? { whatsapp_log: p.whatsappLog.target } : {}), every_ms: p.everyMs, ...(this.state(p.key) ?? {}) }));
+    return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}),
+      ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.whatsappLog ? { whatsapp_log: p.whatsappLog.target } : {}), ...(p.cluster ? { cluster: p.cluster.ssh } : {}),
+      every_ms: p.everyMs, ...(this.state(p.key) ?? {}) }));
   }
 
   prune(olderThanMs = 7 * 86_400_000): void {
     this.store.db.prepare('DELETE FROM probe_results WHERE ts < ?').run(this.store.now() - olderThanMs);
+    this.roots.prune(olderThanMs);
   }
 }
