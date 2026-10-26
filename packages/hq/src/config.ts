@@ -241,7 +241,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     // The CLI's own ~/.claude login only. More accounts come from hq.config.json.
     accounts: [{ name: 'claude', label: 'Claude', expect: '', managed: false }],
     claudeHome: join(homedir(), '.claude'),
-    tab: { listen: '127.0.0.1:7422', baseUrl: 'http://127.0.0.1:7422', cdpUrl: 'http://127.0.0.1:9222', ttlMin: 10 },
+    tab: { listen: '127.0.0.1:7422', baseUrl: 'http://127.0.0.1:7422', cdpUrl: 'http://127.0.0.1:9222', ttlMin: 10, passkeys: true },
     appReleaseDir: '/var/www/hq-app/current',
     apiUrl: null,
     pushContact: 'mailto:owner@localhost',

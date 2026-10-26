@@ -38,7 +38,7 @@ test('a company\'s hq.config.json + org.yaml (the example company in fixtures/) 
         { name: 'personal', label: 'האישי', expect: 'shira@example.com', managed: false },
         { name: 'work', label: 'העבודה', expect: 'shira-work', managed: true },
       ],
-      tab: { listen: '127.0.0.1:7422', baseUrl: 'https://tab.hq.example.com', cdpUrl: 'http://127.0.0.1:9222', ttlMin: 10 },
+      tab: { listen: '127.0.0.1:7422', baseUrl: 'https://tab.hq.example.com', cdpUrl: 'http://127.0.0.1:9222', ttlMin: 10, passkeys: true },
       appReleaseDir: '/var/www/hq-app/current', pushContact: 'mailto:shira@example.com',
     });
     assert.equal(cfg.apiUrl, 'https://api.hq.example.com');

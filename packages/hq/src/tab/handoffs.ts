@@ -17,6 +17,8 @@ export interface TabConfig {
   baseUrl: string;
   cdpUrl: string;
   ttlMin: number;
+  /** Virtual passkeys on every tab of the shared Chrome (tab/passkeys.ts). Off: Chrome's own passkey dialog, as before. */
+  passkeys?: boolean;
 }
 
 export type HandoffState = 'live' | 'done' | 'expired' | 'closed' | 'cancelled';

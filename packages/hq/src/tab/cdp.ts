@@ -13,6 +13,8 @@ export class Cdp {
   private pending = new Map<number, Pending>();
   private sessions = new Map<string, SessionListener>();
   private httpUrl: string;
+  /** A new page target appeared (a tab or window opened). */
+  onTargetCreated: (targetId: string) => void = () => {};
   /** A page target closed or detached (the agent closed its tab, Chrome restarted). */
   onTargetGone: (targetId: string) => void = () => {};
   /** The browser connection dropped: every session id is now invalid. */
@@ -57,6 +59,7 @@ export class Cdp {
       else p.resolve(msg.result);
     } else if (msg.method) {
       if (msg.sessionId) this.sessions.get(msg.sessionId)?.(msg.method, msg.params);
+      if (msg.method === 'Target.targetCreated' && msg.params.targetInfo?.type === 'page') this.onTargetCreated(msg.params.targetInfo.targetId);
       if (msg.method === 'Target.targetDestroyed') this.onTargetGone(msg.params.targetId);
       // Detached by Chrome, not by us (detach() forgets the session first): the tab is no longer drivable.
       if (msg.method === 'Target.detachedFromTarget' && msg.params.targetId && this.sessions.delete(msg.params.sessionId)) {

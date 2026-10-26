@@ -42,6 +42,7 @@ import { AccountManager, type AccountDeps } from './accounts.ts';
 import { TabHandoffs } from './tab/handoffs.ts';
 import { CdpTabBrowser, type TabBrowser } from './tab/browser.ts';
 import { startTabServer, type TabServer } from './tab/server.ts';
+import { PasskeyVault } from './tab/passkeys.ts';
 import { clockOf, readTimeZone } from './timezone.ts';
 import { LoopWatch } from './loop-watch.ts';
 import { LOCAL, Nodes, RoutingLauncher, nodeToggle, type RemoteNode, type SshRun } from './nodes.ts';
@@ -108,6 +109,7 @@ export class Hq {
   readonly ingest: Ingest;
   readonly accounts: AccountManager;
   readonly tab: TabHandoffs;
+  passkeys?: PasskeyVault;
   readonly home: Home;
   readonly memoryFiles: MemoryFiles;
   readonly stallWatch: StallWatch;
@@ -324,6 +326,12 @@ export class Hq {
       // A handoff link never outlives its 10 minutes, and never leaves a phone viewport on a tab.
       this.every(15_000, 'tab', () => this.tab.sweep());
       this.store.bg(this.tab.clearStale(), 'tab.clearStale');
+      // Passkeys the server answers itself (tab/passkeys.ts). The timer also covers a Chrome that was down at start.
+      if (this.cfg.tab.passkeys) {
+        this.passkeys = new PasskeyVault(join(this.cfg.stateDir, 'passkeys.json'), this.cfg.tab.cdpUrl, tabLog);
+        this.store.bg(this.passkeys.coverAll(), 'passkeys.cover');
+        this.every(30_000, 'passkeys', () => this.passkeys!.coverAll());
+      }
       // B.7: quota per account every 10 minutes (get_usage, no inference) + the identity check again.
       this.every(T.accountsMs, 'accounts', async () => {
         // Off: an "all full" item left open closes quietly (accounts.watchFull), nothing else runs.
@@ -455,6 +463,7 @@ export class Hq {
     await this.api?.close();
     await this.tabServer?.close();
     this.tab.browser.close?.();
+    this.passkeys?.close();
     await new Promise<void>((r) => (this.healthServer ? this.healthServer.close(() => r()) : r()));
     if (this.ingestServer) { this.ingestServer.closeAllConnections(); await new Promise<void>((r) => this.ingestServer!.close(() => r())); }
     // Shift-hosts are separate units and keep running across hq restarts (B.5): only drop our sockets.
