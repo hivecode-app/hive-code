@@ -615,3 +615,75 @@ test('shared event: a node that starts losing after it was reported is told to �
     assert.match(j[0]!.body, /net-vmi1004 \(10\.0\.0\.5\): אובדן 20%/);
   } finally { await env.cleanup(); }
 });
+
+test('spec 7: 5 jitter samples in a row send nothing; 6 open one anomaly; a clean sample in between resets the count', async () => {
+  const env = await makeEnv({ projects: { 'tiki-bot-go': LATENCY } });
+  try {
+    const { hq, clock } = env;
+    hq.probes.probes = hq.probes.probes.filter((p) => p.id === 'net-vmi1000011');
+    const seq = [...Array(5).fill(PING_JITTER), PING_OK, ...Array(5).fill(PING_JITTER), PING_LOSS, PING_JITTER, PING_JITTER, PING_OK];
+    hq.probes.run = (p) => runLatencyProbe(p, async () => seq.shift()!);
+    const anomalies = () => hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'probe_anomaly'`).all() as { body: string }[];
+    const step = async () => { await hq.probes.tick(); clock.advance(ROUND); };
+    for (let i = 0; i < 5; i++) await step();
+    assert.equal(anomalies().length, 0, 'five in a row: nothing');
+    await step(); // clean: the count starts over
+    for (let i = 0; i < 5; i++) await step();
+    assert.equal(anomalies().length, 0, 'five again after a clean one: nothing');
+    await step(); // a loss sample continues the run: the sixth
+    assert.equal(anomalies().length, 1);
+    assert.match(anomalies()[0]!.body, /jitter מתמשך: 6 דגימות ברצף בלי דגימה תקינה/);
+    assert.equal((anomalies()[0]!.body.match(/^- \d{4}-/gm) ?? []).length, 6, 'the six samples as evidence');
+    await step(); await step(); // jitter goes on: still one, and not "recovered"
+    assert.equal(anomalies().length, 1);
+    const recovered = () => (hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'system' AND body LIKE '%חזר לתקין%'`).all() as unknown[]).length;
+    assert.equal(recovered(), 0);
+    await step(); // clean
+    assert.equal(recovered(), 1);
+  } finally { await env.cleanup(); }
+});
+
+test('spec 7: jitter that a shared event joins opens no anomaly per node, and the event\'s loss doesn\'t count after it ends', async () => {
+  const env = await makeEnv({ projects: { 'tiki-bot-go': NODES(6) } });
+  try {
+    const { hq, clock } = env;
+    let round = 0;
+    hq.probes.run = (p) => p.kind === 'http' ? Promise.resolve({ ok: true, status: 200, latencyMs: 40, error: null })
+      : runLatencyProbe(p, async () => round === 5 || round === 6 ? lossOut(20) : PING_JITTER);
+    hq.probes.host = () => ({ load1: 0.5, cpus: 8, freeMb: 9000 });
+    const step = async () => { await hq.probes.tick(); round++; clock.advance(ROUND); };
+    const sustained = () => (hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'probe_anomaly' AND body LIKE '%jitter מתמשך%'`).all()).length;
+    for (let i = 0; i < 7; i++) await step(); // 5 jitter, then two rounds of shared loss
+    assert.equal(sustained(), 0, 'the shared event speaks for them');
+    assert.equal((hq.store.db.prepare(`SELECT body FROM messages WHERE body LIKE 'נפילה משותפת ברשת:%'`).all()).length, 1);
+    for (let i = 0; i < 5; i++) await step(); // jitter after the event ended: five samples of its own
+    assert.equal(sustained(), 0, 'the event\'s loss is not jitter that lasted');
+    await step(); // the sixth after the event
+    assert.equal(sustained(), 6);
+  } finally { await env.cleanup(); }
+});
+
+test('spec 7: jitter then loss up to fail_after is one loss anomaly; a gap in the samples starts the run over', async () => {
+  const env = await makeEnv({ projects: { 'tiki-bot-go': NODES(1) } });
+  try {
+    const { hq, clock } = env;
+    const seq = [PING_JITTER, PING_JITTER, PING_JITTER, lossOut(20), lossOut(20), lossOut(20)];
+    hq.probes.probes = hq.probes.probes.filter((p) => p.kind === 'latency');
+    hq.probes.run = (p) => runLatencyProbe(p, async () => seq.shift() ?? PING_JITTER);
+    const anomalies = () => hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'probe_anomaly'`).all() as { body: string }[];
+    for (let i = 0; i < 6; i++) { await hq.probes.tick(); clock.advance(ROUND); }
+    assert.equal(anomalies().length, 1);
+    assert.match(anomalies()[0]!.body, /3 כישלונות ברצף/);
+    assert.doesNotMatch(anomalies()[0]!.body, /jitter מתמשך/);
+  } finally { await env.cleanup(); }
+  const env2 = await makeEnv({ projects: { 'tiki-bot-go': NODES(1) } });
+  try {
+    const { hq, clock } = env2;
+    hq.probes.probes = hq.probes.probes.filter((p) => p.kind === 'latency');
+    hq.probes.run = (p) => runLatencyProbe(p, async () => PING_JITTER);
+    for (let i = 0; i < 5; i++) { await hq.probes.tick(); clock.advance(ROUND); }
+    clock.advance(60 * 60_000); // hq was down for an hour
+    await hq.probes.tick();
+    assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM messages WHERE kind = 'probe_anomaly'`).get() as { n: number }).n, 0);
+  } finally { await env2.cleanup(); }
+});

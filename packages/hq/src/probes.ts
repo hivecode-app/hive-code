@@ -8,7 +8,7 @@
 // For latency, 100% loss is an answer (a failure); hosts that drop ICMP stay out of the charter.
 // `fail_after` consecutive failures → one `now` message to רותם with the evidence; recovery → one note.
 // Latency (memory/company/monitoring/probe-alerts-spec.md, 26/10): over avg/mdev with the loss under its threshold is jitter,
-// recorded and counted in a daily digest by node, never a wake-up. More than SHARED_MIN_NODES nodes losing pings in one round
+// recorded and counted in a daily digest by node; it wakes רותם only when it lasts JITTER_SUSTAIN_ROUNDS samples in a row. More than SHARED_MIN_NODES nodes losing pings in one round
 // is one event; it reaches the owner only when it lasts past SHARED_PERSIST_MS and http fails too or there is no witness.
 import { OWNER, pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -268,6 +268,9 @@ export const SHARED_MIN_NODES = 3;
 export const SHARED_PERSIST_MS = 5 * 60_000;
 /** Latency probes due within this of one that is due run with it, so a round of latency probes is one tick. */
 const ROUND_SLACK_MS = 60_000;
+/** Jitter that lasts wakes: this many latency samples in a row with no clean one (loss continues the run), 30 minutes at
+ *  `every: 5m`. Calibrated on 22–26/10: runs of 1–5 happened 754 times and passed by themselves; 6+ happened 7 times (spec §1). */
+export const JITTER_SUSTAIN_ROUNDS = 6;
 /** The daily jitter digest goes out from this hour, Israel time. */
 export const DIGEST_HOUR = 6;
 /** Chronic jitter: more than CHRONIC_PER_DAY jitter samples a day, CHRONIC_DAYS days in a row → a ticket draft for Contabo. */
@@ -339,6 +342,8 @@ export function jitterDigest(db: Store['db'], probes: ProbeSpec[], now: number):
  *  continues it (and closes what the owner was sent) instead of opening a second one. */
 interface SharedOutage { since: number; lastRound: number; rounds: number; members: Set<string>; owner: boolean; held: boolean }
 const OUTAGE_META = 'probes.shared_outage';
+/** The last shared event that ended: its members' loss inside it doesn't count toward sustained jitter after it. */
+const OUTAGE_LAST_META = 'probes.shared_outage_last';
 
 interface ProbeStateRow { probe_id: string; consecutive_failures: number; anomaly_open: number; last_run_at: number | null; last_ok_at: number | null }
 
@@ -391,16 +396,22 @@ export class ProbeRunner {
     const latencyDue = runnable.some((p) => p.kind === 'latency' && isDue(p));
     const due = runnable.filter((p) => isDue(p) || (latencyDue && p.kind === 'latency' && isDue(p, ROUND_SLACK_MS)));
     const crossed: ProbeSpec[] = [];
+    const sustained: ProbeSpec[] = [];
     const round: { p: ProbeSpec; o: ProbeOutcome }[] = [];
     await Promise.all(due.map(async (p) => {
       this.inflight.add(p.key);
       try {
         const o = await this.run(p);
         if (p.kind === 'latency') round.push({ p, o });
-        if (this.record(p, o, true, now) === 'crossed') crossed.push(p);
+        const r = this.record(p, o, true, now);
+        if (r === 'crossed') crossed.push(p);
+        else if (r === 'sustained') sustained.push(p);
       } finally { this.inflight.delete(p.key); }
     }));
     if (round.length) await this.sharedRound(round, now);
+    // After the round: a node that this round put inside a shared event has no anomaly of its own, as with loss.
+    // Counted again: an event that ended this round no longer lends its loss to the run.
+    for (const p of sustained) if (!this.outage?.members.has(p.key) && this.state(p.key)?.anomaly_open !== 1 && this.badRun(p, now) >= JITTER_SUSTAIN_ROUNDS) this.openAnomaly(p, undefined, true);
     // A node inside an open shared event has no anomaly of its own: the event speaks for it.
     const own = crossed.filter((p) => !this.outage?.members.has(p.key));
     if (own.length) await this.confirm(own);
@@ -527,6 +538,7 @@ export class ProbeRunner {
     }
     if (!o) return;
     this.outage = null;
+    this.store.setMeta(OUTAGE_LAST_META, JSON.stringify({ end: now, members: [...o.members] }));
     const minutes = Math.round((now - o.since) / 60_000);
     const body = `הנפילה המשותפת ברשת נגמרה אחרי ${minutes} דקות: בסבב האחרון ${lost.length} מתוך ${known.length} נודים איבדו pings.`;
     this.mailbox.tell({ msg_id: `probe-shared-${o.since}-recovered`, from: 'hq', to: lead, kind: 'system', priority: 'next', body });
@@ -588,8 +600,9 @@ export class ProbeRunner {
       ].join('\n') });
   }
 
-  /** Returns 'crossed' when `defer` is set and this failure reached fail_after: the caller confirms it first. */
-  record(p: ProbeSpec, o: ProbeOutcome, defer = false, now = this.store.now()): 'crossed' | undefined {
+  /** Returns 'crossed' when `defer` is set and this failure reached fail_after: the caller confirms it first.
+   *  'sustained' when `defer` is set and jitter reached JITTER_SUSTAIN_ROUNDS: the caller opens it after the shared round. */
+  record(p: ProbeSpec, o: ProbeOutcome, defer = false, now = this.store.now()): 'crossed' | 'sustained' | undefined {
     const prev = this.state(p.key);
     if (o.unknown) {
       // No answer is not a failure: the streak and any open anomaly stay as they were; only the attempt is noted.
@@ -598,7 +611,7 @@ export class ProbeRunner {
       this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: o.error });
       return undefined;
     }
-    // Jitter without loss is noted (ok=0, jitter=1) but is healthy for the streak and for recovery: it wakes no one.
+    // Jitter without loss is noted (ok=0, jitter=1) and doesn't advance the loss streak; alone it wakes no one until it lasts (JITTER_SUSTAIN_ROUNDS).
     const jitter = jitterOnly(p, o);
     const healthy = o.ok || jitter;
     const fails = healthy ? 0 : (prev?.consecutive_failures ?? 0) + 1;
@@ -615,38 +628,58 @@ export class ProbeRunner {
     if (!healthy && fails >= p.failAfter && !open) {
       if (defer) return 'crossed';
       if (!this.outage?.members.has(p.key)) this.openAnomaly(p);
-    } else if (healthy && open) {
+    } else if (p.kind === 'latency' && !o.ok && !open && this.badRun(p, now) >= JITTER_SUSTAIN_ROUNDS) {
+      if (defer) return 'sustained';
+      if (!this.outage?.members.has(p.key)) this.openAnomaly(p, undefined, true);
+    } else if (o.ok && open) {
+      // Only a clean sample recovers: jitter after an anomaly is not "back to normal".
       this.store.db.prepare('UPDATE probe_state SET anomaly_open = 0 WHERE probe_id = ?').run(p.key);
       this.mailbox.tell({ msg_id: `probe-${p.key}-recovered-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system',
         priority: 'next', body: p.kind === 'disk' ? `${p.key} חזר לתקין (${o.percent}% ב-${p.disk!.path} על ${p.disk!.host ?? 'local'}).`
-          : p.kind === 'latency' && o.ping ? `${p.key} חזר לתקין (${p.latency!.host}: ${pingEvidence(o.ping)}${jitter ? ', jitter בלי אובדן' : ''}).`
+          : p.kind === 'latency' && o.ping ? `${p.key} חזר לתקין (${p.latency!.host}: ${pingEvidence(o.ping)}).`
           : `${p.key} חזר לתקין (status=${o.status}, ${o.latencyMs}ms).` });
       this.store.emit('probe.recovered', this.cfg.monitoringLeadId, { probe: p.key });
     }
     return undefined;
   }
 
-  private openAnomaly(p: ProbeSpec, verification?: string): void {
+  /** Samples in a row, newest back, with no clean one (jitter or loss), up to JITTER_SUSTAIN_ROUNDS. Unknowns are not recorded here.
+   *  Only samples from the last JITTER_SUSTAIN_ROUNDS intervals (a gap, like hq down, starts over), and for a node that was in the
+   *  last shared event only samples after it ended: its loss there was the event's. */
+  private badRun(p: ProbeSpec, now: number): number {
+    let from = now - JITTER_SUSTAIN_ROUNDS * p.everyMs - ROUND_SLACK_MS;
+    try {
+      const last = JSON.parse(this.store.getMeta(OUTAGE_LAST_META) || 'null') as { end: number; members: string[] } | null;
+      if (last?.members.includes(p.key)) from = Math.max(from, last.end - 1);
+    } catch { /* unreadable: no event */ }
+    const rows = this.store.db.prepare('SELECT ok FROM probe_results WHERE probe_id = ? AND ts > ? ORDER BY id DESC LIMIT ?')
+      .all(p.key, from, JITTER_SUSTAIN_ROUNDS) as { ok: number }[];
+    const i = rows.findIndex((r) => r.ok === 1);
+    return i < 0 ? rows.length : i;
+  }
+
+  private openAnomaly(p: ProbeSpec, verification?: string, sustained = false): void {
     const now = this.store.now();
     const st = this.state(p.key);
     const fails = st?.consecutive_failures ?? 0;
     this.store.db.prepare('UPDATE probe_state SET anomaly_open = 1 WHERE probe_id = ?').run(p.key);
     const recent = this.store.db.prepare('SELECT ok, status, latency_ms, error, ts FROM probe_results WHERE probe_id = ? ORDER BY id DESC LIMIT ?')
-      .all(p.key, p.failAfter) as { status: number | null; latency_ms: number | null; error: string | null; ts: number }[];
+      .all(p.key, sustained ? JITTER_SUSTAIN_ROUNDS : p.failAfter) as { status: number | null; latency_ms: number | null; error: string | null; ts: number }[];
     const lastOk = st?.last_ok_at ? new Date(st.last_ok_at).toISOString() : 'אף פעם (מאז שהתחלנו לבדוק)';
     this.mailbox.tell({ msg_id: `probe-${p.key}-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'probe_anomaly',
       urgency: 'urgent', priority: 'now', body: [
         p.kind === 'disk' ? `חריגה בפרודקשן: ${p.key} (דיסק ${p.disk!.path} על ${p.disk!.host ?? 'local'}, הסף ${p.disk!.maxPercent}%)`
           : p.kind === 'latency' ? `חריגה בפרודקשן: ${p.key} (jitter ברשת אל ${p.latency!.host}: הספים avg ${p.latency!.maxAvgMs}ms, mdev ${p.latency!.maxMdevMs}ms, אובדן ${p.latency!.maxLossPercent}%)`
           : `חריגה בפרודקשן: ${p.key} (${p.method} ${p.url})`,
-        `${fails} כישלונות ברצף (fail_after=${p.failAfter}). תקין לאחרונה: ${lastOk}.`,
+        sustained ? `jitter מתמשך: ${JITTER_SUSTAIN_ROUNDS} דגימות ברצף בלי דגימה תקינה (JITTER_SUSTAIN_ROUNDS), גם כשהאובדן לא הגיע ל-fail_after. תקין לאחרונה: ${lastOk}.`
+          : `${fails} כישלונות ברצף (fail_after=${p.failAfter}). תקין לאחרונה: ${lastOk}.`,
         ...(verification ? [verification] : []),
         'ראיות:',
         ...recent.map((r) => p.kind !== 'http' ? `- ${new Date(r.ts).toISOString()} ${r.error ?? ''}`.trim()
           : `- ${new Date(r.ts).toISOString()} status=${r.status ?? '—'} latency=${r.latency_ms ?? '—'}ms ${r.error ?? ''}`.trim()),
         `שלב 1: observe-only. חקרי, ושלחי ${pre('ל', this.mailbox.names.owner.name)} ask דחוף עם השערה והצעה. פעולה על הפרודקשן רק עם grant באמנה.`,
       ].join('\n') });
-    this.store.emit('probe.anomaly', this.cfg.monitoringLeadId, { probe: p.key, fails });
+    this.store.emit('probe.anomaly', this.cfg.monitoringLeadId, { probe: p.key, fails, ...(sustained ? { jitter_sustained: JITTER_SUSTAIN_ROUNDS } : {}) });
   }
 
   summary() {
