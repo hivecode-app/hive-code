@@ -4,6 +4,8 @@
 // other kinds are listed as unsupported, never silently dropped.
 // `disk` (monitoring-spec §3.2 step 4) is the first ssh-shaped probe: read-only `df`, measured from hq-host only.
 // `latency` measures network jitter to a host: `ping -c 20 -i 0.2 -q` from hq-host (a node with jitter is a slow node, 22/10).
+// `kubelet` reads a cluster over ssh (`kubectl get --raw /version`, `kubectl get nodes`) and compares each node's kubeletVersion to the
+// apiserver's: a node on another version is one anomaly to רותם, held until it matches again (task 697: six 1.34 kubelets on a 1.33 master, 9 days).
 // No answer (timeout, ssh failed, garbage output) is "unknown": not a failure, never counted toward fail_after.
 // For latency, 100% loss is an answer (a failure); hosts that drop ICMP stay out of the charter.
 // `fail_after` consecutive failures → one `now` message to רותם with the evidence; recovery → one note.
@@ -27,10 +29,11 @@ export interface ProbeSpec {
   key: string;              // <project>/<id>
   project: string;
   id: string;
-  kind: 'http' | 'disk' | 'latency' | 'unsupported';
+  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'unsupported';
   url?: string;
   disk?: { target: string; host: string | null; path: string; identityFile: string | null; maxPercent: number };  // host null = local
   latency?: { host: string; maxAvgMs: number; maxMdevMs: number; maxLossPercent: number };
+  kubelet?: { target: string; identityFile: string | null };  // ssh target of a machine with kubectl for the cluster (its master)
   method: string;
   expect: number[];
   maxLatencyMs: number | null;
@@ -89,28 +92,32 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     const id = String(r.id ?? '');
     if (!id) continue;
     const exp = r.expect ?? 200;
+    const identityFile = typeof r.identity === 'string' ? r.identity.replace(/^~(?=\/|$)/, homedir()) : null;
     const dt = typeof r.disk === 'string' ? parseDiskTarget(r.disk) : null;
     const maxPct = Number(r.max_percent);
     const disk = dt && Number.isFinite(maxPct) && maxPct > 0 && maxPct <= 100
       ? { target: String(r.disk), host: dt.host, path: dt.path, maxPercent: maxPct,
-          identityFile: typeof r.identity === 'string' ? r.identity.replace(/^~(?=\/|$)/, homedir()) : null }
+          identityFile }
       : undefined;
     const lt = typeof r.latency === 'string' && isPingHost(r.latency.trim())
       ? { host: r.latency.trim(), maxAvgMs: posNum(r.max_avg_ms, 10), maxMdevMs: posNum(r.max_mdev_ms, 20), maxLossPercent: posNum(r.max_loss_percent, 5) }
       : undefined;
     const latency = lt && [lt.maxAvgMs, lt.maxMdevMs, lt.maxLossPercent].every(Number.isFinite) ? lt : undefined;
+    // `root@host`: never something ssh could read as an option.
+    const kubelet = typeof r.kubelet === 'string' && /^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(r.kubelet.trim())
+      ? { target: r.kubelet.trim(), identityFile } : undefined;
     out.push({
       key: `${project}/${id}`, project, id,
-      kind: typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : 'unsupported',
+      kind: typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : 'unsupported',
       url: typeof r.http === 'string' ? r.http : undefined,
-      disk, latency,
+      disk, latency, kubelet,
       // Observe-only: a probe may only read. Anything but GET/HEAD in a charter is ignored.
       method: typeof r.method === 'string' && r.method.toUpperCase() === 'HEAD' ? 'HEAD' : 'GET',
       expect: (Array.isArray(exp) ? exp : [exp]).map(Number),
       maxLatencyMs: r.max_latency_ms != null ? Number(r.max_latency_ms) : (r.max_latency != null ? parseDuration(r.max_latency, 0) : null),
       everyMs: parseDuration(r.every, 60_000),
       // 20 pings at 0.2s with -W 2 end within ~6s; the default leaves room so a dead host ends in ping's summary, not a kill.
-      timeoutMs: parseDuration(r.timeout, latency ? 20_000 : 10_000),
+      timeoutMs: parseDuration(r.timeout, latency ? 20_000 : kubelet ? 30_000 : 10_000),
       failAfter: Number(r.fail_after ?? 3),
       raw: r,
     });
@@ -126,7 +133,10 @@ export function loadProbes(companyDir: string): ProbeSpec[] {
 }
 
 /** `unknown`: no answer came back. Not a failure (ok is meaningless then); the runner doesn't count it. */
-export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; percent?: number; ping?: PingStats }
+export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; percent?: number; ping?: PingStats; versions?: KubeletVersions }
+
+/** The apiserver's version and each node's kubelet version, as `kubectl` reported them ('' = the node has none yet, still registering). */
+export interface KubeletVersions { master: string; nodes: Record<string, string> }
 
 /** rtt fields are null when nothing came back (no rtt line) or, for mdev, when the ping doesn't report it (busybox). */
 export interface PingStats { transmitted: number; received: number; lossPercent: number; min: number | null; avg: number | null; max: number | null; mdev: number | null }
@@ -189,6 +199,41 @@ export async function runDiskProbe(p: ProbeSpec, run: SshRun = runSsh, local: Lo
   const percent = Number(m[1]);
   return { ok: percent <= d.maxPercent, percent, status: percent, latencyMs: lat(),
     error: percent > d.maxPercent ? `${percent}% בשימוש ב-${d.path} על ${d.host ?? 'local'}, הסף ${d.maxPercent}%` : null };
+}
+
+const KUBELET_SEP = '@@nodes';
+
+/** `<gitVersion of the apiserver>` then `<node> <kubeletVersion>` per line. null when it isn't that. */
+export function parseKubeletVersions(out: string): KubeletVersions | null {
+  const i = out.indexOf(KUBELET_SEP);
+  if (i < 0) return null;
+  let master: unknown;
+  try { master = (JSON.parse(out.slice(0, i)) as { gitVersion?: unknown }).gitVersion; } catch { return null; }
+  if (typeof master !== 'string' || !master) return null;
+  const nodes: Record<string, string> = {};
+  for (const line of out.slice(i + KUBELET_SEP.length).split('\n')) {
+    const m = /^(\S+)(?: (\S+))?$/.exec(line.trim());
+    if (m) nodes[m[1]!] = m[2] ?? '';
+  }
+  return Object.keys(nodes).length ? { master, nodes } : null;
+}
+
+/** Read-only: the apiserver's version and every node's kubelet version, over ssh to the machine named in the charter. */
+export async function runKubeletProbe(p: ProbeSpec, run: SshRun = runSsh): Promise<ProbeOutcome> {
+  const k = p.kubelet!;
+  const t0 = performance.now();
+  const lat = () => Math.round(performance.now() - t0);
+  const cmd = `kubectl get --raw /version && echo ${KUBELET_SEP} && kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.nodeInfo.kubeletVersion}{"\\n"}{end}'`;
+  let out: string;
+  try {
+    out = await run(['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10',
+      ...(k.identityFile ? ['-i', k.identityFile] : []), k.target, cmd], undefined, p.timeoutMs);
+  } catch (e) { return { ok: false, unknown: true, status: null, latencyMs: lat(), error: (e as Error).message }; }
+  const v = parseKubeletVersions(out);
+  if (!v) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: `פלט kubectl לא מובן: ${out.trim().slice(0, 80) || '(ריק)'}` };
+  const off = Object.entries(v.nodes).filter(([, ver]) => ver && ver !== v.master);
+  return { ok: !off.length, versions: v, status: null, latencyMs: lat(),
+    error: off.length ? `${off.length} נודים בגרסת kubelet שונה מהמאסטר (${v.master}): ${off.map(([n, ver]) => `${n} ${ver}`).join(', ')}` : null };
 }
 
 export async function runHttpProbe(p: ProbeSpec): Promise<ProbeOutcome> {
@@ -379,7 +424,8 @@ interface ProbeStateRow { probe_id: string; consecutive_failures: number; anomal
 
 export class ProbeRunner {
   probes: ProbeSpec[] = [];
-  run: (p: ProbeSpec) => Promise<ProbeOutcome> = (p) => p.kind === 'disk' ? runDiskProbe(p) : p.kind === 'latency' ? runLatencyProbe(p) : runHttpProbe(p);
+  run: (p: ProbeSpec) => Promise<ProbeOutcome> = (p) => p.kind === 'disk' ? runDiskProbe(p) : p.kind === 'latency' ? runLatencyProbe(p)
+    : p.kind === 'kubelet' ? runKubeletProbe(p) : runHttpProbe(p);
   /** Second vantage point, asked before an anomaly wakes רותם. null = none configured. */
   witness: Witness | null;
   /** The same second vantage point for latency: ping from ci-host. null = none configured (then a shared event has no witness). */
@@ -655,6 +701,7 @@ export class ProbeRunner {
         last_ok_at = COALESCE(@ok_at, last_ok_at), last_status = @status, last_latency_ms = @lat, last_error = @err`)
       .run({ k: p.key, project: p.project, fails, now, ok_at: o.ok ? now : null, status: o.status, lat: o.latencyMs, err: o.error });
     this.store.emit('probe.result', this.cfg.monitoringLeadId, { probe: p.key, ...o });
+    if (p.kind === 'kubelet') { if (o.versions) this.kubeletSkew(p, o.versions, now); return undefined; }
 
     const open = prev?.anomaly_open === 1;
     if (!healthy && fails >= p.failAfter && !open) {
@@ -673,6 +720,42 @@ export class ProbeRunner {
       this.store.emit('probe.recovered', this.cfg.monitoringLeadId, { probe: p.key });
     }
     return undefined;
+  }
+
+  /** One anomaly per node whose kubelet is not on the apiserver's version, held until it is (or the node is gone); then one note.
+   *  Nodes that go off in the same reading share one message (a master upgraded first puts every worker off at once).
+   *  A node with no version yet (still registering) keeps the state it had.
+   *  Not fail_after: the version doesn't flicker, and the first reading is the evidence. Not urgent: a skew is fixed by day, it doesn't wake anyone. */
+  private kubeletSkew(p: ProbeSpec, v: KubeletVersions, now: number): void {
+    const key = `probes.kubelet_skew.${p.key}`;
+    let open: Record<string, string> = {};
+    try { open = (JSON.parse(this.store.getMeta(key) || '{}') ?? {}) as Record<string, string>; } catch { /* unreadable: none open */ }
+    const off: Record<string, string> = {};
+    for (const [node, ver] of Object.entries(v.nodes)) {
+      if (!ver) { if (node in open) off[node] = open[node]!; } else if (ver !== v.master) off[node] = ver;
+    }
+    const lead = this.cfg.monitoringLeadId;
+    const total = Object.keys(v.nodes).length;
+    const same = Object.values(v.nodes).filter((ver) => ver === v.master).length;
+    const fresh = Object.entries(off).filter(([node]) => !(node in open));
+    if (fresh.length) {
+      this.mailbox.tell({ msg_id: `probe-${p.key}-${now}`, from: 'hq', to: lead, kind: 'probe_anomaly', priority: 'next', body: [
+        `חריגה בקלאסטר: ${p.key} (${p.kubelet!.target}): ${fresh.length === 1 ? 'נוד מריץ' : `${fresh.length} נודים מריצים`} kubelet בגרסה אחרת מהמאסטר (apiserver ${v.master}):`,
+        ...fresh.map(([node, ver]) => `- הנוד ${node} מריץ kubelet ${ver}`),
+        `kubelet חדש מה-apiserver הוא מחוץ ל-skew הנתמך, וגם ישן יותר הוא מצב ביניים שצריך לסגור. ${same} מתוך ${total} נודים בגרסה של המאסטר.`,
+        'בפעם הקודמת (משימה 697, 26/10) ששה נודים כאלה שלחו כ-68% מהבקשות ל-apiserver במשך 9 ימים.',
+        `התראה אחת לנוד: עליו לא תצא עוד התראה עד שהוא חוזר לגרסה של המאסטר. שלב 1: observe-only. חקרי, ושלחי ${pre('ל', this.mailbox.names.owner.name)} הצעה. איך מצרפים נוד בגרסה של המאסטר: machines.md, קלאסטר k3s.`,
+      ].join('\n') });
+      this.store.emit('probe.anomaly', lead, { probe: p.key, nodes: Object.fromEntries(fresh), master: v.master });
+    }
+    const fixed = Object.keys(open).filter((n) => !(n in off));
+    if (fixed.length) {
+      this.mailbox.tell({ msg_id: `probe-${p.key}-recovered-${now}`, from: 'hq', to: lead, kind: 'system', priority: 'next',
+        body: `${p.key}: ${fixed.map((n) => n in v.nodes ? `${n} חזר לגרסה של המאסטר (${v.master})` : `${n} כבר לא בקלאסטר`).join(', ')}.` });
+      this.store.emit('probe.recovered', lead, { probe: p.key, nodes: fixed });
+    }
+    this.store.setMeta(key, JSON.stringify(off));
+    this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(Object.keys(off).length ? 1 : 0, p.key);
   }
 
   /** Samples in a row, newest back, with no clean one (jitter or loss), up to JITTER_SUSTAIN_ROUNDS. Unknowns are not recorded here.
@@ -715,7 +798,7 @@ export class ProbeRunner {
   }
 
   summary() {
-    return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}), every_ms: p.everyMs, ...(this.state(p.key) ?? {}) }));
+    return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}), ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), every_ms: p.everyMs, ...(this.state(p.key) ?? {}) }));
   }
 
   prune(olderThanMs = 7 * 86_400_000): void {

@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { makeEnv, until } from './helpers.ts';
-import { ProbeRunner, loadProbes, parseCharterProbes, parseDuration, runHttpProbe, runDiskProbe, runLatencyProbe, parsePing, pingBreaches, sshWitness, sshPingWitness, jitterDigest, backfillLatencyRows, parsePingEvidence } from '../src/probes.ts';
+import { ProbeRunner, loadProbes, parseCharterProbes, parseDuration, runHttpProbe, runDiskProbe, runLatencyProbe, parsePing, pingBreaches, sshWitness, sshPingWitness, jitterDigest, backfillLatencyRows, parsePingEvidence, runKubeletProbe, parseKubeletVersions } from '../src/probes.ts';
 
 // The example company (fixtures/README.md): its charters declare probes the way a real company's do.
 const COMPANY = join(import.meta.dirname, '..', '..', '..', 'fixtures', 'company-home', 'company');
@@ -727,4 +727,75 @@ test('spec 7: jitter then loss up to fail_after is one loss anomaly; a gap in th
     await hq.probes.tick();
     assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM messages WHERE kind = 'probe_anomaly'`).get() as { n: number }).n, 0);
   } finally { await env2.cleanup(); }
+});
+
+const CLUSTER = '```yaml\nprobes:\n  - {id: kubelet-versions, kubelet: root@203.0.113.13, every: 30m}\n  - {id: bad, kubelet: "-oProxyCommand=x"}\n  - {id: bad2, kubelet: "-Elog@host"}\n```\n';
+const kubectlOut = (master: string, nodes: Record<string, string>) =>
+  `{"major":"1","gitVersion":"${master}"}\n@@nodes\n${Object.entries(nodes).map(([n, v]) => `${n} ${v}`).join('\n')}\n`;
+
+test('kubelet probe: parsing, the apiserver version against each node; ssh error or garbage = unknown', async () => {
+  const [k, bad, bad2] = parseCharterProbes('cluster', CLUSTER);
+  assert.deepEqual([k!.kind, bad!.kind, bad2!.kind], ['kubelet', 'unsupported', 'unsupported'], 'a target that ssh would read as an option is not a probe');
+  assert.equal(k!.kubelet!.target, 'root@203.0.113.13');
+  assert.equal(k!.everyMs, 30 * 60_000);
+  assert.equal(parseKubeletVersions('garbage'), null);
+  assert.equal(parseKubeletVersions('{"gitVersion":"v1.33.6+k3s1"}\n@@nodes\n'), null, 'no nodes is no answer');
+  assert.deepEqual(parseKubeletVersions('{"gitVersion":"v1"}\n@@nodes\na v1\nnew\n')!.nodes, { a: 'v1', new: '' }, 'a node still registering has no version');
+  assert.equal((await runKubeletProbe(k!, async () => kubectlOut('v1', { a: 'v1' }) + 'new\n')).ok, true, 'no version is not a skew');
+  const calls: string[][] = [];
+  const mk = (out: string | Error) => async (args: string[]) => { calls.push(args); if (out instanceof Error) throw out; return out; };
+  const same = await runKubeletProbe(k!, mk(kubectlOut('v1.33.6+k3s1', { srv: 'v1.33.6+k3s1', vmi1: 'v1.33.6+k3s1' })));
+  assert.equal(same.ok, true);
+  assert.match(calls[0]!.join(' '), /root@203\.0\.113\.13 kubectl get --raw \/version && echo @@nodes && kubectl get nodes -o jsonpath=/);
+  const off = await runKubeletProbe(k!, mk(kubectlOut('v1.33.6+k3s1', { srv: 'v1.33.6+k3s1', vmi1: 'v1.34.3+k3s1' })));
+  assert.equal(off.ok, false);
+  assert.equal(off.unknown, undefined);
+  assert.match(off.error!, /vmi1 v1\.34\.3\+k3s1/);
+  for (const o of [new Error('ssh exit 255'), '', 'The connection to the server was refused']) assert.equal((await runKubeletProbe(k!, mk(o))).unknown, true, String(o));
+});
+
+test('kubelet probe: one anomaly per node until it matches the master again, one note then; unknown changes nothing', async () => {
+  const env = await makeEnv({ projects: { cluster: CLUSTER } });
+  try {
+    const { hq, clock } = env;
+    const M = 'v1.33.6+k3s1', N = 'v1.34.3+k3s1';
+    const seq: Array<Record<string, string> | 'unknown'> = [
+      { srv: M, a: M, b: N, c: N },
+      { srv: M, a: M, b: N, c: N },   // same skew: nothing new
+      'unknown',
+      { srv: M, a: M, b: '', c: N },  // b has no version this time: still open, no note
+      { srv: M, a: N, b: N, c: M },   // a goes off, c back
+      { srv: M, a: N },               // b gone from the cluster
+      { srv: M, a: M },
+    ];
+    hq.probes.run = async () => {
+      const v = seq.shift()!;
+      if (v === 'unknown') return { ok: false, unknown: true, status: null, latencyMs: 5, error: 'ssh timeout' };
+      const off = Object.values(v).some((x) => x !== M);
+      return { ok: !off, versions: { master: M, nodes: v }, status: null, latencyMs: 5, error: off ? 'skew' : null };
+    };
+    const msgs = (kind: string) => (hq.store.db.prepare(`SELECT body, urgency FROM messages WHERE to_identity = 'rotem' AND kind = ? ORDER BY created_at, rowid`).all(kind) as { body: string; urgency: string }[]);
+    const open = () => (hq.store.db.prepare(`SELECT anomaly_open n FROM probe_state WHERE probe_id = 'cluster/kubelet-versions'`).get() as { n: number }).n;
+    const step = async () => { await hq.probes.tick(); clock.advance(30 * 60_000 + 1000); };
+    await step();
+    assert.equal(msgs('probe_anomaly').length, 1, 'nodes off in the same reading share one message');
+    assert.match(msgs('probe_anomaly')[0]!.body, /2 נודים מריצים kubelet בגרסה אחרת מהמאסטר \(apiserver v1\.33\.6\+k3s1\)/);
+    assert.match(msgs('probe_anomaly')[0]!.body, /הנוד b מריץ kubelet v1\.34\.3\+k3s1\n- הנוד c מריץ kubelet v1\.34\.3\+k3s1/);
+    assert.equal(msgs('probe_anomaly')[0]!.urgency, 'normal', 'a skew is fixed by day, it wakes no one');
+    assert.equal(open(), 1);
+    await step(); await step(); await step();
+    assert.equal(msgs('probe_anomaly').length, 1, 'no flood: the same skew, an unknown and a node without a version send nothing');
+    assert.equal(msgs('system').length, 0);
+    await step();
+    assert.equal(msgs('probe_anomaly').length, 2);
+    assert.match(msgs('probe_anomaly')[1]!.body, /נוד מריץ kubelet.*\n- הנוד a /);
+    assert.match(msgs('system').at(-1)!.body, /c חזר לגרסה של המאסטר/);
+    await step();
+    assert.match(msgs('system').at(-1)!.body, /b כבר לא בקלאסטר/);
+    assert.equal(open(), 1);
+    await step();
+    assert.match(msgs('system').at(-1)!.body, /a חזר לגרסה של המאסטר/);
+    assert.equal(open(), 0);
+    assert.equal(msgs('probe_anomaly').length, 2);
+  } finally { await env.cleanup(); }
 });
