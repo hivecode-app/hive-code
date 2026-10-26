@@ -818,7 +818,7 @@ test('fail_for: parsed for http; on another kind or not a duration the probe is 
   assert.deepEqual(bad.map((p) => p.kind), ['unsupported', 'unsupported', 'unsupported']);
 });
 
-test('http probe: a timeout is noAnswer; a refused connection, a name that does not exist (NXDOMAIN) or a status is an answer', async () => {
+test('http probe: a timeout, a refused connection, a name that does not exist (NXDOMAIN) or a status is an answer; only EAI_AGAIN is noAnswer', async () => {
   const srv = createServer((req, res) => { if (req.url === '/hang') return; res.writeHead(503); res.end('x'); });
   await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
   const url = `http://127.0.0.1:${(srv.address() as { port: number }).port}`;
@@ -826,7 +826,7 @@ test('http probe: a timeout is noAnswer; a refused connection, a name that does 
     const mk = (u: string) => parseCharterProbes('x', `\`\`\`yaml\nprobes:\n  - {id: h, http: '${u}', timeout: 300ms, fail_for: 30s}\n\`\`\`\n`)[0]!;
     const hang = await runHttpProbe(mk(`${url}/hang`));
     assert.equal(hang.ok, false);
-    assert.equal(hang.noAnswer, true);
+    assert.equal(hang.noAnswer, undefined, 'a timeout starts fail_for like a status');
     const dns = await runHttpProbe(mk('http://nothing-here.invalid/'));
     assert.equal(dns.ok, false);
     if (/ENOTFOUND/.test(dns.error!)) assert.equal(dns.noAnswer, undefined, 'the DNS answered: no such name');
@@ -841,7 +841,7 @@ test('http probe: a timeout is noAnswer; a refused connection, a name that does 
 });
 
 /** Drive the runner in 5s ticks (hq's cadence) for `ms`, with the e2e probe failing as `fail(t)` says (t = ms since the start). */
-async function failFor(fail: (t: number) => false | 'answer' | 'noAnswer' | 'unknown', ms: number, witnessOk = false) {
+async function failFor(fail: (t: number) => false | 'answer' | 'timeout' | 'noAnswer' | 'unknown', ms: number, witnessOk = false) {
   const env = await makeEnv({ projects: { lumo: FAIL_FOR } });
   const { hq, clock } = env;
   const t0 = hq.store.now();
@@ -854,7 +854,8 @@ async function failFor(fail: (t: number) => false | 'answer' | 'noAnswer' | 'unk
     const f = fail(t);
     if (!f) return { ok: true, status: 200, latencyMs: 20, error: null };
     if (f === 'unknown') return { ok: false, unknown: true, status: null, latencyMs: null, error: 'ssh timeout' };
-    if (f === 'noAnswer') return { ok: false, noAnswer: true, status: null, latencyMs: 10_000, error: 'The operation was aborted due to timeout' };
+    if (f === 'noAnswer') return { ok: false, noAnswer: true, status: null, latencyMs: 30, error: 'getaddrinfo EAI_AGAIN e2e.lumo.test (EAI_AGAIN)' };
+    if (f === 'timeout') return { ok: false, status: null, latencyMs: 10_000, error: 'The operation was aborted due to timeout' };
     return { ok: false, status: 502, latencyMs: 30, error: 'status 502, expected 200' };
   };
   hq.probes.witness = async () => { asked.push(hq.store.now() - t0); return witnessOk ? { ok: true, status: 200, latencyMs: 40, error: null } : { ok: false, status: 502, latencyMs: 35, error: 'status 502, expected 200' }; };
@@ -904,17 +905,17 @@ test('fail_for: fine from ci-host → no anomaly, the retries stop, and the sche
   } finally { await r.env.cleanup(); }
 });
 
-test('fail_for: no answer (timeout, DNS) does not start the clock or cross it; fail_after still does', async () => {
+test('fail_for: a DNS that did not answer (EAI_AGAIN) does not start the clock or cross it; fail_after still does', async () => {
   const r = await failFor(() => 'noAnswer', 130_000);
   try {
     assert.deepEqual(r.runs, [0, 60_000, 120_000], 'no retries: no failure with an answer');
     assert.equal(r.anomalies.length, 1, 'fail_after (3) as before');
     assert.match(r.anomalies[0]!.body, /3 כישלונות ברצף \(fail_after=3\)/);
   } finally { await r.env.cleanup(); }
-  // An answer starts it; the stretch of timeouts after it is frozen (0→40s), so it crosses 30s of answered failures after that, at 70s.
+  // An answer starts it; the stretch of EAI_AGAIN after it is frozen (0→40s), so it crosses 30s of answered failures after that, at 70s.
   const m = await failFor((t) => t === 0 || t >= 40_000 ? 'answer' : 'noAnswer', 75_000);
   try {
-    assert.deepEqual(m.asked, [70_000], 'not by the timeout at 30s, nor by the answer at 40s');
+    assert.deepEqual(m.asked, [70_000], 'not by the EAI_AGAIN at 30s, nor by the answer at 40s');
     assert.equal(m.anomalies.length, 1);
   } finally { await m.env.cleanup(); }
   // unknown (the probe could not ask) changes nothing.
@@ -923,6 +924,18 @@ test('fail_for: no answer (timeout, DNS) does not start the clock or cross it; f
     assert.equal(u.anomalies.length, 0);
     assert.equal(u.asked.length, 0);
   } finally { await u.env.cleanup(); }
+});
+
+test('fail_for: timeouts in a row from 0 cross at 30s, through the witness once; recovery = one note', async () => {
+  const r = await failFor((t) => t <= 31_000 && 'timeout', 240_000);
+  try {
+    assert.deepEqual(r.asked, [30_000], 'a server stuck altogether is crossed by fail_for, not fail_after');
+    assert.equal(r.anomalies.length, 1);
+    assert.match(r.anomalies[0]!.body, /נכשל ברצף 30 שניות \(fail_for=30s/);
+    assert.deepEqual(r.runs, [0, 10_000, 20_000, 30_000, 40_000, 60_000, 120_000, 180_000, 240_000]);
+    assert.equal(r.notes.length, 1, 'one note');
+    assert.match(r.notes[0]!.body, /lumo\/e2e חזר לתקין/);
+  } finally { await r.env.cleanup(); }
 });
 
 test('fail_for: removed from the charter during an open failure → its retries stop', async () => {

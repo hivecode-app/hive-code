@@ -13,8 +13,10 @@
 // `fail_after` consecutive failures → one `now` message to רותם with the evidence; recovery → one note.
 // `fail_for` (http only, lumo root 6, 27/10): after a failure that got an answer, look again every FAIL_FOR_RETRY_MS, and a failure
 // still there fail_for after the first one is crossed without waiting for fail_after (then the same witness). The retries are extra
-// runs on top of `every`: they don't count toward fail_after and don't move its schedule. No answer (timeout, DNS) doesn't start
-// or move that clock; fail_after still covers it as before.
+// runs on top of `every`: they don't count toward fail_after and don't move its schedule. A timeout starts and crosses it like a
+// status (the witness filters out a fault on our side). A timed-out run holds its tick for timeoutMs, so a stuck server is crossed
+// at about fail_for + 2×timeout + the witness: fail_for should be well above timeout; a DNS that didn't answer (EAI_AGAIN) or unknown doesn't start or move that
+// clock, and fail_after still covers it as before.
 // Latency (memory/company/monitoring/probe-alerts-spec.md, 26/10): over avg/mdev with the loss under its threshold is jitter,
 // recorded and counted in a daily digest by node; it wakes רותם only when it lasts JITTER_SUSTAIN_ROUNDS samples in a row. More than SHARED_MIN_NODES nodes losing pings in one round
 // is one event; it reaches the owner only when it lasts past SHARED_PERSIST_MS and http fails too or there is no witness.
@@ -172,7 +174,8 @@ export function loadProbes(companyDir: string): ProbeSpec[] {
 }
 
 /** `unknown`: no answer came back. Not a failure (ok is meaningless then); the runner doesn't count it.
- *  `noAnswer` (http): a timeout or a DNS that didn't answer. A failure for fail_after as always, but it doesn't move fail_for's clock. */
+ *  `noAnswer` (http): a DNS that didn't answer (EAI_AGAIN). A failure for fail_after as always, but it doesn't move fail_for's clock.
+ *  A timeout is not noAnswer: it starts and crosses fail_for like a status. */
 export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; alerts?: AmReading; percent?: number; ping?: PingStats; versions?: KubeletVersions }
 
 /** The apiserver's version and each node's kubelet version, as `kubectl` reported them ('' = the node has none yet, still registering). */
@@ -404,7 +407,9 @@ export async function runHttpProbe(p: ProbeSpec): Promise<ProbeOutcome> {
   } catch (e) {
     const err = e as Error & { cause?: { code?: string } };
     // ENOTFOUND is the DNS's answer (no such name: a real fault); EAI_AGAIN is a DNS that didn't answer.
-    const noAnswer = err.name === 'TimeoutError' || ['EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT'].includes(err.cause?.code ?? '');
+    // A timeout (of the request or the connection) is a failure like a status: a server stuck altogether is caught by fail_for,
+    // and the witness from ci-host is what tells a fault on our side apart (27/10).
+    const noAnswer = err.cause?.code === 'EAI_AGAIN';
     return { ok: false, status: null, latencyMs: Math.round(performance.now() - t0), error: err.cause?.code ? `${err.message} (${err.cause.code})` : err.message,
       ...(noAnswer ? { noAnswer: true } : {}) };
   }
@@ -879,7 +884,7 @@ export class ProbeRunner {
     const ff = p.failForMs != null ? this.failFor.get(p.key) : undefined;
     if (ff) ff.last = now;
     if (o.unknown) {
-      if (ff) ff.gap = true;  // no answer: its stretch is frozen, as a timeout's
+      if (ff) ff.gap = true;  // no answer: its stretch is frozen, as a DNS that didn't answer
       // No answer is not a failure: the streak and any open anomaly stay as they were; only the attempt is noted.
       this.store.db.prepare(`INSERT INTO probe_state (probe_id, project, last_run_at, last_error) VALUES (?, ?, ?, ?)
         ON CONFLICT(probe_id) DO UPDATE SET last_run_at = excluded.last_run_at, last_error = excluded.last_error`).run(p.key, p.project, retry ? (prev?.last_run_at ?? now) : now, o.error);
