@@ -18,6 +18,7 @@
 // Latency (memory/company/monitoring/probe-alerts-spec.md, 26/10): over avg/mdev with the loss under its threshold is jitter,
 // recorded and counted in a daily digest by node; it wakes רותם only when it lasts JITTER_SUSTAIN_ROUNDS samples in a row. More than SHARED_MIN_NODES nodes losing pings in one round
 // is one event; it reaches the owner only when it lasts past SHARED_PERSIST_MS and http fails too or there is no witness.
+// `alertmanager` reads the cluster's own critical alerts over ssh (alertmanager.ts): one message per fingerprint, held until it is gone.
 // `cluster` reads the layer under the services of a whole k3s cluster over one ssh (root-signals.ts): its findings and messages are its own.
 import { OWNER, pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -32,17 +33,19 @@ import type { Store } from './store.ts';
 import type { Mailbox } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
 import { RootWatch, isSshTarget, type ClusterSpec } from './root-signals.ts';
+import { amRound, isNamespace, readAlertmanager, NS_TIMEOUT_S, type AlertmanagerSpec, type AmReading, type AmState } from './alertmanager.ts';
 
 export interface ProbeSpec {
   key: string;              // <project>/<id>
   project: string;
   id: string;
-  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'whatsapp_log' | 'cluster' | 'unsupported';
+  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'whatsapp_log' | 'cluster' | 'alertmanager' | 'unsupported';
   url?: string;
   disk?: { target: string; host: string | null; path: string; identityFile: string | null; maxPercent: number };  // host null = local
   latency?: { host: string; maxAvgMs: number; maxMdevMs: number; maxLossPercent: number };
   kubelet?: { target: string; identityFile: string | null };  // ssh target of a machine with kubectl for the cluster (its master)
   whatsappLog?: WhatsappLogSpec;
+  alertmanager?: AlertmanagerSpec;  // the cluster's Alertmanager in each namespace listed, read over ssh to its master
   cluster?: ClusterSpec;     // root signals (root-signals.ts): the k3s master to read the cluster from, over ssh
   method: string;
   expect: number[];
@@ -137,18 +140,22 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     // fail_for is for http; anywhere else, or not a duration, the probe is unsupported (listed, not silently dropped).
     const failForMs = r.fail_for == null ? null : parseDuration(r.fail_for, NaN);
     const badFailFor = failForMs != null && (typeof r.http !== 'string' || !(failForMs > 0));
+    // An explicit list of namespaces, every one a namespace name: a probe that can't say where to look is unsupported.
+    const nss = Array.isArray(r.namespaces) ? r.namespaces.map(String) : [];
+    const alertmanager: AlertmanagerSpec | undefined = typeof r.alertmanager === 'string' && isSshTarget(r.alertmanager.trim()) && nss.length && nss.every(isNamespace)
+      ? { target: r.alertmanager.trim(), identityFile, namespaces: [...new Set(nss)] } : undefined;
     out.push({
       key: `${project}/${id}`, project, id,
-      kind: badFailFor ? 'unsupported' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : 'unsupported',
+      kind: badFailFor ? 'unsupported' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : 'unsupported',
       url: typeof r.http === 'string' ? r.http : undefined,
-      disk, latency, kubelet, whatsappLog, cluster,
+      disk, latency, kubelet, whatsappLog, cluster, alertmanager,
       // Observe-only: a probe may only read. Anything but GET/HEAD in a charter is ignored.
       method: typeof r.method === 'string' && r.method.toUpperCase() === 'HEAD' ? 'HEAD' : 'GET',
       expect: (Array.isArray(exp) ? exp : [exp]).map(Number),
       maxLatencyMs: r.max_latency_ms != null ? Number(r.max_latency_ms) : (r.max_latency != null ? parseDuration(r.max_latency, 0) : null),
       everyMs: parseDuration(r.every, cluster ? 300_000 : 60_000),
       // 20 pings at 0.2s with -W 2 end within ~6s; the default leaves room so a dead host ends in ping's summary, not a kill.
-      timeoutMs: parseDuration(r.timeout, cluster ? 180_000 : latency ? 20_000 : kubelet || whatsappLog ? 30_000 : 10_000),
+      timeoutMs: parseDuration(r.timeout, cluster ? 180_000 : latency ? 20_000 : alertmanager ? Math.max(60_000, (alertmanager.namespaces.length * NS_TIMEOUT_S + 20) * 1000) : kubelet || whatsappLog ? 30_000 : 10_000),
       failAfter: Number(r.fail_after ?? 3),
       failForMs: badFailFor ? null : failForMs,
       raw: r,
@@ -166,7 +173,7 @@ export function loadProbes(companyDir: string): ProbeSpec[] {
 
 /** `unknown`: no answer came back. Not a failure (ok is meaningless then); the runner doesn't count it.
  *  `noAnswer` (http): a timeout or a DNS that didn't answer. A failure for fail_after as always, but it doesn't move fail_for's clock. */
-export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; percent?: number; ping?: PingStats; versions?: KubeletVersions }
+export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; alerts?: AmReading; percent?: number; ping?: PingStats; versions?: KubeletVersions }
 
 /** The apiserver's version and each node's kubelet version, as `kubectl` reported them ('' = the node has none yet, still registering). */
 export interface KubeletVersions { master: string; nodes: Record<string, string> }
@@ -372,6 +379,18 @@ export async function runKubeletProbe(p: ProbeSpec, run: SshRun = runSsh): Promi
     error: off.length ? `${off.length} נודים בגרסת kubelet שונה מהמאסטר (${v.master}): ${off.map(([n, ver]) => `${n} ${ver}`).join(', ')}` : null };
 }
 
+/** Read-only: the critical alerts of each namespace's Alertmanager. Unknown only when no namespace answered; one that didn't
+ *  answer while others did is in `alerts` with its error (the runner keeps its alerts as they were and counts its blindness). */
+export async function runAlertmanagerProbe(p: ProbeSpec, run: SshRun = runSsh): Promise<ProbeOutcome> {
+  const t0 = performance.now();
+  const alerts = await readAlertmanager(p.alertmanager!, p.timeoutMs, run);
+  const latencyMs = Math.round(performance.now() - t0);
+  const known = Object.entries(alerts).filter((e): e is [string, Extract<AmReading[string], unknown[]>] => Array.isArray(e[1]));
+  if (!known.length) return { ok: false, unknown: true, alerts, status: null, latencyMs, error: Object.values(alerts).map((v) => (v as { error: string }).error)[0] ?? null };
+  const crit = known.flatMap(([ns, a]) => a.map((x) => `${ns}/${x.labels.alertname ?? '?'}`));
+  return { ok: !crit.length, alerts, status: null, latencyMs, error: crit.length ? `${crit.length} התראות קריטיות: ${crit.join(', ')}` : null };
+}
+
 export async function runHttpProbe(p: ProbeSpec): Promise<ProbeOutcome> {
   const t0 = performance.now();
   try {
@@ -572,7 +591,7 @@ interface FailFor { since: number; answered: number; gap: boolean; last: number;
 export class ProbeRunner {
   probes: ProbeSpec[] = [];
   run: (p: ProbeSpec) => Promise<ProbeOutcome> = (p) => p.kind === 'disk' ? runDiskProbe(p) : p.kind === 'latency' ? runLatencyProbe(p)
-    : p.kind === 'kubelet' ? runKubeletProbe(p) : p.kind === 'whatsapp_log' ? runWhatsappLogProbe(p) : runHttpProbe(p);
+    : p.kind === 'kubelet' ? runKubeletProbe(p) : p.kind === 'alertmanager' ? runAlertmanagerProbe(p) : p.kind === 'whatsapp_log' ? runWhatsappLogProbe(p) : runHttpProbe(p);
   /** Second vantage point, asked before an anomaly wakes רותם. null = none configured. */
   witness: Witness | null;
   /** The same second vantage point for latency: ping from ci-host. null = none configured (then a shared event has no witness). */
@@ -865,6 +884,7 @@ export class ProbeRunner {
       this.store.db.prepare(`INSERT INTO probe_state (probe_id, project, last_run_at, last_error) VALUES (?, ?, ?, ?)
         ON CONFLICT(probe_id) DO UPDATE SET last_run_at = excluded.last_run_at, last_error = excluded.last_error`).run(p.key, p.project, retry ? (prev?.last_run_at ?? now) : now, o.error);
       this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: o.error });
+      if (p.kind === 'alertmanager' && o.alerts) this.alertmanagerRound(p, o.alerts, now);  // its blindness is counted from unknowns
       return undefined;
     }
     // Jitter without loss is noted (ok=0, jitter=1) and doesn't advance the loss streak; alone it wakes no one until it lasts (JITTER_SUSTAIN_ROUNDS).
@@ -896,6 +916,7 @@ export class ProbeRunner {
       .run({ k: p.key, project: p.project, fails, now: retry ? (prev?.last_run_at ?? now) : now, ok_at: o.ok ? now : null, status: o.status, lat: o.latencyMs, err: o.error });
     this.store.emit('probe.result', this.cfg.monitoringLeadId, { probe: p.key, ...o });
     if (p.kind === 'kubelet') { if (o.versions) this.kubeletSkew(p, o.versions, now); return undefined; }
+    if (p.kind === 'alertmanager') { if (o.alerts) this.alertmanagerRound(p, o.alerts, now); return undefined; }
 
     const open = prev?.anomaly_open === 1;
     if (!healthy && (fails >= p.failAfter || lasted) && !open) {
@@ -954,6 +975,22 @@ export class ProbeRunner {
     this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(Object.keys(off).length ? 1 : 0, p.key);
   }
 
+  /** The cluster's critical alerts against what was told (alertmanager.ts). Not fail_after: Alertmanager's rules already have their `for:`.
+   *  The state is in meta, so a restart doesn't wake רותם again for what is still open. */
+  private alertmanagerRound(p: ProbeSpec, reading: AmReading, now: number): void {
+    const key = `probes.alertmanager.${p.key}`;
+    let prev: AmState = { open: {}, blind: {} };
+    try { prev = { ...prev, ...(JSON.parse(this.store.getMeta(key) || '{}') as Partial<AmState>) }; } catch { /* unreadable: nothing open */ }
+    const { state, messages } = amRound(p.key, p.alertmanager!.target, prev, reading, now, pre('ל', this.mailbox.names.owner.name));
+    const lead = this.cfg.monitoringLeadId;
+    for (const m of messages) {
+      this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system', ...(m.anomaly ? { urgency: 'urgent' as const } : {}), priority: m.priority, body: m.body });
+      this.store.emit(m.anomaly ? 'probe.anomaly' : 'probe.recovered', lead, { probe: p.key, msg: m.id });
+    }
+    this.store.setMeta(key, JSON.stringify(state));
+    this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(Object.keys(state.open).length ? 1 : 0, p.key);
+  }
+
   /** Samples in a row, newest back, with no clean one (jitter or loss), up to JITTER_SUSTAIN_ROUNDS. Unknowns are not recorded here.
    *  Only samples from the last JITTER_SUSTAIN_ROUNDS intervals (a gap, like hq down, starts over), and for a node that was in the
    *  last shared event only samples after it ended: its loss there was the event's. */
@@ -1000,6 +1037,7 @@ export class ProbeRunner {
   summary() {
     return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}),
       ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.whatsappLog ? { whatsapp_log: p.whatsappLog.target } : {}), ...(p.cluster ? { cluster: p.cluster.ssh } : {}),
+      ...(p.alertmanager ? { alertmanager: p.alertmanager.target, namespaces: p.alertmanager.namespaces } : {}),
       every_ms: p.everyMs, ...(p.failForMs != null ? { fail_for_ms: p.failForMs } : {}), ...(this.state(p.key) ?? {}) }));
   }
 
