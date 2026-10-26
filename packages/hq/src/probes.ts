@@ -5,7 +5,7 @@
 // `disk` (monitoring-spec §3.2 step 4) is the first ssh-shaped probe: read-only `df`, measured from hq-host only.
 // `whatsapp_log` reads the WhatsApp gateway's log (read-only `kubectl logs --since` over ssh) and judges what it says (whatsappLogBreaches):
 // no incoming message for `quiet` in the day, `old` over a share of `forwarded` in the webhook summary, a minute of send failures (26/10),
-// and the automation fields of the summary (easy #346): `unknownNumber`/`lookupFailed` over their threshold, or webhooks with nothing forwarded.
+// and the automation fields of the summary (easy #346): `unknownNumber`/`lookupFailed`/`notQueued`/`unreadable` over their threshold.
 // `latency` measures network jitter to a host: `ping -c 20 -i 0.2 -q` from hq-host (a node with jitter is a slow node, 22/10).
 // `kubelet` reads a cluster over ssh (`kubectl get --raw /version`, `kubectl get nodes`) and compares each node's kubeletVersion to the
 // apiserver's: a node on another version is one anomaly to רותם, held until it matches again (task 697: six 1.34 kubelets on a 1.33 master, 9 days).
@@ -132,8 +132,9 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     const lgt = typeof r.whatsapp_log === 'string' ? parseLogTarget(r.whatsapp_log) : null;
     const lg = lgt ? { target: String(r.whatsapp_log), ...lgt, identityFile: typeof r.identity === 'string' ? r.identity.replace(/^~(?=\/|$)/, homedir()) : null,
       quietMs: parseDuration(r.quiet ?? '10m', NaN), maxOldRatio: posNum(r.max_old_ratio, 0.1), maxSendErrorsPerMin: posNum(r.max_send_errors_per_min, 20),
-      maxUnknownNumber: posNum(r.max_unknown_number, 0), maxLookupFailed: posNum(r.max_lookup_failed, 0) } : undefined;
-    const whatsappLog = lg && [lg.quietMs, lg.maxOldRatio, lg.maxSendErrorsPerMin, lg.maxUnknownNumber, lg.maxLookupFailed].every(Number.isFinite) && lg.quietMs > 0 ? lg : undefined;
+      maxUnknownNumber: posNum(r.max_unknown_number, 0), maxLookupFailed: posNum(r.max_lookup_failed, 0),
+      maxNotQueued: posNum(r.max_not_queued, 0), maxUnreadable: posNum(r.max_unreadable, 0) } : undefined;
+    const whatsappLog = lg && [lg.quietMs, lg.maxOldRatio, lg.maxSendErrorsPerMin, lg.maxUnknownNumber, lg.maxLookupFailed, lg.maxNotQueued, lg.maxUnreadable].every(Number.isFinite) && lg.quietMs > 0 ? lg : undefined;
     const latency = lt && [lt.maxAvgMs, lt.maxMdevMs, lt.maxLossPercent].every(Number.isFinite) ? lt : undefined;
     // `root@host`: never something ssh could read as an option.
     const kubelet = typeof r.kubelet === 'string' && /^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(r.kubelet.trim())
@@ -248,7 +249,7 @@ export async function runDiskProbe(p: ProbeSpec, run: SshRun = runSsh, local: Lo
 
 /** A `whatsapp_log` probe: where the log is, and its thresholds. */
 export interface WhatsappLogSpec { target: string; host: string; ns: string; resource: string; identityFile: string | null; quietMs: number; maxOldRatio: number; maxSendErrorsPerMin: number;
-  maxUnknownNumber: number; maxLookupFailed: number }
+  maxUnknownNumber: number; maxLookupFailed: number; maxNotQueued: number; maxUnreadable: number }
 
 /** The window for "no incoming message" is judged only inside these Israel hours: at night a quiet bot is normal. */
 export const QUIET_FROM_HOUR = 6;
@@ -330,7 +331,10 @@ export function whatsappLogBreaches(log: WhatsappLog, l: WhatsappLogSpec, now: n
   const automation: Array<[string, (n: (k: string) => number) => boolean]> = [
     [`unknownNumber מעל ${l.maxUnknownNumber}`, (n) => n('unknownNumber') > l.maxUnknownNumber],
     [`lookupFailed מעל ${l.maxLookupFailed}`, (n) => n('lookupFailed') > l.maxLookupFailed],
-    ['forwarded=0 מול webhooks מעל 0', (n) => n('forwarded') === 0 && n('webhooks') > 0],
+    // Every message in a webhook ends in exactly one count; only notQueued (Kafka failed) is one that should have gone through and
+    // didn't. forwarded=0 alone is a quiet night. unreadable: a POST we couldn't decode.
+    [`notQueued מעל ${l.maxNotQueued}`, (n) => n('notQueued') > l.maxNotQueued],
+    [`unreadable מעל ${l.maxUnreadable}`, (n) => n('unreadable') > l.maxUnreadable],
   ];
   for (const [what, bad] of automation) {
     const hit = recent.filter((e) => bad(summaryField(e.text))).pop();
