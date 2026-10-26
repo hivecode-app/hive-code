@@ -3,6 +3,8 @@
 // (frontmatter `monitoring:` from the B.17 example is accepted too). Phase 1 runs `http` probes;
 // other kinds are listed as unsupported, never silently dropped.
 // `disk` (monitoring-spec §3.2 step 4) is the first ssh-shaped probe: read-only `df`, measured from hq-host only.
+// `whatsapp_log` reads the WhatsApp gateway's log (read-only `kubectl logs --since` over ssh) and judges what it says (whatsappLogBreaches):
+// no incoming message for `quiet` in the day, `old` over a share of `forwarded` in the webhook summary, a minute of send failures (26/10).
 // `latency` measures network jitter to a host: `ping -c 20 -i 0.2 -q` from hq-host (a node with jitter is a slow node, 22/10).
 // `kubelet` reads a cluster over ssh (`kubectl get --raw /version`, `kubectl get nodes`) and compares each node's kubeletVersion to the
 // apiserver's: a node on another version is one anomaly to רותם, held until it matches again (task 697: six 1.34 kubelets on a 1.33 master, 9 days).
@@ -29,11 +31,12 @@ export interface ProbeSpec {
   key: string;              // <project>/<id>
   project: string;
   id: string;
-  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'unsupported';
+  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'whatsapp_log' | 'unsupported';
   url?: string;
   disk?: { target: string; host: string | null; path: string; identityFile: string | null; maxPercent: number };  // host null = local
   latency?: { host: string; maxAvgMs: number; maxMdevMs: number; maxLossPercent: number };
   kubelet?: { target: string; identityFile: string | null };  // ssh target of a machine with kubectl for the cluster (its master)
+  whatsappLog?: WhatsappLogSpec;
   method: string;
   expect: number[];
   maxLatencyMs: number | null;
@@ -64,6 +67,13 @@ export function parseDiskTarget(s: string): { host: string | null; path: string 
 /** A host for ping: an address or a name, never something ping could read as an option. */
 export function isPingHost(s: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(s);
+}
+
+/** `root@host:<ns>/<kind>/<name>`: the workload whose log a `whatsapp_log` probe reads. null when it isn't one. */
+export function parseLogTarget(s: string): { host: string; ns: string; resource: string } | null {
+  const m = /^([A-Za-z0-9_.@-]+):([a-z0-9][a-z0-9-]*)\/((?:deploy|deployment|statefulset|sts)\/[a-z0-9][a-z0-9.-]*)$/.exec(s.trim());
+  if (!m || m[1]!.startsWith('-')) return null;  // `-…` would reach ssh as an option
+  return { host: m[1]!, ns: m[2]!, resource: m[3]! };
 }
 
 /** A missing threshold takes the default; one that is there but isn't a number is NaN, and the probe becomes unsupported (as disk does). */
@@ -102,22 +112,26 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     const lt = typeof r.latency === 'string' && isPingHost(r.latency.trim())
       ? { host: r.latency.trim(), maxAvgMs: posNum(r.max_avg_ms, 10), maxMdevMs: posNum(r.max_mdev_ms, 20), maxLossPercent: posNum(r.max_loss_percent, 5) }
       : undefined;
+    const lgt = typeof r.whatsapp_log === 'string' ? parseLogTarget(r.whatsapp_log) : null;
+    const lg = lgt ? { target: String(r.whatsapp_log), ...lgt, identityFile: typeof r.identity === 'string' ? r.identity.replace(/^~(?=\/|$)/, homedir()) : null,
+      quietMs: parseDuration(r.quiet ?? '10m', NaN), maxOldRatio: posNum(r.max_old_ratio, 0.1), maxSendErrorsPerMin: posNum(r.max_send_errors_per_min, 20) } : undefined;
+    const whatsappLog = lg && [lg.quietMs, lg.maxOldRatio, lg.maxSendErrorsPerMin].every(Number.isFinite) && lg.quietMs > 0 ? lg : undefined;
     const latency = lt && [lt.maxAvgMs, lt.maxMdevMs, lt.maxLossPercent].every(Number.isFinite) ? lt : undefined;
     // `root@host`: never something ssh could read as an option.
     const kubelet = typeof r.kubelet === 'string' && /^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(r.kubelet.trim())
       ? { target: r.kubelet.trim(), identityFile } : undefined;
     out.push({
       key: `${project}/${id}`, project, id,
-      kind: typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : 'unsupported',
+      kind: typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : 'unsupported',
       url: typeof r.http === 'string' ? r.http : undefined,
-      disk, latency, kubelet,
+      disk, latency, kubelet, whatsappLog,
       // Observe-only: a probe may only read. Anything but GET/HEAD in a charter is ignored.
       method: typeof r.method === 'string' && r.method.toUpperCase() === 'HEAD' ? 'HEAD' : 'GET',
       expect: (Array.isArray(exp) ? exp : [exp]).map(Number),
       maxLatencyMs: r.max_latency_ms != null ? Number(r.max_latency_ms) : (r.max_latency != null ? parseDuration(r.max_latency, 0) : null),
       everyMs: parseDuration(r.every, 60_000),
       // 20 pings at 0.2s with -W 2 end within ~6s; the default leaves room so a dead host ends in ping's summary, not a kill.
-      timeoutMs: parseDuration(r.timeout, latency ? 20_000 : kubelet ? 30_000 : 10_000),
+      timeoutMs: parseDuration(r.timeout, latency ? 20_000 : kubelet || whatsappLog ? 30_000 : 10_000),
       failAfter: Number(r.fail_after ?? 3),
       raw: r,
     });
@@ -199,6 +213,109 @@ export async function runDiskProbe(p: ProbeSpec, run: SshRun = runSsh, local: Lo
   const percent = Number(m[1]);
   return { ok: percent <= d.maxPercent, percent, status: percent, latencyMs: lat(),
     error: percent > d.maxPercent ? `${percent}% בשימוש ב-${d.path} על ${d.host ?? 'local'}, הסף ${d.maxPercent}%` : null };
+}
+
+/** A `whatsapp_log` probe: where the log is, and its thresholds. */
+export interface WhatsappLogSpec { target: string; host: string; ns: string; resource: string; identityFile: string | null; quietMs: number; maxOldRatio: number; maxSendErrorsPerMin: number }
+
+/** The window for "no incoming message" is judged only inside these Israel hours: at night a quiet bot is normal. */
+export const QUIET_FROM_HOUR = 6;
+export const QUIET_TO_HOUR = 23;
+const INCOMING = /Incoming WhatsApp message/;
+const SUMMARY = /Lumo automation webhook/;
+const SEND_FAILED = /Client\.Timeout|131016/;
+/** The server sends back only these lines (the log is ~2,000 lines a minute), plus the line count. */
+const REMOTE_AWK = '/Incoming WhatsApp message|Lumo automation webhook|Client\\.Timeout|131016/{print} END{print "@@lines " NR}';
+/** When the workload's running containers started (`@@started`, one line each): the log covers a window only from there. */
+const STARTED_TPL = '{{range .items}}{{range .status.containerStatuses}}@@started {{if .state.running}}{{.state.running.startedAt}}{{end}}{{"\\n"}}{{end}}{{end}}';
+const SELECTOR_TPL = '{{range $k, $v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}';
+
+export const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+
+/** kubectl's `--timestamps` (RFC3339 with nanoseconds). null when it isn't one. */
+function kubeTs(s: string): number | null {
+  const m = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(\.\d+)?(Z|[+-]\d\d:\d\d)$/.exec(s);
+  if (!m) return null;
+  const t = Date.parse(`${m[1]}${m[2] ? m[2].slice(0, 4) : ''}${m[3]}`);
+  return Number.isFinite(t) ? t : null;
+}
+
+/** `started`: the latest start of a running container (null when none is known). */
+export interface WhatsappLog { started: number | null; lines: number; entries: { ts: number; text: string }[] }
+
+/** What the remote command printed, ANSI colors removed. null when it isn't that (no line count). kubectl's own errors go to stderr and fail the run. */
+export function parseWhatsappLog(out: string): WhatsappLog | null {
+  const clean = stripAnsi(out);
+  const end = /^@@lines (\d+)$/m.exec(clean);
+  if (!end) return null;
+  const lines = Number(end[1]);
+  const starts = [...clean.matchAll(/^@@started (\S+)$/gm)].map((m) => kubeTs(m[1]!)).filter((t): t is number => t != null);
+  const started = starts.length ? Math.max(...starts) : null;
+  const entries: WhatsappLog['entries'] = [];
+  for (const l of clean.split('\n')) {
+    if (l.startsWith('@@')) continue;
+    const sp = l.indexOf(' ');
+    const ts = sp > 0 ? kubeTs(l.slice(0, sp)) : null;
+    if (ts != null) entries.push({ ts, text: l.slice(sp + 1) });
+  }
+  return { started, lines, entries };
+}
+
+const hhmm = (ts: number) => new Date(ts).toISOString().slice(11, 16);
+
+/** The three conditions on the gateway's log at `now`. Empty when nothing is over. `everyMs`: failures are counted per minute since the last run. */
+export function whatsappLogBreaches(log: WhatsappLog, l: WhatsappLogSpec, now: number, everyMs: number): string[] {
+  const out: string[] = [];
+  const upTo = log.entries.filter((e) => e.ts <= now);
+  // 1. No incoming message in `quiet`, by day only, and only when the log covers the window: the container started before it.
+  //    A log that is empty or sparse (a stuck gateway still printing its summary) is covered all the same.
+  const start = now - l.quietMs;
+  const day = (t: number) => { const h = israel(t).hour; return h >= QUIET_FROM_HOUR && h < QUIET_TO_HOUR; };
+  const covered = log.started != null && log.started <= start;
+  if (day(start) && day(now) && covered && !upTo.some((e) => e.ts > start && INCOMING.test(e.text))) {
+    out.push(`אף שורת "Incoming WhatsApp message" ב-${Math.round(l.quietMs / 60_000)} הדקות האחרונות (${hhmm(start)}–${hhmm(now)} UTC)`);
+  }
+  // 2. The latest webhook summary: messages dropped as old against the ones forwarded. A summary comes every 5 minutes and stays
+  //    the latest until the next one, so with `every: 1m` one bad summary is several bad runs: it alone can reach fail_after.
+  const sum = upTo.filter((e) => SUMMARY.test(e.text)).pop();
+  if (sum) {
+    const n = (k: string) => Number(new RegExp(`(?:^|\\s)${k}=(\\d+)`).exec(sum.text)?.[1] ?? NaN);
+    const old = n('old'), fwd = n('forwarded');
+    if (Number.isFinite(old) && Number.isFinite(fwd) && old > 0 && old > l.maxOldRatio * fwd) {
+      out.push(`בסיכום "Lumo automation webhook" של ${hhmm(sum.ts)} UTC: old=${old} מול forwarded=${fwd}, מעל ${Math.round(l.maxOldRatio * 100)}%`);
+    }
+  }
+  // 3. Send failures (Client.Timeout, 131016) per minute, in the minutes since the last run (the current one included).
+  const from = Math.floor((now - Math.max(everyMs, 60_000)) / 60_000) * 60_000;
+  const perMin = new Map<number, number>();
+  for (const e of upTo) if (e.ts >= from && SEND_FAILED.test(e.text)) { const m = Math.floor(e.ts / 60_000) * 60_000; perMin.set(m, (perMin.get(m) ?? 0) + 1); }
+  const worst = [...perMin].filter(([, c]) => c > l.maxSendErrorsPerMin).sort((a, b) => b[1] - a[1])[0];
+  if (worst) out.push(`${worst[1]} שורות של Client.Timeout או 131016 בדקה ${hhmm(worst[0])} UTC (הסף ${l.maxSendErrorsPerMin})`);
+  return out;
+}
+
+/** Read-only `kubectl get` (selector, container start) and `kubectl logs --since` on the cluster's master, filtered there.
+ *  A kubectl failure fails the pipeline (pipefail) and ssh with it: unknown. Only an answer that parses can fail. */
+export async function runWhatsappLogProbe(p: ProbeSpec, run: SshRun = runSsh, clock: () => number = Date.now): Promise<ProbeOutcome> {
+  const l = p.whatsappLog!;
+  const t0 = performance.now();
+  const lat = () => Math.round(performance.now() - t0);
+  // A summary line comes every 5 minutes, failures are counted since the last run: the window holds both, and a minute of margin.
+  const since = Math.ceil((Math.max(l.quietMs, 6 * 60_000, p.everyMs + 2 * 60_000) + 60_000) / 1000);
+  const k = `k3s kubectl -n ${q(l.ns)}`;
+  const script = ['set -o pipefail', `sel=$(${k} get ${q(l.resource)} -o go-template=${q(SELECTOR_TPL)})`,
+    `${k} get pods -l "\${sel%,}" -o go-template=${q(STARTED_TPL)}`,
+    `${k} logs ${q(l.resource)} --since=${since}s --timestamps | awk ${q(REMOTE_AWK)}`].join(' && ');
+  const cmd = `bash -c ${q(script)}`;
+  let out: string;
+  try {
+    out = await run(['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10',
+      ...(l.identityFile ? ['-i', l.identityFile] : []), l.host, cmd], undefined, p.timeoutMs);
+  } catch (e) { return { ok: false, unknown: true, status: null, latencyMs: lat(), error: (e as Error).message }; }
+  const log = parseWhatsappLog(out);
+  if (!log) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: `פלט kubectl logs לא מובן: ${stripAnsi(out).trim().slice(0, 120) || '(ריק)'}` };
+  const bad = whatsappLogBreaches(log, l, clock(), p.everyMs);
+  return { ok: !bad.length, status: null, latencyMs: lat(), error: bad.length ? `${l.resource}: ${bad.join('; ')}` : null };
 }
 
 const KUBELET_SEP = '@@nodes';
@@ -425,7 +542,7 @@ interface ProbeStateRow { probe_id: string; consecutive_failures: number; anomal
 export class ProbeRunner {
   probes: ProbeSpec[] = [];
   run: (p: ProbeSpec) => Promise<ProbeOutcome> = (p) => p.kind === 'disk' ? runDiskProbe(p) : p.kind === 'latency' ? runLatencyProbe(p)
-    : p.kind === 'kubelet' ? runKubeletProbe(p) : runHttpProbe(p);
+    : p.kind === 'kubelet' ? runKubeletProbe(p) : p.kind === 'whatsapp_log' ? runWhatsappLogProbe(p) : runHttpProbe(p);
   /** Second vantage point, asked before an anomaly wakes רותם. null = none configured. */
   witness: Witness | null;
   /** The same second vantage point for latency: ping from ci-host. null = none configured (then a shared event has no witness). */
@@ -638,7 +755,7 @@ export class ProbeRunner {
   private async confirm(crossedAll: ProbeSpec[]): Promise<void> {
     let crossed = crossedAll;
     const majority = this.majorityFailing();
-    // Disk and latency are measured from hq-host only: the witness checks http, nothing to verify from ci-host.
+    // Disk, latency and the log are measured from hq-host only: the witness checks http, nothing to verify from ci-host.
     for (const p of crossed.filter((c) => c.kind !== 'http')) this.openAnomaly(p);
     crossed = crossed.filter((c) => c.kind === 'http');
     if (!crossed.length) return;
@@ -716,6 +833,7 @@ export class ProbeRunner {
       this.mailbox.tell({ msg_id: `probe-${p.key}-recovered-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system',
         priority: 'next', body: p.kind === 'disk' ? `${p.key} חזר לתקין (${o.percent}% ב-${p.disk!.path} על ${p.disk!.host ?? 'local'}).`
           : p.kind === 'latency' && o.ping ? `${p.key} חזר לתקין (${p.latency!.host}: ${pingEvidence(o.ping)}).`
+          : p.kind === 'whatsapp_log' ? `${p.key} חזר לתקין (הלוג של ${p.whatsappLog!.resource} בלי חריגה).`
           : `${p.key} חזר לתקין (status=${o.status}, ${o.latencyMs}ms).` });
       this.store.emit('probe.recovered', this.cfg.monitoringLeadId, { probe: p.key });
     }
@@ -785,6 +903,7 @@ export class ProbeRunner {
       urgency: 'urgent', priority: 'now', body: [
         p.kind === 'disk' ? `חריגה בפרודקשן: ${p.key} (דיסק ${p.disk!.path} על ${p.disk!.host ?? 'local'}, הסף ${p.disk!.maxPercent}%)`
           : p.kind === 'latency' ? `חריגה בפרודקשן: ${p.key} (jitter ברשת אל ${p.latency!.host}: הספים avg ${p.latency!.maxAvgMs}ms, mdev ${p.latency!.maxMdevMs}ms, אובדן ${p.latency!.maxLossPercent}%)`
+          : p.kind === 'whatsapp_log' ? `חריגה בפרודקשן: ${p.key} (הלוג של ${p.whatsappLog!.ns}/${p.whatsappLog!.resource} ב-${p.whatsappLog!.host})`
           : `חריגה בפרודקשן: ${p.key} (${p.method} ${p.url})`,
         sustained ? `jitter מתמשך: ${JITTER_SUSTAIN_ROUNDS} דגימות ברצף בלי דגימה תקינה (JITTER_SUSTAIN_ROUNDS), גם כשהאובדן לא הגיע ל-fail_after. תקין לאחרונה: ${lastOk}.`
           : `${fails} כישלונות ברצף (fail_after=${p.failAfter}). תקין לאחרונה: ${lastOk}.`,
@@ -798,7 +917,7 @@ export class ProbeRunner {
   }
 
   summary() {
-    return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}), ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), every_ms: p.everyMs, ...(this.state(p.key) ?? {}) }));
+    return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}), ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.whatsappLog ? { whatsapp_log: p.whatsappLog.target } : {}), every_ms: p.everyMs, ...(this.state(p.key) ?? {}) }));
   }
 
   prune(olderThanMs = 7 * 86_400_000): void {
