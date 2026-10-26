@@ -303,6 +303,7 @@ test('hq start (with its loops) wakes a never-run lead by itself (#68)', async (
     await env.hq.start({ listen: false });
     await until(() => !!env.hq.shifts.get('ac-ceo-1'), 3000, 'ac-ceo woken by start');
     assert.ok(env.hq.mailbox.get('hq-lead-up-ac-ceo'));
+    assert.equal(env.hq.passkeys, undefined, 'a test never covers the shared Chrome\'s tabs (helpers: tab.passkeys off, cdpUrl dead)');
   } finally { await env.cleanup(); }
 });
 

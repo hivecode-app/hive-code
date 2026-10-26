@@ -302,6 +302,9 @@ export async function makeEnv(opts: { cfg?: Partial<HqConfig>; deps?: HqDeps; pr
     batching: { enabled: false, gatherMs: 10 * 60_000 }, ...opts.cfg });
   // The phone listener stays off unless a test asks for it (it would collide on 7422 across test files).
   cfg.tab.listen = opts.cfg?.tab?.listen ?? null;
+  // Never the shared Chrome on 9222 from a test: its tabs are his (rotem 27/10: a run covered them with passkeys and hung).
+  cfg.tab.cdpUrl = opts.cfg?.tab?.cdpUrl ?? 'http://127.0.0.1:1';
+  cfg.tab.passkeys = opts.cfg?.tab?.passkeys ?? false;
   const clock = new Clock();
   const launcher = new FakeLauncher();
   launcher.now = clock.now;

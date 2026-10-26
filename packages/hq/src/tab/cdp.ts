@@ -13,6 +13,8 @@ export class Cdp {
   private pending = new Map<number, Pending>();
   private sessions = new Map<string, SessionListener>();
   private httpUrl: string;
+  /** After close(): no call reopens the connection (a cover in flight would keep hq, or a test, alive). */
+  private closed = false;
   /** A new page target appeared (a tab or window opened). */
   onTargetCreated: (targetId: string) => void = () => {};
   /** A page target closed or detached (the agent closed its tab, Chrome restarted). */
@@ -27,12 +29,14 @@ export class Cdp {
   get connected(): boolean { return this.ws?.readyState === WebSocket.OPEN; }
 
   private connect(): Promise<WebSocket> {
+    if (this.closed) return Promise.reject(new Error('CDP client closed'));
     if (this.connected) return Promise.resolve(this.ws!);
     this.connecting ??= (async () => {
       const ver = await (await fetch(`${this.httpUrl}/json/version`, { signal: AbortSignal.timeout(5000) })).json() as { webSocketDebuggerUrl: string };
       // A Chrome that accepts the connection and never answers must not hang every caller (machines.md, 21/09).
       const ws = new WebSocket(ver.webSocketDebuggerUrl, { perMessageDeflate: false, maxPayload: 256 * 1024 * 1024, handshakeTimeout: 5000 });
       await new Promise((res, rej) => { ws.once('open', res); ws.once('error', rej); });
+      if (this.closed) { ws.close(); throw new Error('CDP client closed'); }
       ws.on('message', (raw) => this.onMessage(raw.toString()));
       ws.on('close', () => {
         if (this.ws !== ws) return;
@@ -102,6 +106,7 @@ export class Cdp {
   }
 
   close(): void {
+    this.closed = true;
     const ws = this.ws;
     this.ws = null;
     ws?.close();
