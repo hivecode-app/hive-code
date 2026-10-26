@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { makeEnv, until } from './helpers.ts';
-import { loadProbes, parseCharterProbes, parseDuration, runHttpProbe, runDiskProbe, runLatencyProbe, parsePing, pingBreaches, sshWitness } from '../src/probes.ts';
+import { ProbeRunner, loadProbes, parseCharterProbes, parseDuration, runHttpProbe, runDiskProbe, runLatencyProbe, parsePing, pingBreaches, sshWitness, sshPingWitness, jitterDigest } from '../src/probes.ts';
 
 // The example company (fixtures/README.md): its charters declare probes the way a real company's do.
 const COMPANY = join(import.meta.dirname, '..', '..', '..', 'fixtures', 'company-home', 'company');
@@ -375,24 +375,243 @@ test('latency probe: parsing, defaults, evidence; no reply at all fails; ping er
   assert.deepEqual([...new Set(hosts)], ['203.0.113.31', '203.0.113.37']);
 });
 
-test('latency probe: fail_after crossed → anomaly with the ping evidence and no witness; recovery note', async () => {
+test('latency probe: loss crosses fail_after → anomaly with the ping evidence, no http witness; recovery note', async () => {
   const env = await makeEnv({ projects: { 'tiki-bot-go': LATENCY } });
   try {
     const { hq, clock } = env;
-    const seq = [PING_JITTER, 'garbage', PING_JITTER, PING_OK];
+    const seq = [PING_LOSS, 'garbage', PING_LOSS, PING_OK];
     hq.probes.probes = hq.probes.probes.filter((p) => p.id === 'net-vmi1000011');
     hq.probes.run = (p) => runLatencyProbe(p, async () => seq.shift()!);
-    hq.probes.witness = async () => { throw new Error('latency must not be verified from ci-host'); };
+    hq.probes.witness = async () => { throw new Error('latency must not be verified by curl'); };
     const anomalies = () => hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'probe_anomaly'`).all() as { body: string }[];
     const step = async () => { await hq.probes.tick(); clock.advance(5 * 60_000 + 1000); };
-    await step(); await step(); // jitter, then unreadable output (unknown: the streak stays at 1)
+    await step(); await step(); // loss, then unreadable output (unknown: the streak stays at 1)
     assert.equal(anomalies().length, 0);
-    await step(); // jitter again → fail_after=2
+    await step(); // loss again → fail_after=2
     assert.equal(anomalies().length, 1);
     assert.match(anomalies()[0]!.body, /jitter ברשת אל 203\.0\.113\.31: הספים avg 10ms, mdev 20ms, אובדן 5%/);
-    assert.match(anomalies()[0]!.body, /min\/avg\/max\/mdev 0\.419\/82\.263\/199\.829\/64\.863ms/);
+    assert.match(anomalies()[0]!.body, /אובדן 10% \(אובדן מעל 5%\)/);
     await step(); // healthy
     assert.ok((hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'system'`).all() as { body: string }[])
       .some((m) => /net-vmi1000011 חזר לתקין \(203\.0\.113\.31: min\/avg\/max\/mdev 0\.271\/0\.39\/1\.066\/0\.165ms/.test(m.body)));
+  } finally { await env.cleanup(); }
+});
+
+// probe-alerts-spec (26/10): jitter wakes no one, a shared loss is one event, the owner hears of it only when it lasts and is real.
+const NODES = (n: number) => `# tiki-bot-go
+
+\`\`\`yaml
+probes:
+${Array.from({ length: n }, (_, i) => `  - {id: net-vmi${1000 + i}, latency: 10.0.0.${i + 1}, every: 5m, fail_after: 3}`).join('\n')}
+  - {id: api, http: https://api.test/h, every: 5m, fail_after: 2}
+\`\`\`
+`;
+const lossOut = (pct: number) => `20 packets transmitted, ${20 - pct / 5} received, ${pct}% packet loss, time 3901ms\nrtt min/avg/max/mdev = 0.300/0.400/0.900/0.100 ms\n`;
+const ROUND = 5 * 60_000;
+
+/** A latency env: `lossy(host, round)` says which nodes lose pings; http answers per `httpOk`. */
+async function netEnv(n: number, lossy: (host: string, round: number) => boolean, httpOk = () => true) {
+  const env = await makeEnv({ projects: { 'tiki-bot-go': NODES(n) } });
+  const { hq } = env;
+  let round = 0;
+  hq.probes.run = (p) => p.kind === 'http'
+    ? Promise.resolve(httpOk() ? { ok: true, status: 200, latencyMs: 40, error: null } : { ok: false, status: 503, latencyMs: 40, error: 'status 503, expected 200' })
+    : runLatencyProbe(p, async (h) => lossy(h, round) ? lossOut(20) : PING_OK);
+  hq.probes.host = () => ({ load1: 0.5, cpus: 8, freeMb: 9000 });
+  const step = async () => { await hq.probes.tick(); round++; env.clock.advance(ROUND); };
+  const to = (who: string, kind?: string) => hq.store.db.prepare(`SELECT kind, priority, body FROM messages WHERE to_identity = ?${kind ? ' AND kind = ?' : ''} ORDER BY rowid`)
+    .all(...(kind ? [who, kind] : [who])) as { kind: string; priority: string; body: string }[];
+  return { env, hq, step, to };
+}
+
+test('spec 1: three jitter samples without loss send nothing and the streak stays 0', async () => {
+  const env = await makeEnv({ projects: { 'tiki-bot-go': LATENCY } });
+  try {
+    const { hq, clock } = env;
+    hq.probes.probes = hq.probes.probes.filter((p) => p.id === 'net-vmi1000011');
+    hq.probes.run = (p) => runLatencyProbe(p, async () => PING_JITTER);
+    for (let i = 0; i < 3; i++) { await hq.probes.tick(); clock.advance(ROUND + 1000); }
+    assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM messages WHERE kind = 'probe_anomaly'`).get() as { n: number }).n, 0);
+    const st = hq.store.db.prepare(`SELECT consecutive_failures, anomaly_open FROM probe_state WHERE probe_id = 'tiki-bot-go/net-vmi1000011'`).get() as { consecutive_failures: number; anomaly_open: number };
+    assert.deepEqual({ ...st }, { consecutive_failures: 0, anomaly_open: 0 });
+    const rows = hq.store.db.prepare(`SELECT ok, jitter, loss_percent, avg_ms, mdev_ms FROM probe_results`).all() as { ok: number; jitter: number; loss_percent: number; avg_ms: number; mdev_ms: number }[];
+    assert.equal(rows.length, 3);
+    assert.deepEqual({ ...rows[0]! }, { ok: 0, jitter: 1, loss_percent: 0, avg_ms: 82.263, mdev_ms: 64.863 }, 'recorded as jitter, with the numbers');
+  } finally { await env.cleanup(); }
+});
+
+test('spec 2: three samples with 10% loss send one alert, as before', async () => {
+  const { env, step, to } = await netEnv(1, () => true);
+  try {
+    for (let i = 0; i < 4; i++) await step();
+    const a = to('rotem', 'probe_anomaly');
+    assert.equal(a.length, 1);
+    assert.equal(a[0]!.priority, 'now');
+    assert.match(a[0]!.body, /tiki-bot-go\/net-vmi1000/);
+  } finally { await env.cleanup(); }
+});
+
+test('spec 3: 12 nodes losing in one round → one combined message with 12 names, none per node', async () => {
+  const lossy = new Set(Array.from({ length: 12 }, (_, i) => `10.0.0.${i + 1}`));
+  const { env, hq, step, to } = await netEnv(16, (h, r) => r === 0 && lossy.has(h));
+  try {
+    hq.probes.pingWitness = async (hosts) => new Map(hosts.map((h) => [h, parsePing(PING_OK)]));
+    await step();
+    const a = to('rotem', 'probe_anomaly');
+    assert.equal(a.length, 1);
+    assert.match(a[0]!.body, /נפילה משותפת ברשת/);
+    assert.match(a[0]!.body, /12 מתוך 16 נודים איבדו pings באותו סבב \(4 תקינים\)/);
+    for (let i = 0; i < 12; i++) assert.match(a[0]!.body, new RegExp(`net-vmi${1000 + i} \\(10\\.0\\.0\\.${i + 1}\\): אובדן 20%`));
+    assert.match(a[0]!.body, /load 0\.5 על 8 ליבות/);
+    assert.match(a[0]!.body, /כל ה-1 תקינים/);
+    assert.match(a[0]!.body, /ping מ-ci-host: 0 מתוך 12 מאבדים גם משם/);
+    await step(); // back to normal
+    assert.equal(to('rotem', 'probe_anomaly').length, 1);
+    assert.ok(to('rotem', 'system').some((m) => /הנפילה המשותפת ברשת נגמרה/.test(m.body)));
+    assert.equal(to('owner').length, 0, 'one round never reaches him');
+  } finally { await env.cleanup(); }
+});
+
+test('spec 4: a shared loss that lasts two rounds reaches the owner (http failing); one round does not', async () => {
+  const { env, hq, step, to } = await netEnv(16, (h, r) => r < 2 && Number(h.split('.')[3]) <= 12, () => false);
+  try {
+    hq.probes.pingWitness = async (hosts) => new Map(hosts.map((h) => [h, parsePing(lossOut(20))]));
+    await step();
+    assert.equal(to('owner').length, 0, 'after one round: nothing to him');
+    await step();
+    const o = to('owner');
+    assert.equal(o.length, 1);
+    assert.equal(o[0]!.kind, 'probe_anomaly');
+    assert.equal(o[0]!.priority, 'now');
+    assert.match(o[0]!.body, /נמשכת 5 דקות/);
+    assert.match(o[0]!.body, /probes של http: 1 מתוך 1 נכשלים/);
+    assert.match(o[0]!.body, /ping מ-ci-host: 12 מתוך 12 מאבדים גם משם/);
+    const inbox = hq.inbox.open().filter((i) => i.kind === 'incident');
+    assert.equal(inbox.length, 1, 'in "waiting for you"');
+    assert.equal(to('rotem', 'probe_anomaly').filter((m) => /net-vmi/.test(m.body) && !/נפילה משותפת/.test(m.body)).length, 0, 'no per-node alert inside the event');
+    await step(); // recovered
+    assert.ok(to('owner').some((m) => /חזר לתקין/.test(m.body)));
+    assert.equal(hq.inbox.open().filter((i) => i.kind === 'incident').length, 0);
+  } finally { await env.cleanup(); }
+});
+
+test('spec 4 (yoav): lasting, but every http fine and ci-host answers → stays with רותם; no witness → the owner', async () => {
+  const lossy = (h: string) => Number(h.split('.')[3]) <= 6;
+  const a = await netEnv(8, lossy);
+  try {
+    a.hq.probes.pingWitness = async (hosts) => new Map(hosts.map((h) => [h, parsePing(PING_OK)]));
+    for (let i = 0; i < 4; i++) await a.step();
+    assert.equal(a.to('owner').length, 0);
+    const held = a.to('rotem', 'system').filter((m) => /לא יצאה התראה/.test(m.body));
+    assert.equal(held.length, 1, 'one note that it was held');
+    assert.match(held[0]!.body, /מ-ci-host הנודים תקינים/);
+  } finally { await a.env.cleanup(); }
+  const b = await netEnv(8, lossy);
+  try {
+    b.hq.probes.pingWitness = async () => ({ unavailable: 'ssh timeout' });
+    await b.step(); await b.step();
+    assert.equal(b.to('owner').length, 1);
+    assert.match(b.to('owner')[0]!.body, /אין witness \(ssh timeout\)/);
+  } finally { await b.env.cleanup(); }
+});
+
+test('spec 6: 3 nodes losing together alert per node as usual; 4 nodes give one combined alert', async () => {
+  const three = await netEnv(8, (h) => Number(h.split('.')[3]) <= 3);
+  try {
+    for (let i = 0; i < 3; i++) await three.step();
+    const a = three.to('rotem', 'probe_anomaly');
+    assert.equal(a.length, 3);
+    assert.ok(a.every((m) => /^חריגה בפרודקשן: tiki-bot-go\/net-vmi100[012]/.test(m.body)));
+  } finally { await three.env.cleanup(); }
+  const four = await netEnv(8, (h) => Number(h.split('.')[3]) <= 4);
+  try {
+    four.hq.probes.pingWitness = async (hosts) => new Map(hosts.map((h) => [h, parsePing(PING_OK)]));
+    for (let i = 0; i < 3; i++) await four.step();
+    const a = four.to('rotem', 'probe_anomaly');
+    assert.equal(a.length, 1);
+    assert.match(a[0]!.body, /4 מתוך 8 נודים/);
+  } finally { await four.env.cleanup(); }
+});
+
+test('latency rounds stay in step: a node a few seconds off joins the round of the others', async () => {
+  const { env, hq, step } = await netEnv(4, () => false);
+  try {
+    await step();
+    hq.store.db.prepare(`UPDATE probe_state SET last_run_at = last_run_at + 20000 WHERE probe_id = 'tiki-bot-go/net-vmi1001'`).run();
+    await step();
+    const at = hq.store.db.prepare(`SELECT DISTINCT last_run_at FROM probe_state WHERE probe_id LIKE '%net-vmi%'`).all();
+    assert.equal(at.length, 1, 'one round, one time');
+  } finally { await env.cleanup(); }
+});
+
+test('spec 5: 4 jitter samples a day for 3 days → a Contabo ticket draft; for 2 days → none', async () => {
+  const env = await makeEnv({ projects: { 'tiki-bot-go': NODES(2) } });
+  try {
+    const { hq, clock } = env;
+    const now = clock.now();
+    const ins = hq.store.db.prepare(`INSERT INTO probe_results (probe_id, ok, status, latency_ms, error, ts, jitter, loss_percent, avg_ms, mdev_ms) VALUES (?, 0, NULL, ?, NULL, ?, 1, 0, ?, ?)`);
+    for (let d = 0; d < 3; d++) for (let k = 0; k < 4; k++) ins.run('tiki-bot-go/net-vmi1000', 50 + d * 10 + k, now - d * 86_400_000 - (k + 1) * 3_600_000, 50 + d * 10 + k, 30 + k);
+    for (let d = 0; d < 2; d++) for (let k = 0; k < 4; k++) ins.run('tiki-bot-go/net-vmi1001', 40, now - d * 86_400_000 - (k + 1) * 3_600_000, 40, 25);
+    const body = jitterDigest(hq.store.db, hq.probes.probes, now)!;
+    assert.match(body, /tiki-bot-go\/net-vmi1000 \(10\.0\.0\.1\): jitter 4, אובדן 0, avg מקסימלי 53ms/);
+    assert.match(body, /tiki-bot-go\/net-vmi1001 \(10\.0\.0\.2\): jitter 4/);
+    assert.match(body, /vmi1000 \(10\.0\.0\.1\), 3 ימים ברצף/);
+    assert.match(body, /Subject: Recurring network jitter on vmi1000 \(10\.0\.0\.1\)/);
+    assert.match(body, /- 24h to 20\/10: 4 samples/);
+    assert.match(body, /The worst samples:\n- 2026-10-18 05:00 UTC: avg 73ms, mdev 33ms\n- 2026-10-18 06:00 UTC: avg 72ms/, 'the worst samples, with time in UTC');
+    assert.doesNotMatch(body, /vmi1001 \(10\.0\.0\.2\), \d ימים ברצף/, 'two days is not chronic');
+    // Through the runner: once a day, from 06:00 Israel time, to רותם, `later`.
+    hq.probes.run = async (p) => p.kind === 'http' ? { ok: true, status: 200, latencyMs: 1, error: null } : runLatencyProbe(p, async () => PING_OK);
+    await hq.probes.tick();
+    clock.advance(60_000);
+    await hq.probes.tick();
+    const d = hq.store.db.prepare(`SELECT priority, body FROM messages WHERE to_identity = 'rotem' AND body LIKE 'סיכום jitter יומי%'`).all() as { priority: string }[];
+    assert.equal(d.length, 1);
+    assert.equal(d[0]!.priority, 'later');
+  } finally { await env.cleanup(); }
+});
+
+test('sshPingWitness: all hosts in one ssh, a summary per host; ssh failure or nothing readable = unavailable', async () => {
+  const calls: string[][] = [];
+  const mk = (out: string | Error) => sshPingWitness({ ssh: 'root@ci-host', identityFile: '/k' }, async (args) => { calls.push(args); if (out instanceof Error) throw out; return out; });
+  const r = await mk(`@@ 10.0.0.1\n${PING_OK}@@ 10.0.0.2\n${lossOut(20)}@@ 10.0.0.3\nping: sendmsg: Network is unreachable\n`)(['10.0.0.1', '10.0.0.2', '10.0.0.3', '-x'], 20_000);
+  assert.ok(r instanceof Map);
+  assert.equal(r.get('10.0.0.1')!.lossPercent, 0);
+  assert.equal(r.get('10.0.0.2')!.lossPercent, 20);
+  assert.equal(r.get('10.0.0.3'), null);
+  const cmd = calls[0]!.join(' ');
+  assert.match(cmd, /-i \/k root@ci-host for h in '10\.0\.0\.1' '10\.0\.0\.2' '10\.0\.0\.3'; do/);
+  assert.doesNotMatch(cmd, /-x/, 'a host that could be an option never reaches the shell');
+  assert.match(cmd, /ping -c 20 -i 0\.2 -W 2 -q -- "\$h"/);
+  assert.ok('unavailable' in (await mk(new Error('ssh exit 255'))(['10.0.0.1'], 20_000)));
+  assert.ok('unavailable' in (await mk('garbage')(['10.0.0.1'], 20_000)));
+});
+
+test('shared event: a restart continues it, and the owner\'s item still closes when it ends', async () => {
+  const { env, hq, step, to } = await netEnv(8, (h, r) => r < 2 && Number(h.split('.')[3]) <= 6, () => false);
+  try {
+    hq.probes.pingWitness = async () => ({ unavailable: 'ssh timeout' });
+    await step(); await step();
+    assert.equal(hq.inbox.open().filter((i) => i.kind === 'incident').length, 1);
+    // hq restarts: a new runner over the same store.
+    const fresh = new ProbeRunner(hq.store, env.cfg, hq.mailbox, hq.inbox);
+    fresh.probes = hq.probes.probes;
+    fresh.run = hq.probes.run;
+    fresh.host = hq.probes.host;
+    await fresh.tick();
+    assert.equal(to('rotem', 'probe_anomaly').filter((m) => /נפילה משותפת ברשת:/.test(m.body)).length, 1, 'not opened a second time');
+    assert.ok(to('owner').some((m) => /חזר לתקין/.test(m.body)));
+    assert.equal(hq.inbox.open().filter((i) => i.kind === 'incident').length, 0);
+  } finally { await env.cleanup(); }
+});
+
+test('shared event: a node that starts losing after it was reported is told to רותם', async () => {
+  const { env, hq, step, to } = await netEnv(8, (h, r) => Number(h.split('.')[3]) <= (r === 0 ? 4 : 5));
+  try {
+    hq.probes.pingWitness = async (hosts) => new Map(hosts.map((h) => [h, parsePing(PING_OK)]));
+    await step(); await step(); await step();
+    const j = to('rotem', 'system').filter((m) => /הצטרפו לנפילה המשותפת/.test(m.body));
+    assert.equal(j.length, 1);
+    assert.match(j[0]!.body, /net-vmi1004 \(10\.0\.0\.5\): אובדן 20%/);
   } finally { await env.cleanup(); }
 });

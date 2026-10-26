@@ -586,6 +586,14 @@ const MIGRATIONS: string[] = [
   `
   CREATE INDEX IF NOT EXISTS messages_pair ON messages(from_identity, to_identity, created_at);
   `,
+  // v32: a latency sample's numbers (probes.ts). `jitter` = over avg/mdev with loss under the threshold: recorded, wakes no one,
+  // and counted in the daily digest by node, whose ticket draft needs avg and mdev of the worst samples.
+  `
+  ALTER TABLE probe_results ADD COLUMN jitter INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE probe_results ADD COLUMN loss_percent REAL;
+  ALTER TABLE probe_results ADD COLUMN avg_ms REAL;
+  ALTER TABLE probe_results ADD COLUMN mdev_ms REAL;
+  `,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

@@ -7,7 +7,10 @@
 // No answer (timeout, ssh failed, garbage output) is "unknown": not a failure, never counted toward fail_after.
 // For latency, 100% loss is an answer (a failure); hosts that drop ICMP stay out of the charter.
 // `fail_after` consecutive failures → one `now` message to רותם with the evidence; recovery → one note.
-import { pre } from '@company/shared';
+// Latency (memory/company/monitoring/probe-alerts-spec.md, 26/10): over avg/mdev with the loss under its threshold is jitter,
+// recorded and counted in a daily digest by node, never a wake-up. More than SHARED_MIN_NODES nodes losing pings in one round
+// is one event; it reaches the owner only when it lasts past SHARED_PERSIST_MS and http fails too or there is no witness.
+import { OWNER, pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { loadavg, cpus, homedir } from 'node:os';
@@ -18,6 +21,7 @@ import { parse } from 'yaml';
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import type { Mailbox } from './mailbox.ts';
+import type { Inbox } from './inbox.ts';
 
 export interface ProbeSpec {
   key: string;              // <project>/<id>
@@ -234,6 +238,108 @@ export function hostLoad(): { load1: number; cpus: number; freeMb: number } {
   return { load1: Math.round(loadavg()[0]! * 100) / 100, cpus: cpus().length, freeMb };
 }
 
+/** What ci-host saw pinging each host (null = no readable summary for it); `unavailable` = ci-host could not be asked. */
+export type PingWitness = (hosts: string[], timeoutMs: number) => Promise<Map<string, PingStats | null> | { unavailable: string }>;
+
+/** The same ping as the probe, run on the witness machine (ci-host) for all the hosts at once, in parallel, over one ssh. */
+export function sshPingWitness(w: { ssh: string; identityFile: string | null }, run: SshRun = runSsh): PingWitness {
+  return async (hosts, timeoutMs) => {
+    const safe = hosts.filter(isPingHost);
+    if (!safe.length) return { unavailable: 'אין כתובות לבדוק' };
+    // One printf per host: each block is a single small write, so parallel blocks don't interleave.
+    const cmd = `for h in ${safe.map(q).join(' ')}; do (o=$(ping -c 20 -i 0.2 -W 2 -q -- "$h" 2>&1); printf '@@ %s\\n%s\\n' "$h" "$o") & done; wait; true`;
+    const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(w.identityFile ? ['-i', w.identityFile] : []), w.ssh, cmd];
+    let out: string;
+    try { out = await run(args, undefined, timeoutMs + 15_000); } catch (e) { return { unavailable: (e as Error).message }; }
+    const seen = new Map<string, PingStats | null>();
+    for (const block of out.split(/^@@ /m).slice(1)) {
+      const nl = block.indexOf('\n');
+      const host = (nl < 0 ? block : block.slice(0, nl)).trim();
+      if (safe.includes(host)) seen.set(host, parsePing(nl < 0 ? '' : block.slice(nl + 1)));
+    }
+    if (![...seen.values()].some(Boolean)) return { unavailable: `תשובה לא מובנת מ-ping ב-ci-host: ${out.trim().slice(0, 80) || '(ריק)'}` };
+    return seen;
+  };
+}
+
+/** More than this many latency probes losing pings in one round is one network event, not an alert per node. */
+export const SHARED_MIN_NODES = 3;
+/** A shared event reaches the owner only once it outlasted this: at `every: 5m`, into the next round. */
+export const SHARED_PERSIST_MS = 5 * 60_000;
+/** Latency probes due within this of one that is due run with it, so a round of latency probes is one tick. */
+const ROUND_SLACK_MS = 60_000;
+/** The daily jitter digest goes out from this hour, Israel time. */
+export const DIGEST_HOUR = 6;
+/** Chronic jitter: more than CHRONIC_PER_DAY jitter samples a day, CHRONIC_DAYS days in a row → a ticket draft for Contabo. */
+export const CHRONIC_PER_DAY = 3;
+export const CHRONIC_DAYS = 3;
+const DAY_MS = 86_400_000;
+
+/** Over avg or mdev only, the loss under its threshold: jitter. Recorded, counted in the digest, wakes no one. */
+export const jitterOnly = (p: ProbeSpec, o: ProbeOutcome): boolean =>
+  p.kind === 'latency' && !o.ok && !o.unknown && !!o.ping && o.ping.received > 0 && o.ping.lossPercent <= p.latency!.maxLossPercent;
+
+/** A latency sample that failed on loss (100% included). */
+export const lossFailed = (p: ProbeSpec, o: ProbeOutcome): boolean => p.kind === 'latency' && !o.ok && !o.unknown && !jitterOnly(p, o);
+
+/** `25/10` and the hour, in Israel time. */
+function israel(ts: number): { date: string; day: string; hour: number } {
+  const f = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' })
+    .formatToParts(ts).map((x) => [x.type, x.value]));
+  return { date: `${f.year}-${f.month}-${f.day}`, day: `${f.day}/${f.month}`, hour: Number(f.hour) };
+}
+
+const vpsName = (p: ProbeSpec): string => /vmi\d+/.exec(p.id)?.[0] ?? p.id;
+
+interface DigestRow { ok: number; jitter: number; loss_percent: number | null; avg_ms: number | null; mdev_ms: number | null; latency_ms: number | null; ts: number }
+
+/** The daily digest (spec §4): the last 24 hours by node, and a ready ticket draft for a node with chronic jitter. null = no latency probes. */
+export function jitterDigest(db: Store['db'], probes: ProbeSpec[], now: number): string | null {
+  const latency = probes.filter((p) => p.kind === 'latency');
+  if (!latency.length) return null;
+  const lines: string[] = ['סיכום jitter יומי, 24 השעות האחרונות לפי נוד:'];
+  const tickets: string[] = [];
+  for (const p of latency) {
+    const rows = db.prepare('SELECT ok, jitter, loss_percent, avg_ms, mdev_ms, latency_ms, ts FROM probe_results WHERE probe_id = ? AND ts > ? AND ts <= ?')
+      .all(p.key, now - 7 * DAY_MS, now) as unknown as DigestRow[];
+    const avg = (r: DigestRow) => r.avg_ms ?? r.latency_ms;
+    const day = rows.filter((r) => r.ts > now - DAY_MS);
+    const jit = day.filter((r) => r.jitter === 1).length;
+    const loss = day.filter((r) => r.ok === 0 && r.jitter === 0 && r.loss_percent != null).length; // rows from before v32 carry no loss
+    const maxAvg = Math.max(-1, ...day.map((r) => avg(r) ?? -1));
+    lines.push(`- ${p.key} (${p.latency!.host}): jitter ${jit}, אובדן ${loss}, avg מקסימלי ${maxAvg >= 0 ? `${maxAvg}ms` : '—'}`);
+    // Days counted back from now, 24 hours each; the streak is the run of days over the bar ending today.
+    const perDay = Array.from({ length: 7 }, (_, i) => rows.filter((r) => r.jitter === 1 && r.ts > now - (i + 1) * DAY_MS && r.ts <= now - i * DAY_MS));
+    let streak = 0;
+    while (streak < perDay.length && perDay[streak]!.length > CHRONIC_PER_DAY) streak++;
+    if (streak < CHRONIC_DAYS) continue;
+    const days = perDay.slice(0, streak).reverse();
+    const worst = days.flat().sort((a, b) => (avg(b) ?? 0) - (avg(a) ?? 0)).slice(0, 3);
+    const end = (i: number) => israel(now - (streak - 1 - i) * DAY_MS).day;
+    tickets.push([
+      `${vpsName(p)} (${p.latency!.host}), ${streak} ימים ברצף:`,
+      '```',
+      `Subject: Recurring network jitter on ${vpsName(p)} (${p.latency!.host})`,
+      '',
+      `We measure latency to ${vpsName(p)} (${p.latency!.host}) every few minutes with 20 pings (ping -c 20 -i 0.2).`,
+      `For the last ${streak} days in a row the round-trip time has repeatedly jumped far above normal, without packet loss:`,
+      ...days.map((d, i) => `- 24h to ${end(i)}: ${d.length} samples over our threshold (avg > ${p.latency!.maxAvgMs}ms or mdev > ${p.latency!.maxMdevMs}ms)`),
+      'The worst samples:',
+      ...worst.map((r) => `- ${new Date(r.ts).toISOString().slice(0, 16).replace('T', ' ')} UTC: avg ${avg(r) ?? '?'}ms, mdev ${r.mdev_ms ?? '?'}ms`),
+      'Please check the host node and the network path of this VPS.',
+      '```',
+    ].join('\n'));
+  }
+  if (tickets.length) lines.push('', `jitter קבוע (יותר מ-${CHRONIC_PER_DAY} ביום, ${CHRONIC_DAYS} ימים ברצף ויותר): המלצה לטיקט ב-Contabo, נוסח מוכן להדבקה.`, ...tickets);
+  else lines.push('', 'אין נוד עם jitter קבוע.');
+  return lines.join('\n');
+}
+
+/** One network event: more than SHARED_MIN_NODES latency probes lost pings in one round. Kept in meta, so a restart
+ *  continues it (and closes what the owner was sent) instead of opening a second one. */
+interface SharedOutage { since: number; lastRound: number; rounds: number; members: Set<string>; owner: boolean; held: boolean }
+const OUTAGE_META = 'probes.shared_outage';
+
 interface ProbeStateRow { probe_id: string; consecutive_failures: number; anomaly_open: number; last_run_at: number | null; last_ok_at: number | null }
 
 export class ProbeRunner {
@@ -241,18 +347,24 @@ export class ProbeRunner {
   run: (p: ProbeSpec) => Promise<ProbeOutcome> = (p) => p.kind === 'disk' ? runDiskProbe(p) : p.kind === 'latency' ? runLatencyProbe(p) : runHttpProbe(p);
   /** Second vantage point, asked before an anomaly wakes רותם. null = none configured. */
   witness: Witness | null;
+  /** The same second vantage point for latency: ping from ci-host. null = none configured (then a shared event has no witness). */
+  pingWitness: PingWitness | null;
   host: () => { load1: number; cpus: number; freeMb: number } = hostLoad;
   private measurerEpisode = false;
+  private outageLoaded: SharedOutage | null | undefined;
   private inflight = new Set<string>();
 
   private store: Store;
   private cfg: HqConfig;
   private mailbox: Mailbox;
-  constructor(store: Store, cfg: HqConfig, mailbox: Mailbox) {
+  private inbox: Inbox | null;
+  constructor(store: Store, cfg: HqConfig, mailbox: Mailbox, inbox: Inbox | null = null) {
     this.store = store;
     this.cfg = cfg;
     this.mailbox = mailbox;
+    this.inbox = inbox;
     this.witness = cfg.probeWitness ? sshWitness(cfg.probeWitness) : null;
+    this.pingWitness = cfg.probeWitness ? sshPingWitness(cfg.probeWitness) : null;
   }
 
   get toggleKey(): string { return `${this.cfg.monitoringLeadId}/prod-probes`; }
@@ -273,16 +385,156 @@ export class ProbeRunner {
     // A.6: an automation that isn't written in its team's contract doesn't exist. The switch is rotem/prod-probes.
     if (!this.store.toggle(this.toggleKey)) return;
     const now = this.store.now();
-    const due = this.probes.filter((p) => p.kind !== 'unsupported' && !this.inflight.has(p.key))
-      .filter((p) => { const s = this.state(p.key); return !s?.last_run_at || now - s.last_run_at >= p.everyMs; });
+    const isDue = (p: ProbeSpec, slack = 0) => { const s = this.state(p.key); return !s?.last_run_at || now - s.last_run_at >= p.everyMs - slack; };
+    const runnable = this.probes.filter((p) => p.kind !== 'unsupported' && !this.inflight.has(p.key));
+    // A round of latency is one tick: one that is due takes along those almost due, and they all record this tick's time.
+    const latencyDue = runnable.some((p) => p.kind === 'latency' && isDue(p));
+    const due = runnable.filter((p) => isDue(p) || (latencyDue && p.kind === 'latency' && isDue(p, ROUND_SLACK_MS)));
     const crossed: ProbeSpec[] = [];
+    const round: { p: ProbeSpec; o: ProbeOutcome }[] = [];
     await Promise.all(due.map(async (p) => {
       this.inflight.add(p.key);
-      try { if (this.record(p, await this.run(p), true) === 'crossed') crossed.push(p); } finally { this.inflight.delete(p.key); }
+      try {
+        const o = await this.run(p);
+        if (p.kind === 'latency') round.push({ p, o });
+        if (this.record(p, o, true, now) === 'crossed') crossed.push(p);
+      } finally { this.inflight.delete(p.key); }
     }));
-    if (crossed.length) await this.confirm(crossed);
+    if (round.length) await this.sharedRound(round, now);
+    // A node inside an open shared event has no anomaly of its own: the event speaks for it.
+    const own = crossed.filter((p) => !this.outage?.members.has(p.key));
+    if (own.length) await this.confirm(own);
     // The measurer episode is about http (the witness): a disk or a jittery node failing for days must not keep it muted.
-    else if (!this.probes.some((p) => p.kind === 'http' && (this.state(p.key)?.consecutive_failures ?? 0) > 0)) this.measurerEpisode = false;
+    else if (!crossed.length && !this.probes.some((p) => p.kind === 'http' && (this.state(p.key)?.consecutive_failures ?? 0) > 0)) this.measurerEpisode = false;
+    this.digest(now);
+  }
+
+  /** The daily jitter digest to רותם, once a day from DIGEST_HOUR Israel time (part of prod-probes, its switch). */
+  private digest(now: number): void {
+    const il = israel(now);
+    if (il.hour < DIGEST_HOUR) return;
+    const key = `probes.jitter_digest.${il.date}`;
+    if (this.store.getMeta(key)) return;
+    const body = jitterDigest(this.store.db, this.probes, now);
+    if (body) this.mailbox.tell({ msg_id: `probe-jitter-digest-${il.date}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system', priority: 'later', body });
+    this.store.setMeta(key, String(now)); // after it went out: a failure tries again next tick (the msg_id keeps it to one)
+    if (body) this.store.emit('probe.jitter_digest', this.cfg.monitoringLeadId, { date: il.date });
+  }
+
+  private get outage(): SharedOutage | null {
+    if (this.outageLoaded === undefined) {
+      let o: SharedOutage | null = null;
+      try {
+        const j = JSON.parse(this.store.getMeta(OUTAGE_META) || 'null') as (Omit<SharedOutage, 'members'> & { members: string[] }) | null;
+        if (j) o = { ...j, members: new Set(j.members) };
+      } catch { /* unreadable: no event */ }
+      this.outageLoaded = o;
+    }
+    return this.outageLoaded;
+  }
+
+  private set outage(o: SharedOutage | null) {
+    this.outageLoaded = o;
+    this.store.setMeta(OUTAGE_META, o ? JSON.stringify({ ...o, members: [...o.members] }) : '');
+  }
+
+  /** http that really fails: reached its fail_after, or has an anomaly open. One blip in the same round wakes no one. */
+  private failingHttp(): ProbeSpec[] {
+    return this.probes.filter((p) => {
+      if (p.kind !== 'http') return false;
+      const s = this.state(p.key);
+      return !!s && (s.anomaly_open === 1 || s.consecutive_failures >= p.failAfter);
+    });
+  }
+
+  /** ci-host's ping to the nodes that lost here: a line per node, and whether ci-host could be asked at all. */
+  private async ci-host(lost: { p: ProbeSpec; o: ProbeOutcome }[]): Promise<{ available: boolean; lines: string[] }> {
+    const w = this.pingWitness ? await this.pingWitness(lost.map(({ p }) => p.latency!.host), Math.max(...lost.map(({ p }) => p.timeoutMs)))
+      : { unavailable: 'לא הוגדרה נקודה שנייה' };
+    if ('unavailable' in w) return { available: false, lines: [`ping מ-ci-host: אין witness (${w.unavailable}).`] };
+    const there = lost.map(({ p }) => ({ p, s: w.get(p.latency!.host) ?? null }));
+    const alsoLost = there.filter(({ p, s }) => s && s.lossPercent > p.latency!.maxLossPercent).length;
+    const read = there.filter(({ s }) => s).length;
+    return { available: true, lines: [
+      `ping מ-ci-host: ${alsoLost} מתוך ${read} מאבדים גם משם. ${alsoLost === 0 ? 'מ-ci-host הנודים תקינים: כנראה הנתיב של hq-host, לא הנודים.' : alsoLost * 2 > read ? 'גם ci-host רואה אובדן: כנראה בנודים או ב-Contabo.' : 'תמונה חלקית.'}`,
+      ...there.map(({ p, s }) => `- ${p.key} מ-ci-host: ${s ? pingEvidence(s) : 'אין סיכום מובן'}`),
+    ] };
+  }
+
+  /** The shared-event part of a body: the nodes, how many were checked, the measurer, and http at this moment. */
+  private sharedFacts(lost: { p: ProbeSpec; o: ProbeOutcome }[], checked: number): string[] {
+    const host = this.host();
+    const http = this.probes.filter((p) => p.kind === 'http');
+    const bad = this.failingHttp();
+    return [
+      `${lost.length} מתוך ${checked} נודים איבדו pings באותו סבב (${checked - lost.length} תקינים):`,
+      ...lost.map(({ p, o }) => `- ${p.key} (${p.latency!.host}): אובדן ${o.ping?.lossPercent ?? '?'}%, avg ${o.ping?.avg ?? '—'}ms`),
+      `hq-host, שממנו יוצאים ה-pings: load ${host.load1} על ${host.cpus} ליבות, ${host.freeMb >= 0 ? `${host.freeMb}MB RAM פנויים` : 'RAM לא ידוע'}.`,
+      !http.length ? 'probes של http: אין.' : bad.length ? `probes של http: ${bad.length} מתוך ${http.length} נכשלים (${bad.map((p) => p.key).join(', ')}).`
+        : `probes של http: כל ה-${http.length} תקינים. זה רמז שהבעיה בנתיב הרשת ולא בשירותים.`,
+    ];
+  }
+
+  /** One round of latency probes (spec §3): more than SHARED_MIN_NODES losing pings is one event, not an alert per node. */
+  private async sharedRound(round: { p: ProbeSpec; o: ProbeOutcome }[], now: number): Promise<void> {
+    const known = round.filter(({ o }) => !o.unknown);
+    if (known.length <= SHARED_MIN_NODES) return; // too few answers to call a shared event either way
+    const lost = known.filter(({ p, o }) => lossFailed(p, o));
+    const lead = this.cfg.monitoringLeadId;
+    const o = this.outage;
+    if (lost.length > SHARED_MIN_NODES) {
+      if (!o) {
+        this.outage = { since: now, lastRound: now, rounds: 1, members: new Set(lost.map(({ p }) => p.key)), owner: false, held: false };
+        const ci-host = await this.ci-host(lost);
+        this.mailbox.tell({ msg_id: `probe-shared-${now}`, from: 'hq', to: lead, kind: 'probe_anomaly', urgency: 'urgent', priority: 'now', body: [
+          'נפילה משותפת ברשת: אירוע אחד, לא התראה לכל נוד.', ...this.sharedFacts(lost, known.length), ...ci-host.lines,
+          `אם זה נמשך גם בסבב הבא (יותר מ-${SHARED_PERSIST_MS / 60_000} דקות), תצא התראה דחופה ${pre('ל', this.mailbox.names.owner.name)}, אבל רק אם נכשל גם probe של http או שאין witness.`,
+        ].join('\n') });
+        this.store.emit('probe.shared_outage', lead, { nodes: lost.map(({ p }) => p.key), checked: known.length, witness: ci-host.available });
+        return;
+      }
+      if (now > o.lastRound) { o.rounds++; o.lastRound = now; }
+      // A node that starts losing after the event was reported is told, or it would be silenced without anyone hearing of it.
+      const joined = lost.filter(({ p }) => !o.members.has(p.key));
+      for (const { p } of joined) o.members.add(p.key);
+      if (joined.length) this.mailbox.tell({ msg_id: `probe-shared-${o.since}-joined-${now}`, from: 'hq', to: lead, kind: 'system', priority: 'next',
+        body: [`הצטרפו לנפילה המשותפת ברשת (עכשיו ${lost.length} מתוך ${known.length} נודים):`,
+          ...joined.map(({ p, o: r }) => `- ${p.key} (${p.latency!.host}): אובדן ${r.ping?.lossPercent ?? '?'}%, avg ${r.ping?.avg ?? '—'}ms`)].join('\n') });
+      this.outage = o;
+      if (o.owner || o.rounds < 2 || now - o.since < SHARED_PERSIST_MS) return;
+      // Lasting. The owner hears of it only when something says it is real: http failing too, or no second point to say otherwise.
+      const bad = this.failingHttp();
+      const ci-host = await this.ci-host(lost);
+      const minutes = Math.round((now - o.since) / 60_000);
+      if (bad.length || !ci-host.available) {
+        o.owner = true;
+        this.outage = o;
+        const ref = `probe-shared-${o.since}`;
+        const body = [`נפילה משותפת ברשת שנמשכת ${minutes} דקות.`, ...this.sharedFacts(lost, known.length), ...ci-host.lines,
+          `${this.mailbox.label(lead)} כבר על זה. observe-only: לא נעשתה פעולה על הפרודקשן.`].join('\n');
+        this.mailbox.tell({ msg_id: `${ref}-owner`, from: lead, to: OWNER, kind: 'probe_anomaly', urgency: 'urgent', priority: 'now', body });
+        this.inbox?.add({ kind: 'incident', urgency: 'urgent', from_identity: lead, ref, dedupe_key: ref,
+          title: `נפילה ברשת: ${lost.length} נודים מאבדים pings כבר ${minutes} דקות`, body });
+        this.store.emit('probe.shared_outage_owner', lead, { nodes: lost.map(({ p }) => p.key), http_failing: bad.map((p) => p.key), witness: ci-host.available });
+      } else if (!o.held) {
+        o.held = true;
+        this.outage = o;
+        this.mailbox.tell({ msg_id: `probe-shared-${o.since}-held`, from: 'hq', to: lead, kind: 'system', priority: 'next', body: [
+          `הנפילה המשותפת נמשכת ${minutes} דקות, אבל כל ה-http תקינים ו-ci-host זמין, ולכן לא יצאה התראה ${pre('ל', this.mailbox.names.owner.name)}: כנראה בעיית מדידה או נתיב.`,
+          ...ci-host.lines].join('\n') });
+      }
+      return;
+    }
+    if (!o) return;
+    this.outage = null;
+    const minutes = Math.round((now - o.since) / 60_000);
+    const body = `הנפילה המשותפת ברשת נגמרה אחרי ${minutes} דקות: בסבב האחרון ${lost.length} מתוך ${known.length} נודים איבדו pings.`;
+    this.mailbox.tell({ msg_id: `probe-shared-${o.since}-recovered`, from: 'hq', to: lead, kind: 'system', priority: 'next', body });
+    if (o.owner) {
+      this.mailbox.tell({ msg_id: `probe-shared-${o.since}-owner-recovered`, from: lead, to: OWNER, priority: 'next', body: `חזר לתקין. ${body}` });
+      this.inbox?.resolveByRef('incident', `probe-shared-${o.since}`);
+    }
+    this.store.emit('probe.shared_recovered', lead, { since: o.since, owner: o.owner });
   }
 
   /** More than half of the http probes failing at once points at the measurer, not at the projects. */
@@ -337,8 +589,7 @@ export class ProbeRunner {
   }
 
   /** Returns 'crossed' when `defer` is set and this failure reached fail_after: the caller confirms it first. */
-  record(p: ProbeSpec, o: ProbeOutcome, defer = false): 'crossed' | undefined {
-    const now = this.store.now();
+  record(p: ProbeSpec, o: ProbeOutcome, defer = false, now = this.store.now()): 'crossed' | undefined {
     const prev = this.state(p.key);
     if (o.unknown) {
       // No answer is not a failure: the streak and any open anomaly stay as they were; only the attempt is noted.
@@ -347,9 +598,12 @@ export class ProbeRunner {
       this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: o.error });
       return undefined;
     }
-    const fails = o.ok ? 0 : (prev?.consecutive_failures ?? 0) + 1;
-    this.store.db.prepare(`INSERT INTO probe_results (probe_id, ok, status, latency_ms, error, ts) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(p.key, o.ok ? 1 : 0, o.status, o.latencyMs, o.error, now);
+    // Jitter without loss is noted (ok=0, jitter=1) but is healthy for the streak and for recovery: it wakes no one.
+    const jitter = jitterOnly(p, o);
+    const healthy = o.ok || jitter;
+    const fails = healthy ? 0 : (prev?.consecutive_failures ?? 0) + 1;
+    this.store.db.prepare(`INSERT INTO probe_results (probe_id, ok, status, latency_ms, error, ts, jitter, loss_percent, avg_ms, mdev_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(p.key, o.ok ? 1 : 0, o.status, o.latencyMs, o.error, now, jitter ? 1 : 0, o.ping?.lossPercent ?? null, o.ping?.avg ?? null, o.ping?.mdev ?? null);
     this.store.db.prepare(`INSERT INTO probe_state (probe_id, project, consecutive_failures, last_run_at, last_ok_at, last_status, last_latency_ms, last_error)
         VALUES (@k, @project, @fails, @now, @ok_at, @status, @lat, @err)
       ON CONFLICT(probe_id) DO UPDATE SET consecutive_failures = @fails, last_run_at = @now,
@@ -358,14 +612,14 @@ export class ProbeRunner {
     this.store.emit('probe.result', this.cfg.monitoringLeadId, { probe: p.key, ...o });
 
     const open = prev?.anomaly_open === 1;
-    if (!o.ok && fails >= p.failAfter && !open) {
+    if (!healthy && fails >= p.failAfter && !open) {
       if (defer) return 'crossed';
-      this.openAnomaly(p);
-    } else if (o.ok && open) {
+      if (!this.outage?.members.has(p.key)) this.openAnomaly(p);
+    } else if (healthy && open) {
       this.store.db.prepare('UPDATE probe_state SET anomaly_open = 0 WHERE probe_id = ?').run(p.key);
       this.mailbox.tell({ msg_id: `probe-${p.key}-recovered-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system',
         priority: 'next', body: p.kind === 'disk' ? `${p.key} חזר לתקין (${o.percent}% ב-${p.disk!.path} על ${p.disk!.host ?? 'local'}).`
-          : p.kind === 'latency' && o.ping ? `${p.key} חזר לתקין (${p.latency!.host}: ${pingEvidence(o.ping)}).`
+          : p.kind === 'latency' && o.ping ? `${p.key} חזר לתקין (${p.latency!.host}: ${pingEvidence(o.ping)}${jitter ? ', jitter בלי אובדן' : ''}).`
           : `${p.key} חזר לתקין (status=${o.status}, ${o.latencyMs}ms).` });
       this.store.emit('probe.recovered', this.cfg.monitoringLeadId, { probe: p.key });
     }
