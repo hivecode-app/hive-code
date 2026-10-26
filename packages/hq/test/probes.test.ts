@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { makeEnv, until } from './helpers.ts';
@@ -798,4 +798,150 @@ test('kubelet probe: one anomaly per node until it matches the master again, one
     assert.equal(open(), 0);
     assert.equal(msgs('probe_anomaly').length, 2);
   } finally { await env.cleanup(); }
+});
+
+const FAIL_FOR = `# lumo
+
+\`\`\`yaml
+probes:
+  - {id: e2e, http: https://e2e.lumo.test/healthz, every: 1m, expect: 200, fail_after: 3, fail_for: 30s}
+  - {id: api, http: https://api.lumo.test/v0/channels, every: 1m, expect: 403, fail_after: 3}
+\`\`\`
+`;
+
+test('fail_for: parsed for http; on another kind or not a duration the probe is unsupported', () => {
+  const [e2e, api] = parseCharterProbes('lumo', FAIL_FOR);
+  assert.equal(e2e!.failForMs, 30_000);
+  assert.equal(e2e!.kind, 'http');
+  assert.equal(api!.failForMs, null);
+  const bad = parseCharterProbes('x', `\`\`\`yaml\nprobes:\n  - {id: d, disk: 'local:/', max_percent: 80, fail_for: 30s}\n  - {id: h, http: https://h.test, fail_for: soon}\n  - {id: z, http: https://h.test, fail_for: 0s}\n\`\`\`\n`);
+  assert.deepEqual(bad.map((p) => p.kind), ['unsupported', 'unsupported', 'unsupported']);
+});
+
+test('http probe: a timeout is noAnswer; a refused connection, a name that does not exist (NXDOMAIN) or a status is an answer', async () => {
+  const srv = createServer((req, res) => { if (req.url === '/hang') return; res.writeHead(503); res.end('x'); });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const url = `http://127.0.0.1:${(srv.address() as { port: number }).port}`;
+  try {
+    const mk = (u: string) => parseCharterProbes('x', `\`\`\`yaml\nprobes:\n  - {id: h, http: '${u}', timeout: 300ms, fail_for: 30s}\n\`\`\`\n`)[0]!;
+    const hang = await runHttpProbe(mk(`${url}/hang`));
+    assert.equal(hang.ok, false);
+    assert.equal(hang.noAnswer, true);
+    const dns = await runHttpProbe(mk('http://nothing-here.invalid/'));
+    assert.equal(dns.ok, false);
+    if (/ENOTFOUND/.test(dns.error!)) assert.equal(dns.noAnswer, undefined, 'the DNS answered: no such name');
+    else assert.match(dns.error!, /EAI_AGAIN/, 'a resolver that did not answer (no DNS where the test runs)');
+    const status = await runHttpProbe(mk(`${url}/x`));
+    assert.equal(status.status, 503);
+    assert.equal(status.noAnswer, undefined);
+    const refused = await runHttpProbe(mk('http://127.0.0.1:1/'));
+    assert.equal(refused.ok, false);
+    assert.equal(refused.noAnswer, undefined);
+  } finally { srv.closeAllConnections(); srv.close(); }
+});
+
+/** Drive the runner in 5s ticks (hq's cadence) for `ms`, with the e2e probe failing as `fail(t)` says (t = ms since the start). */
+async function failFor(fail: (t: number) => false | 'answer' | 'noAnswer' | 'unknown', ms: number, witnessOk = false) {
+  const env = await makeEnv({ projects: { lumo: FAIL_FOR } });
+  const { hq, clock } = env;
+  const t0 = hq.store.now();
+  const runs: number[] = [];
+  const asked: number[] = [];
+  hq.probes.run = async (p) => {
+    if (p.id !== 'e2e') return { ok: true, status: 403, latencyMs: 20, error: null };
+    const t = hq.store.now() - t0;
+    runs.push(t);
+    const f = fail(t);
+    if (!f) return { ok: true, status: 200, latencyMs: 20, error: null };
+    if (f === 'unknown') return { ok: false, unknown: true, status: null, latencyMs: null, error: 'ssh timeout' };
+    if (f === 'noAnswer') return { ok: false, noAnswer: true, status: null, latencyMs: 10_000, error: 'The operation was aborted due to timeout' };
+    return { ok: false, status: 502, latencyMs: 30, error: 'status 502, expected 200' };
+  };
+  hq.probes.witness = async () => { asked.push(hq.store.now() - t0); return witnessOk ? { ok: true, status: 200, latencyMs: 40, error: null } : { ok: false, status: 502, latencyMs: 35, error: 'status 502, expected 200' }; };
+  for (let t = 0; t <= ms; t += 5_000) { await hq.probes.tick(); clock.advance(5_000); }
+  const msgs = hq.store.db.prepare(`SELECT kind, priority, body, created_at FROM messages WHERE to_identity = 'rotem' ORDER BY created_at`).all() as
+    { kind: string; priority: string; body: string; created_at: number }[];
+  return { env, runs, asked, anomalies: msgs.filter((m) => m.kind === 'probe_anomaly'), notes: msgs.filter((m) => /חזר לתקין/.test(m.body)), all: msgs };
+}
+
+test('fail_for: a failure that recovers after 20 seconds wakes no one; retries every 10s, then back to every', async () => {
+  const r = await failFor((t) => t < 20_000 && 'answer', 180_000);
+  try {
+    assert.equal(r.anomalies.length, 0);
+    assert.equal(r.asked.length, 0, 'no witness: nothing crossed');
+    assert.equal(r.notes.length, 0, 'nothing was open, nothing to recover from');
+    assert.deepEqual(r.runs, [0, 10_000, 20_000, 60_000, 120_000, 180_000], 'retries only while the failure is open, ended by the first success');
+    assert.equal((r.env.hq.store.db.prepare(`SELECT consecutive_failures n FROM probe_state WHERE probe_id = 'lumo/e2e'`).get() as { n: number }).n, 0, 'the scheduled run at 60s passed');
+  } finally { await r.env.cleanup(); }
+});
+
+test('fail_for: a failure that lasts 31 seconds wakes רותם once, before fail_after, after the witness; recovery = one note', async () => {
+  const r = await failFor((t) => t <= 31_000 && 'answer', 240_000);
+  try {
+    assert.equal(r.anomalies.length, 1, 'once');
+    assert.deepEqual(r.asked, [30_000], 'the witness is asked once, when it lasted 30s');
+    const a = r.anomalies[0]!;
+    assert.equal(a.priority, 'now');
+    assert.match(a.body, /lumo\/e2e/);
+    assert.match(a.body, /נכשל ברצף 30 שניות \(fail_for=30s/);
+    assert.match(a.body, /אומת גם מנקודה שנייה: status=502/);
+    assert.equal(a.body.match(/status=502 latency=30ms/g)!.length, 4, 'every failure since the first is evidence');
+    assert.equal(r.notes.length, 1, 'one note');
+    assert.match(r.notes[0]!.body, /lumo\/e2e חזר לתקין/);
+    // While the anomaly is open the retries go on, so the note comes within 10s of the recovery; then back to `every`.
+    assert.deepEqual(r.runs, [0, 10_000, 20_000, 30_000, 40_000, 60_000, 120_000, 180_000, 240_000]);
+    assert.equal(r.notes[0]!.created_at - r.anomalies[0]!.created_at, 10_000);
+  } finally { await r.env.cleanup(); }
+});
+
+test('fail_for: fine from ci-host → no anomaly, the retries stop, and the schedule goes on as with fail_after', async () => {
+  const r = await failFor(() => 'answer', 150_000, true);
+  try {
+    assert.equal(r.anomalies.length, 0);
+    assert.deepEqual(r.asked, [30_000, 60_000, 120_000], 'asked at 30s, then once per scheduled run');
+    assert.deepEqual(r.runs, [0, 10_000, 20_000, 30_000, 60_000, 120_000]);
+    assert.ok(r.all.some((m) => /אירוע על hq-host/.test(m.body)));
+  } finally { await r.env.cleanup(); }
+});
+
+test('fail_for: no answer (timeout, DNS) does not start the clock or cross it; fail_after still does', async () => {
+  const r = await failFor(() => 'noAnswer', 130_000);
+  try {
+    assert.deepEqual(r.runs, [0, 60_000, 120_000], 'no retries: no failure with an answer');
+    assert.equal(r.anomalies.length, 1, 'fail_after (3) as before');
+    assert.match(r.anomalies[0]!.body, /3 כישלונות ברצף \(fail_after=3\)/);
+  } finally { await r.env.cleanup(); }
+  // An answer starts it; the stretch of timeouts after it is frozen (0→40s), so it crosses 30s of answered failures after that, at 70s.
+  const m = await failFor((t) => t === 0 || t >= 40_000 ? 'answer' : 'noAnswer', 75_000);
+  try {
+    assert.deepEqual(m.asked, [70_000], 'not by the timeout at 30s, nor by the answer at 40s');
+    assert.equal(m.anomalies.length, 1);
+  } finally { await m.env.cleanup(); }
+  // unknown (the probe could not ask) changes nothing.
+  const u = await failFor((t) => t === 0 ? 'answer' : t < 40_000 ? 'unknown' : false, 60_000);
+  try {
+    assert.equal(u.anomalies.length, 0);
+    assert.equal(u.asked.length, 0);
+  } finally { await u.env.cleanup(); }
+});
+
+test('fail_for: removed from the charter during an open failure → its retries stop', async () => {
+  const r = await failFor((t) => t < 200_000 && 'answer', 15_000);
+  try {
+    const { hq, clock } = r.env;
+    const n = r.runs.length;
+    writeFileSync(join(hq.cfg.companyDir, 'projects', 'lumo.md'), FAIL_FOR.replace(', fail_for: 30s', ''));
+    hq.probes.reload();
+    for (let t = 20_000; t <= 65_000; t += 5_000) { await hq.probes.tick(); clock.advance(5_000); }
+    assert.deepEqual(r.runs.slice(n), [60_000], 'only the scheduled run');
+  } finally { await r.env.cleanup(); }
+});
+
+test('fail_for: a flapping service (scheduled runs fail, the retry after each passes) still reaches fail_after', async () => {
+  const r = await failFor((t) => t % 60_000 === 0 && 'answer', 125_000);
+  try {
+    assert.deepEqual(r.runs, [0, 10_000, 60_000, 70_000, 120_000, 130_000].filter((t) => t <= 125_000));
+    assert.equal(r.anomalies.length, 1, 'three scheduled failures in a row, as before fail_for');
+    assert.match(r.anomalies[0]!.body, /3 כישלונות ברצף \(fail_after=3\)/);
+  } finally { await r.env.cleanup(); }
 });

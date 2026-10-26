@@ -11,6 +11,10 @@
 // No answer (timeout, ssh failed, garbage output) is "unknown": not a failure, never counted toward fail_after.
 // For latency, 100% loss is an answer (a failure); hosts that drop ICMP stay out of the charter.
 // `fail_after` consecutive failures → one `now` message to רותם with the evidence; recovery → one note.
+// `fail_for` (http only, lumo root 6, 27/10): after a failure that got an answer, look again every FAIL_FOR_RETRY_MS, and a failure
+// still there fail_for after the first one is crossed without waiting for fail_after (then the same witness). The retries are extra
+// runs on top of `every`: they don't count toward fail_after and don't move its schedule. No answer (timeout, DNS) doesn't start
+// or move that clock; fail_after still covers it as before.
 // Latency (memory/company/monitoring/probe-alerts-spec.md, 26/10): over avg/mdev with the loss under its threshold is jitter,
 // recorded and counted in a daily digest by node; it wakes רותם only when it lasts JITTER_SUSTAIN_ROUNDS samples in a row. More than SHARED_MIN_NODES nodes losing pings in one round
 // is one event; it reaches the owner only when it lasts past SHARED_PERSIST_MS and http fails too or there is no witness.
@@ -46,8 +50,12 @@ export interface ProbeSpec {
   everyMs: number;
   timeoutMs: number;
   failAfter: number;
+  failForMs: number | null;  // http: a failure lasting this long is crossed without waiting for fail_after (FAIL_FOR_RETRY_MS retries)
   raw: Record<string, unknown>;
 }
+
+/** How often a `fail_for` probe is looked at again while a failure is open. */
+export const FAIL_FOR_RETRY_MS = 10_000;
 
 export function parseDuration(v: unknown, dflt: number): number {
   if (typeof v === 'number') return v * 1000;
@@ -126,9 +134,12 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     const cluster: ClusterSpec | undefined = typeof r.cluster === 'string' && isSshTarget(r.cluster.trim())
       ? { ssh: r.cluster.trim(), identityFile, ignore: Array.isArray(r.ignore) ? r.ignore.map(String) : [] }
       : undefined;
+    // fail_for is for http; anywhere else, or not a duration, the probe is unsupported (listed, not silently dropped).
+    const failForMs = r.fail_for == null ? null : parseDuration(r.fail_for, NaN);
+    const badFailFor = failForMs != null && (typeof r.http !== 'string' || !(failForMs > 0));
     out.push({
       key: `${project}/${id}`, project, id,
-      kind: typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : 'unsupported',
+      kind: badFailFor ? 'unsupported' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : 'unsupported',
       url: typeof r.http === 'string' ? r.http : undefined,
       disk, latency, kubelet, whatsappLog, cluster,
       // Observe-only: a probe may only read. Anything but GET/HEAD in a charter is ignored.
@@ -139,6 +150,7 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
       // 20 pings at 0.2s with -W 2 end within ~6s; the default leaves room so a dead host ends in ping's summary, not a kill.
       timeoutMs: parseDuration(r.timeout, cluster ? 180_000 : latency ? 20_000 : kubelet || whatsappLog ? 30_000 : 10_000),
       failAfter: Number(r.fail_after ?? 3),
+      failForMs: badFailFor ? null : failForMs,
       raw: r,
     });
   }
@@ -152,8 +164,9 @@ export function loadProbes(companyDir: string): ProbeSpec[] {
     .flatMap((f) => parseCharterProbes(basename(f, '.md'), readFileSync(join(dir, f), 'utf8')));
 }
 
-/** `unknown`: no answer came back. Not a failure (ok is meaningless then); the runner doesn't count it. */
-export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; percent?: number; ping?: PingStats; versions?: KubeletVersions }
+/** `unknown`: no answer came back. Not a failure (ok is meaningless then); the runner doesn't count it.
+ *  `noAnswer` (http): a timeout or a DNS that didn't answer. A failure for fail_after as always, but it doesn't move fail_for's clock. */
+export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; percent?: number; ping?: PingStats; versions?: KubeletVersions }
 
 /** The apiserver's version and each node's kubelet version, as `kubectl` reported them ('' = the node has none yet, still registering). */
 export interface KubeletVersions { master: string; nodes: Record<string, string> }
@@ -370,7 +383,11 @@ export async function runHttpProbe(p: ProbeSpec): Promise<ProbeOutcome> {
     return { ok: statusOk && !slow, status: res.status, latencyMs,
       error: !statusOk ? `status ${res.status}, expected ${p.expect.join('|')}` : slow ? `latency ${latencyMs}ms > ${p.maxLatencyMs}ms` : null };
   } catch (e) {
-    return { ok: false, status: null, latencyMs: Math.round(performance.now() - t0), error: (e as Error).message };
+    const err = e as Error & { cause?: { code?: string } };
+    // ENOTFOUND is the DNS's answer (no such name: a real fault); EAI_AGAIN is a DNS that didn't answer.
+    const noAnswer = err.name === 'TimeoutError' || ['EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT'].includes(err.cause?.code ?? '');
+    return { ok: false, status: null, latencyMs: Math.round(performance.now() - t0), error: err.cause?.code ? `${err.message} (${err.cause.code})` : err.message,
+      ...(noAnswer ? { noAnswer: true } : {}) };
   }
 }
 
@@ -545,6 +562,13 @@ const OUTAGE_LAST_META = 'probes.shared_outage_last';
 
 interface ProbeStateRow { probe_id: string; consecutive_failures: number; anomaly_open: number; last_run_at: number | null; last_ok_at: number | null }
 
+/** An open failure of a fail_for probe: since = its first failure that got an answer, moved on by every stretch without an answer
+ *  (from the answered failure before it to the one after it: the clock is frozen there); answered = the last answered failure;
+ *  gap = a failure without an answer came after it; last = the last run (retry or scheduled);
+ *  asked = it was crossed and the witness was asked (then only scheduled runs cross again, as with fail_after).
+ *  In memory: a restart starts the clock over, which costs at most fail_for. */
+interface FailFor { since: number; answered: number; gap: boolean; last: number; asked: boolean }
+
 export class ProbeRunner {
   probes: ProbeSpec[] = [];
   run: (p: ProbeSpec) => Promise<ProbeOutcome> = (p) => p.kind === 'disk' ? runDiskProbe(p) : p.kind === 'latency' ? runLatencyProbe(p)
@@ -559,6 +583,7 @@ export class ProbeRunner {
   private measurerEpisode = false;
   private outageLoaded: SharedOutage | null | undefined;
   private inflight = new Set<string>();
+  private failFor = new Map<string, FailFor>();
 
   private store: Store;
   private cfg: HqConfig;
@@ -579,6 +604,8 @@ export class ProbeRunner {
 
   reload(): ProbeSpec[] {
     this.probes = loadProbes(this.cfg.companyDir);
+    // A clock of a probe that no longer has fail_for (or is gone) would keep its retries going.
+    for (const k of this.failFor.keys()) if (!this.probes.some((p) => p.key === k && p.failForMs != null)) this.failFor.delete(k);
     const backfilled = backfillLatencyRows(this.store.db, this.probes);
     if (backfilled) this.store.emit('probes.backfilled', this.cfg.monitoringLeadId, { rows: backfilled });
     const unsupported = this.probes.filter((p) => p.kind === 'unsupported').map((p) => p.key);
@@ -593,7 +620,7 @@ export class ProbeRunner {
   /** Run every due probe. Observe-only: the only side effect outside the store is a message to רותם. */
   async tick(): Promise<void> {
     // A.6: an automation that isn't written in its team's contract doesn't exist. The switch is rotem/prod-probes.
-    if (!this.store.toggle(this.toggleKey)) return;
+    if (!this.store.toggle(this.toggleKey)) { this.failFor.clear(); return; }  // back on later: an old clock would cross at once
     const now = this.store.now();
     const isDue = (p: ProbeSpec, slack = 0) => { const s = this.state(p.key); return !s?.last_run_at || now - s.last_run_at >= p.everyMs - slack; };
     // Root signals: a round per cluster, on its own (a 3-minute ssh doesn't hold the other probes back).
@@ -602,15 +629,21 @@ export class ProbeRunner {
     // A round of latency is one tick: one that is due takes along those almost due, and they all record this tick's time.
     const latencyDue = runnable.some((p) => p.kind === 'latency' && isDue(p));
     const due = runnable.filter((p) => isDue(p) || (latencyDue && p.kind === 'latency' && isDue(p, ROUND_SLACK_MS)));
+    // fail_for: an open failure is looked at again every FAIL_FOR_RETRY_MS, until the first success (or it was crossed and
+    // the witness said it is us: then the schedule goes on as with fail_after). An anomaly that is open keeps the retries, for a fast note.
+    const retries = runnable.filter((p) => {
+      const f = this.failFor.get(p.key);
+      return !!f && p.failForMs != null && !due.includes(p) && (!f.asked || this.state(p.key)?.anomaly_open === 1) && now - f.last >= FAIL_FOR_RETRY_MS;
+    });
     const crossed: ProbeSpec[] = [];
     const sustained: ProbeSpec[] = [];
     const round: { p: ProbeSpec; o: ProbeOutcome }[] = [];
-    await Promise.all(due.map(async (p) => {
+    await Promise.all([...due.map((p) => ({ p, retry: false })), ...retries.map((p) => ({ p, retry: true }))].map(async ({ p, retry }) => {
       this.inflight.add(p.key);
       try {
         const o = await this.run(p);
         if (p.kind === 'latency') round.push({ p, o });
-        const r = this.record(p, o, true, now);
+        const r = this.record(p, o, true, now, retry);
         if (r === 'crossed') crossed.push(p);
         else if (r === 'sustained') sustained.push(p);
       } finally { this.inflight.delete(p.key); }
@@ -819,33 +852,54 @@ export class ProbeRunner {
       ].join('\n') });
   }
 
-  /** Returns 'crossed' when `defer` is set and this failure reached fail_after: the caller confirms it first.
-   *  'sustained' when `defer` is set and jitter reached JITTER_SUSTAIN_ROUNDS: the caller opens it after the shared round. */
-  record(p: ProbeSpec, o: ProbeOutcome, defer = false, now = this.store.now()): 'crossed' | 'sustained' | undefined {
+  /** Returns 'crossed' when `defer` is set and this failure reached fail_after (or lasted fail_for): the caller confirms it first.
+   *  'sustained' when `defer` is set and jitter reached JITTER_SUSTAIN_ROUNDS: the caller opens it after the shared round.
+   *  `retry`: a fail_for retry. It doesn't count toward fail_after and doesn't move last_run_at (the schedule of `every`). */
+  record(p: ProbeSpec, o: ProbeOutcome, defer = false, now = this.store.now(), retry = false): 'crossed' | 'sustained' | undefined {
     const prev = this.state(p.key);
+    const ff = p.failForMs != null ? this.failFor.get(p.key) : undefined;
+    if (ff) ff.last = now;
     if (o.unknown) {
+      if (ff) ff.gap = true;  // no answer: its stretch is frozen, as a timeout's
       // No answer is not a failure: the streak and any open anomaly stay as they were; only the attempt is noted.
       this.store.db.prepare(`INSERT INTO probe_state (probe_id, project, last_run_at, last_error) VALUES (?, ?, ?, ?)
-        ON CONFLICT(probe_id) DO UPDATE SET last_run_at = excluded.last_run_at, last_error = excluded.last_error`).run(p.key, p.project, now, o.error);
+        ON CONFLICT(probe_id) DO UPDATE SET last_run_at = excluded.last_run_at, last_error = excluded.last_error`).run(p.key, p.project, retry ? (prev?.last_run_at ?? now) : now, o.error);
       this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: o.error });
       return undefined;
     }
     // Jitter without loss is noted (ok=0, jitter=1) and doesn't advance the loss streak; alone it wakes no one until it lasts (JITTER_SUSTAIN_ROUNDS).
     const jitter = jitterOnly(p, o);
     const healthy = o.ok || jitter;
-    const fails = healthy ? 0 : (prev?.consecutive_failures ?? 0) + 1;
+    // A retry that passes ends the retries, but the streak of scheduled failures stays (a flapping service still reaches fail_after);
+    // with an anomaly open it is a recovery like any other.
+    const fails = retry ? (healthy && prev?.anomaly_open === 1 ? 0 : prev?.consecutive_failures ?? 0)
+      : healthy ? 0 : (prev?.consecutive_failures ?? 0) + 1;
+    // fail_for's clock: started by the first failure that got an answer, ended by a success. No answer neither starts it nor crosses it.
+    let lasted = false;
+    if (p.failForMs != null) {
+      if (healthy) this.failFor.delete(p.key);
+      else if (o.noAnswer) { if (ff) ff.gap = true; }
+      else if (!ff) this.failFor.set(p.key, { since: now, answered: now, gap: false, last: now, asked: false });
+      else {
+        if (ff.gap) ff.since += now - ff.answered;
+        ff.answered = now;
+        ff.gap = false;
+        lasted = now - ff.since >= p.failForMs && (!retry || !ff.asked);
+      }
+    }
     this.store.db.prepare(`INSERT INTO probe_results (probe_id, ok, status, latency_ms, error, ts, jitter, loss_percent, avg_ms, mdev_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(p.key, o.ok ? 1 : 0, o.status, o.latencyMs, o.error, now, jitter ? 1 : 0, o.ping?.lossPercent ?? null, o.ping?.avg ?? null, o.ping?.mdev ?? null);
     this.store.db.prepare(`INSERT INTO probe_state (probe_id, project, consecutive_failures, last_run_at, last_ok_at, last_status, last_latency_ms, last_error)
         VALUES (@k, @project, @fails, @now, @ok_at, @status, @lat, @err)
       ON CONFLICT(probe_id) DO UPDATE SET consecutive_failures = @fails, last_run_at = @now,
         last_ok_at = COALESCE(@ok_at, last_ok_at), last_status = @status, last_latency_ms = @lat, last_error = @err`)
-      .run({ k: p.key, project: p.project, fails, now, ok_at: o.ok ? now : null, status: o.status, lat: o.latencyMs, err: o.error });
+      .run({ k: p.key, project: p.project, fails, now: retry ? (prev?.last_run_at ?? now) : now, ok_at: o.ok ? now : null, status: o.status, lat: o.latencyMs, err: o.error });
     this.store.emit('probe.result', this.cfg.monitoringLeadId, { probe: p.key, ...o });
     if (p.kind === 'kubelet') { if (o.versions) this.kubeletSkew(p, o.versions, now); return undefined; }
 
     const open = prev?.anomaly_open === 1;
-    if (!healthy && fails >= p.failAfter && !open) {
+    if (!healthy && (fails >= p.failAfter || lasted) && !open) {
+      if (ff) ff.asked = true;
       if (defer) return 'crossed';
       if (!this.outage?.members.has(p.key)) this.openAnomaly(p);
     } else if (p.kind === 'latency' && !o.ok && !open && this.badRun(p, now) >= JITTER_SUSTAIN_ROUNDS) {
@@ -920,8 +974,10 @@ export class ProbeRunner {
     const st = this.state(p.key);
     const fails = st?.consecutive_failures ?? 0;
     this.store.db.prepare('UPDATE probe_state SET anomaly_open = 1 WHERE probe_id = ?').run(p.key);
+    const ff = this.failFor.get(p.key);
+    const lasted = ff && p.failForMs != null && now - ff.since >= p.failForMs ? Math.round((now - ff.since) / 1000) : null;
     const recent = this.store.db.prepare('SELECT ok, status, latency_ms, error, ts FROM probe_results WHERE probe_id = ? ORDER BY id DESC LIMIT ?')
-      .all(p.key, sustained ? JITTER_SUSTAIN_ROUNDS : p.failAfter) as { status: number | null; latency_ms: number | null; error: string | null; ts: number }[];
+      .all(p.key, sustained ? JITTER_SUSTAIN_ROUNDS : lasted != null ? Math.max(p.failAfter, Math.min(10, Math.ceil(lasted * 1000 / FAIL_FOR_RETRY_MS) + 1)) : p.failAfter) as { status: number | null; latency_ms: number | null; error: string | null; ts: number }[];
     const lastOk = st?.last_ok_at ? new Date(st.last_ok_at).toISOString() : 'אף פעם (מאז שהתחלנו לבדוק)';
     this.mailbox.tell({ msg_id: `probe-${p.key}-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'probe_anomaly',
       urgency: 'urgent', priority: 'now', body: [
@@ -930,6 +986,7 @@ export class ProbeRunner {
           : p.kind === 'whatsapp_log' ? `חריגה בפרודקשן: ${p.key} (הלוג של ${p.whatsappLog!.ns}/${p.whatsappLog!.resource} ב-${p.whatsappLog!.host})`
           : `חריגה בפרודקשן: ${p.key} (${p.method} ${p.url})`,
         sustained ? `jitter מתמשך: ${JITTER_SUSTAIN_ROUNDS} דגימות ברצף בלי דגימה תקינה (JITTER_SUSTAIN_ROUNDS), גם כשהאובדן לא הגיע ל-fail_after. תקין לאחרונה: ${lastOk}.`
+          : lasted != null && fails < p.failAfter ? `נכשל ברצף ${lasted} שניות (fail_for=${p.failForMs! / 1000}s, בדיקה חוזרת כל ${FAIL_FOR_RETRY_MS / 1000} שניות), בלי לחכות ל-fail_after=${p.failAfter}. תקין לאחרונה: ${lastOk}.`
           : `${fails} כישלונות ברצף (fail_after=${p.failAfter}). תקין לאחרונה: ${lastOk}.`,
         ...(verification ? [verification] : []),
         'ראיות:',
@@ -943,7 +1000,7 @@ export class ProbeRunner {
   summary() {
     return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}),
       ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.whatsappLog ? { whatsapp_log: p.whatsappLog.target } : {}), ...(p.cluster ? { cluster: p.cluster.ssh } : {}),
-      every_ms: p.everyMs, ...(this.state(p.key) ?? {}) }));
+      every_ms: p.everyMs, ...(p.failForMs != null ? { fail_for_ms: p.failForMs } : {}), ...(this.state(p.key) ?? {}) }));
   }
 
   prune(olderThanMs = 7 * 86_400_000): void {
