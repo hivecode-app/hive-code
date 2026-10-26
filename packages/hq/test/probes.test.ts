@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { makeEnv, until } from './helpers.ts';
-import { ProbeRunner, loadProbes, parseCharterProbes, parseDuration, runHttpProbe, runDiskProbe, runLatencyProbe, parsePing, pingBreaches, sshWitness, sshPingWitness, jitterDigest } from '../src/probes.ts';
+import { ProbeRunner, loadProbes, parseCharterProbes, parseDuration, runHttpProbe, runDiskProbe, runLatencyProbe, parsePing, pingBreaches, sshWitness, sshPingWitness, jitterDigest, backfillLatencyRows, parsePingEvidence } from '../src/probes.ts';
 
 // The example company (fixtures/README.md): its charters declare probes the way a real company's do.
 const COMPANY = join(import.meta.dirname, '..', '..', '..', 'fixtures', 'company-home', 'company');
@@ -568,6 +568,47 @@ test('spec 5: 4 jitter samples a day for 3 days → a Contabo ticket draft; for 
     const d = hq.store.db.prepare(`SELECT priority, body FROM messages WHERE to_identity = 'rotem' AND body LIKE 'סיכום jitter יומי%'`).all() as { priority: string }[];
     assert.equal(d.length, 1);
     assert.equal(d[0]!.priority, 'later');
+  } finally { await env.cleanup(); }
+});
+
+test('backfill: rows from before v32 get jitter/loss/avg/mdev from their error text, by the jitterOnly rule; idempotent', async () => {
+  const env = await makeEnv({ projects: { 'tiki-bot-go': NODES(2) } });
+  try {
+    const { hq, clock } = env;
+    const now = clock.now();
+    const p = hq.probes.probes.find((x) => x.key === 'tiki-bot-go/net-vmi1000')!;
+    // The error texts come from the probe itself, so a change in its wording breaks this test, not the backfill silently.
+    const err = async (out: string) => (await runLatencyProbe(p, async () => out)).error!;
+    const jit = await err('20 packets transmitted, 20 received, 0% packet loss, time 3901ms\nrtt min/avg/max/mdev = 0.469/22.485/83.042/28.411 ms\n');
+    const small = await err('20 packets transmitted, 19 received, 5% packet loss, time 3901ms\nrtt min/avg/max/mdev = 0.4/30.5/90/25 ms\n');
+    const busybox = await err('20 packets transmitted, 20 received, 0% packet loss\nround-trip min/avg/max = 0.4/30.5/90 ms\n');
+    const lost = await err(lossOut(20));
+    const none = await err('20 packets transmitted, 0 received, 100% packet loss, time 3901ms\n');
+    const ins = hq.store.db.prepare('INSERT INTO probe_results (probe_id, ok, status, latency_ms, error, ts) VALUES (?, ?, NULL, ?, ?, ?)');
+    const rows = [[0, 22, jit], [0, 31, small], [0, 31, busybox], [0, 0, lost], [0, null, none], [1, 1, null], [0, null, 'פלט ping לא מובן: x']] as const;
+    rows.forEach(([ok, lat, e], i) => ins.run('tiki-bot-go/net-vmi1000', ok, lat, e, now - (i + 1) * 60_000));
+    ins.run('tiki-bot-go/api', 0, 5, jit, now - 60_000); // not a latency probe: untouched
+    assert.equal(backfillLatencyRows(hq.store.db, hq.probes.probes), 5);
+    const got = hq.store.db.prepare(`SELECT jitter, loss_percent, avg_ms, mdev_ms FROM probe_results WHERE probe_id = 'tiki-bot-go/net-vmi1000' ORDER BY ts DESC`).all()
+      .map((r) => ({ ...r as object }));
+    assert.deepEqual(got, [
+      { jitter: 1, loss_percent: 0, avg_ms: 22.485, mdev_ms: 28.411 },
+      { jitter: 1, loss_percent: 5, avg_ms: 30.5, mdev_ms: 25 },
+      { jitter: 1, loss_percent: 0, avg_ms: 30.5, mdev_ms: null },
+      { jitter: 0, loss_percent: 20, avg_ms: 0.4, mdev_ms: 0.1 },
+      { jitter: 0, loss_percent: 100, avg_ms: null, mdev_ms: null },
+      { jitter: 0, loss_percent: null, avg_ms: null, mdev_ms: null },
+      { jitter: 0, loss_percent: null, avg_ms: null, mdev_ms: null },
+    ]);
+    assert.equal((hq.store.db.prepare(`SELECT loss_percent FROM probe_results WHERE probe_id = 'tiki-bot-go/api'`).get() as { loss_percent: number | null }).loss_percent, null);
+    assert.equal(backfillLatencyRows(hq.store.db, hq.probes.probes), 0, 'a second run changes nothing');
+    const body = jitterDigest(hq.store.db, hq.probes.probes, now)!;
+    assert.match(body, /tiki-bot-go\/net-vmi1000 \(10\.0\.0\.1\): jitter 3, אובדן 2, avg מקסימלי 30\.5ms/);
+    assert.equal(parsePingEvidence('status 500, expected 200'), null);
+    // reload() runs it: a row written after the last reload is filled on the next one.
+    ins.run('tiki-bot-go/net-vmi1001', 0, 22, jit.replace('10.0.0.1', '10.0.0.2'), now - 60_000);
+    hq.probes.reload();
+    assert.equal((hq.store.db.prepare(`SELECT jitter FROM probe_results WHERE probe_id = 'tiki-bot-go/net-vmi1001'`).get() as { jitter: number }).jitter, 1);
   } finally { await env.cleanup(); }
 });
 

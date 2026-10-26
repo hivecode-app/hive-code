@@ -285,6 +285,36 @@ export const jitterOnly = (p: ProbeSpec, o: ProbeOutcome): boolean =>
 /** A latency sample that failed on loss (100% included). */
 export const lossFailed = (p: ProbeSpec, o: ProbeOutcome): boolean => p.kind === 'latency' && !o.ok && !o.unknown && !jitterOnly(p, o);
 
+/** A failed latency sample's `error` as runLatencyProbe writes it (pingEvidence). null when it isn't one. */
+export function parsePingEvidence(error: string): PingStats | null {
+  const none = /: אין אף תשובה, אובדן (\d+(?:\.\d+)?)%/.exec(error);
+  if (none) return { transmitted: 20, received: 0, lossPercent: Number(none[1]), min: null, avg: null, max: null, mdev: null };
+  const m = /: min\/avg\/max\/mdev (\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?|—)ms, אובדן (\d+(?:\.\d+)?)%/.exec(error);
+  if (!m) return null;
+  return { transmitted: 20, received: 1, lossPercent: Number(m[5]), min: Number(m[1]), avg: Number(m[2]), max: Number(m[3]), mdev: m[4] === '—' ? null : Number(m[4]) };
+}
+
+/** Failed latency samples from before v32 carry no jitter/loss/avg/mdev, so the digest saw no jitter in them. Fills them from
+ *  their `error` text by the same rule as jitterOnly, against the probe's max_loss_percent in the charter today. Idempotent: only
+ *  rows with no loss_percent, and a filled row has one; a text it can't read stays as it is and is read again on the next reload.
+ *  `received` is only "some came back or none", which is all jitterOnly asks. */
+export function backfillLatencyRows(db: Store['db'], probes: ProbeSpec[]): number {
+  const read = db.prepare('SELECT id, error FROM probe_results WHERE probe_id = ? AND ok = 0 AND loss_percent IS NULL AND error IS NOT NULL');
+  const set = db.prepare('UPDATE probe_results SET jitter = ?, loss_percent = ?, avg_ms = ?, mdev_ms = ? WHERE id = ? AND loss_percent IS NULL');
+  let n = 0;
+  db.transaction(() => {
+    for (const p of probes.filter((x) => x.kind === 'latency')) {
+      for (const r of read.all(p.key) as { id: number; error: string }[]) {
+        const s = parsePingEvidence(r.error);
+        if (!s) continue;
+        const jitter = jitterOnly(p, { ok: false, status: null, latencyMs: null, error: r.error, ping: s });
+        n += set.run(jitter ? 1 : 0, s.lossPercent, s.avg, s.mdev, r.id).changes;
+      }
+    }
+  })();
+  return n;
+}
+
 /** `25/10` and the hour, in Israel time. */
 function israel(ts: number): { date: string; day: string; hour: number } {
   const f = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' })
@@ -376,6 +406,8 @@ export class ProbeRunner {
 
   reload(): ProbeSpec[] {
     this.probes = loadProbes(this.cfg.companyDir);
+    const backfilled = backfillLatencyRows(this.store.db, this.probes);
+    if (backfilled) this.store.emit('probes.backfilled', this.cfg.monitoringLeadId, { rows: backfilled });
     const unsupported = this.probes.filter((p) => p.kind === 'unsupported').map((p) => p.key);
     this.store.emit('probes.loaded', this.cfg.monitoringLeadId, { count: this.probes.length, unsupported });
     return this.probes;
