@@ -4,7 +4,8 @@
 // other kinds are listed as unsupported, never silently dropped.
 // `disk` (monitoring-spec §3.2 step 4) is the first ssh-shaped probe: read-only `df`, measured from hq-host only.
 // `whatsapp_log` reads the WhatsApp gateway's log (read-only `kubectl logs --since` over ssh) and judges what it says (whatsappLogBreaches):
-// no incoming message for `quiet` in the day, `old` over a share of `forwarded` in the webhook summary, a minute of send failures (26/10).
+// no incoming message for `quiet` in the day, `old` over a share of `forwarded` in the webhook summary, a minute of send failures (26/10),
+// and the automation fields of the summary (easy #346): `unknownNumber`/`lookupFailed` over their threshold, or webhooks with nothing forwarded.
 // `latency` measures network jitter to a host: `ping -c 20 -i 0.2 -q` from hq-host (a node with jitter is a slow node, 22/10).
 // `kubelet` reads a cluster over ssh (`kubectl get --raw /version`, `kubectl get nodes`) and compares each node's kubeletVersion to the
 // apiserver's: a node on another version is one anomaly to רותם, held until it matches again (task 697: six 1.34 kubelets on a 1.33 master, 9 days).
@@ -130,8 +131,9 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
       : undefined;
     const lgt = typeof r.whatsapp_log === 'string' ? parseLogTarget(r.whatsapp_log) : null;
     const lg = lgt ? { target: String(r.whatsapp_log), ...lgt, identityFile: typeof r.identity === 'string' ? r.identity.replace(/^~(?=\/|$)/, homedir()) : null,
-      quietMs: parseDuration(r.quiet ?? '10m', NaN), maxOldRatio: posNum(r.max_old_ratio, 0.1), maxSendErrorsPerMin: posNum(r.max_send_errors_per_min, 20) } : undefined;
-    const whatsappLog = lg && [lg.quietMs, lg.maxOldRatio, lg.maxSendErrorsPerMin].every(Number.isFinite) && lg.quietMs > 0 ? lg : undefined;
+      quietMs: parseDuration(r.quiet ?? '10m', NaN), maxOldRatio: posNum(r.max_old_ratio, 0.1), maxSendErrorsPerMin: posNum(r.max_send_errors_per_min, 20),
+      maxUnknownNumber: posNum(r.max_unknown_number, 0), maxLookupFailed: posNum(r.max_lookup_failed, 0) } : undefined;
+    const whatsappLog = lg && [lg.quietMs, lg.maxOldRatio, lg.maxSendErrorsPerMin, lg.maxUnknownNumber, lg.maxLookupFailed].every(Number.isFinite) && lg.quietMs > 0 ? lg : undefined;
     const latency = lt && [lt.maxAvgMs, lt.maxMdevMs, lt.maxLossPercent].every(Number.isFinite) ? lt : undefined;
     // `root@host`: never something ssh could read as an option.
     const kubelet = typeof r.kubelet === 'string' && /^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(r.kubelet.trim())
@@ -245,13 +247,15 @@ export async function runDiskProbe(p: ProbeSpec, run: SshRun = runSsh, local: Lo
 }
 
 /** A `whatsapp_log` probe: where the log is, and its thresholds. */
-export interface WhatsappLogSpec { target: string; host: string; ns: string; resource: string; identityFile: string | null; quietMs: number; maxOldRatio: number; maxSendErrorsPerMin: number }
+export interface WhatsappLogSpec { target: string; host: string; ns: string; resource: string; identityFile: string | null; quietMs: number; maxOldRatio: number; maxSendErrorsPerMin: number;
+  maxUnknownNumber: number; maxLookupFailed: number }
 
 /** The window for "no incoming message" is judged only inside these Israel hours: at night a quiet bot is normal. */
 export const QUIET_FROM_HOUR = 6;
 export const QUIET_TO_HOUR = 23;
 const INCOMING = /Incoming WhatsApp message/;
-const SUMMARY = /Lumo automation webhook/;
+/** The 5-minute summary: the title then its fields. Not the per-driver route's own lines with that title ("…: bad signature", "… not understood"). */
+const SUMMARY = /Lumo automation webhook\s+\w+=\d/;
 const SEND_FAILED = /Client\.Timeout|131016/;
 /** The server sends back only these lines (the log is ~2,000 lines a minute), plus the line count. */
 const REMOTE_AWK = '/Incoming WhatsApp message|Lumo automation webhook|Client\\.Timeout|131016/{print} END{print "@@lines " NR}';
@@ -290,9 +294,12 @@ export function parseWhatsappLog(out: string): WhatsappLog | null {
   return { started, lines, entries };
 }
 
+/** A numeric `key=value` field of a summary line. NaN when the line doesn't have it (every comparison with NaN is false). */
+const summaryField = (text: string) => (k: string): number => Number(new RegExp(`(?:^|\\s)${k}=(\\d+)`).exec(text)?.[1] ?? NaN);
+
 const hhmm = (ts: number) => new Date(ts).toISOString().slice(11, 16);
 
-/** The three conditions on the gateway's log at `now`. Empty when nothing is over. `everyMs`: failures are counted per minute since the last run. */
+/** The conditions on the gateway's log at `now`. Empty when nothing is over. `everyMs`: failures are counted per minute since the last run. */
 export function whatsappLogBreaches(log: WhatsappLog, l: WhatsappLogSpec, now: number, everyMs: number): string[] {
   const out: string[] = [];
   const upTo = log.entries.filter((e) => e.ts <= now);
@@ -306,13 +313,28 @@ export function whatsappLogBreaches(log: WhatsappLog, l: WhatsappLogSpec, now: n
   }
   // 2. The latest webhook summary: messages dropped as old against the ones forwarded. A summary comes every 5 minutes and stays
   //    the latest until the next one, so with `every: 1m` one bad summary is several bad runs: it alone can reach fail_after.
-  const sum = upTo.filter((e) => SUMMARY.test(e.text)).pop();
+  const sums = upTo.filter((e) => SUMMARY.test(e.text));
+  const sum = sums.at(-1);
   if (sum) {
-    const n = (k: string) => Number(new RegExp(`(?:^|\\s)${k}=(\\d+)`).exec(sum.text)?.[1] ?? NaN);
+    const n = summaryField(sum.text);
     const old = n('old'), fwd = n('forwarded');
     if (Number.isFinite(old) && Number.isFinite(fwd) && old > 0 && old > l.maxOldRatio * fwd) {
       out.push(`בסיכום "Lumo automation webhook" של ${hhmm(sum.ts)} UTC: old=${old} מול forwarded=${fwd}, מעל ${Math.round(l.maxOldRatio * 100)}%`);
     }
+  }
+  // 2b. The automation fields (easy #346). A field the summary doesn't print is absent, not 0: a gateway before #346 never breaches.
+  //     Judged on every summary since the last run and on the latest one, which (like 2) stays the latest for 5 minutes.
+  //     Evidence: the summary line itself and its timestamp.
+  const recent = sums.filter((e) => e.ts > now - Math.max(everyMs, 60_000) || e === sum);
+  const line = (e: { ts: number; text: string }) => `${new Date(e.ts).toISOString()}: ${e.text.trim()}`;
+  const automation: Array<[string, (n: (k: string) => number) => boolean]> = [
+    [`unknownNumber מעל ${l.maxUnknownNumber}`, (n) => n('unknownNumber') > l.maxUnknownNumber],
+    [`lookupFailed מעל ${l.maxLookupFailed}`, (n) => n('lookupFailed') > l.maxLookupFailed],
+    ['forwarded=0 מול webhooks מעל 0', (n) => n('forwarded') === 0 && n('webhooks') > 0],
+  ];
+  for (const [what, bad] of automation) {
+    const hit = recent.filter((e) => bad(summaryField(e.text))).pop();
+    if (hit) out.push(`${what} בסיכום "Lumo automation webhook" (${line(hit)})`);
   }
   // 3. Send failures (Client.Timeout, 131016) per minute, in the minutes since the last run (the current one included).
   const from = Math.floor((now - Math.max(everyMs, 60_000)) / 60_000) * 60_000;
