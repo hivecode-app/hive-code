@@ -36,7 +36,7 @@ import type { Store } from './store.ts';
 import type { Mailbox } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
 import { RootWatch, isSshTarget, type ClusterSpec } from './root-signals.ts';
-import { amRound, isNamespace, readAlertmanager, NS_TIMEOUT_S, type AlertmanagerSpec, type AmReading, type AmState } from './alertmanager.ts';
+import { amRound, isNamespace, readAlertmanager, NS_TIMEOUT_S, RESOLVE_AFTER_MS, type AlertmanagerSpec, type AmReading, type AmState } from './alertmanager.ts';
 
 export interface ProbeSpec {
   key: string;              // <project>/<id>
@@ -146,9 +146,14 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     const failForMs = r.fail_for == null ? null : parseDuration(r.fail_for, NaN);
     const badFailFor = failForMs != null && (typeof r.http !== 'string' || !(failForMs > 0));
     // An explicit list of namespaces, every one a namespace name: a probe that can't say where to look is unsupported.
-    const nss = Array.isArray(r.namespaces) ? r.namespaces.map(String) : [];
+    // An entry is a name, or `{name, prod: false}` for a namespace that isn't production (its alerts arrive at `later`, low urgency).
+    const nsEntries = Array.isArray(r.namespaces) ? r.namespaces.map((n) => n && typeof n === 'object'
+      ? { name: String((n as { name?: unknown }).name ?? ''), prod: (n as { prod?: unknown }).prod !== false } : { name: String(n), prod: true }) : [];
+    const nss = nsEntries.map((n) => n.name);
+    const resolveAfterMs = r.resolve_after == null ? RESOLVE_AFTER_MS : parseDuration(r.resolve_after, NaN);
     const alertmanager: AlertmanagerSpec | undefined = typeof r.alertmanager === 'string' && isSshTarget(r.alertmanager.trim()) && nss.length && nss.every(isNamespace)
-      ? { target: r.alertmanager.trim(), identityFile, namespaces: [...new Set(nss)] } : undefined;
+      && resolveAfterMs >= 0
+      ? { target: r.alertmanager.trim(), identityFile, namespaces: [...new Set(nss)], nonProd: [...new Set(nsEntries.filter((n) => !n.prod).map((n) => n.name))], resolveAfterMs } : undefined;
     out.push({
       key: `${project}/${id}`, project, id,
       kind: badFailFor ? 'unsupported' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : 'unsupported',
@@ -417,7 +422,9 @@ export async function runAlertmanagerProbe(p: ProbeSpec, run: SshRun = runSsh): 
   const known = Object.entries(alerts).filter((e): e is [string, Extract<AmReading[string], unknown[]>] => Array.isArray(e[1]));
   if (!known.length) return { ok: false, unknown: true, alerts, status: null, latencyMs, error: Object.values(alerts).map((v) => (v as { error: string }).error)[0] ?? null };
   const crit = known.flatMap(([ns, a]) => a.map((x) => `${ns}/${x.labels.alertname ?? '?'}`));
-  return { ok: !crit.length, alerts, status: null, latencyMs, error: crit.length ? `${crit.length} התראות קריטיות: ${crit.join(', ')}` : null };
+  // ok is production's: a critical alert in a `prod: false` namespace is in the error, but doesn't fail the probe.
+  const nonProd = new Set(p.alertmanager!.nonProd ?? []);
+  return { ok: known.every(([ns, a]) => nonProd.has(ns) || !a.length), alerts, status: null, latencyMs, error: crit.length ? `${crit.length} התראות קריטיות: ${crit.join(', ')}` : null };
 }
 
 export async function runHttpProbe(p: ProbeSpec): Promise<ProbeOutcome> {
@@ -1012,14 +1019,18 @@ export class ProbeRunner {
     const key = `probes.alertmanager.${p.key}`;
     let prev: AmState = { open: {}, blind: {} };
     try { prev = { ...prev, ...(JSON.parse(this.store.getMeta(key) || '{}') as Partial<AmState>) }; } catch { /* unreadable: nothing open */ }
-    const { state, messages } = amRound(p.key, p.alertmanager!.target, prev, reading, now, pre('ל', this.mailbox.names.owner.name));
+    const am = p.alertmanager!;
+    const { state, messages } = amRound(p.key, am.target, prev, reading, now, { toOwner: pre('ל', this.mailbox.names.owner.name), nonProd: am.nonProd, resolveAfterMs: am.resolveAfterMs });
     const lead = this.cfg.monitoringLeadId;
     for (const m of messages) {
-      this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system', ...(m.anomaly ? { urgency: 'urgent' as const } : {}), priority: m.priority, body: m.body });
-      this.store.emit(m.anomaly ? 'probe.anomaly' : 'probe.recovered', lead, { probe: p.key, msg: m.id });
+      this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system',
+        ...(m.anomaly ? { urgency: 'urgent' as const } : m.priority === 'later' ? { urgency: 'low' as const } : {}), priority: m.priority, body: m.body });
+      this.store.emit(m.event, lead, { probe: p.key, msg: m.id });
     }
     this.store.setMeta(key, JSON.stringify(state));
-    this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(Object.keys(state.open).length ? 1 : 0, p.key);
+    // Open in production: what isn't production doesn't hold the probe's anomaly open.
+    const nonProd = new Set(am.nonProd ?? []);
+    this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(Object.values(state.open).some((o) => !nonProd.has(o.ns)) ? 1 : 0, p.key);
   }
 
   /** Samples in a row, newest back, with no clean one (jitter or loss), up to JITTER_SUSTAIN_ROUNDS. Unknowns are not recorded here.
@@ -1068,7 +1079,7 @@ export class ProbeRunner {
   summary() {
     return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}),
       ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.whatsappLog ? { whatsapp_log: p.whatsappLog.target } : {}), ...(p.cluster ? { cluster: p.cluster.ssh } : {}),
-      ...(p.alertmanager ? { alertmanager: p.alertmanager.target, namespaces: p.alertmanager.namespaces } : {}),
+      ...(p.alertmanager ? { alertmanager: p.alertmanager.target, namespaces: p.alertmanager.namespaces, non_prod: p.alertmanager.nonProd ?? [], resolve_after_ms: p.alertmanager.resolveAfterMs ?? RESOLVE_AFTER_MS } : {}),
       every_ms: p.everyMs, ...(p.failForMs != null ? { fail_for_ms: p.failForMs } : {}), ...(this.state(p.key) ?? {}) }));
   }
 

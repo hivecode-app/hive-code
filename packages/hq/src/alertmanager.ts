@@ -1,11 +1,13 @@
 // `alertmanager` probe (lumo root 6, 27/10): the cluster's own alerts reach רותם. Read-only, over the ssh the `cluster` probe uses:
 // per namespace in the charter, `kubectl exec deploy/alertmanager -- wget -qO-` of /api/v2/alerts (active, not silenced, not inhibited).
 // Only GET: no POST, no silences. A critical alert (labels.severity == "critical") wakes רותם once by its fingerprint, and one note
-// when it is gone from the list. ssh or exec that failed, no alertmanager pod, garbage: that namespace is unknown, not a failure,
+// when it has been gone from the list for `resolve_after` (5m): one that flaps (gone for a round, then back) says nothing more.
+// A namespace marked `prod: false` in the charter (lumo-dev) is not production: its alerts reach her at `later`, not urgent and not as
+// a production anomaly (the mailbox still delivers it, a resting shift included, like any message from hq). ssh or exec that failed, no alertmanager pod, garbage: that namespace is unknown, not a failure,
 // and its open alerts stay as they were. Unknown for more than BLIND_MS: one separate message, "no sight of Alertmanager".
 import { runSsh, q, type SshRun } from './nodes.ts';
 
-export interface AlertmanagerSpec { target: string; identityFile: string | null; namespaces: string[] }
+export interface AlertmanagerSpec { target: string; identityFile: string | null; namespaces: string[]; nonProd?: string[]; resolveAfterMs?: number }
 
 export interface AmAlert { fingerprint: string; labels: Record<string, string>; summary: string | null; startsAt: string }
 
@@ -15,6 +17,8 @@ export type AmReading = Record<string, AmAlert[] | { error: string }>;
 export const AM_PATH = 'http://localhost:9093/api/v2/alerts?active=true&silenced=false&inhibited=false';
 /** Without an answer from a namespace this long, רותם hears that there is no sight of it. */
 export const BLIND_MS = 10 * 60_000;
+/** An alert gone from the list this long is gone (hold-down): Alertmanager drops one for a round while its rule re-evaluates. */
+export const RESOLVE_AFTER_MS = 5 * 60_000;
 
 const NS = /^[a-z0-9][a-z0-9-]*$/;
 export const isNamespace = (s: string): boolean => NS.test(s) && s.length <= 63;
@@ -78,15 +82,22 @@ export async function readAlertmanager(a: AlertmanagerSpec, timeoutMs: number, r
   }
 }
 
-/** What is open per probe: the critical alerts already told (by `<ns>/<fingerprint>`), and the namespaces with no answer. */
-export interface AmState { open: Record<string, { ns: string; alertname: string; summary: string | null }>; blind: Record<string, { since: number; told: boolean; error: string }> }
+/** What is open per probe: the critical alerts already told (by `<ns>/<fingerprint>`; `goneSince` while it is missing from the list
+ *  but not yet `resolve_after`), and the namespaces with no answer. */
+export interface AmState { open: Record<string, { ns: string; alertname: string; summary: string | null; goneSince?: number }>; blind: Record<string, { since: number; told: boolean; error: string }> }
 
-export interface AmMessage { id: string; anomaly: boolean; priority: 'now' | 'next'; body: string }
+export interface AmMessage { id: string; anomaly: boolean; priority: 'now' | 'next' | 'later'; body: string; event: 'probe.anomaly' | 'probe.recovered' | 'probe.nonprod' }
 
+export interface AmOptions { toOwner?: string; nonProd?: string[]; resolveAfterMs?: number }
+
+const span = (ms: number): string => ms % 60_000 ? `${Math.round(ms / 1000)} שניות` : ms === 60_000 ? 'דקה' : `${ms / 60_000} דקות`;
 const utc = (s: string): string => { const t = Date.parse(s); return Number.isFinite(t) ? `${new Date(t).toISOString().replace('T', ' ').slice(0, 19)} UTC` : s || '—'; };
 
 /** One reading against what was open: the new state and what goes to רותם. Pure, so the rules are tested without ssh. */
-export function amRound(key: string, target: string, prev: AmState, reading: AmReading, now: number, toOwner = 'לרן'): { state: AmState; messages: AmMessage[] } {
+export function amRound(key: string, target: string, prev: AmState, reading: AmReading, now: number, opts: AmOptions = {}): { state: AmState; messages: AmMessage[] } {
+  const toOwner = opts.toOwner ?? 'לרן';
+  const nonProd = new Set(opts.nonProd ?? []);
+  const resolveAfter = opts.resolveAfterMs ?? RESOLVE_AFTER_MS;
   const state: AmState = { open: { ...prev.open }, blind: { ...prev.blind } };
   const messages: AmMessage[] = [];
   const fresh: { ns: string; a: AmAlert }[] = [];
@@ -102,41 +113,65 @@ export function amRound(key: string, target: string, prev: AmState, reading: AmR
     if (state.blind[ns]?.told) back.push(ns);
     delete state.blind[ns];
     const now_ = new Set(r.map((a) => `${ns}/${a.fingerprint}`));
-    for (const a of r) if (!state.open[`${ns}/${a.fingerprint}`]) {
-      fresh.push({ ns, a });
-      state.open[`${ns}/${a.fingerprint}`] = { ns, alertname: a.labels.alertname ?? '?', summary: a.summary };
+    for (const a of r) {
+      const k = `${ns}/${a.fingerprint}`;
+      const o = state.open[k];
+      if (!o) {
+        fresh.push({ ns, a });
+        state.open[k] = { ns, alertname: a.labels.alertname ?? '?', summary: a.summary };
+      } else if (o.goneSince != null) {
+        // Back within resolve_after: it never resolved, nothing to say.
+        const { goneSince: _, ...still } = o;
+        state.open[k] = still;
+      }
     }
-    for (const [k, o] of Object.entries(state.open)) if (o.ns === ns && !now_.has(k)) { gone.push(k); delete state.open[k]; }
+    for (const [k, o] of Object.entries(state.open)) {
+      if (o.ns !== ns || now_.has(k)) continue;
+      const since = o.goneSince ?? now;
+      if (now - since >= resolveAfter) { gone.push(k); delete state.open[k]; } else state.open[k] = { ...o, goneSince: since };
+    }
   }
   // Namespaces no longer in the charter: what was open there is dropped without a note (no one is watching them now).
   for (const k of Object.keys(state.open)) if (!(state.open[k]!.ns in reading)) delete state.open[k];
   for (const ns of Object.keys(state.blind)) if (!(ns in reading)) delete state.blind[ns];
 
-  if (fresh.length) messages.push({ id: `probe-${key}-${now}`, anomaly: true, priority: 'now', body: [
-    `התראה קריטית מ-Alertmanager: ${key} (${target}), ${fresh.length === 1 ? 'התראה אחת חדשה' : `${fresh.length} התראות חדשות`}:`,
-    ...fresh.flatMap(({ ns, a }) => [
-      `- ${ns}: ${a.labels.alertname ?? '?'}${a.summary ? `: ${a.summary}` : ''}`,
-      `  התחילה: ${utc(a.startsAt)}`,
-      `  labels: ${Object.entries(a.labels).map(([k, v]) => `${k}=${v}`).join(', ')}`,
-      `  fingerprint: ${a.fingerprint}`,
-    ]),
-    'התראה אחת לכל fingerprint: כל עוד היא פתוחה לא תצא עליה עוד הודעה, ויצא note כשהיא נעלמת מהרשימה.',
+  const prodFresh = fresh.filter((f) => !nonProd.has(f.ns));
+  const devFresh = fresh.filter((f) => nonProd.has(f.ns));
+  const lines = (list: typeof fresh) => list.flatMap(({ ns, a }) => [
+    `- ${ns}: ${a.labels.alertname ?? '?'}${a.summary ? `: ${a.summary}` : ''}`,
+    `  התחילה: ${utc(a.startsAt)}`,
+    `  labels: ${Object.entries(a.labels).map(([k, v]) => `${k}=${v}`).join(', ')}`,
+    `  fingerprint: ${a.fingerprint}`,
+  ]);
+  const once = `התראה אחת לכל fingerprint: כל עוד היא פתוחה לא תצא עליה עוד הודעה, ויצא note כשהיא נעלמת מהרשימה${resolveAfter > 0 ? ` ל-${span(resolveAfter)}` : ''}.`;
+  if (prodFresh.length) messages.push({ id: `probe-${key}-${now}`, anomaly: true, priority: 'now', event: 'probe.anomaly', body: [
+    `התראה קריטית מ-Alertmanager: ${key} (${target}), ${prodFresh.length === 1 ? 'התראה אחת חדשה' : `${prodFresh.length} התראות חדשות`}:`,
+    ...lines(prodFresh),
+    once,
     `שלב 1: observe-only. חקרי, ושלחי ${toOwner} ask דחוף עם השערה והצעה. פעולה על הפרודקשן רק עם grant באמנה.`,
   ].join('\n') });
-  if (gone.length) messages.push({ id: `probe-${key}-recovered-${now}`, anomaly: false, priority: 'next', body: [
-    `${key}: ${gone.length === 1 ? 'התראה קריטית נעלמה' : `${gone.length} התראות קריטיות נעלמו`} מ-Alertmanager:`,
-    ...gone.map((k) => { const o = prev.open[k]!; return `- ${o.ns}: ${o.alertname}${o.summary ? `: ${o.summary}` : ''}`; }),
+  if (devFresh.length) messages.push({ id: `probe-${key}-nonprod-${now}`, anomaly: false, priority: 'later', event: 'probe.nonprod', body: [
+    `התראה קריטית מ-Alertmanager מחוץ לפרודקשן: ${key} (${target}), ${devFresh.length === 1 ? 'התראה אחת חדשה' : `${devFresh.length} התראות חדשות`}:`,
+    ...lines(devFresh),
+    once,
+    'ה-namespace מסומן באמנה prod: false, ולכן זה לא דחוף: לבדוק כשיש זמן.',
   ].join('\n') });
+  if (gone.length) messages.push({ id: `probe-${key}-recovered-${now}`, anomaly: false, event: 'probe.recovered',
+    priority: gone.every((k) => nonProd.has(prev.open[k]!.ns)) ? 'later' : 'next', body: [
+      `${key}: ${gone.length === 1 ? 'התראה קריטית נעלמה' : `${gone.length} התראות קריטיות נעלמו`} מ-Alertmanager:`,
+      ...gone.map((k) => { const o = prev.open[k]!; return `- ${o.ns}${nonProd.has(o.ns) ? ' (לא פרודקשן)' : ''}: ${o.alertname}${o.summary ? `: ${o.summary}` : ''}. נעלמה מהרשימה ב-${utc(new Date(o.goneSince ?? now).toISOString())}`; }),
+    ].join('\n') });
   const blind = Object.entries(state.blind).filter(([, b]) => !b.told && now - b.since > BLIND_MS);
   if (blind.length) {
     for (const [ns, b] of blind) state.blind[ns] = { ...b, told: true };
-    messages.push({ id: `probe-${key}-blind-${now}`, anomaly: true, priority: 'now', body: [
+    const prodBlind = blind.some(([ns]) => !nonProd.has(ns));
+    messages.push({ id: `probe-${key}-blind-${now}`, anomaly: prodBlind, priority: prodBlind ? 'now' : 'later', event: prodBlind ? 'probe.anomaly' : 'probe.nonprod', body: [
       `אין ראייה ל-Alertmanager: ${key} (${target}), כבר יותר מ-${BLIND_MS / 60_000} דקות:`,
-      ...blind.map(([ns, b]) => `- ${ns}: מ-${utc(new Date(b.since).toISOString())}. ${b.error}`),
+      ...blind.map(([ns, b]) => `- ${ns}${nonProd.has(ns) ? ' (לא פרודקשן)' : ''}: מ-${utc(new Date(b.since).toISOString())}. ${b.error}`),
       'זה לא אומר שיש תקלה, אלא שהתראות קריטיות מה-namespace הזה לא יגיעו אלייך עד שהראייה חוזרת.',
     ].join('\n') });
   }
-  if (back.length) messages.push({ id: `probe-${key}-sight-${now}`, anomaly: false, priority: 'next',
+  if (back.length) messages.push({ id: `probe-${key}-sight-${now}`, anomaly: false, priority: back.every((ns) => nonProd.has(ns)) ? 'later' : 'next', event: 'probe.recovered',
     body: `${key}: חזרה ראייה ל-Alertmanager ב-${back.join(', ')}.` });
   return { state, messages };
 }

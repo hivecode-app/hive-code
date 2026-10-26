@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv } from './helpers.ts';
-import { alertmanagerCommand, amRound, parseAlerts, parseAmOutput, readAlertmanager, BLIND_MS, type AmReading, type AmState } from '../src/alertmanager.ts';
+import { alertmanagerCommand, amRound, parseAlerts, parseAmOutput, readAlertmanager, BLIND_MS, RESOLVE_AFTER_MS, type AmReading, type AmState } from '../src/alertmanager.ts';
 import { parseCharterProbes, runAlertmanagerProbe } from '../src/probes.ts';
 
 // The shape of Alertmanager v0.34's /api/v2/alerts in lumo-prod on 26/10 (no severity there), plus a critical one.
@@ -70,7 +70,9 @@ test('alertmanager: a critical alert wakes once by fingerprint, with labels, sum
   assert.match(m.body, /fingerprint: aa00000000000001/);
   const r2 = amRound('lumo/alerts', 'root@m', r1.state, { 'lumo-prod': crit, 'lumo-dev': [] }, T + 60_000);
   assert.equal(r2.messages.length, 0, 'still open: no second message');
-  const r3 = amRound('lumo/alerts', 'root@m', r2.state, { 'lumo-prod': [], 'lumo-dev': [] }, T + 120_000);
+  const r3a = amRound('lumo/alerts', 'root@m', r2.state, { 'lumo-prod': [], 'lumo-dev': [] }, T + 120_000);
+  assert.equal(r3a.messages.length, 0, 'gone for less than resolve_after: still open');
+  const r3 = amRound('lumo/alerts', 'root@m', r3a.state, { 'lumo-prod': [], 'lumo-dev': [] }, T + 120_000 + RESOLVE_AFTER_MS);
   assert.equal(r3.messages.length, 1);
   assert.equal(r3.messages[0]!.anomaly, false);
   assert.match(r3.messages[0]!.body, /התראה קריטית נעלמה[\s\S]*lumo-prod: DbPrimaryDown/);
@@ -106,12 +108,74 @@ test('alertmanager: no answer keeps what is open; past 10 minutes one message "n
   assert.equal(amRound('k', 't', q, { a: [] }, T + BLIND_MS + 1).messages.length, 0);
 });
 
+test('alertmanager: a flapping alert (gone for a round, back) says nothing; gone for resolve_after, one note', () => {
+  const crit = parseAlerts(LIST)!;
+  const R = (s: AmState, prod: typeof crit, t: number) => amRound('lumo/alerts', 'root@m', s, { 'lumo-prod': prod, 'lumo-dev': [] }, t);
+  let r = R(EMPTY, crit, T);
+  assert.equal(r.messages.length, 1);
+  // 26/10 20:40:42: missing for one round, back a minute later with another startsAt. No note, no new message.
+  r = R(r.state, [], T + 60_000);
+  assert.equal(r.messages.length, 0);
+  assert.equal(r.state.open['lumo-prod/aa00000000000001']!.goneSince, T + 60_000);
+  r = R(r.state, [{ ...crit[0]!, startsAt: '2026-10-26T20:40:45.000Z' }], T + 120_000);
+  assert.equal(r.messages.length, 0);
+  assert.equal(r.state.open['lumo-prod/aa00000000000001']!.goneSince, undefined, 'back: the hold-down clock starts over');
+  // Gone for good: nothing until resolve_after, then exactly one note.
+  const notes: string[] = [];
+  for (let t = T + 180_000; t <= T + 180_000 + RESOLVE_AFTER_MS + 180_000; t += 60_000) {
+    r = R(r.state, [], t);
+    notes.push(...r.messages.map((m) => m.body));
+  }
+  assert.equal(notes.length, 1);
+  assert.match(notes[0]!, /התראה קריטית נעלמה/);
+  assert.match(notes[0]!, /נעלמה מהרשימה ב-2026-10-27 09:03:00 UTC/, 'when it went, not when the hold-down ended');
+  // A namespace taken out of the charter while held down: dropped, no note.
+  const held = R(R(EMPTY, crit, T).state, [], T + 60_000).state;
+  const out = amRound('lumo/alerts', 'root@m', held, { 'lumo-dev': [] }, T + 60_000 + RESOLVE_AFTER_MS);
+  assert.deepEqual([out.messages.length, out.state.open], [0, {}]);
+  // A missing answer in the hold-down is not "gone" time lost: it stays open, and resolves by the time it went missing.
+  let q = R(EMPTY, crit, T).state;
+  q = R(q, [], T + 60_000).state;
+  q = amRound('lumo/alerts', 'root@m', q, { 'lumo-prod': { error: 'x' }, 'lumo-dev': [] }, T + 120_000).state;
+  assert.ok(q.open['lumo-prod/aa00000000000001']);
+  assert.equal(R(q, [], T + 60_000 + RESOLVE_AFTER_MS).messages.length, 1);
+  // resolve_after from the charter.
+  const s0 = amRound('k', 't', EMPTY, { a: crit }, T).state;
+  assert.equal(amRound('k', 't', s0, { a: [] }, T, { resolveAfterMs: 0 }).messages.length, 1);
+  assert.match(amRound('k', 't', EMPTY, { a: crit }, T, { resolveAfterMs: 30_000 }).messages[0]!.body, /ל-30 שניות\./);
+  assert.match(amRound('k', 't', EMPTY, { a: crit }, T, { resolveAfterMs: 60_000 }).messages[0]!.body, /ל-דקה\./);
+});
+
+test('alertmanager: a critical alert from a namespace with prod: false is later, not urgent, without "ask"; production is now', () => {
+  const crit = parseAlerts(LIST)!;
+  const r = amRound('lumo/alerts', 'root@m', EMPTY, { 'lumo-prod': [], 'lumo-dev': crit }, T, { nonProd: ['lumo-dev'] });
+  assert.equal(r.messages.length, 1);
+  const m = r.messages[0]!;
+  assert.equal(m.priority, 'later');
+  assert.equal(m.anomaly, false);
+  assert.equal(m.event, 'probe.nonprod');
+  assert.match(m.body, /מחוץ לפרודקשן/);
+  assert.doesNotMatch(m.body, /ask|observe-only|פעולה על הפרודקשן/);
+  const both = amRound('lumo/alerts', 'root@m', EMPTY, { 'lumo-prod': crit, 'lumo-dev': crit }, T, { nonProd: ['lumo-dev'] });
+  assert.deepEqual(both.messages.map((x) => [x.priority, x.anomaly]), [['now', true], ['later', false]]);
+  assert.doesNotMatch(both.messages[0]!.body, /lumo-dev/, 'the urgent one holds only production');
+  // Its note and its blindness are later too.
+  const gone = amRound('lumo/alerts', 'root@m', r.state, { 'lumo-prod': [], 'lumo-dev': [] }, T + RESOLVE_AFTER_MS, { nonProd: ['lumo-dev'] });
+  assert.equal(gone.state.open['lumo-dev/aa00000000000001']!.goneSince, T + RESOLVE_AFTER_MS);
+  const g2 = amRound('lumo/alerts', 'root@m', gone.state, { 'lumo-prod': [], 'lumo-dev': [] }, T + 2 * RESOLVE_AFTER_MS, { nonProd: ['lumo-dev'] });
+  assert.equal(g2.messages[0]!.priority, 'later');
+  assert.match(g2.messages[0]!.body, /- lumo-dev \(לא פרודקשן\): DbPrimaryDown/);
+  let b = amRound('k', 't', EMPTY, { d: { error: 'x' } }, T, { nonProd: ['d'] }).state;
+  const bm = amRound('k', 't', b, { d: { error: 'x' } }, T + BLIND_MS + 1, { nonProd: ['d'] }).messages;
+  assert.deepEqual(bm.map((x) => [x.priority, x.anomaly]), [['later', false]]);
+});
+
 const CHARTER = `---
 monitoring:
   - id: alerts
     alertmanager: root@203.0.113.15
     identity: ~/.ssh/lumo-cluster_ed25519
-    namespaces: [lumo-prod, lumo-dev]
+    namespaces: [lumo-prod, {name: lumo-dev, prod: false}]
     every: 1m
   - {id: no-ns, alertmanager: root@m}
   - {id: bad-ns, alertmanager: root@m, namespaces: ['lumo prod']}
@@ -127,7 +191,18 @@ test('alertmanager probe: parsed with an explicit list of namespaces; without on
   assert.equal(p!.alertmanager!.target, 'root@203.0.113.15');
   assert.match(p!.alertmanager!.identityFile!, /\/\.ssh\/lumo-cluster_ed25519$/);
   assert.equal(p!.timeoutMs, 60_000);
+  assert.deepEqual(p!.alertmanager!.nonProd, ['lumo-dev']);
+  assert.equal(p!.alertmanager!.resolveAfterMs, RESOLVE_AFTER_MS);
   assert.deepEqual(bad.map((x) => x.kind), ['unsupported', 'unsupported', 'unsupported']);
+  const [plain, badResolve] = parseCharterProbes('x', `---
+monitoring:
+  - {id: plain, alertmanager: root@m, namespaces: [a], resolve_after: 2m}
+  - {id: bad-resolve, alertmanager: root@m, namespaces: [a], resolve_after: soon}
+---
+`);
+  assert.deepEqual(plain!.alertmanager!.nonProd, [], 'a namespace is production unless it says prod: false');
+  assert.equal(plain!.alertmanager!.resolveAfterMs, 120_000);
+  assert.equal(badResolve!.kind, 'unsupported');
 });
 
 test('alertmanager probe: no namespace answered = unknown; one that answered is a reading, ok only without critical alerts', async () => {
@@ -140,6 +215,9 @@ test('alertmanager probe: no namespace answered = unknown; one that answered is 
   assert.ok('error' in (part.alerts!['lumo-dev'] as object));
   const crit = await runAlertmanagerProbe(p!, async () => block('lumo-prod', LIST) + block('lumo-dev', '[]'));
   assert.equal(crit.ok, false);
+  const dev = await runAlertmanagerProbe(p!, async () => block('lumo-prod', '[]') + block('lumo-dev', LIST));
+  assert.equal(dev.ok, true, 'a critical alert in prod: false does not fail the probe');
+  assert.match(dev.error!, /lumo-dev\/DbPrimaryDown/);
   assert.match(crit.error!, /lumo-prod\/DbPrimaryDown/);
 });
 
@@ -169,10 +247,21 @@ test('alertmanager probe in the runner: wakes רותם once (urgent), a note whe
     assert.match(toRotem()[1]!.body, /אין ראייה ל-Alertmanager/);
     reading = { 'lumo-prod': [], 'lumo-dev': [] };
     await hq.probes.tick();
+    assert.equal(toRotem().length, 3, 'sight is back at once; the alert is held down for resolve_after');
+    for (let i = 0; i < 6; i++) { clock.advance(61_000); await hq.probes.tick(); }
     const last = toRotem().slice(2).map((m) => m.body);
     assert.equal(last.length, 2);
     assert.ok(last.some((b) => /התראה קריטית נעלמה/.test(b)));
     assert.ok(last.some((b) => /חזרה ראייה/.test(b)));
+    assert.equal((hq.store.db.prepare(`SELECT anomaly_open FROM probe_state WHERE probe_id = 'lumo/alerts'`).get() as { anomaly_open: number }).anomaly_open, 0);
+    // From lumo-dev (prod: false): later, low, a system message; not anomaly_open.
+    clock.advance(61_000);
+    reading = { 'lumo-prod': [], 'lumo-dev': parseAlerts(LIST)! };
+    await hq.probes.tick();
+    const dev = toRotem().at(-1)!;
+    assert.equal(toRotem().length, 5);
+    assert.deepEqual([dev.kind, dev.urgency, dev.priority], ['system', 'low', 'later']);
+    assert.match(dev.body, /מחוץ לפרודקשן/);
     assert.equal((hq.store.db.prepare(`SELECT anomaly_open FROM probe_state WHERE probe_id = 'lumo/alerts'`).get() as { anomaly_open: number }).anomaly_open, 0);
   } finally { await env.cleanup(); }
 });
