@@ -20,8 +20,18 @@
 //
 // "Closed" comes from --closed-tasks (hq passes it for a node, which has no hq.db) or else from hq.db, read-only: the tasks
 // known to be done for over 24 hours. Any other task id keeps its /tmp. With no list the /tmp step is skipped.
+//
+// Task 798: on 27/10 /tmp held 21GB in 38k entries, 6.9GB of it from the last day: leftovers of tests (hq-*, mcp-wal-*,
+// mongo-mem-*), review and scratch files, and the caches claude-<uid>, tsx-<uid>, node-compile-cache. So any other entry
+// directly in /tmp (and any entry directly inside those caches) goes too, when nothing in it changed for 24 hours (mtime and
+// ctime of every file inside, not only of the directory: `tar x`, `cp -a` and `mv` keep an old mtime, not an old ctime) and
+// nothing holds it: an open file, a cwd or a mapped file of a process we can read in /proc (ours; another user's are hidden
+// from us), a bound unix socket, a mount point, or the source of a mount of a running docker container. Never a socket, a fifo
+// or a symlink, never across a mount, never a dotted name (.X11-unix, .com.google.Chrome.*), never systemd-private-*, tmux-*,
+// ssh-*, chrome or playwright, and never what belongs to another user. Each entry is checked again right before it goes.
+// Without a believable /proc this step is skipped: not knowing who holds a file is not permission to delete it.
 import { execFile } from 'node:child_process';
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statfsSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statfsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -48,6 +58,80 @@ export function pickTmp(entries, closed) {
     if (UNNUMBERED.test(e.name)) out.push(e.name);
   }
   return out;
+}
+
+/** Never removed by age: what a live service or the system keeps in /tmp. Dotted names (.X11-unix, .ICE-unix, .com.google.Chrome.*) are skipped before this. */
+const LIVE = /^(?:systemd-private-|snap-private-tmp$|tmux-|ssh-|dbus-|pulse-|lost\+found$)|chrom|playwright|puppeteer/i;
+
+/** Caches that live sessions keep writing to as a whole; what is directly inside them is judged on its own. */
+export const cacheDirs = (uid) => [`claude-${uid}`, `tsx-${uid}`, 'node-compile-cache'];
+
+/**
+ * May an entry directly in /tmp go by age at all (task 798), by its name. Task directories (t<N>, task-<N>, rev<N>, audit-*)
+ * and the caches themselves are decided elsewhere; what a live service or the system keeps stays.
+ */
+export function byName(name, uid) {
+  return !name.startsWith('.') && !LIVE.test(name) && !cacheDirs(uid).includes(name) && !NUMBERED.test(name) && !UNNUMBERED.test(name);
+}
+
+/**
+ * Paths under `root` something holds: a process's cwd, root, exe, open files and mapped files (only processes we may read:
+ * our own, or all as root), bound unix sockets, and mount points. null when /proc is missing or does not look like the
+ * machine's (no pid 1, or too few processes, as in a pid namespace).
+ */
+export function heldUnder(root, proc = '/proc') {
+  let pids;
+  try { pids = readdirSync(proc).filter((n) => /^\d+$/.test(n)); } catch { return null; }
+  if (!pids.includes('1') || pids.length < 20) return null;
+  const out = new Set();
+  const add = (p) => { if (p === root || p.startsWith(`${root}/`)) out.add(p.replace(/ \(deleted\)$/, '')); };
+  for (const pid of pids) {
+    const base = join(proc, pid);
+    for (const l of ['cwd', 'root', 'exe']) { try { add(readlinkSync(join(base, l))); } catch { /* gone, or not ours */ } }
+    try { for (const fd of readdirSync(join(base, 'fd'))) { try { add(readlinkSync(join(base, 'fd', fd))); } catch { /* closed meanwhile */ } } } catch { /* not ours */ }
+    try { for (const line of readFileSync(join(base, 'maps'), 'utf8').split('\n')) { const i = line.indexOf('/'); if (i >= 0) add(line.slice(i)); } } catch { /* not ours */ }
+  }
+  try { for (const line of readFileSync(join(proc, 'net', 'unix'), 'utf8').split('\n').slice(1)) { const p = line.trim().split(/\s+/)[7]; if (p) add(p); } } catch { /* no sockets table */ }
+  // mountinfo: "36 35 98:0 /mnt1 /mnt/parent rw ..." - the 5th field is the mount point, with spaces as \040
+  try { for (const line of readFileSync(join(proc, 'self', 'mountinfo'), 'utf8').split('\n')) { const p = line.split(' ')[4]; if (p) add(p.replace(/\\040/g, ' ')); } } catch { return null; }
+  return out;
+}
+
+/**
+ * Sources under `root` that running docker containers mount: their processes are root's, hidden from us in /proc.
+ * null when that cannot be known: `docker ps` failed, or a container has all of `root` (its own sockets and files there are
+ * invisible from here).
+ */
+async function dockerHeld(root, docker) {
+  const ps = await run(docker, ['ps', '-q'], 30_000);
+  if (!ps.ok) return null;
+  const ids = ps.out.split('\n').filter(Boolean);
+  if (!ids.length) return [];
+  // a container that exited meanwhile fails inspect; the others still print
+  const r = await run(docker, ['inspect', '--format', '{{range .Mounts}}{{.Source}}\n{{end}}', ...ids], 30_000);
+  if (!r.ok && !r.out.trim()) return null;
+  const sources = r.out.split('\n').filter(Boolean);
+  if (sources.some((p) => p === root || p === '/' || root.startsWith(`${p}/`))) return null; // all of root, or above it
+  return sources.filter((p) => p.startsWith(`${root}/`));
+}
+
+const isHeld = (path, held) => { for (const h of held) if (h === path || h.startsWith(`${path}/`)) return true; return false; };
+
+/**
+ * Walks `path`: null (keep) if it or anything inside changed after `since` (mtime or ctime), sits on another filesystem
+ * than `dev`, or cannot be read; else its size.
+ */
+function quietSize(path, since, dev) {
+  let st;
+  try { st = lstatSync(path); } catch { return null; }
+  if (Math.max(st.mtimeMs, st.ctimeMs) > since || st.dev !== dev) return null;
+  let size = st.blocks * 512;
+  if (st.isDirectory()) {
+    let names;
+    try { names = readdirSync(path); } catch { return null; }
+    for (const n of names) { const s = quietSize(join(path, n), since, dev); if (s === null) return null; size += s; }
+  }
+  return size;
 }
 
 /** "1.2GB", "512MB", "34.5kB", "Total reclaimed space: 3.1GB" → bytes; null when there is no size in the text. */
@@ -158,6 +242,66 @@ export async function clean(opts = {}) {
       if (!dry) rmSync(p, { recursive: true, force: true });
     }
     steps.push({ name: '/tmp של משימות', freed: dry ? 0 : freed, note: `${doomed.length} תיקיות${dry ? ` (היו משחררות ${human(freed)})` : ''}: ${doomed.slice(0, 8).join(' ')}` });
+  }
+
+  const uid = process.getuid?.() ?? 0;
+  const proc = opts.proc ?? '/proc';
+  let why = '';
+  const holders = async () => {
+    const h = opts.proc === null ? null : heldUnder(tmp, proc);
+    if (!h) { why = 'אין /proc של המכונה, לא ידוע מי מחזיק קבצים, מדלג'; return null; }
+    if (!hasDocker || !info.ok) return h;
+    const d = await dockerHeld(tmp, docker);
+    if (!d) { why = 'לא ידוע מה קונטיינרים של docker מחזיקים ב-/tmp, מדלג'; return null; }
+    for (const p of d) h.add(p);
+    return h;
+  };
+  let held = await holders();
+  if (!held) steps.push({ name: '/tmp ישן', freed: 0, note: why });
+  else {
+    const since = now - TMP_AGE_MS;
+    const dev = lstatSync(tmp).dev;
+    const sizes = new Map();
+    /** The quiet entries of `dir` that `keep(name)` lets through, as paths relative to /tmp. */
+    const look = (dir, prefix, keep) => {
+      let names;
+      try { names = readdirSync(dir); } catch { return []; }
+      const out = [];
+      for (const name of names) {
+        if (!keep(name)) continue; // by name first: no walk over what stays anyway
+        const p = join(dir, name);
+        let st;
+        try { st = lstatSync(p); } catch { continue; }
+        if (st.uid !== uid || !(st.isDirectory() || st.isFile()) || isHeld(p, held)) continue;
+        const size = quietSize(p, since, dev);
+        if (size === null) continue;
+        sizes.set(`${prefix}${name}`, size);
+        out.push(`${prefix}${name}`);
+      }
+      return out;
+    };
+    const doomed = look(tmp, '', (n) => byName(n, uid));
+    for (const c of cacheDirs(uid)) {
+      const st = (() => { try { return lstatSync(join(tmp, c)); } catch { return null; } })();
+      if (!st?.isDirectory() || st.uid !== uid) continue;
+      doomed.push(...look(join(tmp, c), `${c}/`, () => true)); // inside a cache everything is the cache's own
+    }
+    // The walk took a while: who holds what, and what changed, again right before each removal.
+    const again = await holders();
+    if (!again) doomed.length = 0; // went unknown meanwhile: nothing is known to be free
+    else held = again;
+    let freedQ = 0;
+    const removed = [];
+    let failed = 0;
+    let firstErr = '';
+    for (const rel of doomed) {
+      const p = join(tmp, rel);
+      if (isHeld(p, held) || quietSize(p, since, dev) === null) continue;
+      if (!dry) { try { rmSync(p, { recursive: true, force: true }); } catch (e) { failed++; firstErr ||= e.code ?? String(e); continue; } }
+      freedQ += sizes.get(rel) ?? 0;
+      removed.push(rel);
+    }
+    steps.push({ name: '/tmp ישן', freed: dry ? 0 : freedQ, note: `${removed.length} פריטים שלא השתנו 24 שעות ואין להם מחזיק${again ? '' : ` (${why})`}${failed ? `, ${failed} לא נמחקו עד הסוף (${firstErr})` : ''}${dry ? ` (היו משחררים ${human(freedQ)})` : ''}: ${removed.slice(0, 8).join(' ')}` });
   }
 
   const freed = dry ? 0 : Math.max(0, before - used(tmp));

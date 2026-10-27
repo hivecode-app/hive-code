@@ -1,7 +1,7 @@
 // scripts/drift-lib.mjs: waiting for GO is not drift; a manual pull, a dirty file are.
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -10,9 +10,13 @@ import { checkoutDrift, pendingCommits, pendingLines, incidentTitle } from './dr
 const git = 'git -c user.email=t@t -c user.name=t -c init.defaultBranch=main';
 const sh = (cwd, cmd) => execFileSync('bash', ['-c', cmd], { cwd, encoding: 'utf8' }).trim();
 
+const made = [];
+after(() => { for (const d of made) rmSync(d, { recursive: true, force: true }); });
+
 /** origin with A(#1) B(#2) C(#3) D(#4); prod cloned and reset to B. */
 function fixture() {
   const t = mkdtempSync(join(tmpdir(), 'drift-'));
+  made.push(t);
   const origin = join(t, 'origin');
   sh(t, `${git} init -q origin`);
   const shas = {};

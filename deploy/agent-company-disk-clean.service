@@ -1,4 +1,4 @@
-# Disk cleaning (task 382): docker build cache and images, npm cache, journal, /tmp of closed tasks. Installed by
+# Disk cleaning (task 382): docker build cache and images, npm cache, journal, /tmp of closed tasks, and (task 798) any /tmp entry quiet for 24h that no process holds. Installed by
 # `scripts/deploy.sh hq`; the timer runs it daily, and hq runs the same script when the disk passes 85% (disk-watch.ts).
 [Unit]
 Description=agent-company disk clean (docker, caches, /tmp of closed tasks)

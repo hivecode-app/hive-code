@@ -289,8 +289,14 @@ export interface TestEnv {
   cleanup(): Promise<void>;
 }
 
+// A test that never calls cleanup() (or fails before it) left its hq-* in /tmp: 1,076 of them on hq-host by 27/10 (task 798).
+// What is still here when the test process exits goes then.
+const liveEnvDirs = new Set<string>();
+process.on('exit', () => { for (const d of liveEnvDirs) { try { rmSync(d, { recursive: true, force: true }); } catch { /* a leftover, not a failure */ } } });
+
 export async function makeEnv(opts: { cfg?: Partial<HqConfig>; deps?: HqDeps; projects?: Record<string, string>; noStart?: boolean; org?: string } = {}): Promise<TestEnv> {
   const dir = mkdtempSync(join(tmpdir(), 'hq-'));
+  liveEnvDirs.add(dir);
   const company = join(dir, 'company');
   mkdirSync(join(company, 'projects'), { recursive: true });
   mkdirSync(join(dir, 'memory')); // the company's memory/: memory-files writes only where there is one
@@ -327,6 +333,7 @@ export async function makeEnv(opts: { cfg?: Partial<HqConfig>; deps?: HqDeps; pr
       await hq.stop().catch(() => {});
       await launcher.closeAll();
       rmSync(dir, { recursive: true, force: true });
+      liveEnvDirs.delete(dir);
     },
   };
 }
