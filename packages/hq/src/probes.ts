@@ -24,6 +24,7 @@
 // `alertmanager` reads the cluster's own critical alerts over ssh (alertmanager.ts): one message per fingerprint, held until it is gone.
 // `cluster` reads the layer under the services of a whole k3s cluster over one ssh (root-signals.ts): its findings and messages are its own.
 // `lumo_ws` reads the summary of the Lumo websocket in easy's workers over one ssh (lumo-ws.ts): its state and messages are its own.
+// Its discovery (a full scan every discover_every) runs on its own, as `cluster`: a slow scan doesn't hold the other probes.
 import { OWNER, pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -38,7 +39,7 @@ import type { Mailbox } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
 import { RootWatch, isSshTarget, type ClusterSpec } from './root-signals.ts';
 import { amRound, isNamespace, readAlertmanager, NS_TIMEOUT_S, RESOLVE_AFTER_MS, type AlertmanagerSpec, type AmReading, type AmState } from './alertmanager.ts';
-import { emptyWsState, isLabelKey, isLabelValue, kubeTs, parseWsOutput, parseWsTarget, stripAnsi, wsCommand, wsRound, type LumoWsSpec, type WsReading, type WsState } from './lumo-ws.ts';
+import { discoverCommand, discoverDue, discoverRound, emptyWsDiscovery, emptyWsState, isLabelKey, isLabelValue, kubeTs, parseDiscoverOutput, parseWsOutput, parseWsTarget, stripAnsi, wsCommand, wsRound, wsWatch, type LumoWsSpec, type WsDiscovery, type WsReading, type WsState } from './lumo-ws.ts';
 
 export { stripAnsi };
 
@@ -161,9 +162,12 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     const phoneLabel = r.phone_label == null ? 'userId' : String(r.phone_label);
     const phones = r.phones === '*' ? '*' as const : Array.isArray(r.phones) && r.phones.every((x) => typeof x === 'string' || typeof x === 'number')
       ? [...new Set(r.phones.map(String))] : r.phones == null ? [] : null;
-    const ws = wst && phones && (phones === '*' || phones.every(isLabelValue)) && isLabelKey(phoneLabel) ? { target: String(r.lumo_ws), ...wst, phoneLabel, phones, identityFile,
-      downAfter: posNum(r.down_after, 2), quietMs: parseDuration(r.quiet ?? '10m', NaN), silentMs: parseDuration(r.silent ?? '15m', NaN) } : undefined;
-    const lumoWs = ws && Number.isInteger(ws.downAfter) && ws.downAfter >= 1 && ws.quietMs > 0 && ws.silentMs > 0 ? ws : undefined;
+    const wsIgnore = r.ignore == null ? [] : Array.isArray(r.ignore) && r.ignore.every((x) => typeof x === 'string' || typeof x === 'number') ? [...new Set(r.ignore.map(String))] : null;
+    const ws = wst && phones && wsIgnore && [...(phones === '*' ? [] : phones), ...wsIgnore].every(isLabelValue) && isLabelKey(phoneLabel) ? { target: String(r.lumo_ws), ...wst, phoneLabel, phones, ignore: wsIgnore, identityFile,
+      downAfter: posNum(r.down_after, 2), quietMs: parseDuration(r.quiet ?? '10m', NaN), silentMs: parseDuration(r.silent ?? '15m', NaN),
+      discoverEveryMs: parseDuration(r.discover_every ?? '6h', NaN), discoverTimeoutMs: parseDuration(r.discover_timeout ?? '5m', NaN) } : undefined;
+    // discover_timeout at least 30s: the master stops the scan 10s before hq gives up on it.
+    const lumoWs = ws && Number.isInteger(ws.downAfter) && ws.downAfter >= 1 && [ws.quietMs, ws.silentMs, ws.discoverEveryMs].every((x) => x > 0) && ws.discoverTimeoutMs >= 30_000 ? ws : undefined;
     const alertmanager: AlertmanagerSpec | undefined = typeof r.alertmanager === 'string' && isSshTarget(r.alertmanager.trim()) && nss.length && nss.every(isNamespace)
       && resolveAfterMs >= 0
       ? { target: r.alertmanager.trim(), identityFile, namespaces: [...new Set(nss)], nonProd: [...new Set(nsEntries.filter((n) => !n.prod).map((n) => n.name))], resolveAfterMs } : undefined;
@@ -398,6 +402,15 @@ export async function runLumoWsProbe(p: ProbeSpec, run: SshRun = runSsh): Promis
   const r = parseWsOutput(out);
   if ('error' in r) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: r.error };
   return { ok: true, ws: r, status: null, latencyMs: lat(), error: r.errors.length ? `kubectl: ${r.errors.slice(0, 3).join('; ')}` : null };
+}
+
+/** Read-only: the scan of discovery (lumo-ws.ts), one ssh, discover_timeout. Throws nothing: no answer is `{ error }`. */
+export async function runLumoWsDiscover(p: ProbeSpec, run: SshRun = runSsh): Promise<{ phones: string[]; lines: number } | { error: string }> {
+  const s = p.lumoWs!;
+  try {
+    return parseDiscoverOutput(await run(['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10',
+      ...(s.identityFile ? ['-i', s.identityFile] : []), s.host, discoverCommand(s)], undefined, s.discoverTimeoutMs));
+  } catch (e) { return { error: (e as Error).message }; }
 }
 
 const KUBELET_SEP = '@@nodes';
@@ -652,6 +665,8 @@ export class ProbeRunner {
   probes: ProbeSpec[] = [];
   run: (p: ProbeSpec) => Promise<ProbeOutcome> = (p) => p.kind === 'disk' ? runDiskProbe(p) : p.kind === 'latency' ? runLatencyProbe(p)
     : p.kind === 'kubelet' ? runKubeletProbe(p) : p.kind === 'alertmanager' ? runAlertmanagerProbe(p) : p.kind === 'whatsapp_log' ? runWhatsappLogProbe(p) : p.kind === 'lumo_ws' ? runLumoWsProbe(p) : runHttpProbe(p);
+  /** The scan of discovery of a lumo_ws probe (runs on its own, never holds the tick). */
+  discover: (p: ProbeSpec) => Promise<{ phones: string[]; lines: number } | { error: string }> = (p) => runLumoWsDiscover(p);
   /** Second vantage point, asked before an anomaly wakes רותם. null = none configured. */
   witness: Witness | null;
   /** The same second vantage point for latency: ping from ci-host. null = none configured (then a shared event has no witness). */
@@ -704,6 +719,8 @@ export class ProbeRunner {
     const isDue = (p: ProbeSpec, slack = 0) => { const s = this.state(p.key); return !s?.last_run_at || now - s.last_run_at >= p.everyMs - slack; };
     // Root signals: a round per cluster, on its own (a 3-minute ssh doesn't hold the other probes back).
     for (const p of this.probes.filter((x) => x.kind === 'cluster' && !this.inflight.has(x.key) && isDue(x))) void this.clusterRound(p, now);
+    // lumo_ws discovery: a minute-long scan, on its own as well; the round goes on with the list it had.
+    for (const p of this.probes.filter((x) => x.kind === 'lumo_ws' && !this.inflight.has(`${x.key}#discover`) && discoverDue(x.lumoWs!, this.wsDiscovery(x), now))) void this.discoverRound(p, now);
     const runnable = this.probes.filter((p) => p.kind !== 'unsupported' && p.kind !== 'cluster' && !this.inflight.has(p.key));
     // A round of latency is one tick: one that is due takes along those almost due, and they all record this tick's time.
     const latencyDue = runnable.some((p) => p.kind === 'latency' && isDue(p));
@@ -720,7 +737,7 @@ export class ProbeRunner {
     await Promise.all([...due.map((p) => ({ p, retry: false })), ...retries.map((p) => ({ p, retry: true }))].map(async ({ p, retry }) => {
       this.inflight.add(p.key);
       try {
-        const o = await this.run(p);
+        const o = await this.run(p.kind === 'lumo_ws' ? this.wsSpec(p) : p);
         if (p.kind === 'latency') round.push({ p, o });
         const r = this.record(p, o, true, now, retry);
         if (r === 'crossed') crossed.push(p);
@@ -749,6 +766,40 @@ export class ProbeRunner {
     } catch (e) {
       this.store.emit('roots.error', this.cfg.monitoringLeadId, { probe: p.key, error: (e as Error).message });
     } finally { this.inflight.delete(p.key); }
+  }
+
+  private wsDiscovery(p: ProbeSpec): WsDiscovery {
+    try { return { ...emptyWsDiscovery(), ...(JSON.parse(this.store.getMeta(`probes.lumo_ws_discovery.${p.key}`) || '{}') as Partial<WsDiscovery>) }; } catch { return emptyWsDiscovery(); }
+  }
+
+  /** A lumo_ws probe as its round runs: the charter's phones and the discovered ones, without the ignored. */
+  wsSpec(p: ProbeSpec): ProbeSpec { return { ...p, lumoWs: wsWatch(p.lumoWs!, this.wsDiscovery(p).phones) }; }
+
+  /** One scan of discovery (lumo-ws.ts). Its time, how long it took and how many lines it read are in meta and in the event. */
+  async discoverRound(p: ProbeSpec, now = this.store.now()): Promise<void> {
+    const k = `${p.key}#discover`;
+    this.inflight.add(k);
+    try {
+      // Tried before it runs: a restart during the scan waits as after a failure, not a second scan on the master at once.
+      this.store.setMeta(`probes.lumo_ws_discovery.${p.key}`, JSON.stringify({ ...this.wsDiscovery(p), tried: now }));
+      const t0 = performance.now();
+      const r = await this.discover(p);
+      const ms = Math.round(performance.now() - t0);
+      // A reload during the scan: the charter as it is now (an ignore added meanwhile is not "discovered"); a probe gone records nothing.
+      const cur = this.probes.find((x) => x.key === p.key && x.kind === 'lumo_ws');
+      if (!cur) return;
+      p = cur;
+      const { state, messages, added } = discoverRound(p.key, p.lumoWs!, this.wsDiscovery(p), r, now, ms);
+      this.store.setMeta(`probes.lumo_ws_discovery.${p.key}`, JSON.stringify(state));
+      const lead = this.cfg.monitoringLeadId;
+      for (const m of messages) {
+        this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system', priority: m.anomaly ? 'next' : 'later', body: m.body });
+        this.store.emit(m.event, lead, { probe: p.key, msg: m.id });
+      }
+      this.store.emit('probe.lumo_ws_discover', lead, { probe: p.key, ms, ...('error' in r ? { error: r.error } : { found: r.phones.length, lines: r.lines, added }) });
+    } catch (e) {
+      this.store.emit('probe.lumo_ws_discover', this.cfg.monitoringLeadId, { probe: p.key, error: (e as Error).message });
+    } finally { this.inflight.delete(k); }
   }
 
   /** The daily jitter digest to רותם, once a day from DIGEST_HOUR Israel time (part of prod-probes, its switch). */
@@ -1063,7 +1114,7 @@ export class ProbeRunner {
     const key = `probes.lumo_ws.${p.key}`;
     let prev: WsState = emptyWsState();
     try { prev = { ...prev, ...(JSON.parse(this.store.getMeta(key) || '{}') as Partial<WsState>) }; } catch { /* unreadable: nothing open */ }
-    const { state, messages, open } = wsRound(p.key, p.lumoWs!, prev, reading, now, quietHours);
+    const { state, messages, open } = wsRound(p.key, this.wsSpec(p).lumoWs!, prev, reading, now, quietHours);
     const lead = this.cfg.monitoringLeadId;
     for (const m of messages) {
       this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system',
@@ -1120,7 +1171,7 @@ export class ProbeRunner {
   summary() {
     return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}),
       ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.whatsappLog ? { whatsapp_log: p.whatsappLog.target } : {}), ...(p.cluster ? { cluster: p.cluster.ssh } : {}),
-      ...(p.lumoWs ? { lumo_ws: p.lumoWs.target, phones: p.lumoWs.phones } : {}),
+      ...(p.lumoWs ? { lumo_ws: p.lumoWs.target, phones: p.lumoWs.phones, ignore: p.lumoWs.ignore, discovered: this.wsDiscovery(p).phones } : {}),
       ...(p.alertmanager ? { alertmanager: p.alertmanager.target, namespaces: p.alertmanager.namespaces, non_prod: p.alertmanager.nonProd ?? [], resolve_after_ms: p.alertmanager.resolveAfterMs ?? RESOLVE_AFTER_MS } : {}),
       every_ms: p.everyMs, ...(p.failForMs != null ? { fail_for_ms: p.failForMs } : {}), ...(this.state(p.key) ?? {}) }));
   }
