@@ -23,6 +23,7 @@
 // is one event; it reaches the owner only when it lasts past SHARED_PERSIST_MS and http fails too or there is no witness.
 // `alertmanager` reads the cluster's own critical alerts over ssh (alertmanager.ts): one message per fingerprint, held until it is gone.
 // `cluster` reads the layer under the services of a whole k3s cluster over one ssh (root-signals.ts): its findings and messages are its own.
+// `lumo_ws` reads the summary of the Lumo websocket in easy's workers over one ssh (lumo-ws.ts): its state and messages are its own.
 import { OWNER, pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -37,12 +38,15 @@ import type { Mailbox } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
 import { RootWatch, isSshTarget, type ClusterSpec } from './root-signals.ts';
 import { amRound, isNamespace, readAlertmanager, NS_TIMEOUT_S, RESOLVE_AFTER_MS, type AlertmanagerSpec, type AmReading, type AmState } from './alertmanager.ts';
+import { emptyWsState, isLabelKey, isLabelValue, kubeTs, parseWsOutput, parseWsTarget, stripAnsi, wsCommand, wsRound, type LumoWsSpec, type WsReading, type WsState } from './lumo-ws.ts';
+
+export { stripAnsi };
 
 export interface ProbeSpec {
   key: string;              // <project>/<id>
   project: string;
   id: string;
-  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'whatsapp_log' | 'cluster' | 'alertmanager' | 'unsupported';
+  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'whatsapp_log' | 'cluster' | 'alertmanager' | 'lumo_ws' | 'unsupported';
   url?: string;
   disk?: { target: string; host: string | null; path: string; identityFile: string | null; maxPercent: number };  // host null = local
   latency?: { host: string; maxAvgMs: number; maxMdevMs: number; maxLossPercent: number };
@@ -50,6 +54,7 @@ export interface ProbeSpec {
   whatsappLog?: WhatsappLogSpec;
   alertmanager?: AlertmanagerSpec;  // the cluster's Alertmanager in each namespace listed, read over ssh to its master
   cluster?: ClusterSpec;     // root signals (root-signals.ts): the k3s master to read the cluster from, over ssh
+  lumoWs?: LumoWsSpec;     // the Lumo websocket of easy's workers (lumo-ws.ts), read over ssh to the master
   method: string;
   expect: number[];
   maxLatencyMs: number | null;
@@ -151,21 +156,29 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
       ? { name: String((n as { name?: unknown }).name ?? ''), prod: (n as { prod?: unknown }).prod !== false } : { name: String(n), prod: true }) : [];
     const nss = nsEntries.map((n) => n.name);
     const resolveAfterMs = r.resolve_after == null ? RESOLVE_AFTER_MS : parseDuration(r.resolve_after, NaN);
+    // lumo_ws: the phones are the switch's list (`settings.lumoWsPhones`), `'*'` for all; anything else makes it unsupported.
+    const wst = typeof r.lumo_ws === 'string' ? parseWsTarget(r.lumo_ws) : null;
+    const phoneLabel = r.phone_label == null ? 'userId' : String(r.phone_label);
+    const phones = r.phones === '*' ? '*' as const : Array.isArray(r.phones) && r.phones.every((x) => typeof x === 'string' || typeof x === 'number')
+      ? [...new Set(r.phones.map(String))] : r.phones == null ? [] : null;
+    const ws = wst && phones && (phones === '*' || phones.every(isLabelValue)) && isLabelKey(phoneLabel) ? { target: String(r.lumo_ws), ...wst, phoneLabel, phones, identityFile,
+      downAfter: posNum(r.down_after, 2), quietMs: parseDuration(r.quiet ?? '10m', NaN), silentMs: parseDuration(r.silent ?? '15m', NaN) } : undefined;
+    const lumoWs = ws && Number.isInteger(ws.downAfter) && ws.downAfter >= 1 && ws.quietMs > 0 && ws.silentMs > 0 ? ws : undefined;
     const alertmanager: AlertmanagerSpec | undefined = typeof r.alertmanager === 'string' && isSshTarget(r.alertmanager.trim()) && nss.length && nss.every(isNamespace)
       && resolveAfterMs >= 0
       ? { target: r.alertmanager.trim(), identityFile, namespaces: [...new Set(nss)], nonProd: [...new Set(nsEntries.filter((n) => !n.prod).map((n) => n.name))], resolveAfterMs } : undefined;
     out.push({
       key: `${project}/${id}`, project, id,
-      kind: badFailFor ? 'unsupported' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : 'unsupported',
+      kind: badFailFor ? 'unsupported' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : lumoWs ? 'lumo_ws' : 'unsupported',
       url: typeof r.http === 'string' ? r.http : undefined,
-      disk, latency, kubelet, whatsappLog, cluster, alertmanager,
+      disk, latency, kubelet, whatsappLog, cluster, alertmanager, lumoWs,
       // Observe-only: a probe may only read. Anything but GET/HEAD in a charter is ignored.
       method: typeof r.method === 'string' && r.method.toUpperCase() === 'HEAD' ? 'HEAD' : 'GET',
       expect: (Array.isArray(exp) ? exp : [exp]).map(Number),
       maxLatencyMs: r.max_latency_ms != null ? Number(r.max_latency_ms) : (r.max_latency != null ? parseDuration(r.max_latency, 0) : null),
-      everyMs: parseDuration(r.every, cluster ? 300_000 : 60_000),
+      everyMs: parseDuration(r.every, cluster || lumoWs ? 300_000 : 60_000),
       // 20 pings at 0.2s with -W 2 end within ~6s; the default leaves room so a dead host ends in ping's summary, not a kill.
-      timeoutMs: parseDuration(r.timeout, cluster ? 180_000 : latency ? 20_000 : alertmanager ? Math.max(60_000, (alertmanager.namespaces.length * NS_TIMEOUT_S + 20) * 1000) : kubelet || whatsappLog ? 30_000 : 10_000),
+      timeoutMs: parseDuration(r.timeout, cluster ? 180_000 : latency ? 20_000 : alertmanager ? Math.max(60_000, (alertmanager.namespaces.length * NS_TIMEOUT_S + 20) * 1000) : lumoWs ? (lumoWs.phones === '*' ? 150_000 : 60_000) : kubelet || whatsappLog ? 30_000 : 10_000),
       failAfter: Number(r.fail_after ?? 3),
       failForMs: badFailFor ? null : failForMs,
       raw: r,
@@ -184,7 +197,7 @@ export function loadProbes(companyDir: string): ProbeSpec[] {
 /** `unknown`: no answer came back. Not a failure (ok is meaningless then); the runner doesn't count it.
  *  `noAnswer` (http): a DNS that didn't answer (EAI_AGAIN). A failure for fail_after as always, but it doesn't move fail_for's clock.
  *  A timeout is not noAnswer: it starts and crosses fail_for like a status. */
-export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; alerts?: AmReading; percent?: number; ping?: PingStats; versions?: KubeletVersions }
+export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; alerts?: AmReading; ws?: WsReading; percent?: number; ping?: PingStats; versions?: KubeletVersions }
 
 /** The apiserver's version and each node's kubelet version, as `kubectl` reported them ('' = the node has none yet, still registering). */
 export interface KubeletVersions { master: string; nodes: Record<string, string> }
@@ -259,6 +272,8 @@ export interface WhatsappLogSpec { target: string; host: string; ns: string; res
 /** The window for "no incoming message" is judged only inside these Israel hours: at night a quiet bot is normal. */
 export const QUIET_FROM_HOUR = 6;
 export const QUIET_TO_HOUR = 23;
+/** Inside the hours a quiet window is judged (Israel time). */
+export const quietHours = (t: number): boolean => { const h = israel(t).hour; return h >= QUIET_FROM_HOUR && h < QUIET_TO_HOUR; };
 const INCOMING = /Incoming WhatsApp message/;
 /** The 5-minute summary: the title then its fields. Not the per-driver route's own lines with that title ("…: bad signature", "… not understood"). */
 const SUMMARY = /Lumo automation webhook\s+\w+=\d/;
@@ -268,16 +283,6 @@ const REMOTE_AWK = '/Incoming WhatsApp message|Lumo automation webhook|Client\\.
 /** When the workload's running containers started (`@@started`, one line each): the log covers a window only from there. */
 const STARTED_TPL = '{{range .items}}{{range .status.containerStatuses}}@@started {{if .state.running}}{{.state.running.startedAt}}{{end}}{{"\\n"}}{{end}}{{end}}';
 const SELECTOR_TPL = '{{range $k, $v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}';
-
-export const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
-
-/** kubectl's `--timestamps` (RFC3339 with nanoseconds). null when it isn't one. */
-function kubeTs(s: string): number | null {
-  const m = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(\.\d+)?(Z|[+-]\d\d:\d\d)$/.exec(s);
-  if (!m) return null;
-  const t = Date.parse(`${m[1]}${m[2] ? m[2].slice(0, 4) : ''}${m[3]}`);
-  return Number.isFinite(t) ? t : null;
-}
 
 /** `started`: the latest start of a running container (null when none is known). */
 export interface WhatsappLog { started: number | null; lines: number; entries: { ts: number; text: string }[] }
@@ -312,7 +317,7 @@ export function whatsappLogBreaches(log: WhatsappLog, l: WhatsappLogSpec, now: n
   // 1. No incoming message in `quiet`, by day only, and only when the log covers the window: the container started before it.
   //    A log that is empty or sparse (a stuck gateway still printing its summary) is covered all the same.
   const start = now - l.quietMs;
-  const day = (t: number) => { const h = israel(t).hour; return h >= QUIET_FROM_HOUR && h < QUIET_TO_HOUR; };
+  const day = quietHours;
   const covered = log.started != null && log.started <= start;
   if (day(start) && day(now) && covered && !upTo.some((e) => e.ts > start && INCOMING.test(e.text))) {
     out.push(`אף שורת "Incoming WhatsApp message" ב-${Math.round(l.quietMs / 60_000)} הדקות האחרונות (${hhmm(start)}–${hhmm(now)} UTC)`);
@@ -376,6 +381,23 @@ export async function runWhatsappLogProbe(p: ProbeSpec, run: SshRun = runSsh, cl
   if (!log) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: `פלט kubectl logs לא מובן: ${stripAnsi(out).trim().slice(0, 120) || '(ריק)'}` };
   const bad = whatsappLogBreaches(log, l, clock(), p.everyMs);
   return { ok: !bad.length, status: null, latencyMs: lat(), error: bad.length ? `${l.resource}: ${bad.join('; ')}` : null };
+}
+
+/** Read-only: the summaries of the Lumo websocket in the workers with the switch on, over one ssh (lumo-ws.ts).
+ *  An empty list reads nothing. ok is judged by the round (the runner), not here. */
+export async function runLumoWsProbe(p: ProbeSpec, run: SshRun = runSsh): Promise<ProbeOutcome> {
+  const s = p.lumoWs!;
+  const t0 = performance.now();
+  const lat = () => Math.round(performance.now() - t0);
+  if (Array.isArray(s.phones) && !s.phones.length) return { ok: true, ws: { pods: {}, summaries: [], errors: [] }, status: null, latencyMs: 0, error: null };
+  let out: string;
+  try {
+    out = await run(['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10',
+      ...(s.identityFile ? ['-i', s.identityFile] : []), s.host, wsCommand(s, p.everyMs)], undefined, p.timeoutMs);
+  } catch (e) { return { ok: false, unknown: true, status: null, latencyMs: lat(), error: (e as Error).message }; }
+  const r = parseWsOutput(out);
+  if ('error' in r) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: r.error };
+  return { ok: true, ws: r, status: null, latencyMs: lat(), error: r.errors.length ? `kubectl: ${r.errors.slice(0, 3).join('; ')}` : null };
 }
 
 const KUBELET_SEP = '@@nodes';
@@ -629,7 +651,7 @@ interface FailFor { since: number; answered: number; gap: boolean; last: number;
 export class ProbeRunner {
   probes: ProbeSpec[] = [];
   run: (p: ProbeSpec) => Promise<ProbeOutcome> = (p) => p.kind === 'disk' ? runDiskProbe(p) : p.kind === 'latency' ? runLatencyProbe(p)
-    : p.kind === 'kubelet' ? runKubeletProbe(p) : p.kind === 'alertmanager' ? runAlertmanagerProbe(p) : p.kind === 'whatsapp_log' ? runWhatsappLogProbe(p) : runHttpProbe(p);
+    : p.kind === 'kubelet' ? runKubeletProbe(p) : p.kind === 'alertmanager' ? runAlertmanagerProbe(p) : p.kind === 'whatsapp_log' ? runWhatsappLogProbe(p) : p.kind === 'lumo_ws' ? runLumoWsProbe(p) : runHttpProbe(p);
   /** Second vantage point, asked before an anomaly wakes רותם. null = none configured. */
   witness: Witness | null;
   /** The same second vantage point for latency: ping from ci-host. null = none configured (then a shared event has no witness). */
@@ -923,6 +945,7 @@ export class ProbeRunner {
         ON CONFLICT(probe_id) DO UPDATE SET last_run_at = excluded.last_run_at, last_error = excluded.last_error`).run(p.key, p.project, retry ? (prev?.last_run_at ?? now) : now, o.error);
       this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: o.error });
       if (p.kind === 'alertmanager' && o.alerts) this.alertmanagerRound(p, o.alerts, now);  // its blindness is counted from unknowns
+      if (p.kind === 'lumo_ws') this.lumoWsRound(p, { error: o.error ?? 'אין תשובה' }, now);  // so is this one's
       return undefined;
     }
     // Jitter without loss is noted (ok=0, jitter=1) and doesn't advance the loss streak; alone it wakes no one until it lasts (JITTER_SUSTAIN_ROUNDS).
@@ -955,6 +978,7 @@ export class ProbeRunner {
     this.store.emit('probe.result', this.cfg.monitoringLeadId, { probe: p.key, ...o });
     if (p.kind === 'kubelet') { if (o.versions) this.kubeletSkew(p, o.versions, now); return undefined; }
     if (p.kind === 'alertmanager') { if (o.alerts) this.alertmanagerRound(p, o.alerts, now); return undefined; }
+    if (p.kind === 'lumo_ws') { if (o.ws) this.lumoWsRound(p, o.ws, now); return undefined; }
 
     const open = prev?.anomaly_open === 1;
     if (!healthy && (fails >= p.failAfter || lasted) && !open) {
@@ -1033,6 +1057,23 @@ export class ProbeRunner {
     this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(Object.values(state.open).some((o) => !nonProd.has(o.ns)) ? 1 : 0, p.key);
   }
 
+  /** The workers' websocket against what was told (lumo-ws.ts). Not fail_after: each condition has its own duration.
+   *  The state is in meta, so a restart doesn't wake רותם again for what is still open, and keeps the runs of live=false. */
+  private lumoWsRound(p: ProbeSpec, reading: WsReading | { error: string }, now: number): void {
+    const key = `probes.lumo_ws.${p.key}`;
+    let prev: WsState = emptyWsState();
+    try { prev = { ...prev, ...(JSON.parse(this.store.getMeta(key) || '{}') as Partial<WsState>) }; } catch { /* unreadable: nothing open */ }
+    const { state, messages, open } = wsRound(p.key, p.lumoWs!, prev, reading, now, quietHours);
+    const lead = this.cfg.monitoringLeadId;
+    for (const m of messages) {
+      this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system',
+        ...(m.urgent ? { urgency: 'urgent' as const } : {}), priority: m.urgent ? 'now' : 'next', body: m.body });
+      this.store.emit(m.event, lead, { probe: p.key, msg: m.id });
+    }
+    this.store.setMeta(key, JSON.stringify(state));
+    this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(open ? 1 : 0, p.key);
+  }
+
   /** Samples in a row, newest back, with no clean one (jitter or loss), up to JITTER_SUSTAIN_ROUNDS. Unknowns are not recorded here.
    *  Only samples from the last JITTER_SUSTAIN_ROUNDS intervals (a gap, like hq down, starts over), and for a node that was in the
    *  last shared event only samples after it ended: its loss there was the event's. */
@@ -1079,6 +1120,7 @@ export class ProbeRunner {
   summary() {
     return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}),
       ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.whatsappLog ? { whatsapp_log: p.whatsappLog.target } : {}), ...(p.cluster ? { cluster: p.cluster.ssh } : {}),
+      ...(p.lumoWs ? { lumo_ws: p.lumoWs.target, phones: p.lumoWs.phones } : {}),
       ...(p.alertmanager ? { alertmanager: p.alertmanager.target, namespaces: p.alertmanager.namespaces, non_prod: p.alertmanager.nonProd ?? [], resolve_after_ms: p.alertmanager.resolveAfterMs ?? RESOLVE_AFTER_MS } : {}),
       every_ms: p.everyMs, ...(p.failForMs != null ? { fail_for_ms: p.failForMs } : {}), ...(this.state(p.key) ?? {}) }));
   }
