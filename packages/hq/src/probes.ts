@@ -6,7 +6,6 @@
 // `whatsapp_log` reads the WhatsApp gateway's log (read-only `kubectl logs --since` over ssh) and judges what it says (whatsappLogBreaches):
 // no incoming message and no status update from Meta for `quiet` in the day (#347), `old` over a share of `forwarded` in the webhook summary, a minute of send failures (26/10),
 // and the automation fields of the summary (easy #346): `unknownNumber`/`lookupFailed`/`notQueued`/`unreadable` over their threshold.
-// webhooks=0 in two summaries in a row, by day (27/10): Lumo stopped calling the gateway while Meta's lines kept coming.
 // Its `Outbound: no status` and `Message failed` lines (easy #355) are judged on their own, without fail_after (whatsapp-failed.ts).
 // `latency` measures network jitter to a host: `ping -c 20 -i 0.2 -q` from hq-host (a node with jitter is a slow node, 22/10).
 // `kubelet` reads a cluster over ssh (`kubectl get --raw /version`, `kubectl get nodes`) and compares each node's kubeletVersion to the
@@ -382,16 +381,6 @@ export function whatsappLogBreaches(log: WhatsappLog, l: WhatsappLogSpec, now: n
   for (const [what, bad] of automation) {
     const hit = recent.filter((e) => bad(summaryField(e.text))).pop();
     if (hit) out.push(`${what} בסיכום "Lumo automation webhook" (${line(hit)})`);
-  }
-  // 2c. webhooks=0 in the two latest summaries, by day (27/10 06:41–06:51 UTC: Lumo stopped calling the gateway, rides didn't reach
-  //     drivers, and Meta's incoming messages and statuses kept 1 quiet). A summary every 5 minutes: the second zero comes 5 minutes after the first, and fail_after (3 at 1m) adds ~2.
-  //     A summary without the field (NaN) breaks the pair. No summary at all is not 0: a stuck gateway is 1's.
-  const pair = sums.slice(-2);
-  if (pair.length === 2 && pair.every((e) => summaryField(e.text)('webhooks') === 0) && day(pair[0]!.ts) && day(now)) {
-    const last = sums.filter((e) => summaryField(e.text)('webhooks') > 0).at(-1);
-    out.push(`webhooks=0 בשני סיכומי "Lumo automation webhook" ברצף (${pair.map((e) => hhmm(e.ts)).join(', ')} UTC); `
-      + (last ? `האחרון מעל 0: webhooks=${summaryField(last.text)('webhooks')} ב-${hhmm(last.ts)} UTC` : 'אין סיכום עם webhooks מעל 0 בחלון שנקרא')
-      + '. השער עונה ומדפיס סיכום, ולכן הבעיה כנראה בצד של לומו (botgw או tinode), לא בשער');
   }
   // 3. Send failures (Client.Timeout, 131016) per minute, in the minutes since the last run (the current one included).
   const from = Math.floor((now - Math.max(everyMs, 60_000)) / 60_000) * 60_000;
