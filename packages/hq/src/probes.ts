@@ -4,7 +4,7 @@
 // other kinds are listed as unsupported, never silently dropped.
 // `disk` (monitoring-spec §3.2 step 4) is the first ssh-shaped probe: read-only `df`, measured from hq-host only.
 // `whatsapp_log` reads the WhatsApp gateway's log (read-only `kubectl logs --since` over ssh) and judges what it says (whatsappLogBreaches):
-// no incoming message for `quiet` in the day, `old` over a share of `forwarded` in the webhook summary, a minute of send failures (26/10),
+// no incoming message and no status update from Meta for `quiet` in the day (#347), `old` over a share of `forwarded` in the webhook summary, a minute of send failures (26/10),
 // and the automation fields of the summary (easy #346): `unknownNumber`/`lookupFailed`/`notQueued`/`unreadable` over their threshold.
 // `latency` measures network jitter to a host: `ping -c 20 -i 0.2 -q` from hq-host (a node with jitter is a slow node, 22/10).
 // `kubelet` reads a cluster over ssh (`kubectl get --raw /version`, `kubectl get nodes`) and compares each node's kubeletVersion to the
@@ -279,17 +279,23 @@ export const QUIET_TO_HOUR = 23;
 /** Inside the hours a quiet window is judged (Israel time). */
 export const quietHours = (t: number): boolean => { const h = israel(t).hour; return h >= QUIET_FROM_HOUR && h < QUIET_TO_HOUR; };
 const INCOMING = /Incoming WhatsApp message/;
+/** Meta's delivery statuses for what we sent: they keep coming on a quiet morning with no user writing in (#347). The gateway doesn't
+ *  log them when its forwarding allowlist is on (tiki-bot-go whatsapp-webhook-go/server/server.go): then a quiet morning alerts again. */
+const STATUS = 'Message status update';
 /** The 5-minute summary: the title then its fields. Not the per-driver route's own lines with that title ("…: bad signature", "… not understood"). */
 const SUMMARY = /Lumo automation webhook\s+\w+=\d/;
 const SEND_FAILED = /Client\.Timeout|131016/;
-/** The server sends back only these lines (the log is ~2,000 lines a minute), plus the line count. */
-const REMOTE_AWK = '/Incoming WhatsApp message|Lumo automation webhook|Client\\.Timeout|131016/{print} END{print "@@lines " NR}';
+/** The server sends back only these lines (the log is ~2,000 lines a minute), plus the line count. Status updates come by the hundred
+ *  a minute, so only a count per minute (`@@status <latest ts in it> <n>`), not the lines. */
+export const REMOTE_AWK = `/${STATUS}/{m=substr($1,1,16); n[m]++; t[m]=$1; next} /Incoming WhatsApp message|Lumo automation webhook|Client\\.Timeout|131016/{print} `
+  + 'END{for (m in n) print "@@status " t[m] " " n[m]; print "@@lines " NR}';
 /** When the workload's running containers started (`@@started`, one line each): the log covers a window only from there. */
 const STARTED_TPL = '{{range .items}}{{range .status.containerStatuses}}@@started {{if .state.running}}{{.state.running.startedAt}}{{end}}{{"\\n"}}{{end}}{{end}}';
 const SELECTOR_TPL = '{{range $k, $v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}';
 
-/** `started`: the latest start of a running container (null when none is known). */
-export interface WhatsappLog { started: number | null; lines: number; entries: { ts: number; text: string }[] }
+/** `started`: the latest start of a running container (null when none is known). `statuses`: Meta's status updates per minute,
+ *  `ts` the latest one in that minute. */
+export interface WhatsappLog { started: number | null; lines: number; entries: { ts: number; text: string }[]; statuses: { ts: number; count: number }[] }
 
 /** What the remote command printed, ANSI colors removed. null when it isn't that (no line count). kubectl's own errors go to stderr and fail the run. */
 export function parseWhatsappLog(out: string): WhatsappLog | null {
@@ -299,6 +305,8 @@ export function parseWhatsappLog(out: string): WhatsappLog | null {
   const lines = Number(end[1]);
   const starts = [...clean.matchAll(/^@@started (\S+)$/gm)].map((m) => kubeTs(m[1]!)).filter((t): t is number => t != null);
   const started = starts.length ? Math.max(...starts) : null;
+  const statuses = [...clean.matchAll(/^@@status (\S+) (\d+)$/gm)].map((m) => ({ ts: kubeTs(m[1]!), count: Number(m[2]) }))
+    .filter((x): x is { ts: number; count: number } => x.ts != null);
   const entries: WhatsappLog['entries'] = [];
   for (const l of clean.split('\n')) {
     if (l.startsWith('@@')) continue;
@@ -306,7 +314,7 @@ export function parseWhatsappLog(out: string): WhatsappLog | null {
     const ts = sp > 0 ? kubeTs(l.slice(0, sp)) : null;
     if (ts != null) entries.push({ ts, text: l.slice(sp + 1) });
   }
-  return { started, lines, entries };
+  return { started, lines, entries, statuses };
 }
 
 /** A numeric `key=value` field of a summary line. NaN when the line doesn't have it (every comparison with NaN is false). */
@@ -318,13 +326,16 @@ const hhmm = (ts: number) => new Date(ts).toISOString().slice(11, 16);
 export function whatsappLogBreaches(log: WhatsappLog, l: WhatsappLogSpec, now: number, everyMs: number): string[] {
   const out: string[] = [];
   const upTo = log.entries.filter((e) => e.ts <= now);
-  // 1. No incoming message in `quiet`, by day only, and only when the log covers the window: the container started before it.
-  //    A log that is empty or sparse (a stuck gateway still printing its summary) is covered all the same.
+  // 1. No incoming message and no status update from Meta in `quiet` (#347: on a quiet morning no one writes in, and the statuses of
+  //    what we send keep coming; a stuck gateway or a webhook Meta stopped sending gets neither). By day only, and only when the log
+  //    covers the window: the container started before it. A log that is empty or sparse (a stuck gateway still printing its summary)
+  //    is covered all the same.
   const start = now - l.quietMs;
   const day = quietHours;
   const covered = log.started != null && log.started <= start;
-  if (day(start) && day(now) && covered && !upTo.some((e) => e.ts > start && INCOMING.test(e.text))) {
-    out.push(`אף שורת "Incoming WhatsApp message" ב-${Math.round(l.quietMs / 60_000)} הדקות האחרונות (${hhmm(start)}–${hhmm(now)} UTC)`);
+  if (day(start) && day(now) && covered && !upTo.some((e) => e.ts > start && INCOMING.test(e.text))
+    && !log.statuses.some((x) => x.ts > start && x.ts <= now)) {
+    out.push(`אף שורת "Incoming WhatsApp message" ואף "${STATUS}" מ-Meta ב-${Math.round(l.quietMs / 60_000)} הדקות האחרונות (${hhmm(start)}–${hhmm(now)} UTC)`);
   }
   // 2. The latest webhook summary: messages dropped as old against the ones forwarded. A summary comes every 5 minutes and stays
   //    the latest until the next one, so with `every: 1m` one bad summary is several bad runs: it alone can reach fail_after.
