@@ -21,6 +21,10 @@ export interface HqConfig {
   /** Temporary, owner-message-only Codex continuity. Off unless explicitly enabled. */
   codexLean?: boolean;
   codexModel?: string;
+  /** The codex CLI (codex-quota.ts reads the weekly quota through it). Default: `codex` on PATH. */
+  codexBin?: string;
+  /** Codex task workers (codex-quota.ts): a new task goes to Codex only while the week is under this %. Default 20. */
+  codexTaskMaxPercent?: number;
   stateDir: string;
   dbPath: string;
   /** COMPANY_HOME: the company's checkout, company/ and memory/ at its root (shared company-home.ts). */

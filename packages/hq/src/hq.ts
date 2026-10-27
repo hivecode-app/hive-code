@@ -45,6 +45,7 @@ import { startTabServer, type TabServer } from './tab/server.ts';
 import { PasskeyVault } from './tab/passkeys.ts';
 import { clockOf, readTimeZone } from './timezone.ts';
 import { LoopWatch } from './loop-watch.ts';
+import { CodexQuota, type CodexLimitsReader } from './codex-quota.ts';
 import { LOCAL, Nodes, RoutingLauncher, nodeToggle, type RemoteNode, type SshRun } from './nodes.ts';
 
 /** The phone view's own diagnostics go to the journal, not the event log (frames and taps are not events). */
@@ -68,6 +69,8 @@ export interface HqDeps {
   ssh?: SshRun;
   /** Starts the jobs of request_access (access.ts). */
   accessRunner?: JobRunner;
+  /** Reads Codex's rate limits (codex-quota.ts; default: a short-lived `codex app-server`). */
+  codexLimits?: CodexLimitsReader;
   now?: () => number;
 }
 
@@ -108,6 +111,8 @@ export class Hq {
   readonly pusher: Pusher;
   readonly ingest: Ingest;
   readonly accounts: AccountManager;
+  /** Codex's weekly quota, for task workers on Codex (codex-quota.ts). */
+  readonly codexQuota: CodexQuota;
   readonly tab: TabHandoffs;
   passkeys?: PasskeyVault;
   readonly home: Home;
@@ -150,6 +155,8 @@ export class Hq {
     this.scheduler.pollNode = (n) => this.pollNode(n);
     this.night = new Night(this.store, cfg, this.scheduler, this.mailbox, this.inbox, deps.issues);
     this.accounts = new AccountManager(this.store, cfg, this.shifts, this.mailbox, this.inbox, deps.accounts);
+    this.codexQuota = new CodexQuota(this.store, cfg, deps.codexLimits);
+    this.scheduler.codexBlocked = () => this.codexQuota.blocked();
     this.night.accountsFull = () => this.accounts.allFull();
     this.watchdog = new Watchdog(this.store, cfg, this.shifts, this.mailbox, this.inbox);
     this.rotator = new Rotator(this.store, cfg, this.shifts, this.mailbox);
@@ -209,6 +216,27 @@ export class Hq {
     this.conversations.setAlert((m) => this.store.bg(this.pusher.notifyMessage(m), 'push.message'));
     this.pusher.titleOf = (id) => this.conversationTitle(id);
     this.shifts.on('delta', (row, ev) => this.store.publish('engine.delta', row.identity, { shift: row.id, ...ev }));
+    // A Codex task worker out of quota mid-task (codex-quota.ts): the opener hears it once per task, and it stays on Codex.
+    // A fresh shift of a task worker may carry no task id: its task is found by the identity (like shifts.codexTask).
+    this.shifts.on('codexLimit', (row, text) => {
+      type T = { id: number; ref: string | null; title: string; project: string | null; labels: string };
+      const t = (row.task_id != null
+        ? this.store.db.prepare('SELECT id, ref, title, project, labels FROM tasks WHERE id = ?').get(row.task_id)
+        : this.store.db.prepare(`SELECT t.id, t.ref, t.title, t.project, t.labels FROM tasks t JOIN identities i ON i.id = t.identity
+            WHERE t.identity = ? AND i.team_kind = 'task' ORDER BY t.updated_at DESC LIMIT 1`).get(row.identity)) as T | undefined;
+      if (!t) return;
+      // Once per task per Codex week: another week's limit on the same task is news again.
+      const reset = this.codexQuota.state()?.resetsAt;
+      const week = reset != null && reset > this.store.now() ? reset : 'unknown';
+      const msgId = `task-${t.id}-codex-limit-${week}`;
+      if (this.mailbox.get(msgId)) return;
+      this.store.bg(this.codexQuota.refresh(), 'codex-quota.refresh');
+      const to = openedBy(t) ?? (t.project ? projectLead(this.store, t.project) : undefined) ?? this.cfg.managerId;
+      this.store.emit('codex.limit', row.identity, { task: t.id, shift: row.id, text: text.slice(0, 300) });
+      this.mailbox.tell({ msg_id: msgId, from: 'hq', to, priority: 'next',
+        body: `משימה ${t.ref ?? `#${t.id}`} (${t.title}) נעצרה באמצע: מכסת Codex נגמרה. היא לא עברה ל-Claude. `
+          + `העבודה שלה נשארה בענף וב-worktree. אם להמשיך על Claude, סוגרים אותה (\`close_team\`) ופותחים משימה חדשה בלי \`engine\` שממשיכה מהענף.` });
+    });
     this.shifts.on('launchFailed', (identity, shiftId, err) => {
       this.store.emit('shift.launch_failed', identity, { shift: shiftId, error: err.message });
     });
@@ -339,6 +367,9 @@ export class Hq {
         for (const a of this.accounts.rows()) if (a.config_dir && a.health !== 'needs_login') await this.accounts.verify(a.name);
         await this.accounts.refresh();
       });
+      // Codex's weekly quota (codex-quota.ts): the home's row, and the guard on new Codex tasks. First read right away.
+      this.every(T.accountsMs, 'codex-quota', async () => { await this.codexQuota.refresh(); });
+      this.store.bg(this.codexQuota.refresh(), 'codex-quota.refresh');
       // #115: `remember` with `file` → the rolling memory PR (memory-files.ts), when enough waits or long enough.
       this.every(10 * 60_000, 'memory-files', () => this.memoryFiles.sweep());
       // #153: a project standing still with work open wakes its lead, and then the manager.

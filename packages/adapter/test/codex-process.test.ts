@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CodexProcess } from '../src/codex-process.ts';
+import { CodexProcess, codexMcpConfig } from '../src/codex-process.ts';
 import type { ShiftSpec } from '../src/spec.ts';
 import type { EngineEvent } from '@company/shared';
 
@@ -71,4 +71,26 @@ test('an API-key login cannot silently replace the requested subscription login'
     const calls = readFileSync(join(root, 'rpc.log'), 'utf8');
     assert.equal(calls.includes('turn/start'), false);
   } finally { await p.stop(100); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a task worker on Codex: task instructions, no browser (also not the one in ~/.codex/config.toml), no ChatGPT apps', async () => {
+  const { root, spec } = setup(); const events: EngineEvent[] = [];
+  const mcp = join(root, 'mcp.json');
+  writeFileSync(mcp, JSON.stringify({ mcpServers: { company: { command: 'node', args: ['server.ts'] }, browser: { command: 'node', args: ['gateway.ts'] } } }));
+  const p = new CodexProcess({ ...spec, mcpConfigFile: mcp, codexMode: 'task', codexModel: 'gpt-6-astra' }, { onEvent: (e) => events.push(e) });
+  try {
+    p.sendUser('משימה');
+    await until(() => events.some((e) => e.kind === 'result'));
+    const start = readFileSync(join(root, 'rpc.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).find((x) => x.method === 'thread/start').params;
+    assert.match(start.developerInstructions, /# עובד משימה על Codex/);
+    assert.match(start.developerInstructions, /לא נוגעים בפרודקשן/);
+    assert.match(start.developerInstructions, /נכתב ב-Codex \(gpt-6-astra\), נסקר ב-Claude/);
+    assert.doesNotMatch(start.developerInstructions, /המשכיות רזה/);
+    assert.deepEqual(start.config.mcp_servers.browser, { command: 'true', enabled: false });
+    assert.equal(start.config.mcp_servers.company.required, true);
+    assert.equal(start.config['features.apps'], false);
+    assert.equal(start.model, 'gpt-6-astra');
+  } finally { await p.stop(100); rmSync(root, { recursive: true, force: true }); }
+  // The continuity mode keeps what it had.
+  assert.equal(codexMcpConfig(undefined).browser, undefined);
 });

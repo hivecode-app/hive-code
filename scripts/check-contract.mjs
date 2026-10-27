@@ -492,6 +492,12 @@ export function main() {
         if (!isObj(dr) || !Array.isArray(dr.paths) || !dr.paths.length || !dr.paths.every((v) => typeof v === 'string' && v)) err(`${rel(charter)}: design_review needs "paths", a list of paths`);
         for (const k of ['wait_minutes', 'small_lines']) if (isObj(dr) && dr[k] != null && !(Number.isInteger(dr[k]) && dr[k] > 0)) err(`${rel(charter)}: design_review "${k}" must be a positive whole number`);
       }
+      // codex: Codex as a task worker (packages/hq/src/workspace.ts codexCharter). No `default`: a task goes to Codex only when its opener asks.
+      if (fm.codex != null) {
+        const cx = fm.codex;
+        if (!isObj(cx) || !['off', 'on-request'].includes(cx.tasks)) err(`${rel(charter)}: codex needs "tasks": off or on-request`);
+        if (isObj(cx) && cx.model != null && !(typeof cx.model === 'string' && cx.model)) err(`${rel(charter)}: codex "model" must be a model name`);
+      }
       // heavy: the classes `reserve` knows in this project (packages/hq/src/heavy.ts). hq drops a class it cannot read, so a typo is caught here.
       if (fm.heavy != null) {
         if (!Array.isArray(fm.heavy)) err(`${rel(charter)}: "heavy" must be a list of classes`);

@@ -23,6 +23,9 @@ export interface Checkout {
  */
 export interface DesignReview { reviewer: string; paths: string[]; waitMinutes: number; smallLines: number }
 
+/** Never `default` (yet): a task goes to Codex only when whoever opens it asks (task 836). */
+export interface CodexCharter { tasks: 'off' | 'on-request'; model: string | null }
+
 export interface AccessGrant { resource: string; verbs: ('read' | 'write' | 'exec')[]; quote: string; date: string }
 
 export interface Charter {
@@ -39,6 +42,8 @@ export interface Charter {
   access: AccessGrant[];
   /** `heavy:` — what is heavy in this project (reserve): classes that replace the company's of the same name (heavy.ts). */
   heavy: HeavyClass[];
+  /** `codex:` — Codex as a task worker (codex-helper.md). `on-request`: an open_team with `engine: "codex"` runs on it. Off by default. */
+  codex: CodexCharter;
   paused: string | null;  // paused: he put the project on hold (the reason, or "מושהה"). Workers still run; hq doesn't wake it (stall-watch.ts)
   error?: string;         // status "invalid": why the charter could not be read
 }
@@ -74,7 +79,7 @@ export function readCharter(companyDir: string, project: string): Charter | null
     const m = readFileSync(file, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
     fm = ((m ? parse(m[1]!) : {}) ?? {}) as Record<string, unknown>;
   } catch (e) {
-    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, designReview: null, access: [], heavy: [], paused: null, error: (e as Error).message };
+    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, designReview: null, access: [], heavy: [], codex: { tasks: 'off', model: null }, paused: null, error: (e as Error).message };
   }
   const s = (v: unknown) => (typeof v === 'string' && v ? v : null);
   const checkouts: Checkout[] = [];
@@ -91,6 +96,7 @@ export function readCharter(companyDir: string, project: string): Charter | null
     project, status: s(fm.status) ?? 'active', machine: s(fm.machine), checkouts,
     worktreeDir: s(fm.worktree_dir) ?? '.worktrees', commands, ciCheck: s(fm.ci_check),
     mergeInstructions: steps(fm.merge_instructions), designReview: designReview(fm.design_review), access: accessGrants(fm.access), heavy: parseHeavy(fm.heavy),
+    codex: codexCharter(fm.codex),
     paused: fm.paused === true ? 'מושהה' : s(fm.paused),
   };
 }
@@ -106,6 +112,11 @@ function accessGrants(v: unknown): AccessGrant[] {
     const verbs = (Array.isArray(o.verbs) ? o.verbs : ['read']).filter((w): w is 'read' | 'write' | 'exec' => w === 'read' || w === 'write' || w === 'exec');
     return verbs.length ? [{ resource, verbs, quote, date }] : [];
   });
+}
+
+function codexCharter(v: unknown): CodexCharter {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  return { tasks: o.tasks === 'on-request' ? 'on-request' : 'off', model: typeof o.model === 'string' && o.model ? o.model : null };
 }
 
 function designReview(v: unknown): DesignReview | null {

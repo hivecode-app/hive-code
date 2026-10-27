@@ -714,7 +714,7 @@ class HqBackend extends Backend {
     if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'task.new' || type == 'task.state' || type == 'toggle.changed' || type.startsWith('watchdog.')
         || type == 'home.composed' || type == 'task.awaiting' || type == 'deploy.recorded' || type == 'asked.changed'
         // A new quota read (every 10 minutes): the home's "המכסה" card.
-        || type == 'accounts.quota'
+        || type == 'accounts.quota' || type == 'codex.quota'
         // A turn that ended: the header's "עובד"/"פנוי" comes from the board.
         || type == 'engine.result') {
       _refreshSoon();

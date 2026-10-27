@@ -123,7 +123,8 @@ class HomeV2 extends StatelessWidget {
 
     // 5. The quota: up top while every account is full (nothing can run), else after what finished.
     final quota = recipe?.quota ?? const <QuotaLine>[];
-    final usable = [for (final q in quota) if (q.usable) q];
+    // Codex's row is not an account the company runs on: all Claude accounts full is what stops the work.
+    final usable = [for (final q in quota) if (q.usable && !q.isCodex) q];
     final allFull = usable.isNotEmpty && usable.every((q) => q.full);
     final quotaCard = BlockCard(label: 'המכסה', child: QuotaCard(quota: quota, now: now));
     // 6. How fast it goes and on what (task 496): right under the quota, and folds with the home.

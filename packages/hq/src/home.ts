@@ -61,6 +61,8 @@ export interface QuotaLine {
   name: string; label: string; usable: boolean; full: boolean; reopens_at: number | null;
   five_hour_pct: number | null; seven_day_pct: number | null; five_hour_resets_at: number | null; seven_day_resets_at: number | null;
   snapshot_at: number | null;
+  /** A line of its own under the windows (Codex: new tasks are not sent to it until the reset). */
+  note?: string;
 }
 
 export const STALE_MS = 30 * 60_000;
@@ -348,8 +350,14 @@ export class Home {
       } catch { fallback = 'invalid'; }
     }
     recipe ??= { ...this.defaultRecipe(), version: row?.version ?? 0, fallback, ...(this.enabled() ? { source: 'hq' as const } : {}) };
-    return { ...recipe, blocks: this.live(recipe.blocks, refs), waiting_changed_at: this.hq.inbox.lastChange(), quota: this.hq.accounts.quota(),
+    return { ...recipe, blocks: this.live(recipe.blocks, refs), waiting_changed_at: this.hq.inbox.lastChange(), quota: this.quota(),
       usage: this.usage() };
+  }
+
+  /** The Claude accounts, then Codex's week (codex-quota.ts) once it has been read: the app's "המכסה" card. */
+  private quota(): QuotaLine[] {
+    const codex = this.hq.codexQuota.line();
+    return [...this.hq.accounts.quota(), ...(codex ? [codex] : [])];
   }
 
   /** usage.ts reads a day of events: once a minute is enough for a card that moves with the 10-minute quota read. */

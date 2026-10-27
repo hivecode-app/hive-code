@@ -33,6 +33,7 @@ const OPTIONS = {
     provider: { type: 'string' },
     'codex-bin': { type: 'string' },
     'codex-model': { type: 'string' },
+    'codex-mode': { type: 'string' },
     'oauth-token-file': { type: 'string' },
     'config-dir': { type: 'string' },           // managed CLAUDE_CONFIG_DIR of the account hq picked (B.7)
     'company-repo': { type: 'string' },         // the engine's main checkout (COMPANY_REPO, the hooks guard)
@@ -113,6 +114,7 @@ const spec: ShiftSpec = {
   mcpConfigFile, settingsFile, oauthToken, configDir: v['config-dir'],
   claudeBin: v['claude-bin'],
   provider: v.provider === 'codex' ? 'codex' : 'claude', codexBin: v['codex-bin'], codexModel: v['codex-model'],
+  ...(v['codex-mode'] === 'task' ? { codexMode: 'task' as const } : {}),
   env: {
     COMPANY_REPO: v['company-repo'] ?? process.env.COMPANY_REPO ?? repoRoot,
     // COMPANY_HOME from the same hq.config.json hq reads, at every start: a `systemctl restart` of the shift follows a

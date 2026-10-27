@@ -142,6 +142,10 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       members: strs('identities של חברי הצוות / member identities'),
       local: { type: 'boolean', description: 'true כשהמשימה צריכה משהו שיש רק בשרת הראשי: מפתחות ssh, `.env`, kubectl, סודות של hq-host, דפדפן או סימולטור. בלי: רצה בשרת הפנוי, גם בשרת השני '
         + '/ true when the task needs what only the main server has (ssh keys, .env, kubectl, hq-host secrets, browser, simulator); default: whichever server has room, the second one included' },
+      engine: { type: 'string', enum: ['claude', 'codex'], description: 'על מה העובד רץ. ברירת מחדל claude. codex רק בפרויקט שהאמנה שלו מדליקה אותו (`codex: { tasks: on-request }`), בלי assignee, '
+        + 'ולמשימת קוד עם קריטריון ברור (בדיקות, typecheck). לא לפרודקשן, לדפדפן או לשיחה. כשמכסת Codex נגמרה, hq דוחה עם הסיבה ולא מעביר ל-Claude '
+        + '/ which engine the worker runs on, default claude; codex only where the charter turns it on, with no assignee, for code work with a clear check' },
+      model: s('רק עם engine codex: מודל Codex, e.g. gpt-6-astra. ברירת מחדל: מהאמנה / with engine codex only: the Codex model, default the charter\'s'),
     }, ['name', 'purpose']),
     tool('close_team', 'סגירת צוות משימה: המשימה נסגרת, המשמרת נעצרת והעבודה נשמרת. רק מי שפתח, המנהל שלו, המנהל של העובד או ' + n.manager.name + '. '
       + 'awaiting ו-awaiting_note גוברים על מה שהעובד סימן, ואפשר לסמן אותם גם על משימה שכבר נסגרה. '

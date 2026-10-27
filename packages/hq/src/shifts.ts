@@ -15,6 +15,7 @@ import { buildSystemPrompt, writeSystemPrompt } from './system-prompt.ts';
 import { prMergedFrom, recordPrMerged } from './merged.ts';
 import { noWorkers, readCharter, Workspaces } from './workspace.ts';
 import { contextTokens, restRotationDue } from './rotation.ts';
+import { codexOf } from './codex-quota.ts';
 
 export type ShiftKind = 'work' | 'resident' | 'foreign';
 
@@ -43,6 +44,8 @@ export interface ShiftRow {
 export interface LaunchSpec {
   provider?: 'claude' | 'codex';
   codexModel?: string;
+  /** `task`: a Codex task worker (task 836); absent = the codex/lean continuity. */
+  codexMode?: 'task';
   /** --model / --effort of a Claude shift (config `engine`). */
   model?: string | null;
   effort?: string | null;
@@ -108,6 +111,9 @@ function systemctl(args: string[]): Promise<{ code: number | null; err: string }
   });
 }
 
+/** How Codex words a turn that ran out of quota ("You've hit your usage limit…", a 429). */
+export const CODEX_LIMIT = /usage limit|rate limit reached|\b429\b.*too many requests/i;
+
 export const shiftUnit = (shiftId: string) => `company-shift@${shiftId}.service`;
 
 /** The flags hq passes to the shift-host (shift-host cli.ts --args-file). shift-no comes from the store. */
@@ -117,6 +123,7 @@ export function hostArgs(spec: LaunchSpec, stateDir: string): Record<string, str
     cwd: spec.cwd, 'state-dir': stateDir, resume: spec.resume,
     ...(spec.provider ? { provider: spec.provider } : {}),
     ...(spec.codexModel ? { 'codex-model': spec.codexModel } : {}),
+    ...(spec.codexMode ? { 'codex-mode': spec.codexMode } : {}),
     ...(spec.model && spec.provider !== 'codex' ? { model: spec.model } : {}),
     ...(spec.effort && spec.provider !== 'codex' ? { effort: spec.effort } : {}),
     ...(spec.systemPromptFile ? { 'append-system-prompt-file': spec.systemPromptFile } : {}),
@@ -181,6 +188,7 @@ export interface ShiftEvents {
   frame: [ShiftRow, LoggedFrame, boolean]; // live=false: replayed after a reconnect
   ended: [ShiftRow, string];
   launchFailed: [string, string, Error]; // identity, shiftId, error
+  codexLimit: [ShiftRow, string]; // a Codex task worker's turn hit the usage limit: the error text
 }
 
 export class ShiftManager extends EventEmitter<ShiftEvents> {
@@ -265,8 +273,11 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     if (this.cfg.codexLean && !['message', 'manual', 'resurrect'].includes(opts.reason)) {
       throw new Error('מצב Codex רזה: עובד מתעורר רק מפנייה ישירה של הבעלים');
     }
+    // Codex for the whole company (codex/lean, owner messages only), or for this one task (open_team engine codex, task 836).
+    const codexTask = this.cfg.codexLean ? null : this.codexTask(opts.taskId ?? null, identity);
+    const onCodex = !!this.cfg.codexLean || !!codexTask;
     const cur = this.current(identity);
-    const providerChanged = !!cur && (cur.account === 'codex') !== !!this.cfg.codexLean;
+    const providerChanged = !!cur && (cur.account === 'codex') !== onCodex;
     if (providerChanged) {
       if (this.midTurn(cur!)) throw new ShiftBusyError(`${identity}: the current turn must finish before changing provider`);
       opts = { ...opts, forceNew: true, reason: 'message' };
@@ -288,7 +299,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     const neverRan = !!last && last.host_seq === 0 && last.run_start_seq == null;
     // A lead that rested past its prompt cache with a big context: a resume would write all of it to the cache again (rotation.ts).
     const restRotate = !!last && !opts.forceNew && !neverRan && !cur && restRotationDue(this.cfg, this.store, last, this.store.now());
-    const wouldResume = !!last && (last.account === 'codex') === !!this.cfg.codexLean && !neverRan && !opts.forceNew && !NEW_SHIFT_REASONS.has(last.end_reason ?? '')
+    const wouldResume = !!last && (last.account === 'codex') === onCodex && !neverRan && !opts.forceNew && !NEW_SHIFT_REASONS.has(last.end_reason ?? '')
       && !restRotate && !this.pastTask(identity, last.task_id) && (!ownTask || last.task_id === ownTask.id);
     let cwd = opts.cwd ?? this.taskCwd(opts.taskId ?? ownTask?.id ?? (wouldResume ? last!.task_id : null), identity) ?? this.projectCwd(identity) ?? this.cfg.defaultCwd;
     // A task placed on a node (nodes.ts) runs there, every run; everything else runs here.
@@ -300,7 +311,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     // from before v7 have no cwd and resume as before (on hq-host defaultCwd is the agent-company checkout itself).
     const moved = (!!last?.cwd && last.cwd !== cwd) || (!!last && (last.machine ?? LOCAL) !== machine);
     const resume = wouldResume && !moved;
-    const shiftNo = resume || (neverRan && !opts.forceNew && (last?.account === 'codex') === !!this.cfg.codexLean) ? last!.shift_no : (last?.shift_no ?? 0) + 1;
+    const shiftNo = resume || (neverRan && !opts.forceNew && (last?.account === 'codex') === onCodex) ? last!.shift_no : (last?.shift_no ?? 0) + 1;
     const shiftId = `${identity}-${shiftNo}`;
     const socketPath = shiftSocketPath(this.paths, shiftId);
     const sessionId = sessionIdFor(identity, shiftNo);
@@ -340,13 +351,15 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       if (this.cfg.codexLean) this.writeContinuity(shiftId, identity, taskMachine);
       const systemPromptFile = this.writeSystem(shiftId, identity);
       // A node runs on its own login (nodes.ts): not one of the accounts here, and never moved between them.
-      const acct = this.cfg.codexLean ? { name: 'codex', configDir: null }
+      const acct = onCodex ? { name: 'codex', configDir: null }
         : machine === LOCAL ? this.chooseAccount?.(identity, opts.account) ?? null : { name: nodeAccount(machine), configDir: null };
       this.patch(shiftId, { account: acct?.name ?? null });
       await this.launcher.launch({
         shiftId, identity, shiftNo, sessionId, resume, kind, socketPath, taskId, unit,
         cwd, systemPromptFile, account: acct?.name ?? null, configDir: acct?.configDir ?? null, machine,
-        ...(this.cfg.codexLean ? { provider: 'codex' as const, codexModel: this.cfg.codexModel } : this.engineFor(identity)),
+        ...(this.cfg.codexLean ? { provider: 'codex' as const, codexModel: this.cfg.codexModel }
+          : codexTask ? { provider: 'codex' as const, codexMode: 'task' as const, codexModel: codexTask.model ?? this.cfg.codexModel }
+          : this.engineFor(identity)),
       });
     } catch (e) {
       this.markEnded(shiftId, 'dead', stage);
@@ -391,6 +404,17 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
           WHERE t.identity = ? AND i.team_kind = 'task' AND t.state != 'done' ORDER BY t.updated_at DESC LIMIT 1`).get(identity)
     ) as { worktree: string | null } | undefined;
     return r?.worktree ?? undefined;
+  }
+
+  /** A task whose worker runs on Codex (open_team engine codex): its model, found like taskCwd. Null = Claude. A task worker's
+   *  task that is done counts too: a manual start of it stays on Codex, never on Claude by itself. */
+  private codexTask(taskId: number | null, identity: string): { model: string | null } | null {
+    const r = (taskId != null
+      ? this.store.db.prepare('SELECT labels FROM tasks WHERE id = ?').get(taskId)
+      : this.store.db.prepare(`SELECT t.labels FROM tasks t JOIN identities i ON i.id = t.identity
+          WHERE t.identity = ? AND i.team_kind = 'task' ORDER BY t.updated_at DESC LIMIT 1`).get(identity)
+    ) as { labels: string } | undefined;
+    return codexOf(r?.labels);
   }
 
   /** The machine a task's shifts run on: the task's (nodes.ts), else here. Found like taskCwd. */
@@ -554,6 +578,9 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
         // A compaction's own result reports the summary call, which read the whole conversation: the boundary said what is left.
         const compacted = this.compacted.delete(id);
         if (ctx != null && !compacted) fields.context_tokens = ctx;
+        // A Codex task worker whose turn hit the ChatGPT usage limit: hq tells the opener (hq.ts), never moves it to Claude.
+        // Also replayed after a reconnect: the seq filter above already drops what was seen, and the message id is fixed.
+        if (row.account === 'codex' && !this.cfg.codexLean && ev.isError && CODEX_LIMIT.test(ev.text ?? '')) this.emit('codexLimit', row, ev.text ?? '');
       }
       else if (ev.kind === 'compact') {
         // A manual compaction (hq's `/compact`) is a turn of its own, and its result reports the summary call over the

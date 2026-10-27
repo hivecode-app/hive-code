@@ -30,6 +30,7 @@ import { guarded, requestUrl } from './http-guard.ts';
 import { EstimateError, longEtaWarning, parseEta } from './estimates.ts';
 import { AccessError } from './access.ts';
 import { LeaseError } from './leases.ts';
+import { CODEX_LABEL, CODEX_MODEL_LABEL } from './codex-quota.ts';
 
 const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home', 'withdraw_ask', 'withdraw_go']);
 
@@ -203,6 +204,11 @@ export class Ingest {
         // assignee: the project's standing worker whose domain it is (the lead picks). Without one, a temporary worker.
         const assignee = s(a.assignee)?.trim() || undefined;
         const worker = assignee ? getIdentity(this.hq.store, assignee) : undefined;
+        // A Codex task (engine below) gets a fresh task worker: a standing one has its own Claude session.
+        if (assignee && s(a.engine)?.trim() === 'codex') {
+          throw new IngestError(400, 'open_team: a Codex task gets a fresh task worker, not an assignee',
+            `משימה ל-Codex נפתחת לעובד משימה חדש, בלי \`assignee\`: לעובד קבוע יש סשן של Claude משלו`);
+        }
         if (assignee && (!worker || !worker.active)) {
           throw new IngestError(400, `open_team: unknown assignee ${assignee}`, `אין עובד קבוע בשם \`${assignee}\` (ה-assignee הוא identity מ-org.yaml, למשל \`ido\`)`);
         }
@@ -227,6 +233,26 @@ export class Ingest {
           throw new IngestError(400, `open_team: project ${project} is dormant or its charter is invalid; it gets workers only after it moves to the company`,
             `הפרויקט \`${project}\` רדום או שהאמנה שלו לא תקינה. הוא מקבל עובדים רק אחרי שהוא עובר לחברה (\`status: active\` באמנה)`);
         }
+        // engine: "codex" (task 836): this task's worker runs on Codex, only when the opener asks and the project's charter
+        // allows it (`codex.tasks: on-request`). Claude stays the default; nothing moves to Codex by itself, and a Codex task
+        // that can't run is refused here with the reason, never sent to Claude instead.
+        const engine = s(a.engine)?.trim() || 'claude';
+        if (engine !== 'claude' && engine !== 'codex') {
+          throw new IngestError(400, `open_team: unknown engine ${engine}`, `ה-\`engine\` הוא \`claude\` (ברירת המחדל) או \`codex\``);
+        }
+        let codexModel: string | null = null;
+        if (engine === 'codex') {
+          const ch = project != null ? readCharter(this.hq.cfg.companyDir, project) : null;
+          if (!ch || ch.codex.tasks !== 'on-request') {
+            throw new IngestError(400, `open_team: Codex tasks are off in project ${project ?? '(none)'}`,
+              `Codex לא דולק בפרויקט \`${project ?? '(בלי פרויקט)'}\`. מדליקים באמנה שלו, ב-PR: \`codex: { tasks: on-request }\`. בלי \`engine\` המשימה רצה על Claude`);
+          }
+          const why = this.hq.codexQuota.blocked();
+          if (why) {
+            throw new IngestError(409, 'open_team: Codex quota', `המשימה לא נפתחה: ${why}. היא לא עוברת ל-Claude לבד. אם לפתוח אותה על Claude, \`open_team\` שוב בלי \`engine\``);
+          }
+          codexModel = s(a.model)?.trim() || ch.codex.model;
+        }
         // Same ticket while its task is still open → that task. A finished one is not reopened silently.
         const base = s(a.ref) ?? `team:${e.id}`;
         const open = db.prepare(`SELECT ref FROM tasks WHERE (ref = ? OR ref LIKE ? ESCAPE '\\') AND state != 'done' ORDER BY id DESC LIMIT 1`)
@@ -242,7 +268,8 @@ export class Ingest {
           title: need('name'), body: need('purpose'), project, ref, priority, labels: [`opened-by:${e.identity}`, ...(s(a.repo) ? [`repo:${s(a.repo)}`] : []),
             // Needs what exists only here: stays here (nodes.ts NEEDS_LOCAL). Default: wherever there is room.
             // `remote` (before 22/10) is ignored: every task may go to a node now.
-            ...(a.local === true ? ['needs-local'] : [])],
+            ...(a.local === true ? ['needs-local'] : []),
+            ...(engine === 'codex' ? [CODEX_LABEL, ...(codexModel ? [`${CODEX_MODEL_LABEL}${codexModel}`] : [])] : [])],
           identity: worker?.id,
         });
         return { ok: true, id: e.id, ref: `task-${task.id}`, result: { task: task.id, state: task.state } };

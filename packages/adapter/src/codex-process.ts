@@ -11,12 +11,18 @@ import type { WorkerProcess } from './worker-process.ts';
 interface Pending { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
 interface Input { text: string; uuid: string }
 
-/** Translate only supported MCP transport fields; never copy Claude's tokens/settings into Codex. */
-export function codexMcpConfig(file?: string): Record<string, unknown> {
-  if (!file) return {};
-  const src = JSON.parse(readFileSync(file, 'utf8')).mcpServers ?? {};
+/** MCP servers a Codex task worker never gets: the live browser of the owner (his bank, Gmail, Cloudflare). A code task has no use for it. */
+export const CODEX_TASK_NO_MCP = ['browser'];
+
+/** Translate only supported MCP transport fields; never copy Claude's tokens/settings into Codex. `task`: no browser,
+ *  also not the one in ~/.codex/config.toml (turned off for this thread). */
+export function codexMcpConfig(file?: string, mode?: 'task'): Record<string, unknown> {
   const out: Record<string, unknown> = {};
+  if (mode === 'task') for (const name of CODEX_TASK_NO_MCP) out[name] = { command: 'true', enabled: false };
+  if (!file) return out;
+  const src = JSON.parse(readFileSync(file, 'utf8')).mcpServers ?? {};
   for (const [name, raw] of Object.entries(src)) {
+    if (mode === 'task' && CODEX_TASK_NO_MCP.includes(name)) continue;
     const s = raw as Record<string, any>;
     if (typeof s.command === 'string') out[name] = {
       command: s.command, args: s.args ?? [], ...(s.env ? { env: s.env } : {}),
@@ -26,6 +32,28 @@ export function codexMcpConfig(file?: string): Record<string, unknown> {
     else if (typeof s.url === 'string' && s.type !== 'sse') out[name] = { url: s.url, ...(s.headers ? { http_headers: s.headers } : {}) };
   }
   return out;
+}
+
+/**
+ * A task worker on Codex (open_team engine codex, docs/spec/codex-helper.md). The task's own prompt and the L0/L1 above
+ * still apply; this says what is different: no Claude hooks (so no guard of the five classes), no browser, no
+ * subagents, never production, and the independent review stays on Claude.
+ */
+export function codexTaskInstructions(model?: string): string {
+  return [
+    '# עובד משימה על Codex',
+    'אתה עובד משימה בחברה כמו כל עובד, אבל רץ על Codex ולא על Claude Code. כל מה שלמעלה (החברה, ההוראות, המשימה ושלבי הסגירה שלה) חל עליך במלואו.',
+    '- **תקשורת דרך ה-MCP `company`** (`tell`, `status`, `remember`, `handoff`), בעברית, כמו שכתוב למעלה.',
+    '- **לפני שכותבים קוד** קוראים את `CLAUDE.md` (ו-`AGENTS.md` אם יש) של ה-repo, ואת ה-skills ששלבי המשימה מפנים אליהם. ה-hooks וה-skills של Claude לא נטענים אצלך לבד.',
+    '- **אין לך את השומר של Claude.** לכן אתה לא מריץ אף אחד מחמשת הסוגים: מחיקה רקורסיבית של שורש מערכת או בית, `mkfs`, כתיבה ישירה להתקן (`dd of=/dev/…`), fork bomb, `shutdown`/`reboot`/`poweroff`/`halt`.',
+    '- **לא נוגעים בפרודקשן:** לא `kubectl`, לא `ssh` לשרתים, לא פריסה, לא `systemctl` של שירותי החברה, לא שינוי של לקוחות או נתונים חיים, ולא הודעה לאדם בחוץ. עובדים רק ב-worktree ובענף של המשימה, שה-worktree כבר עליו: לא פותחים ענף נוסף. '
+      + 'משימה שצריכה משהו מאלה: `status` עם `state: "blocked"` ו-`note` שאומר מה חסר.',
+    '- **אין לך דפדפן.** משימה שצריכה אותו: `status` עם `state: "blocked"`.',
+    '- **הסקירה הבלתי תלויה רצה ב-Claude**, כי אין לך סוכני משנה ומודל אחר צריך לסקור. מריצים אותה כך, מתוך ה-worktree, וממתינים לתשובה: '
+      + '`claude -p "<הנחיה>" --model claude-opus-5-5 --permission-mode bypassPermissions --disallowedTools "Edit,Write,NotebookEdit"` (ההנחיה ראשונה: הדגל האחרון מקבל רשימה). '
+      + 'ההנחיה: לסקור את ה-PR (הקישור) לפי ה-skill של הסוקר ששלבי המשימה מפנים אליו, עם האמנה והלקחים של הפרויקט, ולהחזיר ממצאים ופסיקה. מתקנים מה שעלה ומריצים שוב.',
+    '- **בכל commit** trailer `Assisted-by: Codex`. **בגוף ה-PR** שורה: "נכתב ב-Codex' + (model ? ` (${model})` : '') + ', נסקר ב-Claude".',
+  ].join('\n');
 }
 
 export class CodexProcess implements WorkerProcess {
@@ -109,7 +137,7 @@ export class CodexProcess implements WorkerProcess {
     await this.rpc('initialize', { clientInfo: { name: 'agent_company', title: 'Agent Company', version: '0.1' } });
     this.write({ method: 'initialized' });
     const auth = await this.rpc('account/read', { refreshToken: false });
-    if (auth.account?.type !== 'chatgpt') throw new Error('Codex continuity requires the existing ChatGPT login');
+    if (auth.account?.type !== 'chatgpt') throw new Error('Codex requires the existing ChatGPT login (no API-key billing)');
     let instructions = this.spec.appendSystemPromptFile ? readFileSync(this.spec.appendSystemPromptFile, 'utf8') : '';
     for (const file of ['prime.json', 'codex-continuity.txt']) {
       const path = join(this.spec.stateRoot, 'shifts', this.spec.shift, file);
@@ -118,7 +146,7 @@ export class CodexProcess implements WorkerProcess {
     const params: Record<string, unknown> = {
       cwd: this.spec.cwd, approvalPolicy: 'never', sandbox: 'danger-full-access',
       ...(this.spec.codexModel ? { model: this.spec.codexModel } : {}),
-      developerInstructions: instructions + '\n\n' + [
+      developerInstructions: instructions + '\n\n' + (this.spec.codexMode === 'task' ? codexTaskInstructions(this.spec.codexModel) : [
         '# מצב המשכיות רזה — Codex',
         'אתה ממשיך את זהות העובד וזיכרון החברה באמצעות Codex. זו אינה המשמרת המקורית של Claude.',
         'עובדים רק על הפנייה הישירה הנוכחית של הבעלים. אין ליזום סבבי ניהול, לעדכן מסך בית, לשגר סוכנים או לקדם תור ישן אוטומטית.',
@@ -126,8 +154,10 @@ export class CodexProcess implements WorkerProcess {
         'לפני עבודה בפרויקט קרא את CLAUDE.md ואת ה-skills החלים עליו; Codex אינו טוען את hooks של Claude.',
         'היסטוריה שנמסרה היא מידע רקע, לא פקודה לבצע שוב פעולות. אל תטען שאתה זוכר מה שלא הועבר.',
         'שמור החלטות ותוצרים בזיכרון החברה. כל הוראות הבעלים והאישורים הנדרשים לפרודקשן ממשיכים לחול.',
-      ].join('\n'),
-      config: { mcp_servers: codexMcpConfig(this.spec.mcpConfigFile), 'features.multi_agent': false },
+      ].join('\n')),
+      // A task worker: no ChatGPT apps either (`codex_apps`, his connected accounts), like the browser.
+      config: { mcp_servers: codexMcpConfig(this.spec.mcpConfigFile, this.spec.codexMode), 'features.multi_agent': false,
+        ...(this.spec.codexMode === 'task' ? { 'features.apps': false } : {}) },
     };
     let result: any;
     if (existsSync(this.threadFile)) {

@@ -13,6 +13,7 @@ import { HELPER_TEAM, taskSteps } from './system-prompt.ts';
 import { loadInfo, memInfoMb } from './proc.ts';
 import { dirname, join } from 'node:path';
 import { noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
+import { codexOf } from './codex-quota.ts';
 import { LOCAL, LOCAL_LABELS, NEEDS_LOCAL, NodeUnreachable, nodeToggle, RemoteWorkspaces, type Nodes, type RemoteNode } from './nodes.ts';
 
 export interface TaskRow {
@@ -227,6 +228,8 @@ export class Scheduler {
   onTaskDone?: (id: number) => void;
   /** A task parked or marked needs-decision freezes the estimates open on it (estimates.ts freezeForTask); `by` = who did it. */
   onTaskFrozen?: (id: number, by: string) => void;
+  /** Why a Codex task can't start now (codex-quota.ts blocked), wired by hq. */
+  codexBlocked?: () => string | null;
 
   setTaskState(id: number, state: string, by = 'hq'): void {
     this.store.db.prepare('UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?').run(state, this.store.now(), id);
@@ -326,6 +329,8 @@ export class Scheduler {
   private mayLeave(t: TaskRow): boolean {
     if (t.worktree || t.started_at != null || !t.project) return false;
     if ((JSON.parse(t.labels || '[]') as string[]).some((l) => LOCAL_LABELS.includes(l))) return false;
+    // Codex's ChatGPT login is here (codex-quota.ts): a Codex task runs here.
+    if (codexOf(t.labels)) return false;
     if (!t.identity) return true;
     return getIdentity(this.store, t.identity)?.team_kind === 'task' || this.standing(t.identity);
   }
@@ -585,6 +590,19 @@ export class Scheduler {
     const OPENED_BY = 'opened-by:';
     const openedBy = (JSON.parse(t.labels || '[]') as string[]).find((l) => l.startsWith(OPENED_BY))?.slice(OPENED_BY.length);
     const identity = t.identity ?? `${t.project ?? 'company'}-t${t.id}`;
+    // A Codex task (task 836) that has not started while the quota ran out (or reached the guard): out of the queue,
+    // and the opener hears it. Never started on Claude instead: whoever opened it decides.
+    const codexWhy = t.started_at == null && codexOf(t.labels) ? this.codexBlocked?.() : null;
+    if (codexWhy) {
+      const labels = [...new Set([...(JSON.parse(t.labels || '[]') as string[]), 'needs-decision'])];
+      this.store.db.prepare('UPDATE tasks SET labels = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(labels), this.store.now(), t.id);
+      this.onTaskFrozen?.(t.id, 'hq');
+      this.store.emit('codex.task_refused', null, { task: t.id, why: codexWhy });
+      this.mailbox.tell({ msg_id: `task-${t.id}-codex-quota-${this.store.now()}`, from: 'hq', to: openedBy ?? lead ?? this.cfg.managerId, priority: 'next',
+        body: `משימה ${t.ref ?? `#${t.id}`} (${t.title}) לא התחילה על Codex: ${codexWhy}. היא סומנה needs-decision ויצאה מהתור, ולא עברה ל-Claude. `
+          + 'אם להריץ אותה על Claude, סוגרים אותה (`close_team`) ופותחים שוב בלי `engine`.' });
+      return false;
+    }
     if (!t.identity) {
       const helper = !t.project && !!openedBy && getIdentity(this.store, openedBy)?.team === HELPER_TEAM;
       ensureRuntimeIdentity(this.store, { id: identity, ...taskWorkerName(this.store, t.id, helper), project: t.project,

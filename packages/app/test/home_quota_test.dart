@@ -37,6 +37,15 @@ void main() {
     expect(quotaLines(_q('a', measured: const Duration(hours: 2)), _now).last, 'נמדד 12:06');
   });
 
+  test('Codex: only its week, and the note when new tasks stop going to it', () {
+    final codex = QuotaLine.fromJson({'name': 'codex', 'label': 'Codex', 'usable': true, 'full': false, 'reopens_at': null, 'five_hour_pct': null,
+      'seven_day_pct': 23, 'five_hour_resets_at': null, 'seven_day_resets_at': DateTime(2026, 10, 24, 6).millisecondsSinceEpoch,
+      'snapshot_at': _now.millisecondsSinceEpoch, 'note': 'לא מקבל משימות חדשות עד האיפוס, כי עבר את התקרה של 20%'})!;
+    expect(codex.isCodex, isTrue);
+    expect(quotaLines(codex, _now), ['שבועי ${_p(23)}, מתאפס שבת 24/10 06:00', 'לא מקבל משימות חדשות עד האיפוס, כי עבר את התקרה של 20%']);
+    expect(codex.toJson()['note'], codex.note);
+  });
+
   test('the quota comes and goes with the recipe JSON (the cache keeps it)', () {
     final r = HomeRecipe.fromJson({'version': 1, 'composed_by': 'hq', 'composed_at': 0, 'blocks': [], 'quota': [
       {'name': 'hive-owner', 'label': 'hive-owner', 'usable': true, 'full': true, 'reopens_at': 1000, 'five_hour_pct': 0, 'seven_day_pct': 100,
@@ -65,13 +74,23 @@ void main() {
     ]);
     await pumpApp(tester, size: const Size(360, 1600), home: Scaffold(body: ListView(children: [HomeV2(data: data(), now: _now, recipe: down, folded: true)])));
     expect(find.byType(QuotaCard), findsOneWidget);
+
+    // Codex with room does not make the Claude accounts any less full: the work still stands, the card stays up top.
+    final codex = QuotaLine(name: 'codex', label: 'Codex', sevenDay: 3, sevenDayResets: DateTime(2026, 10, 24, 6), measuredAt: _now);
+    await pumpApp(tester, size: const Size(360, 1600), home: Scaffold(body: ListView(children: [HomeV2(data: data(), now: _now, recipe: _recipe([...down.quota, codex]), folded: true)])));
+    expect(find.byType(QuotaCard), findsOneWidget);
+    expect(find.text('Codex'), findsOneWidget);
   });
 
-  for (final dark in [false, true]) {
-    testWidgets('golden: the card, one account full (${dark ? 'dark' : 'light'})', (tester) async {
-      final r = _recipe([_q('החשבון הראשי', five: 2, week: 2), _q('hive-owner', five: 0, week: 100, full: true, reopens: DateTime(2026, 10, 21, 13, 59))]);
-      await pumpApp(tester, dark: dark, size: const Size(360, 900), home: Scaffold(body: ListView(children: [HomeV2(data: data(), now: _now, recipe: r)])));
-      await expectLater(find.byType(Scaffold).first, matchesGoldenFile('goldens/home_quota/card-${dark ? 'dark' : 'light'}.png'));
+  // Codex last, over its task cap: one window and the note (task 836).
+  final codexOver = QuotaLine(name: 'codex', label: 'Codex', sevenDay: 23, sevenDayResets: DateTime(2026, 10, 24, 6), measuredAt: _now,
+      note: 'לא מקבל משימות חדשות עד האיפוס, כי עבר את התקרה של 20%');
+  for (final (dark, scale) in [(false, 1.0), (true, 1.0), (false, 1.3)]) {
+    final name = '${dark ? 'dark' : 'light'}${scale == 1.0 ? '' : '-$scale'}';
+    testWidgets('golden: the card, one account full, Codex over its cap ($name)', (tester) async {
+      final r = _recipe([_q('החשבון הראשי', five: 2, week: 2), _q('hive-owner', five: 0, week: 100, full: true, reopens: DateTime(2026, 10, 21, 13, 59)), codexOver]);
+      await pumpApp(tester, dark: dark, textScale: scale, size: const Size(360, 900), home: Scaffold(body: ListView(children: [HomeV2(data: data(), now: _now, recipe: r)])));
+      await expectLater(find.byType(Scaffold).first, matchesGoldenFile('goldens/home_quota/card-$name.png'));
     });
   }
 }

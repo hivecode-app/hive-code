@@ -114,8 +114,9 @@ class SinceText {
 }
 
 /// One Claude account's quota as hq read it (GET /api/home `quota`, accounts.ts): both windows and their resets.
+/// The last line may be Codex's week (name `codex`, hq codex-quota.ts): one window, and a [note] when tasks stop going to it.
 class QuotaLine {
-  const QuotaLine({required this.name, required this.label, this.usable = true, this.full = false, this.reopensAt, this.fiveHour, this.sevenDay, this.fiveHourResets, this.sevenDayResets, this.measuredAt});
+  const QuotaLine({required this.name, required this.label, this.usable = true, this.full = false, this.reopensAt, this.fiveHour, this.sevenDay, this.fiveHourResets, this.sevenDayResets, this.measuredAt, this.note});
   final String name;
   final String label;
 
@@ -130,6 +131,10 @@ class QuotaLine {
   final DateTime? fiveHourResets;
   final DateTime? sevenDayResets;
   final DateTime? measuredAt;
+  final String? note;
+
+  /// Codex, not a Claude account: whether the company can run is not decided by it.
+  bool get isCodex => name == 'codex';
 
   static DateTime? _t(Object? v) => v is num ? DateTime.fromMillisecondsSinceEpoch(v.toInt()) : null;
 
@@ -147,6 +152,7 @@ class QuotaLine {
       fiveHourResets: _t(j['five_hour_resets_at']),
       sevenDayResets: _t(j['seven_day_resets_at']),
       measuredAt: _t(j['snapshot_at']),
+      note: j['note'] as String?,
     );
   }
 
@@ -161,6 +167,7 @@ class QuotaLine {
         'five_hour_resets_at': fiveHourResets?.millisecondsSinceEpoch,
         'seven_day_resets_at': sevenDayResets?.millisecondsSinceEpoch,
         'snapshot_at': measuredAt?.millisecondsSinceEpoch,
+        if (note != null) 'note': note,
       };
 }
 

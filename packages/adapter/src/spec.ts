@@ -30,6 +30,8 @@ export interface ShiftSpec {
   provider?: 'claude' | 'codex';
   codexBin?: string;
   codexModel?: string;
+  /** `task`: a Codex task worker (open_team engine codex): task instructions, no browser. Absent = codex/lean continuity. */
+  codexMode?: 'task';
   extraArgs?: string[];
 }
 

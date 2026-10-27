@@ -1,7 +1,8 @@
 // "המכסה" on the home (task 482): every Claude account the company runs on, its 5-hour and weekly use and when
 // each resets, from hq's last read (accounts.ts, every 10 minutes). On 23/10 both accounts hit 100% weekly and the
 // company stood for 36 hours with nothing on the screen to say so. A full account is the word "חסום" and its icon,
-// with when it opens again; never a color. A read older than half an hour says when it was taken.
+// with when it opens again; never a color. A read older than half an hour says when it was taken. Under the accounts,
+// Codex's week (task 836): it runs only tasks sent to it, so a line says when new ones stop going to it.
 import 'package:flutter/material.dart';
 
 import '../../model/home_recipe.dart';
@@ -32,7 +33,9 @@ List<String> quotaLines(QuotaLine q, DateTime now) {
   return [
     if (!q.usable) 'לא מחובר'
     else if (q.full) q.reopensAt != null ? 'חסום עד ${aheadAt(q.reopensAt!, now)}' : 'חסום',
-    if (q.usable) ...[windowLine('5 שעות', q.fiveHour, q.fiveHourResets, now), windowLine('שבועי', q.sevenDay, q.sevenDayResets, now)],
+    // Codex has one window, the week: no "5 שעות ?" line for a window it does not have.
+    if (q.usable) ...[if (!q.isCodex) windowLine('5 שעות', q.fiveHour, q.fiveHourResets, now), windowLine('שבועי', q.sevenDay, q.sevenDayResets, now)],
+    if (q.note != null) q.note!,
     if (q.usable && old) 'נמדד ${daysAgo(q.measuredAt!, now) == 0 ? hm(q.measuredAt!) : '${dm(q.measuredAt!)} ${hm(q.measuredAt!)}'}',
   ];
 }
