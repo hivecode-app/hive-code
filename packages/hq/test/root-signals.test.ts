@@ -342,16 +342,46 @@ test('skew: kubelet newer than the apiserver, or more than 3 minors older; helpe
     'the collector only reads');
 });
 
-test('a node getting less CPU: the shell loop at more than twice its median, three rounds', async () => {
+/** /proc/stat counters for a node whose round had `steal`% steal and `busy`% busy (the rest idle), 1,000 ticks a round. */
+class NodeCpu {
+  private cpu = [0, 0, 0, 0, 0, 0, 0, 0];
+  next(steal: number, busy: number): number[] {
+    const user = busy - steal;
+    this.cpu = this.cpu.map((v, i) => v + Math.round(10 * ([user, 0, 0, 100 - busy, 0, 0, 0, steal][i]!)));
+    return this.cpu;
+  }
+}
+
+test('a node getting less CPU: the shell loop at more than twice its median with steal over 3% in the round, three rounds', async () => {
   const { env, w, open, to } = await rootEnv();
   try {
-    const at = (m: number, bench: number) => w.observe('c', snap(out({ ts: T('10:00:00') + m * MIN, nodes: [{ name: 'vmi1', v: 'v1.33.6', ip: '10.0.0.1', bench }] })));
+    const c = new NodeCpu();
+    const at = (m: number, bench: number, steal = 0, busy = 20) =>
+      w.observe('c', snap(out({ ts: T('10:00:00') + m * MIN, nodes: [{ name: 'vmi1', v: 'v1.33.6', ip: '10.0.0.1', bench, cpu: c.next(steal, busy) }] })));
     for (let i = 0; i < 12; i++) at(i * 5, 0.3);
-    at(60, 0.5);
+    at(60, 0.5, 10, 40);
     assert.deepEqual(open(), []);
-    for (const m of [65, 70, 75]) at(m, 0.9);
+    for (const m of [65, 70, 75]) at(m, 0.9, 12, 60);
     assert.deepEqual(open(), ['cpu/vmi1']);
-    assert.match(to('rotem').at(-1)!.body, /vmi1 \(10\.0\.0\.1\) מקבלת כ-33% מה-CPU שהיא מקבלת בדרך כלל: לולאה קבועה רצה 0\.9s מול חציון של 0\.3s/);
+    assert.match(to('rotem').at(-1)!.body, /vmi1 \(10\.0\.0\.1\) מקבלת כ-33% מה-CPU שהיא מקבלת בדרך כלל: לולאה קבועה רצה 0\.9s מול חציון של 0\.3s ב-24 השעות האחרונות, steal 12% בסבב, עסוק 60%/);
+    for (const m of [80, 85, 90]) w.observe('c', snap(out({ ts: T('10:00:00') + m * MIN, nodes: [{ name: 'vmi1', v: 'v1.33.6', ip: '10.0.0.1', bench: 0.9 }] })));
+    assert.deepEqual(open(), ['cpu/vmi1'], 'a round with no steal reading is unknown: it closes nothing');
+  } finally { await env.cleanup(); }
+});
+
+test('a slow shell loop with steal at or under 3%, or no steal reading, is not a finding (vmi1000014 27/10: 35% busy, 0% steal, a DB move)', async () => {
+  const { env, w, open } = await rootEnv();
+  try {
+    const c = new NodeCpu();
+    const at = (m: number, bench: number, steal: number, busy: number, cpu = true) =>
+      w.observe('c', snap(out({ ts: T('10:00:00') + m * MIN, nodes: [{ name: 'vmi1', v: 'v1.33.6', ip: '10.0.0.1', bench, cpu: cpu ? c.next(steal, busy) : undefined }] })));
+    for (let i = 0; i < 12; i++) at(i * 5, 0.3, 0, 10);
+    for (const m of [60, 65, 70, 75]) at(m, 0.9, 0, 35);
+    assert.deepEqual(open(), []);
+    for (const m of [80, 85, 90, 95]) at(m, 0.9, 3, 35);
+    assert.deepEqual(open(), [], 'steal at the threshold is not over it');
+    for (const m of [100, 105, 110, 115]) at(m, 0.9, 0, 0, false);
+    assert.deepEqual(open(), [], 'no steal reading, no finding');
   } finally { await env.cleanup(); }
 });
 

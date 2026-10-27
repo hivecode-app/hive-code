@@ -2,7 +2,7 @@
 // service with nothing declared per service. A `cluster:` probe in a charter names a k3s master; every round one ssh runs
 // CLUSTER_SCRIPT there, which only reads: kubectl get (nodes, pods, /metrics, the kubelets' /metrics), `cat /proc/stat` and a tiny
 // shell loop inside a DaemonSet pod on each node, and psql with default_transaction_read_only in the primary of every CNPG cluster.
-// Findings: kubelet newer than the apiserver, one node flooding the apiserver, steal, a node getting less CPU than it used to, a
+// Findings: kubelet newer than the apiserver, one node flooding the apiserver, steal, a node getting less CPU than it used to (with steal), a
 // container killed on memory in a loop, a container crash-looping, a query running long (and the analyze/vacuum just before it),
 // a statement whose mean jumped (when pg_stat_statements is there), a queue whose oldest row is far older than it usually is.
 // A finding that lasts reaches רותם; a root (not a symptom) that lasts OWNER_ROUNDS reaches the owner, with the symptoms beside it.
@@ -89,7 +89,7 @@ done
 export interface NodeSample { name: string; kubelet: string; ip: string; requests: number | null; cpu: number[] | null; benchS: number | null }
 export interface ContainerRow { ns: string; pod: string; node: string; owner: string; startedAt: number | null; container: string; restarts: number; waiting: string; lastReason: string; lastFinishedAt: number | null; memLimit: string }
 export interface PgDb { cluster: string; db: string; active: { hash: string; secs: number; query: string }[]; maint: { table: string; analyzeAt: number; vacuumAt: number }[]; stmts: { id: string; calls: number; totalMs: number; query: string }[] | null; queues: { name: string; depth: number; ageS: number }[] }
-/** `unknown`: key prefixes of findings this snapshot could not see (a command that failed). They are neither seen nor missing:
+/** `unknown`: keys of findings this snapshot could not see (a command that failed), or prefixes when they end in `/`. They are neither seen nor missing:
  *  a round in which `kubectl exec` to the primary timed out must not close the slow query that made it time out. */
 export interface Snapshot { ts: number; apiserver: string | null; nodes: NodeSample[]; containers: ContainerRow[]; apiTotal: number | null; pg: PgDb[]; unknown: string[] }
 
@@ -170,6 +170,10 @@ export const API_SOURCE_FACTOR = 3;
 export const STEAL_MAX_PERCENT = 25;
 /** The shell loop took more than this × its 24h median on the node: the node gets less than half the CPU it used to. */
 export const BENCH_FACTOR = 2;
+/** …and only with steal above this in the same round. The loop runs in a pod on the node, so our own load slows it too: on 27/10
+ *  vmi1000014 (lumo) was 35% busy with 7.4% iowait during a DB move and 0% steal, and the loop on tiki's nodes ran 0.04–0.60s by
+ *  load and CPU model with 0.0% steal. Without steal a slow loop is not a finding. */
+export const BENCH_STEAL_MIN_PERCENT = 3;
 /** A baseline needs this many samples before anything is compared to it (an hour at `every: 5m`). */
 export const BASELINE_MIN = 12;
 /** Restarts of a container on OOMKilled within OOM_WINDOW_MS that make a loop. wabridge 26/10: 7 within ~10 minutes. */
@@ -247,11 +251,13 @@ const ignored = (ignore: string[], ns: string, pod: string): boolean => ignore.s
 /** One round: what is wrong now, and the samples that future rounds compare to. Pure: the history in, findings out. */
 /** `open`: the findings open now. A loop that is open stays a loop when its restarts pass CHRONIC_RESTARTS: only what was
  *  already looping when we first saw it is chronic. */
-export function evaluate(prev: Snapshot | null, cur: Snapshot, h: History, ignore: string[] = [], open: Set<string> = new Set()): { findings: Finding[]; samples: Sample[] } {
+/** `unknown`: more key prefixes this round could not see, beyond the snapshot's own (no steal without the round before). */
+export function evaluate(prev: Snapshot | null, cur: Snapshot, h: History, ignore: string[] = [], open: Set<string> = new Set()): { findings: Finding[]; samples: Sample[]; unknown: string[] } {
   const findings: Finding[] = [];
   const samples: Sample[] = [];
   const now = cur.ts;
   const dayAgo = now - DAY;
+  const unknown: string[] = [];
 
   // Version skew: kubelet newer than the apiserver, or too far behind it.
   const api = minor(cur.apiserver);
@@ -280,23 +286,29 @@ export function evaluate(prev: Snapshot | null, cur: Snapshot, h: History, ignor
     text: [`version skew: ${skewed.length} kubelets מחוץ לטווח הנתמך מול apiserver ${cur.apiserver} (kubelet לא יכול להיות חדש מה-apiserver, או ישן ממנו ביותר מ-${SKEW_MAX_OLDER} גרסאות):`,
       ...skewed.map((n) => `- ${n.name}: ${n.kubelet}${rates.has(n.name) ? `, ${Math.round(rates.get(n.name)!)} בקשות לדקה` : ''}`)].join('\n') });
 
-  // CPU the machine got: steal from /proc/stat over the round, and a fixed shell loop against the node's own median.
+  // CPU the machine got: steal from /proc/stat over the round, and a fixed shell loop against the node's own median. The loop is a
+  // finding only with steal above BENCH_STEAL_MIN_PERCENT in the same round (our own load slows it too). A round with no steal reading
+  // (no /proc/stat now or the round before, counters that went back) sees neither: unknown, so it closes nothing either.
   for (const n of cur.nodes) {
     const p = prevNode.get(n.name);
+    let steal: number | null = null;
+    let busy: number | null = null;
     if (n.cpu && p?.cpu && n.cpu.length >= 8 && p.cpu.length >= 8) {
       const d = n.cpu.slice(0, 8).map((v, i) => v - p.cpu![i]!);
       const total = d.reduce((s, v) => s + v, 0);
       if (total > 0 && d.every((v) => v >= 0)) {
-        const steal = (100 * d[7]!) / total;
-        const busy = (100 * (total - d[3]! - d[4]!)) / total;
+        steal = (100 * d[7]!) / total;
+        busy = (100 * (total - d[3]! - d[4]!)) / total;
         if (steal > STEAL_MAX_PERCENT) findings.push({ key: `steal/${n.name}`, signal: 'cpu-steal', subject: n.name,
           text: `steal ב-${n.name} (${n.ip}): ${round1(steal)}% מה-CPU בסבב האחרון (הסף ${STEAL_MAX_PERCENT}%), עסוק ${round1(busy)}%. הספק לא נותן למכונה את ה-CPU שלה.` });
       }
     }
+    if (steal == null) unknown.push(`steal/${n.name}`, `cpu/${n.name}`);
     if (n.benchS != null) {
       const b = h.stats(`bench:${n.name}`, dayAgo, now);
-      if (b.n >= BASELINE_MIN && b.median > 0 && n.benchS > BENCH_FACTOR * b.median) findings.push({ key: `cpu/${n.name}`, signal: 'cpu-received', subject: n.name,
-        text: `${n.name} (${n.ip}) מקבלת כ-${Math.round((100 * b.median) / n.benchS)}% מה-CPU שהיא מקבלת בדרך כלל: לולאה קבועה רצה ${n.benchS}s מול חציון של ${b.median}s ב-24 השעות האחרונות.` });
+      if (b.n >= BASELINE_MIN && b.median > 0 && n.benchS > BENCH_FACTOR * b.median && steal != null && busy != null && steal > BENCH_STEAL_MIN_PERCENT)
+        findings.push({ key: `cpu/${n.name}`, signal: 'cpu-received', subject: n.name,
+          text: `${n.name} (${n.ip}) מקבלת כ-${Math.round((100 * b.median) / n.benchS)}% מה-CPU שהיא מקבלת בדרך כלל: לולאה קבועה רצה ${n.benchS}s מול חציון של ${b.median}s ב-24 השעות האחרונות, steal ${round1(steal)}% בסבב, עסוק ${round1(busy)}%.` });
       samples.push({ key: `bench:${n.name}`, value: n.benchS });
     }
   }
@@ -377,7 +389,7 @@ export function evaluate(prev: Snapshot | null, cur: Snapshot, h: History, ignor
         text: `התור ${q.name} ב-${at} מתמלא: ${q.depth > 100_000 ? 'יותר מ-100,000' : q.depth.toLocaleString('en-US')} ממתינים, בדרך כלל ${Math.round(b.median)}. הישן ביותר בן ${Math.round(q.ageS)} שניות.` });
     }
   }
-  return { findings, samples };
+  return { findings, samples, unknown };
 }
 
 // ---------- the watch ----------
@@ -446,7 +458,7 @@ export class RootWatch {
     const prev = this.last.get(cluster) ?? null;
     const db = this.store.db;
     const rows = new Map((db.prepare('SELECT * FROM root_findings WHERE cluster = ?').all(cluster) as FindingRow[]).map((r) => [r.key, r]));
-    const { findings, samples } = evaluate(prev, snap, this.history(cluster), ignore, new Set(rows.keys()));
+    const { findings, samples, unknown } = evaluate(prev, snap, this.history(cluster), ignore, new Set(rows.keys()));
     this.last.set(cluster, snap);
     const now = snap.ts;
     const ins = db.prepare('INSERT INTO root_samples (cluster, key, ts, value) VALUES (?, ?, ?, ?)');
@@ -461,7 +473,7 @@ export class RootWatch {
       }
       const live = new Set(findings.map((f) => f.key));
       for (const r of rows.values()) {
-        if (live.has(r.key) || snap.unknown.some((u) => r.key.startsWith(u))) continue;
+        if (live.has(r.key) || [...snap.unknown, ...unknown].some((u) => r.key === u || (u.endsWith('/') && r.key.startsWith(u)))) continue;
         if (r.misses + 1 >= CLEAR_ROUNDS) { db.prepare('DELETE FROM root_findings WHERE cluster = ? AND key = ?').run(cluster, r.key); closed.push(r); }
         else db.prepare('UPDATE root_findings SET misses = misses + 1 WHERE cluster = ? AND key = ?').run(cluster, r.key);
       }
