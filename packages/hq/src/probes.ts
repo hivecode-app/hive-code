@@ -6,6 +6,7 @@
 // `whatsapp_log` reads the WhatsApp gateway's log (read-only `kubectl logs --since` over ssh) and judges what it says (whatsappLogBreaches):
 // no incoming message and no status update from Meta for `quiet` in the day (#347), `old` over a share of `forwarded` in the webhook summary, a minute of send failures (26/10),
 // and the automation fields of the summary (easy #346): `unknownNumber`/`lookupFailed`/`notQueued`/`unreadable` over their threshold.
+// Its `Outbound: no status` and `Message failed` lines (easy #355) are judged on their own, without fail_after (whatsapp-failed.ts).
 // `latency` measures network jitter to a host: `ping -c 20 -i 0.2 -q` from hq-host (a node with jitter is a slow node, 22/10).
 // `kubelet` reads a cluster over ssh (`kubectl get --raw /version`, `kubectl get nodes`) and compares each node's kubeletVersion to the
 // apiserver's: a node on another version is one anomaly to רותם, held until it matches again (task 697: six 1.34 kubelets on a 1.33 master, 9 days).
@@ -31,6 +32,7 @@ import { basename, join } from 'node:path';
 import { loadavg, cpus, homedir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { memInfoMb } from './proc.ts';
+import { tzOffsetMs } from './timezone.ts';
 import { runSsh, q, type SshRun } from './nodes.ts';
 import { parse } from 'yaml';
 import type { HqConfig } from './config.ts';
@@ -39,6 +41,7 @@ import type { Mailbox } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
 import { RootWatch, isSshTarget, type ClusterSpec } from './root-signals.ts';
 import { amRound, isNamespace, readAlertmanager, NS_TIMEOUT_S, RESOLVE_AFTER_MS, type AlertmanagerSpec, type AmReading, type AmState } from './alertmanager.ts';
+import { FAILED_AWK, FAILED_AWK_END, emptyFailedState, failedRound, parseFailed, type FailedReading, type FailedSpec, type FailedState } from './whatsapp-failed.ts';
 import { discoverCommand, discoverDue, discoverRound, emptyWsDiscovery, emptyWsState, isLabelKey, isLabelValue, kubeTs, parseDiscoverOutput, parseWsOutput, parseWsTarget, stripAnsi, wsCommand, wsRound, wsWatch, type LumoWsSpec, type WsDiscovery, type WsReading, type WsState } from './lumo-ws.ts';
 
 export { stripAnsi };
@@ -99,6 +102,15 @@ export function parseLogTarget(s: string): { host: string; ns: string; resource:
   return { host: m[1]!, ns: m[2]!, resource: m[3]! };
 }
 
+/** A time in the charter: an ISO date or date-time (YAML may hand a Date). A date alone is midnight in Israel. NaN when it isn't one. */
+const charterTime = (v: unknown): number => {
+  if (v instanceof Date) return v.getTime();
+  if (typeof v !== 'string') return NaN;
+  const t = v.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) { const utc = Date.parse(`${t}T00:00:00Z`); return utc - tzOffsetMs(utc, 'Asia/Jerusalem'); }
+  return /^\d{4}-\d{2}-\d{2}T/.test(t) ? Date.parse(t) : NaN;
+};
+
 /** A missing threshold takes the default; one that is there but isn't a number is NaN, and the probe becomes unsupported (as disk does). */
 const posNum = (v: unknown, dflt: number): number => { if (v == null) return dflt; const n = typeof v === 'number' ? v : NaN; return Number.isFinite(n) && n >= 0 ? n : NaN; };
 
@@ -139,8 +151,10 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     const lg = lgt ? { target: String(r.whatsapp_log), ...lgt, identityFile: typeof r.identity === 'string' ? r.identity.replace(/^~(?=\/|$)/, homedir()) : null,
       quietMs: parseDuration(r.quiet ?? '10m', NaN), maxOldRatio: posNum(r.max_old_ratio, 0.1), maxSendErrorsPerMin: posNum(r.max_send_errors_per_min, 20),
       maxUnknownNumber: posNum(r.max_unknown_number, 0), maxLookupFailed: posNum(r.max_lookup_failed, 0),
-      maxNotQueued: posNum(r.max_not_queued, 0), maxUnreadable: posNum(r.max_unreadable, 0) } : undefined;
-    const whatsappLog = lg && [lg.quietMs, lg.maxOldRatio, lg.maxSendErrorsPerMin, lg.maxUnknownNumber, lg.maxLookupFailed, lg.maxNotQueued, lg.maxUnreadable].every(Number.isFinite) && lg.quietMs > 0 ? lg : undefined;
+      maxNotQueued: posNum(r.max_not_queued, 0), maxUnreadable: posNum(r.max_unreadable, 0),
+      failed: { jump: posNum(r.failed_jump, 3), min: posNum(r.failed_min, 20), baselineFrom: r.failed_baseline_from == null ? null : charterTime(r.failed_baseline_from) } } : undefined;
+    const whatsappLog = lg && [lg.quietMs, lg.maxOldRatio, lg.maxSendErrorsPerMin, lg.maxUnknownNumber, lg.maxLookupFailed, lg.maxNotQueued, lg.maxUnreadable,
+      lg.failed.jump, lg.failed.min, lg.failed.baselineFrom ?? 0].every(Number.isFinite) && lg.quietMs > 0 && lg.failed.min >= 1 ? lg : undefined;
     const latency = lt && [lt.maxAvgMs, lt.maxMdevMs, lt.maxLossPercent].every(Number.isFinite) ? lt : undefined;
     // `root@host`: never something ssh could read as an option.
     const kubelet = typeof r.kubelet === 'string' && /^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(r.kubelet.trim())
@@ -201,7 +215,7 @@ export function loadProbes(companyDir: string): ProbeSpec[] {
 /** `unknown`: no answer came back. Not a failure (ok is meaningless then); the runner doesn't count it.
  *  `noAnswer` (http): a DNS that didn't answer (EAI_AGAIN). A failure for fail_after as always, but it doesn't move fail_for's clock.
  *  A timeout is not noAnswer: it starts and crosses fail_for like a status. */
-export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; alerts?: AmReading; ws?: WsReading; percent?: number; ping?: PingStats; versions?: KubeletVersions }
+export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; alerts?: AmReading; ws?: WsReading; wa?: FailedReading; percent?: number; ping?: PingStats; versions?: KubeletVersions }
 
 /** The apiserver's version and each node's kubelet version, as `kubectl` reported them ('' = the node has none yet, still registering). */
 export interface KubeletVersions { master: string; nodes: Record<string, string> }
@@ -271,7 +285,9 @@ export async function runDiskProbe(p: ProbeSpec, run: SshRun = runSsh, local: Lo
 
 /** A `whatsapp_log` probe: where the log is, and its thresholds. */
 export interface WhatsappLogSpec { target: string; host: string; ns: string; resource: string; identityFile: string | null; quietMs: number; maxOldRatio: number; maxSendErrorsPerMin: number;
-  maxUnknownNumber: number; maxLookupFailed: number; maxNotQueued: number; maxUnreadable: number }
+  maxUnknownNumber: number; maxLookupFailed: number; maxNotQueued: number; maxUnreadable: number;
+  /** `Message failed` per code against its baseline (whatsapp-failed.ts): `failed_jump`, `failed_min`, `failed_baseline_from`. */
+  failed: FailedSpec }
 
 /** The window for "no incoming message" is judged only inside these Israel hours: at night a quiet bot is normal. */
 export const QUIET_FROM_HOUR = 6;
@@ -287,15 +303,16 @@ const SUMMARY = /Lumo automation webhook\s+\w+=\d/;
 const SEND_FAILED = /Client\.Timeout|131016/;
 /** The server sends back only these lines (the log is ~2,000 lines a minute), plus the line count. Status updates come by the hundred
  *  a minute, so only a count per minute (`@@status <latest ts in it> <n>`), not the lines. */
-export const REMOTE_AWK = `/${STATUS}/{m=substr($1,1,16); n[m]++; t[m]=$1; next} /Incoming WhatsApp message|Lumo automation webhook|Client\\.Timeout|131016/{print} `
-  + 'END{for (m in n) print "@@status " t[m] " " n[m]; print "@@lines " NR}';
+export const REMOTE_AWK = `/${STATUS}/{m=substr($1,1,16); n[m]++; t[m]=$1; next} ${FAILED_AWK}/Incoming WhatsApp message|Lumo automation webhook|Client\\.Timeout|131016/{print} `
+  + `END{for (m in n) print "@@status " t[m] " " n[m]; ${FAILED_AWK_END}print "@@lines " NR}`;
 /** When the workload's running containers started (`@@started`, one line each): the log covers a window only from there. */
 const STARTED_TPL = '{{range .items}}{{range .status.containerStatuses}}@@started {{if .state.running}}{{.state.running.startedAt}}{{end}}{{"\\n"}}{{end}}{{end}}';
 const SELECTOR_TPL = '{{range $k, $v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}';
 
 /** `started`: the latest start of a running container (null when none is known). `statuses`: Meta's status updates per minute,
  *  `ts` the latest one in that minute. */
-export interface WhatsappLog { started: number | null; lines: number; entries: { ts: number; text: string }[]; statuses: { ts: number; count: number }[] }
+export interface WhatsappLog { started: number | null; lines: number; entries: { ts: number; text: string }[]; statuses: { ts: number; count: number }[];
+  failed?: FailedReading['failed']; noStatus?: FailedReading['noStatus'] }
 
 /** What the remote command printed, ANSI colors removed. null when it isn't that (no line count). kubectl's own errors go to stderr and fail the run. */
 export function parseWhatsappLog(out: string): WhatsappLog | null {
@@ -314,7 +331,7 @@ export function parseWhatsappLog(out: string): WhatsappLog | null {
     const ts = sp > 0 ? kubeTs(l.slice(0, sp)) : null;
     if (ts != null) entries.push({ ts, text: l.slice(sp + 1) });
   }
-  return { started, lines, entries, statuses };
+  return { started, lines, entries, statuses, ...parseFailed(clean, kubeTs) };
 }
 
 /** A numeric `key=value` field of a summary line. NaN when the line doesn't have it (every comparison with NaN is false). */
@@ -394,8 +411,11 @@ export async function runWhatsappLogProbe(p: ProbeSpec, run: SshRun = runSsh, cl
   } catch (e) { return { ok: false, unknown: true, status: null, latencyMs: lat(), error: (e as Error).message }; }
   const log = parseWhatsappLog(out);
   if (!log) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: `פלט kubectl logs לא מובן: ${stripAnsi(out).trim().slice(0, 120) || '(ריק)'}` };
-  const bad = whatsappLogBreaches(log, l, clock(), p.everyMs);
-  return { ok: !bad.length, status: null, latencyMs: lat(), error: bad.length ? `${l.resource}: ${bad.join('; ')}` : null };
+  const now = clock();
+  const bad = whatsappLogBreaches(log, l, now, p.everyMs);
+  // The window the reading covers: from --since, or from the container's start when it is later.
+  const wa: FailedReading = { from: Math.max(now - since * 1000, log.started ?? -Infinity), to: now, failed: log.failed ?? [], noStatus: log.noStatus ?? [] };
+  return { ok: !bad.length, wa, status: null, latencyMs: lat(), error: bad.length ? `${l.resource}: ${bad.join('; ')}` : null };
 }
 
 /** Read-only: the summaries of the Lumo websocket in the workers with the switch on, over one ssh (lumo-ws.ts).
@@ -1041,6 +1061,7 @@ export class ProbeRunner {
     if (p.kind === 'kubelet') { if (o.versions) this.kubeletSkew(p, o.versions, now); return undefined; }
     if (p.kind === 'alertmanager') { if (o.alerts) this.alertmanagerRound(p, o.alerts, now); return undefined; }
     if (p.kind === 'lumo_ws') { if (o.ws) this.lumoWsRound(p, o.ws, now); return undefined; }
+    if (p.kind === 'whatsapp_log' && o.wa) this.whatsappFailedRound(p, o.wa, now);
 
     const open = prev?.anomaly_open === 1;
     if (!healthy && (fails >= p.failAfter || lasted) && !open) {
@@ -1134,6 +1155,23 @@ export class ProbeRunner {
     }
     this.store.setMeta(key, JSON.stringify(state));
     this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(open ? 1 : 0, p.key);
+  }
+
+  /** `Outbound: no status` and `Message failed` of the gateway (whatsapp-failed.ts): their own messages, beside fail_after.
+   *  The counts per hour, the codes open and the ids told are in meta: the baseline survives a restart, and nothing is told twice. */
+  private whatsappFailedRound(p: ProbeSpec, reading: FailedReading, now: number): void {
+    const key = `probes.whatsapp_failed.${p.key}`;
+    let prev: FailedState = emptyFailedState();
+    try { prev = { ...prev, ...(JSON.parse(this.store.getMeta(key) || '{}') as Partial<FailedState>) }; } catch { /* unreadable: start over */ }
+    const l = p.whatsappLog!;
+    const { state, messages } = failedRound(p.key, `${l.ns}/${l.resource} ב-${l.host}`, l.failed, prev, reading, now);
+    const lead = this.cfg.monitoringLeadId;
+    for (const m of messages) {
+      this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system',
+        ...(m.anomaly ? { urgency: 'urgent' as const } : {}), priority: m.anomaly ? 'now' : 'next', body: m.body });
+      this.store.emit(m.event, lead, { probe: p.key, msg: m.id });
+    }
+    this.store.setMeta(key, JSON.stringify(state));
   }
 
   /** Samples in a row, newest back, with no clean one (jitter or loss), up to JITTER_SUSTAIN_ROUNDS. Unknowns are not recorded here.
