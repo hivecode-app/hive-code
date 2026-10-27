@@ -71,6 +71,15 @@ export interface HqConfig {
     compactContextTokens: number; // a shift (standing, or a task's) over this compacts in its next quiet moment, while its cache is warm (0 = never)
     compactQuietMs: number;      // ... quiet = no turn, no tool, no background work, no mail, nothing waiting on him, this long
   };
+  /** The model and effort every Claude shift starts with (--model, --effort). The model is always passed: on --resume the
+   *  CLI otherwise brings back the model the session last used, and a session a safety classifier once moved to a fallback
+   *  model stays on it for good (eli 22/10 → 27/10 on claude-opus-4-8, alone in the company). effort null = the CLI's own. */
+  engine: {
+    model: string | null;
+    effort: string | null;
+    /** org.yaml team id → effort, over `effort` (the personal team answers him in conversation, not in tasks). */
+    effortByTeam: Record<string, string>;
+  };
   /** mailbox.ts heldUntil: a worker's message that can wait is gathered with the others, one wake for all of them. */
   batching: {
     enabled: boolean;
@@ -224,6 +233,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     },
     rotation: { enabled: true, restIdleMs: 60 * 60_000, restContextTokens: 150_000, maxContextTokens: 600_000, handoffWaitMs: 10 * 60_000,
       compactContextTokens: 250_000, compactQuietMs: 2 * 60_000 },
+    engine: { model: 'claude-opus-5-5', effort: null, effortByTeam: { personal: 'medium' } },
     batching: { enabled: true, gatherMs: 10 * 60_000 },
     capacity: { reserveMb: 4096, rssIdleMb: 400, rssWorkMb: 1300, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8, maxLoad: 1.5 },
     backups: { hourly: 24, daily: 7 },
@@ -256,6 +266,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     capacity: { ...base.capacity, ...fromFile.capacity, ...overrides.capacity },
     rotation: { ...base.rotation, ...fromFile.rotation, ...overrides.rotation },
     batching: { ...base.batching, ...fromFile.batching, ...overrides.batching },
+    engine: { ...base.engine, ...fromFile.engine, ...overrides.engine },
     backups: { ...base.backups, ...fromFile.backups, ...overrides.backups },
     auth: { ...base.auth, ...fromFile.auth, ...overrides.auth },
     tab: { ...base.tab, ...fromFile.tab, ...overrides.tab },

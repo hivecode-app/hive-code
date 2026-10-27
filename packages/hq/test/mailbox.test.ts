@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, until } from './helpers.ts';
-import { isBareAck, neverRan, tokenless } from '../src/mailbox.ts';
+import { isBareAck, isStopRequest, neverRan, tokenless } from '../src/mailbox.ts';
 
 test('tell to a resting identity wakes a shift, delivers, then seen → handled on reply', async () => {
   const env = await makeEnv();
@@ -34,12 +34,13 @@ test('tell to a resting identity wakes a shift, delivers, then seen → handled 
   } finally { await env.cleanup(); }
 });
 
-test('urgent tell uses priority now', async () => {
+test('urgent tell is stored as `now`, and goes on the wire as `next`: it never cuts the turn it lands in', async () => {
   const env = await makeEnv();
   try {
     env.hq.mailbox.tell({ msg_id: 'u-1', to: 'rotem', body: 'דחוף', urgency: 'urgent' });
     await until(() => env.hq.mailbox.get('u-1')!.state === 'delivered');
-    assert.equal(env.launcher.hosts.get('rotem-1')!.sent[0]!.priority, 'now');
+    assert.equal(env.hq.mailbox.get('u-1')!.priority, 'now');
+    assert.equal(env.launcher.hosts.get('rotem-1')!.sent[0]!.priority, 'next');
   } finally { await env.cleanup(); }
 });
 
@@ -251,7 +252,7 @@ test('heldByCli messages are never re-sent on resume, and are re-sent to a new s
   } finally { await env.cleanup(); }
 });
 
-test('his `now` asks the host to stop the worker if safe; what it waits for reaches the app; answers and hq notes never ask', async () => {
+test('only his stop request asks the host to stop the worker if safe; what it waits for reaches the app; every other `now` goes in as `next`', async () => {
   const env = await makeEnv();
   try {
     const { hq, launcher } = env;
@@ -268,14 +269,21 @@ test('his `now` asks the host to stop the worker if safe; what it waits for reac
     assert.deepEqual(hq.mailbox.get('n-1')!.waiting_on, host.waitingOn);
     assert.ok(events.some((e) => e.id === 'n-1' && e.waiting_on?.command === 'bash deploy/hq.sh'), 'the app hears it');
 
+    assert.equal(host.sent.at(-1)!.priority, 'now');
+
+    // 27/10 (eli): any other `now` of his cut the turn and it started over without a word. It joins the turn as `next`.
+    hq.mailbox.tell({ msg_id: 'n-5', to: 'eli', body: 'תפצל לי להודעות שאפשר להעתיק', priority: 'now' });
     hq.mailbox.tell({ msg_id: 'n-2', to: 'eli', body: 'אחרי הצעד', priority: 'next' });
     hq.mailbox.tell({ msg_id: 'n-3', from: 'hq', to: 'eli', kind: 'system', body: 'תזכורת', priority: 'now' });
     hq.mailbox.tell({ msg_id: 'n-4', to: 'eli', kind: 'answer', body: 'כן', priority: 'now' });
-    await until(() => ['n-2', 'n-3', 'n-4'].every((id) => hq.mailbox.get(id)!.state === 'delivered'), 3000, 'delivered');
-    for (const id of ['n-2', 'n-3', 'n-4']) {
-      assert.equal(host.sent.find((s) => s.msgId === id)!.stopIfSafe, false, id);
+    await until(() => ['n-2', 'n-3', 'n-4', 'n-5'].every((id) => hq.mailbox.get(id)!.state === 'delivered'), 3000, 'delivered');
+    for (const id of ['n-2', 'n-3', 'n-4', 'n-5']) {
+      const sent = host.sent.find((s) => s.msgId === id)!;
+      assert.equal(sent.stopIfSafe, false, id);
+      assert.equal(sent.priority, 'next', id);
       assert.equal(hq.mailbox.get(id)!.waiting_on, null, id);
     }
+    assert.equal(hq.mailbox.get('n-5')!.priority, 'now', 'stored as he sent it');
   } finally { await env.cleanup(); }
 });
 
@@ -440,4 +448,11 @@ test('isBareAck: a thank-you or a receipt alone, nothing more; never a yes', () 
   for (const t of ['תודה', 'תודה.', 'קיבלתי, תודה!', 'ראיתי, תודה רבה', '\u200fקיבלתי.', 'הבנתי']) assert.equal(isBareAck(t), true, t);
   for (const t of ['סגור', 'בסדר', 'מקובל', 'אוקיי', 'מעולה', 'יופי, תודה', 'תודה, מוזג', 'קיבלתי. תפרוס אחרי GO', 'תודה?', 'תודה. אכתוב לך כשה-tag יוצא.', '', 'מחכה ל-CI'])
     assert.equal(isBareAck(t), false, t);
+});
+
+test('isStopRequest: his stop words at the start, not a stop word inside a sentence', () => {
+  for (const t of ['עצור', 'תעצור!', 'תפסיק, זה לא מה שביקשתי', 'די', 'די!', 'די, עצור', 'רגע עצור', 'לא, עצור', 'אוקיי עצור', 'Stop', '  «עצור»', '״עצור״', 'הפסק עכשיו'])
+    assert.equal(isStopRequest(t), true, t);
+  for (const t of ['תפצל לי להודעות שאפשר להעתיק', 'דיברנו על זה', 'עצורה', 'stopwatch', 'אל תעצור', 'מה קורה שם', 'די טוב, עכשיו תעלה את זה', 'די הרבה זמן לוקח לך', 'די דחוף, תסתכל', 'stop the server and redeploy', ''])
+    assert.equal(isStopRequest(t), false, t);
 });

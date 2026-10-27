@@ -18,11 +18,11 @@ test('store: WAL, migrations idempotent across reopen, toggles seeded once', () 
     const path = join(dir, 'hq.db');
     const s1 = new Store(path);
     assert.equal(s1.db.pragma('journal_mode', { simple: true }), 'wal');
-    assert.equal(s1.schemaVersion, 34);
+    assert.equal(s1.schemaVersion, 35);
     s1.setToggle('probes', false);
     s1.close();
     const s2 = new Store(path);
-    assert.equal(s2.schemaVersion, 34);
+    assert.equal(s2.schemaVersion, 35);
     assert.equal(s2.toggle('probes'), false, 'manual off survives restart');
     assert.equal(s2.toggle('scheduler'), true);
     const e = s2.emit('x', 'eli', { a: 1 });
@@ -312,10 +312,11 @@ test('v24: an inbox with rows from before `links` upgrades, and they have none',
     for (const c of ['context_tokens', 'rest_handoff_at']) s.db.exec(`ALTER TABLE shifts DROP COLUMN ${c}`); // v30
     for (const c of ['jitter', 'loss_percent', 'avg_ms', 'mdev_ms']) s.db.exec(`ALTER TABLE probe_results DROP COLUMN ${c}`); // v32
     s.db.exec('ALTER TABLE messages DROP COLUMN fyi'); // v34
+    s.db.exec('ALTER TABLE messages DROP COLUMN first_word_at'); // v35
     s.db.pragma('user_version = 23');
     s.db.prepare(`INSERT INTO inbox (kind, title, body, urgency, blocking, created_at) VALUES ('go', 'GO: ישן', '', 'normal', 1, 100)`).run();
     (s as unknown as { migrate(): void }).migrate();
-    assert.equal(s.schemaVersion, 34);
+    assert.equal(s.schemaVersion, 35);
     const row = s.db.prepare('SELECT title, links FROM inbox').get() as { title: string; links: string | null };
     assert.deepEqual(row, { title: 'GO: ישן', links: null });
   } finally { s.close(); }
@@ -328,6 +329,7 @@ test('v25 (#331): an ask the manager "answered" with a plain tell goes back to i
     for (const c of ['context_tokens', 'rest_handoff_at']) s.db.exec(`ALTER TABLE shifts DROP COLUMN ${c}`); // v30
     for (const c of ['jitter', 'loss_percent', 'avg_ms', 'mdev_ms']) s.db.exec(`ALTER TABLE probe_results DROP COLUMN ${c}`); // v32
     s.db.exec('ALTER TABLE messages DROP COLUMN fyi'); // v34
+    s.db.exec('ALTER TABLE messages DROP COLUMN first_word_at'); // v35
     s.db.pragma('user_version = 24');
     const ask = s.db.prepare(`INSERT INTO asks (id, from_identity, question, options, blocking, state, answer, answered_by, created_at, escalated_at, answered_at) VALUES (?, 'dana', 'איזה?', '["א","ב","ג"]', 1, 'answered', ?, 'manager', 1, 2, 3)`);
     const item = s.db.prepare(`INSERT INTO inbox (kind, title, body, from_identity, urgency, blocking, ref, state, resolved_at, created_at) VALUES (?, 't', '', ?, 'low', 0, ?, ?, ?, 1)`);
@@ -338,11 +340,31 @@ test('v25 (#331): an ask the manager "answered" with a plain tell goes back to i
     item.run('ask', 'dana', 'ask-explicit', 'resolved', 3);
     item.run('escalation_note', 'yoav', 'ask-explicit', 'open', null);
     (s as unknown as { migrate(): void }).migrate();
-    assert.equal(s.schemaVersion, 34);
+    assert.equal(s.schemaVersion, 35);
     const open = s.db.prepare(`SELECT kind, from_identity, ref FROM inbox WHERE state = 'open' ORDER BY ref, kind`).all();
     assert.deepEqual(open, [{ kind: 'escalation_note', from_identity: 'yoav', ref: 'ask-explicit' }, { kind: 'ask', from_identity: 'dana', ref: 'ask-plain' }]);
     const a = s.db.prepare(`SELECT state, answer, manager_note, options FROM asks WHERE id = 'ask-plain'`).get() as Record<string, string | null>;
     assert.deepEqual(a, { state: 'escalated', answer: null, manager_note: 'את זה אני לא יכול לענות במקומו', options: '["א","ב","ג"]' });
     assert.equal((s.db.prepare(`SELECT state FROM asks WHERE id = 'ask-explicit'`).get() as { state: string }).state, 'answered');
   } finally { s.close(); }
+});
+
+test('27/10 eli: every Claude shift starts with --model (a resume never keeps a fallback model) and its team\'s --effort', async () => {
+  const { makeEnv, until } = await import('./helpers.ts');
+  const { hostArgs } = await import('../src/shifts.ts');
+  const env = await makeEnv();
+  try {
+    const { hq, launcher, cfg } = env;
+    assert.deepEqual(hq.shifts.engineFor('eli'), { model: 'claude-opus-5-5', effort: 'medium' }, 'personal team');
+    assert.deepEqual(hq.shifts.engineFor('yoav'), { model: 'claude-opus-5-5' }, 'no effort: the CLI default');
+    await hq.shifts.request('eli', { reason: 'message' });
+    await until(() => launcher.launches.length === 1, 3000, 'launched');
+    const args = hostArgs(launcher.launches[0]!, cfg.stateDir);
+    assert.equal(args.model, 'claude-opus-5-5');
+    assert.equal(args.effort, 'medium');
+    (cfg.engine as { effort: string | null }).effort = 'high';
+    (cfg.engine as { model: string | null }).model = null;
+    assert.deepEqual(hq.shifts.engineFor('yoav'), { effort: 'high' });
+    assert.equal(hostArgs({ ...launcher.launches[0]!, provider: 'codex' }, cfg.stateDir).model, undefined, 'codex has its own model');
+  } finally { await env.cleanup(); }
 });

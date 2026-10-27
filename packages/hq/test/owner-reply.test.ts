@@ -254,3 +254,56 @@ test('board: a live idle shift is "free" (פנוי), never "resting" (נח); no 
     assert.equal(amit.status, 'resting');
   } finally { await env.cleanup(); }
 });
+
+test('reply times: from his message to the first streamed word after it was read, and to the reply, per worker', async () => {
+  const { replyTimes, replyTimesByWorker } = await import('../src/reply-times.ts');
+  const env = await makeEnv();
+  try {
+    const { hq, clock } = env;
+    const sent = clock.now();
+    const host = await ownerTurn(env, 'm-time', 'תפצל לי להודעות שאפשר להעתיק');
+    clock.advance(4000);
+    host.live({ t: 'delta', ev: { kind: 'text_delta', text: 'הנה' } });
+    await until(() => hq.mailbox.get('m-time')!.first_word_at != null, 3000, 'first word');
+    clock.advance(3000);
+    host.live({ t: 'delta', ev: { kind: 'text_delta', text: ' הכול' } });
+    host.event({ kind: 'text', text: 'הנה הכול', messageId: 'msg_t' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'הנה הכול' });
+    await until(() => hq.mailbox.get('m-time')!.state === 'handled', 3000, 'handled');
+    const [t] = replyTimes(hq.store, sent - 1);
+    assert.equal(t!.first_word_ms, 4000, 'the first word, not the last');
+    assert.equal(t!.reply_ms, 7000);
+
+    // A message he sent that was answered by a tool alone: its first word is the reply.
+    const host2 = await ownerTurn(env, 'm-tool', 'שלח לי ב-tell');
+    clock.advance(2000);
+    hq.mailbox.tell({ msg_id: 'eli-1:t2', from: 'eli', to: 'owner', body: 'שלחתי', ref: 'm-tool' });
+    host2.event({ kind: 'result', subtype: 'success', isError: false, text: '' });
+    await until(() => hq.mailbox.get('m-tool')!.state === 'handled', 3000, 'handled by the tell');
+    const w = replyTimesByWorker(replyTimes(hq.store, sent - 1));
+    assert.equal(w.length, 1);
+    assert.equal(w[0]!.identity, 'eli');
+    assert.equal(w[0]!.messages, 2);
+    assert.equal(w[0]!.answered, 2);
+    assert.ok(w[0]!.first_word_p50_ms != null && w[0]!.reply_p90_ms === 7000);
+  } finally { await env.cleanup(); }
+});
+
+test('reply times: two messages read together share the first word; one left unanswered gets no word of a later turn', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, clock } = env;
+    const host = await ownerTurn(env, 'm-thanks', 'תודה');
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: '' });
+    await until(() => hq.store.db.prepare(`SELECT 1 FROM events WHERE type = 'engine.result'`).get() != null, 3000, 'turn ended');
+    await new Promise((r) => setTimeout(r, 30));
+    clock.advance(60_000);
+    await ownerTurn(env, 'm-a', 'תפצל');
+    await ownerTurn(env, 'm-b', 'ותוסיף את הקישור');
+    clock.advance(2000);
+    host.live({ t: 'delta', ev: { kind: 'text_delta', text: 'הנה' } });
+    await until(() => hq.mailbox.get('m-b')!.first_word_at != null, 3000, 'first word');
+    assert.equal(hq.mailbox.get('m-a')!.first_word_at, hq.mailbox.get('m-b')!.first_word_at);
+    assert.equal(hq.mailbox.get('m-thanks')!.first_word_at, null, 'read in an earlier turn');
+  } finally { await env.cleanup(); }
+});

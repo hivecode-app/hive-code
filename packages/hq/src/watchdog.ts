@@ -128,6 +128,8 @@ export class Watchdog {
       this.store.emit('watchdog.stuck', s.identity, { shift: s.id });
     }
     if (!s.nudged_at) {
+      // The nudge goes in as `next` (mailbox.ts: no `now` cuts a turn): read at the next step. A turn stuck with no step
+      // at all is the interrupt's, half a window later.
       this.shifts.setFields(s.id, { nudged_at: now });
       this.mailbox.tell({ msg_id: `nudge-${s.id}-${now}`, from: 'hq', to: s.identity, kind: 'system', priority: 'now',
         body: 'לא היה אירוע 10 דקות באמצע turn. אם אתה תקוע, כתוב במשפט אחד מה חוסם אותך.' });

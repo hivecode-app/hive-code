@@ -24,6 +24,7 @@ import { normalizePath } from './error-watch.ts';
 import { companyDay, dateOf, isDate, messageBody } from './company-day.ts';
 import { recordPrMerged } from './merged.ts';
 import { isCancelled, type TaskRow } from './scheduler.ts';
+import { replyTimes, replyTimesByWorker } from './reply-times.ts';
 
 export function loadOrCreateToken(stateDir: string): string {
   if (process.env.HQ_TOKEN) return process.env.HQ_TOKEN;
@@ -340,6 +341,14 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     const kind = oneOf(q('kind'), ETA_KINDS, 'kind');
     return { estimates: hq.estimates.list({ project: q('project'), identity: q('identity'), kind, message_id: q('message_id'), task: count('task'),
       state: oneOf(q('state'), ['open', 'missed', 'done', 'cancelled'] as const, 'state'), since: when('since'), until: when('until'), limit: count('limit'), missed: q('missed') === '1' || undefined }) };
+  });
+
+  // How long he waits per worker (reply-times.ts): from his message to the first word and to the reply, over `hours` (default 24).
+  route('GET', '/api/reply-times', ({ url }) => {
+    const hours = Math.min(24 * 30, Math.max(1, Number(url.searchParams.get('hours')) || 24));
+    const identity = url.searchParams.get('identity');
+    const times = replyTimes(hq.store, hq.store.now() - hours * 3600_000).filter((t) => !identity || t.identity === identity);
+    return { hours, workers: replyTimesByWorker(times), messages: times.slice(0, 50) };
   });
 
   // The company map (company-day.ts): one day's lines and tables, without any message text; a line's text on its own.

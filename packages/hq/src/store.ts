@@ -608,6 +608,9 @@ const MIGRATIONS: string[] = [
   // v34: a message for the record only (an update that asks nothing of its reader): it never wakes anyone, and goes in with
   // the recipient's next turn or shift (mailbox.ts heldFyi). Not work waiting either: a queued one keeps no shift up.
   `ALTER TABLE messages ADD COLUMN fyi INTEGER NOT NULL DEFAULT 0;`,
+  // v35: when the worker began to answer his message (its first streamed word after it read it): with created_at and
+  // handled_at, how long he waited for a word and for the whole reply, per worker (reply-times.ts).
+  `ALTER TABLE messages ADD COLUMN first_word_at INTEGER;`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

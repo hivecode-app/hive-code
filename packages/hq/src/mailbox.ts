@@ -24,6 +24,19 @@ export function isBareAck(body: string): boolean {
   return t.length > 0 && t.length <= 40 && BARE_ACK.test(t);
 }
 
+/**
+ * His message that asks the worker to stop ("עצור", "תפסיק, זה לא זה"): the only message that cuts a turn in the middle.
+ * Anything else he sends mid-turn joins the turn after its running step (27/10: three of his messages to eli each cut
+ * the turn after 30-87 s, and it started over three times without a word).
+ */
+const STOP_VERB = /^(?:(?:רגע|לא|אוקיי|אוקי|טוב)[\s,]+)?(?:עצור|עצרי|עצרו|תעצור|תעצרי|תעצרו|תפסיק|תפסיקי|תפסיקו|הפסק|הפסיקי|הפסיקו)(?![\p{L}\p{N}])/iu;
+/** "די" and "stop" are a stop only on their own ("די!", "די, עצור"), never "די טוב" or "stop the server". */
+const STOP_ALONE = /^(?:די|stop)[\s.!,]*(?:$|,|עצור|תעצור|תפסיק)/iu;
+export function isStopRequest(body: string): boolean {
+  const t = body.replace(/[\u200e\u200f]/g, '').replace(/^[\s"'«״*.!,:-]+/u, '');
+  return STOP_VERB.test(t) || STOP_ALONE.test(t);
+}
+
 export interface MessageRow {
   id: string; from_identity: string; to_identity: string; kind: MessageKind; body: string; urgency: Urgency;
   priority: Priority; ref: string | null; state: MessageState; attempts: number; resurrected: number; shift_id: string | null;
@@ -37,6 +50,8 @@ export interface MessageRow {
   waiting_on: WaitingOn | null;
   /** 1 = for the record only: never wakes the recipient, goes in with its next turn or shift (heldFyi). */
   fyi: number;
+  /** His message: the worker's first streamed word after reading it (reply-times.ts). */
+  first_word_at: number | null;
 }
 
 type StoredRow = Omit<MessageRow, 'attachments' | 'waiting_on'> & { attachments: string | null; waiting_on: string | null };
@@ -103,6 +118,7 @@ export class Mailbox {
     this.inbox = inbox;
     this.foreign = foreign;
     shifts.on('live', (row) => this.store.bg(this.flush(row.identity), 'mailbox.flush'));
+    shifts.on('delta', (row, ev: { kind: string }) => { if (ev.kind === 'text_delta') this.firstWord(row); });
     // `seen` comes only from the host's delivery frames (started/completed = dequeued into the
     // conversation). Assistant text is not proof: a `later` message can still be waiting behind the turn.
     shifts.on('frame', (row, f, live?: boolean) => {
@@ -126,6 +142,7 @@ export class Mailbox {
           } else this.store.emit('turn.error', row.identity, err);
         }
         this.onTurnEnd(row, f.ev);
+        this.turnEndAt.set(row.identity, this.store.now());
       }
     });
     shifts.on('ended', (row) => {
@@ -358,14 +375,16 @@ export class Mailbox {
       try {
         if (this.cfg.codexLean) this.leanMessage = { id, identity: m.to_identity };
         this.store.db.prepare('UPDATE messages SET shift_id = ? WHERE id = ?').run(shift.id, id);
-        // His own `now` stops the worker, but only out of a tool that is safe to cut (shift-host safe-tools.ts, adi
-        // 21/10/2026); otherwise it goes in right after the running tool. hq's notes and the answers it writes in his
-        // name (GO, ask, inbox: kind `answer`) never stop anyone.
-        const stop = m.from_identity === OWNER && m.kind === 'tell' && m.priority === 'now' ? { stopIfSafe: true } : undefined;
+        // Only his explicit stop ("עצור") stops the worker, and only out of a tool that is safe to cut (shift-host
+        // safe-tools.ts, adi 21/10/2026); otherwise it goes in right after the running tool. Every other `now`, his
+        // included, goes on the wire as `next`: the CLI takes a `now` line by ending the open turn (error_during_execution,
+        // the work so far lost), and a `next` one joins that turn after its running step, or starts a turn when idle.
+        const stop = m.from_identity === OWNER && m.kind === 'tell' && isStopRequest(m.body) ? { stopIfSafe: true } : undefined;
+        const wire: Priority = stop ? 'now' : m.priority === 'now' ? 'next' : m.priority;
         // Idempotent on msgId in the host: a resend after an hq crash returns the current state instead.
-        let r = await conn.send(id, this.envelope(m), m.priority, retry, stop);
+        let r = await conn.send(id, this.envelope(m), wire, retry, stop);
         // The host remembers this msgId as never accepted (e.g. its claude restarted): write it again.
-        if (r?.state === 'failed' && !retry && !this.cfg.codexLean) r = await conn.send(id, this.envelope(m), m.priority, true);
+        if (r?.state === 'failed' && !retry && !this.cfg.codexLean) r = await conn.send(id, this.envelope(m), wire, true);
         if (r?.waitingOn) this.setWaiting(id, r.waitingOn);
         if (r) this.onDelivery(shift, id, r.state);
         // A turn this message starts (or joins) carries what waited for the record: the CLI folds it into the same turn.
@@ -477,7 +496,25 @@ export class Mailbox {
     }
     if (state === 'written') return;
     if (m.state === 'queued') this.setState(msgId, 'delivered', { shift_id: row.id, error: null });
-    if ((state === 'started' || state === 'completed') && this.get(msgId)!.state === 'delivered') this.setState(msgId, 'seen');
+    if ((state === 'started' || state === 'completed') && this.get(msgId)!.state === 'delivered') {
+      this.setState(msgId, 'seen');
+      if (m.from_identity === OWNER && m.kind === 'tell') this.awaitingWord.set(m.to_identity, true);
+    }
+  }
+
+  /** identity → a message of his it read may still wait for its first word. Absent (after an hq restart): look once. */
+  private awaitingWord = new Map<string, boolean>();
+  /** identity → when its last turn ended: a message it read before that and left unanswered ("תודה") gets no word of a
+   *  later turn. Absent (after an hq restart): the last `engine.result` in the log. */
+  private turnEndAt = new Map<string, number>();
+  /** The first streamed word of a worker after it read his message: one UPDATE per message, not per token. */
+  private firstWord(row: Pick<ShiftRow, 'id' | 'identity'>): void {
+    if (this.awaitingWord.get(row.identity) === false) return;
+    this.awaitingWord.set(row.identity, false);
+    const since = this.turnEndAt.get(row.identity) ?? (this.store.db.prepare(`SELECT MAX(ts) FROM events WHERE identity = ? AND type = 'engine.result'`)
+      .pluck().get(row.identity) as number | null) ?? 0;
+    this.store.db.prepare(`UPDATE messages SET first_word_at = ? WHERE to_identity = ? AND from_identity = ? AND kind = 'tell'
+      AND state = 'seen' AND shift_id = ? AND first_word_at IS NULL AND seen_at > ?`).run(this.store.now(), row.identity, OWNER, row.id, since);
   }
 
   /**

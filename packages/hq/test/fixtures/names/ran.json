@@ -24,7 +24,7 @@
        "next",
        "later"
       ],
-      "description": "now מפריע, next ברירת מחדל, later לסוף התור / delivery priority"
+      "description": "now מעיר מיד (לא קוטע סבב שרץ), next ברירת מחדל, later לסוף התור / delivery priority"
      },
      "fyi": {
       "type": "boolean",

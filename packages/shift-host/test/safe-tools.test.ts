@@ -98,12 +98,12 @@ test('his `now` during an unsafe tool waits for that tool only, goes in before t
     h.send({ t: 'send', id: 'f', msgId: 'second', text: 'ועוד משהו', priority: 'now', stopIfSafe: true });
     await h.wait((f) => f.t === 'delivery' && f.msgId === 'second' && f.state === 'started');
     assert.ok(h.frames.some((f) => f.t === 'delivery' && f.msgId === 'first' && f.state === 'completed'), 'the first answer was not cut');
-    // An unsafe tool is never interrupted, and a `now` without stopIfSafe (hq's own notes) never asks.
+    // A line without stopIfSafe (everything but his stop) never interrupts, even a safe tool; it says what it waits for.
     h.send({ t: 'send', id: 'c', msgId: 'work2', text: tool('Read', { file_path: '/x' }, 600), priority: 'next' });
     await h.wait((f) => f.t === 'event' && f.ev.kind === 'tool_use' && (f.ev as any).name === 'Read');
-    h.send({ t: 'send', id: 'd', msgId: 'note', text: 'תזכורת', priority: 'now' });
+    h.send({ t: 'send', id: 'd', msgId: 'note', text: 'תזכורת', priority: 'next' });
     const rd = await h.wait((f) => f.t === 'reply' && f.re === 'd');
-    assert.equal(rd.data.waitingOn, undefined);
+    assert.equal(rd.data.waitingOn?.tool, 'Read');
     await h.wait((f) => f.t === 'delivery' && f.msgId === 'note' && f.state === 'started');
     assert.ok(!h.frames.some((f) => f.t === 'event' && f.ev.kind === 'result' && f.ev.isError), 'hq notes do not cut');
   } finally { await h.close(); }

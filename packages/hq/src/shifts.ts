@@ -43,6 +43,9 @@ export interface ShiftRow {
 export interface LaunchSpec {
   provider?: 'claude' | 'codex';
   codexModel?: string;
+  /** --model / --effort of a Claude shift (config `engine`). */
+  model?: string | null;
+  effort?: string | null;
   shiftId: string; identity: string; shiftNo: number; sessionId: string; resume: boolean;
   kind: ShiftKind; cwd: string; socketPath: string; taskId: number | null;
   /** systemd unit: company-shift@<shift>.service (the template instance). */
@@ -114,6 +117,8 @@ export function hostArgs(spec: LaunchSpec, stateDir: string): Record<string, str
     cwd: spec.cwd, 'state-dir': stateDir, resume: spec.resume,
     ...(spec.provider ? { provider: spec.provider } : {}),
     ...(spec.codexModel ? { 'codex-model': spec.codexModel } : {}),
+    ...(spec.model && spec.provider !== 'codex' ? { model: spec.model } : {}),
+    ...(spec.effort && spec.provider !== 'codex' ? { effort: spec.effort } : {}),
     ...(spec.systemPromptFile ? { 'append-system-prompt-file': spec.systemPromptFile } : {}),
     ...(spec.configDir ? { 'config-dir': spec.configDir } : {}),
   };
@@ -341,7 +346,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       await this.launcher.launch({
         shiftId, identity, shiftNo, sessionId, resume, kind, socketPath, taskId, unit,
         cwd, systemPromptFile, account: acct?.name ?? null, configDir: acct?.configDir ?? null, machine,
-        ...(this.cfg.codexLean ? { provider: 'codex' as const, codexModel: this.cfg.codexModel } : {}),
+        ...(this.cfg.codexLean ? { provider: 'codex' as const, codexModel: this.cfg.codexModel } : this.engineFor(identity)),
       });
     } catch (e) {
       this.markEnded(shiftId, 'dead', stage);
@@ -767,6 +772,14 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       const task = row.task_id == null ? undefined : this.store.db.prepare('SELECT project FROM tasks WHERE id = ?').get(row.task_id) as { project: string | null } | undefined;
       recordPrMerged(this.store, { ...m, project: task?.project ?? getIdentity(this.store, row.identity)?.project ?? null, by: row.identity });
     } catch { /* a merge we cannot read must not hold up the spool */ }
+  }
+
+  /** --model and --effort of a Claude shift of [identity]: config `engine`, the team's effort over the default. */
+  engineFor(identity: string): { model?: string; effort?: string } {
+    const e = this.cfg.engine;
+    const team = getIdentity(this.store, identity)?.team;
+    const effort = (team ? e.effortByTeam[team] : undefined) ?? e.effort;
+    return { ...(e.model ? { model: e.model } : {}), ...(effort ? { effort } : {}) };
   }
 
   /** L0 + L1 from the contract, rewritten on every (re)start so a merged contract change applies at the next run. */

@@ -52,7 +52,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'hq מחזיר הצעה לפי איך שהערכות כאלה יוצאות בפועל. כשזה מוכן: eta_done. Send a message to a teammate by identity. A message that promises a time goes in the eta_* fields, not only in the text.', {
       to: s('identity של הנמען / recipient identity, e.g. "dana"'),
       body: s('תוכן ההודעה / message text'),
-      urgency: oneOf(['now', 'next', 'later'], 'now מפריע, next ברירת מחדל, later לסוף התור / delivery priority'),
+      urgency: oneOf(['now', 'next', 'later'], 'now מעיר מיד (לא קוטע סבב שרץ), next ברירת מחדל, later לסוף התור / delivery priority'),
       fyi: { type: 'boolean', description: 'לידיעה בלבד: עדכון שלא מבקש מהנמען כלום ושאף אחד לא מחכה לו ("מחכה ל-X", "העברתי לדנה"). לא מעיר אותו, '
         + 'ונמסר בסבב הבא שלו. לא לשאלה, לבקשה, ל-"מוזג" או לכל דבר שמישהו מחכה לו / for the record only: never wakes the recipient, goes in with its next turn' },
       ref: s('מזהה הודעה שעליה עונים, e.g. m-8812 / message id being answered'),

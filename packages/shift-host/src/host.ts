@@ -276,10 +276,22 @@ export class ShiftHost {
       }
       return this.send(msgId, text, 'now', retry);
     }
-    const first = blocking.reduce((a, b) => (a.since <= b.since ? a : b));
+    return { ...this.send(msgId, text, 'now', retry), ...this.waitingOn(blocking) };
+  }
+
+  /** A line sent while tools run goes in after them: the oldest one is what it waits for (his bubble says so). */
+  private waitingOn(tools = [...this.activeTools.values()]): Pick<SendReply, 'waitingOn'> {
+    if (!this.turnOpen || !tools.length) return {};
+    const first = tools.reduce((a, b) => (a.since <= b.since ? a : b));
     const command = first.name === 'Bash' ? (first.input as { command?: unknown } | undefined)?.command : undefined;
-    return { ...this.send(msgId, text, 'now', retry),
-      waitingOn: { tool: first.name, ...(typeof command === 'string' ? { command } : {}), since: first.since } };
+    return { waitingOn: { tool: first.name, ...(typeof command === 'string' ? { command } : {}), since: first.since } };
+  }
+
+  /** Every line but his stop: it joins the turn after the running tools, and the reply says which tool that is. */
+  private sendAfterTools(msgId: string, text: string, priority: 'now' | 'next' | 'later', retry: boolean): SendReply {
+    const known = this.deliveries.has(msgId);
+    const r = this.send(msgId, text, priority, retry);
+    return known && !retry ? r : { ...r, ...this.waitingOn() };
   }
 
   private send(msgId: string, text: string, priority: 'now' | 'next' | 'later', retry: boolean): { uuid: string; state: DeliveryState } {
@@ -427,7 +439,7 @@ export class ShiftHost {
       switch (f.t) {
         case 'send': this.reply(c, f.id, f.stopIfSafe === true && f.priority === 'now'
           ? await this.sendNow(f.msgId, f.text, f.retry === true)
-          : this.send(f.msgId, f.text, f.priority, f.retry === true)); return;
+          : this.sendAfterTools(f.msgId, f.text, f.priority, f.retry === true)); return;
         case 'interrupt': this.reply(c, f.id, await this.interrupt()); return;
         case 'usage': this.reply(c, f.id, toUsageReply(await this.need().usage())); return;
         case 'context': this.reply(c, f.id, toContextReply(await this.need().contextUsage())); return;
