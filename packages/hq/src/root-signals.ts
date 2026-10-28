@@ -24,7 +24,7 @@ K=kubectl; command -v kubectl >/dev/null 2>&1 || K="k3s kubectl"
 out() { printf '\n@@ %s\n%s\n' "$1" "$2"; }
 out now "$(date +%s)"
 out version "$($K version -o json 2>/dev/null | tr -d '\n ')"
-NODES=$($K get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.nodeInfo.kubeletVersion}{"\t"}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}' 2>/dev/null)
+NODES=$($K get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.nodeInfo.kubeletVersion}{"\t"}{.status.addresses[?(@.type=="InternalIP")].address}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null)
 out nodes "$NODES"
 PODS=$($K get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.nodeName}{"\t"}{.metadata.ownerReferences[0].kind}{"\t"}{.status.startTime}{"\t"}{.status.phase}{"\t"}{range .status.containerStatuses[*]}{.name}{","}{.restartCount}{","}{.state.waiting.reason}{","}{.lastState.terminated.reason}{","}{.lastState.terminated.finishedAt}{";"}{end}{"\t"}{range .spec.containers[*]}{.name}{"="}{.resources.limits.memory}{";"}{end}{"\n"}{end}' 2>/dev/null)
 [ -n "$PODS" ] || PODS='!failed'
@@ -86,7 +86,8 @@ done
 
 // ---------- the snapshot ----------
 
-export interface NodeSample { name: string; kubelet: string; ip: string; requests: number | null; cpu: number[] | null; benchS: number | null }
+/** `ready`: the node's Ready condition (null = not in the output, as from a collector before it read it). */
+export interface NodeSample { name: string; kubelet: string; ip: string; ready?: boolean | null; requests: number | null; cpu: number[] | null; benchS: number | null }
 export interface ContainerRow { ns: string; pod: string; node: string; owner: string; startedAt: number | null; container: string; restarts: number; waiting: string; lastReason: string; lastFinishedAt: number | null; memLimit: string }
 export interface PgDb { cluster: string; db: string; active: { hash: string; secs: number; query: string }[]; maint: { table: string; analyzeAt: number; vacuumAt: number }[]; stmts: { id: string; calls: number; totalMs: number; query: string }[] | null; queues: { name: string; depth: number; ageS: number }[] }
 /** `unknown`: keys of findings this snapshot could not see (a command that failed), or prefixes when they end in `/`. They are neither seen nor missing:
@@ -109,12 +110,12 @@ export function parseSnapshot(text: string, fallbackTs: number): Snapshot | null
   try { apiserver = (JSON.parse(sec.get('version') || 'null') as { serverVersion?: { gitVersion?: string } } | null)?.serverVersion?.gitVersion ?? null; } catch { /* unknown */ }
   const nodes: NodeSample[] = [];
   for (const line of (sec.get('nodes') ?? '').split('\n').filter(Boolean)) {
-    const [name = '', kubelet = '', ip = ''] = line.split('\t');
+    const [name = '', kubelet = '', ip = '', ready = ''] = line.split('\t');
     const body = sec.get(`node ${name}`) ?? '';
     const req = /^requests (\d+)\s*$/m.exec(body);
     const cpu = /^cpu\s+([\d ]+)$/m.exec(body);
     const bench = /^bench (\d+(?:\.\d+)?) (\d+(?:\.\d+)?)\s*$/m.exec(body);
-    nodes.push({ name, kubelet, ip: ip.split(' ')[0] ?? '', requests: req ? Number(req[1]) : null,
+    nodes.push({ name, kubelet, ip: ip.split(' ')[0] ?? '', ready: ready === 'True' ? true : ready === 'False' || ready === 'Unknown' ? false : null, requests: req ? Number(req[1]) : null,
       cpu: cpu ? cpu[1]!.trim().split(/\s+/).map(Number) : null,
       benchS: bench ? Math.round((Number(bench[2]) - Number(bench[1])) * 100) / 100 : null });
   }
@@ -290,6 +291,8 @@ export function evaluate(prev: Snapshot | null, cur: Snapshot, h: History, ignor
   // finding only with steal above BENCH_STEAL_MIN_PERCENT in the same round (our own load slows it too). A round with no steal reading
   // (no /proc/stat now or the round before, counters that went back) sees neither: unknown, so it closes nothing either.
   for (const n of cur.nodes) {
+    // Ready each round, for jitter on the node (probes.ts, jitterImpact): a node not Ready while its pings jitter is an impact.
+    if (n.ready != null) samples.push({ key: `ready:${n.name}`, value: n.ready ? 1 : 0 });
     const p = prevNode.get(n.name);
     let steal: number | null = null;
     let busy: number | null = null;

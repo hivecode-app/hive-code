@@ -20,7 +20,9 @@
 // at about fail_for + 2×timeout + the witness: fail_for should be well above timeout; a DNS that didn't answer (EAI_AGAIN) or unknown doesn't start or move that
 // clock, and fail_after still covers it as before.
 // Latency (memory/company/monitoring/probe-alerts-spec.md, 26/10): over avg/mdev with the loss under its threshold is jitter,
-// recorded and counted in a daily digest by node; it wakes רותם only when it lasts JITTER_SUSTAIN_ROUNDS samples in a row. More than SHARED_MIN_NODES nodes losing pings in one round
+// recorded and counted in a daily digest by node; it wakes רותם only when it lasts JITTER_SUSTAIN_ROUNDS samples in a row and it has
+// an impact (jitterImpact, yoav 28/10): a service probe of its project failing, or the node not Ready, in that window. Without one it
+// is noted quietly (probe.jitter_quiet) and counted in the digest, which drafts a Contabo ticket only for a node that had an impact. More than SHARED_MIN_NODES nodes losing pings in one round
 // is one event; it reaches the owner only when it lasts past SHARED_PERSIST_MS and http fails too or there is no witness.
 // `alertmanager` reads the cluster's own critical alerts over ssh (alertmanager.ts): one message per fingerprint, held until it is gone.
 // `cluster` reads the layer under the services of a whole k3s cluster over one ssh (root-signals.ts): its findings and messages are its own.
@@ -593,6 +595,36 @@ export const jitterOnly = (p: ProbeSpec, o: ProbeOutcome): boolean =>
 /** A latency sample that failed on loss (100% included). */
 export const lossFailed = (p: ProbeSpec, o: ProbeOutcome): boolean => p.kind === 'latency' && !o.ok && !o.unknown && !jitterOnly(p, o);
 
+/** Kinds whose failure is a service failing: jitter while one of them fails in its project has an impact. Not latency (the
+ *  network itself), disk or kubelet (a version skew or a full disk is not something jitter does). lumo_ws records no failure
+ *  (its findings are its own messages), so it isn't here. */
+const SERVICE_KINDS = new Set<ProbeSpec['kind']>(['http', 'whatsapp_log', 'alertmanager']);
+
+/** What jitter on `p` could have done in (from, to]: a failure of a service probe in its project, or its node not Ready in a
+ *  `cluster:` probe's rounds (root-signals.ts, `ready:<node>`; the node by the vmi name in the probe's id). Oldest first. */
+export function jitterImpact(db: Store['db'], probes: ProbeSpec[], p: ProbeSpec, from: number, to: number): { ts: number; what: string }[] {
+  const out: { ts: number; what: string }[] = [];
+  const services = probes.filter((x) => x.project === p.project && SERVICE_KINDS.has(x.kind)).map((x) => x.key);
+  if (services.length) {
+    const rows = db.prepare(`SELECT probe_id, ts FROM probe_results WHERE ok = 0 AND ts > ? AND ts <= ? AND probe_id IN (${services.map(() => '?').join(', ')})`)
+      .all(from, to, ...services) as { probe_id: string; ts: number }[];
+    for (const r of rows) out.push({ ts: r.ts, what: `${r.probe_id} נכשל` });
+  }
+  const node = vpsName(p);
+  const ready = db.prepare('SELECT ts FROM root_samples WHERE cluster = ? AND key = ? AND value = 0 AND ts > ? AND ts <= ?');
+  for (const c of probes.filter((x) => x.kind === 'cluster')) {
+    for (const r of ready.all(c.key, `ready:${node}`, from, to) as { ts: number }[]) out.push({ ts: r.ts, what: `הנוד ${node} לא Ready (${c.key})` });
+  }
+  return out.sort((a, b) => a.ts - b.ts);
+}
+
+/** `tiki-bot-go/api נכשל 3 פעמים, הנוד vmi1 לא Ready פעם אחת`: impacts by what, in the order they first happened. */
+const impactText = (xs: { what: string }[]): string => {
+  const n = new Map<string, number>();
+  for (const x of xs) n.set(x.what, (n.get(x.what) ?? 0) + 1);
+  return [...n].map(([w, k]) => `${w} ${k === 1 ? 'פעם אחת' : `${k} פעמים`}`).join(', ');
+};
+
 /** A failed latency sample's `error` as runLatencyProbe writes it (pingEvidence). null when it isn't one. */
 export function parsePingEvidence(error: string): PingStats | null {
   const none = /: אין אף תשובה, אובדן (\d+(?:\.\d+)?)%/.exec(error);
@@ -634,12 +666,14 @@ const vpsName = (p: ProbeSpec): string => /vmi\d+/.exec(p.id)?.[0] ?? p.id;
 
 interface DigestRow { ok: number; jitter: number; loss_percent: number | null; avg_ms: number | null; mdev_ms: number | null; latency_ms: number | null; ts: number }
 
-/** The daily digest (spec §4): the last 24 hours by node, and a ready ticket draft for a node with chronic jitter. null = no latency probes. */
+/** The daily digest (spec §4): the last 24 hours by node; a node with chronic jitter is "למעקב", and gets a recommendation for a
+ *  Contabo ticket with a ready draft only when its jitter had an impact (jitterImpact) in the days counted. null = no latency probes. */
 export function jitterDigest(db: Store['db'], probes: ProbeSpec[], now: number): string | null {
   const latency = probes.filter((p) => p.kind === 'latency');
   if (!latency.length) return null;
   const lines: string[] = ['סיכום jitter יומי, 24 השעות האחרונות לפי נוד:'];
   const tickets: string[] = [];
+  const watch: string[] = [];
   for (const p of latency) {
     const rows = db.prepare('SELECT ok, jitter, loss_percent, avg_ms, mdev_ms, latency_ms, ts FROM probe_results WHERE probe_id = ? AND ts > ? AND ts <= ?')
       .all(p.key, now - 7 * DAY_MS, now) as unknown as DigestRow[];
@@ -655,10 +689,15 @@ export function jitterDigest(db: Store['db'], probes: ProbeSpec[], now: number):
     while (streak < perDay.length && perDay[streak]!.length > CHRONIC_PER_DAY) streak++;
     if (streak < CHRONIC_DAYS) continue;
     const days = perDay.slice(0, streak).reverse();
+    // An impact counts while the node jittered: within a round of one of its jitter samples.
+    const jitTs = days.flat().map((r) => r.ts);
+    const impact = jitterImpact(db, probes, p, now - streak * DAY_MS - p.everyMs - ROUND_SLACK_MS, now)
+      .filter((x) => jitTs.some((t) => x.ts >= t - ROUND_SLACK_MS && x.ts <= t + p.everyMs + ROUND_SLACK_MS));
+    if (!impact.length) { watch.push(`- ${vpsName(p)} (${p.latency!.host}), ${streak} ימים ברצף, בלי כשל שירות ובלי נוד לא Ready בזמן ה-jitter.`); continue; }
     const worst = days.flat().sort((a, b) => (avg(b) ?? 0) - (avg(a) ?? 0)).slice(0, 3);
     const end = (i: number) => israel(now - (streak - 1 - i) * DAY_MS).day;
     tickets.push([
-      `${vpsName(p)} (${p.latency!.host}), ${streak} ימים ברצף:`,
+      `${vpsName(p)} (${p.latency!.host}), ${streak} ימים ברצף. השפעה בזמן ה-jitter: ${impactText(impact)}.`,
       '```',
       `Subject: Recurring network jitter on ${vpsName(p)} (${p.latency!.host})`,
       '',
@@ -671,8 +710,9 @@ export function jitterDigest(db: Store['db'], probes: ProbeSpec[], now: number):
       '```',
     ].join('\n'));
   }
-  if (tickets.length) lines.push('', `jitter קבוע (יותר מ-${CHRONIC_PER_DAY} ביום, ${CHRONIC_DAYS} ימים ברצף ויותר): המלצה לטיקט ב-Contabo, נוסח מוכן להדבקה.`, ...tickets);
-  else lines.push('', 'אין נוד עם jitter קבוע.');
+  if (tickets.length) lines.push('', `jitter קבוע (יותר מ-${CHRONIC_PER_DAY} ביום, ${CHRONIC_DAYS} ימים ברצף ויותר) עם השפעה: המלצה לטיקט ב-Contabo, נוסח מוכן להדבקה.`, ...tickets);
+  if (watch.length) lines.push('', 'למעקב: jitter קבוע בלי השפעה. אין המלצה לטיקט.', ...watch);
+  if (!tickets.length && !watch.length) lines.push('', 'אין נוד עם jitter קבוע.');
   return lines.join('\n');
 }
 
@@ -778,7 +818,7 @@ export class ProbeRunner {
     if (round.length) await this.sharedRound(round, now);
     // After the round: a node that this round put inside a shared event has no anomaly of its own, as with loss.
     // Counted again: an event that ended this round no longer lends its loss to the run.
-    for (const p of sustained) if (!this.outage?.members.has(p.key) && this.state(p.key)?.anomaly_open !== 1 && this.badRun(p, now) >= JITTER_SUSTAIN_ROUNDS) this.openAnomaly(p, undefined, true);
+    for (const p of sustained) if (!this.outage?.members.has(p.key) && this.state(p.key)?.anomaly_open !== 1 && this.badRun(p, now) >= JITTER_SUSTAIN_ROUNDS) this.sustainedJitter(p, now);
     // A node inside an open shared event has no anomaly of its own: the event speaks for it.
     const own = crossed.filter((p) => !this.outage?.members.has(p.key));
     if (own.length) await this.confirm(own);
@@ -1064,13 +1104,14 @@ export class ProbeRunner {
     if (p.kind === 'whatsapp_log' && o.wa) this.whatsappFailedRound(p, o.wa, now);
 
     const open = prev?.anomaly_open === 1;
+    if (p.kind === 'latency' && o.ok && this.store.getMeta(`probes.jitter_quiet.${p.key}`)) this.store.setMeta(`probes.jitter_quiet.${p.key}`, '');
     if (!healthy && (fails >= p.failAfter || lasted) && !open) {
       if (ff) ff.asked = true;
       if (defer) return 'crossed';
       if (!this.outage?.members.has(p.key)) this.openAnomaly(p);
     } else if (p.kind === 'latency' && !o.ok && !open && this.badRun(p, now) >= JITTER_SUSTAIN_ROUNDS) {
       if (defer) return 'sustained';
-      if (!this.outage?.members.has(p.key)) this.openAnomaly(p, undefined, true);
+      if (!this.outage?.members.has(p.key)) this.sustainedJitter(p, now);
     } else if (o.ok && open) {
       // Only a clean sample recovers: jitter after an anomaly is not "back to normal".
       this.store.db.prepare('UPDATE probe_state SET anomaly_open = 0 WHERE probe_id = ?').run(p.key);
@@ -1177,16 +1218,41 @@ export class ProbeRunner {
   /** Samples in a row, newest back, with no clean one (jitter or loss), up to JITTER_SUSTAIN_ROUNDS. Unknowns are not recorded here.
    *  Only samples from the last JITTER_SUSTAIN_ROUNDS intervals (a gap, like hq down, starts over), and for a node that was in the
    *  last shared event only samples after it ended: its loss there was the event's. */
-  private badRun(p: ProbeSpec, now: number): number {
+  private badRun(p: ProbeSpec, now: number): number { return this.badRows(p, now).length; }
+
+  /** The time of the oldest sample of the run badRun counts (now when there is none). */
+  private runStart(p: ProbeSpec, now: number): number { return this.badRows(p, now).at(-1)?.ts ?? now; }
+
+  private badRows(p: ProbeSpec, now: number): { ok: number; ts: number }[] {
     let from = now - JITTER_SUSTAIN_ROUNDS * p.everyMs - ROUND_SLACK_MS;
     try {
       const last = JSON.parse(this.store.getMeta(OUTAGE_LAST_META) || 'null') as { end: number; members: string[] } | null;
       if (last?.members.includes(p.key)) from = Math.max(from, last.end - 1);
     } catch { /* unreadable: no event */ }
-    const rows = this.store.db.prepare('SELECT ok FROM probe_results WHERE probe_id = ? AND ts > ? ORDER BY id DESC LIMIT ?')
-      .all(p.key, from, JITTER_SUSTAIN_ROUNDS) as { ok: number }[];
+    const rows = this.store.db.prepare('SELECT ok, ts FROM probe_results WHERE probe_id = ? AND ts > ? ORDER BY id DESC LIMIT ?')
+      .all(p.key, from, JITTER_SUSTAIN_ROUNDS) as { ok: number; ts: number }[];
     const i = rows.findIndex((r) => r.ok === 1);
-    return i < 0 ? rows.length : i;
+    return i < 0 ? rows : rows.slice(0, i);
+  }
+
+  /** Jitter that lasted JITTER_SUSTAIN_ROUNDS: urgent only with an impact in its window (jitterImpact). Without one it is noted
+   *  once per run (probe.jitter_quiet, cleared by a clean sample) and wakes no one; nothing opens, so no "recovered" follows either.
+   *  Looked at again every round while it lasts: an impact that comes later opens it then. */
+  private sustainedJitter(p: ProbeSpec, now: number): void {
+    // The window is the run itself: from its oldest sample (a failure in the round before it, as a shared event's, is not its impact).
+    const start = this.runStart(p, now);
+    const impact = jitterImpact(this.store.db, this.probes, p, start - 1, now);
+    const key = `probes.jitter_quiet.${p.key}`;
+    if (impact.length) {
+      if (this.store.getMeta(key)) this.store.setMeta(key, '');
+      this.openAnomaly(p, `השפעה בזמן ה-jitter: ${impactText(impact)}.`, true);
+      return;
+    }
+    // Once per run: the meta is the last round it was seen. A run that started after it (after a gap or a shared event) is a new one.
+    const seen = Number(this.store.getMeta(key) || '0');
+    this.store.setMeta(key, String(now));
+    if (seen >= start) return;
+    this.store.emit('probe.jitter_quiet', this.cfg.monitoringLeadId, { probe: p.key, rounds: JITTER_SUSTAIN_ROUNDS });
   }
 
   private openAnomaly(p: ProbeSpec, verification?: string, sustained = false): void {
@@ -1205,7 +1271,7 @@ export class ProbeRunner {
           : p.kind === 'latency' ? `חריגה בפרודקשן: ${p.key} (jitter ברשת אל ${p.latency!.host}: הספים avg ${p.latency!.maxAvgMs}ms, mdev ${p.latency!.maxMdevMs}ms, אובדן ${p.latency!.maxLossPercent}%)`
           : p.kind === 'whatsapp_log' ? `חריגה בפרודקשן: ${p.key} (הלוג של ${p.whatsappLog!.ns}/${p.whatsappLog!.resource} ב-${p.whatsappLog!.host})`
           : `חריגה בפרודקשן: ${p.key} (${p.method} ${p.url})`,
-        sustained ? `jitter מתמשך: ${JITTER_SUSTAIN_ROUNDS} דגימות ברצף בלי דגימה תקינה (JITTER_SUSTAIN_ROUNDS), גם כשהאובדן לא הגיע ל-fail_after. תקין לאחרונה: ${lastOk}.`
+        sustained ? `jitter מתמשך עם השפעה: ${JITTER_SUSTAIN_ROUNDS} דגימות ברצף בלי דגימה תקינה (JITTER_SUSTAIN_ROUNDS), גם כשהאובדן לא הגיע ל-fail_after. תקין לאחרונה: ${lastOk}.`
           : lasted != null && fails < p.failAfter ? `נכשל ברצף ${lasted} שניות (fail_for=${p.failForMs! / 1000}s, בדיקה חוזרת כל ${FAIL_FOR_RETRY_MS / 1000} שניות), בלי לחכות ל-fail_after=${p.failAfter}. תקין לאחרונה: ${lastOk}.`
           : `${fails} כישלונות ברצף (fail_after=${p.failAfter}). תקין לאחרונה: ${lastOk}.`,
         ...(verification ? [verification] : []),

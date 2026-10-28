@@ -19,13 +19,13 @@ const S = (hms: string) => Math.round(T(hms) / 1000);
 const MIN = 60_000;
 
 /** Collector output (the format CLUSTER_SCRIPT prints), built from the parts a case needs. */
-function out(o: { ts: number; api?: string; nodes?: { name: string; v: string; ip: string; req?: number; cpu?: number[]; bench?: number }[];
+function out(o: { ts: number; api?: string; nodes?: { name: string; v: string; ip: string; ready?: string; req?: number; cpu?: number[]; bench?: number }[];
   pods?: string[]; apiTotal?: number; pg?: Record<string, Record<string, string[]>> }): string {
   const s: string[] = [`@@ now\n${Math.round(o.ts / 1000)}`];
   if (o.api) s.push(`@@ version\n${JSON.stringify({ serverVersion: { major: '1', minor: o.api.split('.')[1], gitVersion: o.api } })}`);
   // A cluster always has a node; with none the round is unknown (kubectl didn't answer).
   const nodes = o.nodes?.length ? o.nodes : [{ name: 'vmi1000003', v: 'v1.34.3+k3s1', ip: '203.0.113.15' }];
-  s.push(`@@ nodes\n${nodes.map((n) => `${n.name}\t${n.v}\t${n.ip}`).join('\n')}`);
+  s.push(`@@ nodes\n${nodes.map((n) => `${n.name}\t${n.v}\t${n.ip}${n.ready != null ? `\t${n.ready}` : ''}`).join('\n')}`);
   s.push(`@@ pods\n${(o.pods ?? []).join('\n')}`);
   if (o.apiTotal != null) s.push(`@@ apiserver\n${o.apiTotal}`);
   for (const n of o.nodes ?? []) s.push(`@@ node ${n.name}\nrequests ${n.req ?? ''}\n${n.cpu ? `cpu  ${n.cpu.join(' ')}\n` : ''}${n.bench != null ? `bench 1000.00 ${(1000 + n.bench).toFixed(2)}` : ''}`);
@@ -172,6 +172,13 @@ test('(1) the same loop with an http probe failing beside it reaches the owner a
     assert.match(to('owner').at(-1)!.body, /חזר לתקין בקלאסטר c:\n- api-source[\s\S]*- kubelet-skew/);
     assert.equal(env.hq.inbox.open().filter((i) => i.kind === 'incident').length, 0);
   } finally { await env.cleanup(); }
+});
+
+test('Ready: each node\'s condition is a ready:<node> sample, 1 or 0; a collector without the column records none', () => {
+  const s1 = snap(out({ ts: 600_000, nodes: [{ name: 'vmi1', v: 'v1.33.6+k3s1', ip: '10.0.0.1', ready: 'True' }, { name: 'vmi2', v: 'v1.33.6+k3s1', ip: '10.0.0.2', ready: 'Unknown' }, { name: 'vmi3', v: 'v1.33.6+k3s1', ip: '10.0.0.3' }] }));
+  assert.deepEqual(s1.nodes.map((n) => n.ready), [true, false, null]);
+  const { samples } = evaluate(null, s1, { stats: () => ({ median: 0, n: 0 }), sum: () => 0 });
+  assert.deepEqual(samples.filter((x) => x.key.startsWith('ready:')), [{ key: 'ready:vmi1', value: 1 }, { key: 'ready:vmi2', value: 0 }]);
 });
 
 test('steal: the master at 50.5% (its average on 21/10) is a root after three rounds; 23.7% (the max of 22–26/10) is not', async () => {

@@ -544,18 +544,22 @@ test('latency rounds stay in step: a node a few seconds off joins the round of t
   } finally { await env.cleanup(); }
 });
 
-test('spec 5: 4 jitter samples a day for 3 days → a Contabo ticket draft; for 2 days → none', async () => {
+test('spec 5: 4 jitter samples a day for 3 days with an impact → a Contabo ticket draft; for 2 days → none', async () => {
   const env = await makeEnv({ projects: { 'tiki-bot-go': NODES(2) } });
   try {
     const { hq, clock } = env;
     const now = clock.now();
     const ins = hq.store.db.prepare(`INSERT INTO probe_results (probe_id, ok, status, latency_ms, error, ts, jitter, loss_percent, avg_ms, mdev_ms) VALUES (?, 0, NULL, ?, NULL, ?, 1, 0, ?, ?)`);
     for (let d = 0; d < 3; d++) for (let k = 0; k < 4; k++) ins.run('tiki-bot-go/net-vmi1000', 50 + d * 10 + k, now - d * 86_400_000 - (k + 1) * 3_600_000, 50 + d * 10 + k, 30 + k);
+    // The service failed a minute after one of vmi1000's jitter samples: an impact.
+    hq.store.db.prepare(`INSERT INTO probe_results (probe_id, ok, status, latency_ms, error, ts) VALUES ('tiki-bot-go/api', 0, 503, 40, 'status 503', ?)`).run(now - 86_400_000 - 3_600_000 + 60_000);
     for (let d = 0; d < 2; d++) for (let k = 0; k < 4; k++) ins.run('tiki-bot-go/net-vmi1001', 40, now - d * 86_400_000 - (k + 1) * 3_600_000, 40, 25);
     const body = jitterDigest(hq.store.db, hq.probes.probes, now)!;
     assert.match(body, /tiki-bot-go\/net-vmi1000 \(10\.0\.0\.1\): jitter 4, אובדן 0, avg מקסימלי 53ms/);
     assert.match(body, /tiki-bot-go\/net-vmi1001 \(10\.0\.0\.2\): jitter 4/);
-    assert.match(body, /vmi1000 \(10\.0\.0\.1\), 3 ימים ברצף/);
+    assert.match(body, /vmi1000 \(10\.0\.0\.1\), 3 ימים ברצף\. השפעה בזמן ה-jitter: tiki-bot-go\/api נכשל פעם אחת\./);
+    assert.match(body, /עם השפעה: המלצה לטיקט ב-Contabo/);
+    assert.doesNotMatch(body, /למעקב/);
     assert.match(body, /Subject: Recurring network jitter on vmi1000 \(10\.0\.0\.1\)/);
     assert.match(body, /- 24h to 20\/10: 4 samples/);
     assert.match(body, /The worst samples:\n- 2026-10-18 05:00 UTC: avg 73ms, mdev 33ms\n- 2026-10-18 06:00 UTC: avg 72ms/, 'the worst samples, with time in UTC');
@@ -568,6 +572,27 @@ test('spec 5: 4 jitter samples a day for 3 days → a Contabo ticket draft; for 
     const d = hq.store.db.prepare(`SELECT priority, body FROM messages WHERE to_identity = 'rotem' AND body LIKE 'סיכום jitter יומי%'`).all() as { priority: string }[];
     assert.equal(d.length, 1);
     assert.equal(d[0]!.priority, 'later');
+  } finally { await env.cleanup(); }
+});
+
+test('spec 5: chronic jitter without an impact is "למעקב", with no ticket and no draft; a node not Ready at the time is an impact', async () => {
+  const charter = NODES(2).replace('\n```\n', '\n  - {id: cluster, cluster: root@10.0.0.100, every: 5m}\n```\n');
+  const env = await makeEnv({ projects: { 'tiki-bot-go': charter } });
+  try {
+    const { hq, clock } = env;
+    const now = clock.now();
+    const ins = hq.store.db.prepare(`INSERT INTO probe_results (probe_id, ok, status, latency_ms, error, ts, jitter, loss_percent, avg_ms, mdev_ms) VALUES (?, 0, NULL, 50, NULL, ?, 1, 0, 50, 30)`);
+    for (const id of ['net-vmi1000', 'net-vmi1001']) for (let d = 0; d < 3; d++) for (let k = 0; k < 4; k++) ins.run(`tiki-bot-go/${id}`, now - d * 86_400_000 - (k + 1) * 3_600_000);
+    // A service failure far from any jitter sample is not an impact; vmi1001 was not Ready while it jittered (and vmi1000 Ready).
+    hq.store.db.prepare(`INSERT INTO probe_results (probe_id, ok, status, latency_ms, error, ts) VALUES ('tiki-bot-go/api', 0, 503, 40, 'status 503', ?)`).run(now - 12 * 3_600_000);
+    const rs = hq.store.db.prepare(`INSERT INTO root_samples (cluster, key, ts, value) VALUES ('tiki-bot-go/cluster', ?, ?, ?)`);
+    rs.run('ready:vmi1000', now - 3_600_000, 1);
+    rs.run('ready:vmi1001', now - 2 * 3_600_000 + 60_000, 0);
+    const body = jitterDigest(hq.store.db, hq.probes.probes, now)!;
+    assert.match(body, /למעקב: jitter קבוע בלי השפעה\. אין המלצה לטיקט\.\n- vmi1000 \(10\.0\.0\.1\), 3 ימים ברצף, בלי כשל שירות ובלי נוד לא Ready/);
+    assert.doesNotMatch(body, /Recurring network jitter on vmi1000/, 'no draft for a node without an impact');
+    assert.match(body, /vmi1001 \(10\.0\.0\.2\), 3 ימים ברצף\. השפעה בזמן ה-jitter: הנוד vmi1001 לא Ready \(tiki-bot-go\/cluster\) פעם אחת\./);
+    assert.match(body, /Subject: Recurring network jitter on vmi1001/);
   } finally { await env.cleanup(); }
 });
 
@@ -657,7 +682,7 @@ test('shared event: a node that starts losing after it was reported is told to �
   } finally { await env.cleanup(); }
 });
 
-test('spec 7: 5 jitter samples in a row send nothing; 6 open one anomaly; a clean sample in between resets the count', async () => {
+test('spec 7: 5 jitter samples in a row send nothing; 6 without an impact are noted quietly, wake no one and send no "recovered"', async () => {
   const env = await makeEnv({ projects: { 'tiki-bot-go': LATENCY } });
   try {
     const { hq, clock } = env;
@@ -671,16 +696,68 @@ test('spec 7: 5 jitter samples in a row send nothing; 6 open one anomaly; a clea
     await step(); // clean: the count starts over
     for (let i = 0; i < 5; i++) await step();
     assert.equal(anomalies().length, 0, 'five again after a clean one: nothing');
-    await step(); // a loss sample continues the run: the sixth
+    const quiet = () => (hq.store.db.prepare(`SELECT COUNT(*) n FROM events WHERE type = 'probe.jitter_quiet'`).get() as { n: number }).n;
+    await step(); // a loss sample continues the run: the sixth, and no service failed and no node was not Ready
+    assert.equal(anomalies().length, 0, 'jitter without an impact wakes no one');
+    assert.equal(quiet(), 1, 'noted quietly');
+    await step(); await step(); // jitter goes on: still nothing, noted once
+    assert.equal(anomalies().length, 0);
+    assert.equal(quiet(), 1);
+    assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM messages WHERE body NOT LIKE 'סיכום jitter יומי%'`).get() as { n: number }).n, 0, 'nothing to anyone (but the daily digest)');
+    await step(); // clean
+    assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM messages WHERE body LIKE '%חזר לתקין%'`).get() as { n: number }).n, 0, 'no "recovered" without an alert');
+  } finally { await env.cleanup(); }
+});
+
+test('spec 7: sustained jitter with a service failing in its project in the window opens one urgent anomaly, with the impact', async () => {
+  const env = await makeEnv({ projects: { 'tiki-bot-go': NODES(1) } });
+  try {
+    const { hq, clock } = env;
+    let round = 0;
+    // The service fails once, in the fourth round: under its fail_after, so it is only the jitter's impact.
+    hq.probes.run = (p) => p.kind === 'http'
+      ? Promise.resolve(round === 3 ? { ok: false, status: 503, latencyMs: 40, error: 'status 503, expected 200' } : { ok: true, status: 200, latencyMs: 40, error: null })
+      : runLatencyProbe(p, async () => round < 8 ? PING_JITTER : PING_OK);
+    hq.probes.host = () => ({ load1: 0.5, cpus: 8, freeMb: 9000 });
+    const step = async () => { await hq.probes.tick(); round++; clock.advance(ROUND); };
+    const anomalies = () => hq.store.db.prepare(`SELECT body, urgency FROM messages WHERE kind = 'probe_anomaly'`).all() as { body: string; urgency: string }[];
+    for (let i = 0; i < 5; i++) await step();
+    assert.equal(anomalies().length, 0);
+    await step(); // the sixth
     assert.equal(anomalies().length, 1);
-    assert.match(anomalies()[0]!.body, /jitter מתמשך: 6 דגימות ברצף בלי דגימה תקינה/);
+    assert.equal(anomalies()[0]!.urgency, 'urgent');
+    assert.match(anomalies()[0]!.body, /jitter מתמשך עם השפעה: 6 דגימות ברצף בלי דגימה תקינה/);
+    assert.match(anomalies()[0]!.body, /השפעה בזמן ה-jitter: tiki-bot-go\/api נכשל פעם אחת\./);
     assert.equal((anomalies()[0]!.body.match(/^- \d{4}-/gm) ?? []).length, 6, 'the six samples as evidence');
     await step(); await step(); // jitter goes on: still one, and not "recovered"
     assert.equal(anomalies().length, 1);
-    const recovered = () => (hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'system' AND body LIKE '%חזר לתקין%'`).all() as unknown[]).length;
+    const recovered = () => (hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'system' AND body LIKE '%net-vmi1000 חזר לתקין%'`).all() as unknown[]).length;
     assert.equal(recovered(), 0);
     await step(); // clean
     assert.equal(recovered(), 1);
+  } finally { await env.cleanup(); }
+});
+
+test('spec 7: a service failing in the round before the run, or healthy all along, is no impact; a node not Ready in the run is one', async () => {
+  const charter = NODES(1).replace('\n```\n', '\n  - {id: cluster, cluster: root@10.0.0.100, every: 5m}\n```\n');
+  const env = await makeEnv({ projects: { 'tiki-bot-go': charter } });
+  try {
+    const { hq, clock } = env;
+    hq.probes.roots.collect = async () => { throw new Error('no ssh in tests'); };
+    let round = 0;
+    // Round 0: clean ping, the service fails. Rounds 1–6: jitter, the service fine. Round 7 on: jitter, and the node not Ready.
+    hq.probes.run = (p) => p.kind === 'http'
+      ? Promise.resolve(round === 0 ? { ok: false, status: 503, latencyMs: 40, error: 'status 503, expected 200' } : { ok: true, status: 200, latencyMs: 40, error: null })
+      : runLatencyProbe(p, async () => round === 0 ? PING_OK : PING_JITTER);
+    hq.probes.host = () => ({ load1: 0.5, cpus: 8, freeMb: 9000 });
+    const step = async () => { await hq.probes.tick(); round++; clock.advance(ROUND); };
+    const anomalies = () => hq.store.db.prepare(`SELECT body FROM messages WHERE kind = 'probe_anomaly' AND body LIKE '%jitter מתמשך%'`).all() as { body: string }[];
+    for (let i = 0; i < 7; i++) await step(); // the sixth jitter sample is round 6
+    assert.equal(anomalies().length, 0, 'the failure was before the run, and the service was fine during it');
+    hq.store.db.prepare(`INSERT INTO root_samples (cluster, key, ts, value) VALUES ('tiki-bot-go/cluster', 'ready:vmi1000', ?, 0)`).run(clock.now() - 30_000);
+    await step();
+    assert.equal(anomalies().length, 1);
+    assert.match(anomalies()[0]!.body, /השפעה בזמן ה-jitter: הנוד vmi1000 לא Ready \(tiki-bot-go\/cluster\) פעם אחת\./);
   } finally { await env.cleanup(); }
 });
 
@@ -689,7 +766,8 @@ test('spec 7: jitter that a shared event joins opens no anomaly per node, and th
   try {
     const { hq, clock } = env;
     let round = 0;
-    hq.probes.run = (p) => p.kind === 'http' ? Promise.resolve({ ok: true, status: 200, latencyMs: 40, error: null })
+    // The service fails once, in the round of the sixth sample after the event: the jitter's impact (and under fail_after).
+    hq.probes.run = (p) => p.kind === 'http' ? Promise.resolve(round === 12 ? { ok: false, status: 503, latencyMs: 40, error: 'status 503, expected 200' } : { ok: true, status: 200, latencyMs: 40, error: null })
       : runLatencyProbe(p, async () => round === 5 || round === 6 ? lossOut(20) : PING_JITTER);
     hq.probes.host = () => ({ load1: 0.5, cpus: 8, freeMb: 9000 });
     const step = async () => { await hq.probes.tick(); round++; clock.advance(ROUND); };
