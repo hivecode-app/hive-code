@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
@@ -136,7 +136,9 @@ test('nodes: a node that does not answer gets no task, and its load caps it', as
 test('RemoteLauncher: the shift\'s files go to the same paths there, on the node\'s token, then its unit starts', async () => {
   const calls: { args: string[]; input?: string }[] = [];
   const run: SshRun = async (args, input) => { calls.push({ args, input }); return ''; };
-  const node = new RemoteNode(NODE, '/home/owner/.local/state/agent-company', run);
+  // The ssh control socket is local: a temp dir, never the real state dir of this machine.
+  const state = mkdtempSync(join(tmpdir(), 'rl-'));
+  const node = new RemoteNode(NODE, state, run);
   node.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
   try {
     const l = new RemoteLauncher(node, '/home/owner/.local/state/agent-company');
@@ -153,7 +155,7 @@ test('RemoteLauncher: the shift\'s files go to the same paths there, on the node
     assert.match(calls.at(-1)!.args.at(-1)!, /systemctl enable --now 'company-shift@p-t1-1.service'/);
     await l.kill('p-t1-1', spec.unit);
     assert.match(calls.at(-1)!.args.at(-1)!, /systemctl disable --now 'company-shift@p-t1-1.service'/);
-  } finally { node.close(); }
+  } finally { node.close(); rmSync(state, { recursive: true, force: true }); }
 });
 
 test('HostClient awaitHello: a socket that opens but has no host behind it (an ssh forward) is not connected', async () => {
