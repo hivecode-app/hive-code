@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeEnv } from './helpers.ts';
+import { makeEnv, ORG_YAML } from './helpers.ts';
 import { alertmanagerCommand, amRound, parseAlerts, parseAmOutput, readAlertmanager, BLIND_MS, RESOLVE_AFTER_MS, type AmReading, type AmState } from '../src/alertmanager.ts';
 import { parseCharterProbes, runAlertmanagerProbe } from '../src/probes.ts';
 
@@ -264,4 +264,182 @@ test('alertmanager probe in the runner: wakes רותם once (urgent), a note whe
     assert.match(dev.body, /מחוץ לפרודקשן/);
     assert.equal((hq.store.db.prepare(`SELECT anomaly_open FROM probe_state WHERE probe_id = 'lumo/alerts'`).get() as { anomaly_open: number }).anomaly_open, 0);
   } finally { await env.cleanup(); }
+});
+
+// lumobot's alerts reach the Alertmanager of lumo-prod with pod_namespace=lumobot (28/10): its own probe, hila with a copy to boaz.
+const BOT_LIST = JSON.stringify([
+  alert('bb00000000000001', { alertname: 'PodCrashLooping', namespace: 'monitoring', pod_namespace: 'lumobot', severity: 'warning' }, 'lumobot crashloop'),
+  alert('bb00000000000002', { alertname: 'PodRestarted', namespace: 'monitoring', pod_namespace: 'lumobot' }),
+  alert('bb00000000000003', { alertname: 'PodRestarted', namespace: 'monitoring', pod_namespace: 'lumo-prod' }),
+  alert('bb00000000000004', { alertname: 'DbPrimaryDown', namespace: 'lumo-prod', pod_namespace: 'lumobot', severity: 'critical' }),
+  alert('aa00000000000001', { alertname: 'DbPrimaryDown', namespace: 'lumo-prod', severity: 'critical' }),
+]);
+const BOT = { match: { pod_namespace: 'lumobot' }, critical: ['DeploymentUnavailable', 'DeploymentRolloutStuck', 'PodCrashLooping', 'ContainerOOMKilled'], warning: ['PodRestarted'] };
+
+test('alertmanager: match keeps only its labels, critical/warning by alertname beat the label, exclude drops them for the other probe', () => {
+  const bot = parseAlerts(BOT_LIST, BOT)!;
+  assert.deepEqual(bot.map((a) => [a.fingerprint, a.severity]), [['bb00000000000001', 'critical'], ['bb00000000000002', 'warning'], ['bb00000000000004', 'critical']]);
+  const lumo = parseAlerts(BOT_LIST, { exclude: [{ pod_namespace: 'lumobot' }] })!;
+  assert.deepEqual(lumo.map((a) => a.fingerprint), ['aa00000000000001'], 'not lumobot\'s, and still only severity=critical');
+  assert.deepEqual(parseAlerts(BOT_LIST)!.map((a) => a.fingerprint), ['bb00000000000004', 'aa00000000000001'], 'no filter: as before');
+});
+
+test('alertmanager: a warning is next, not an anomaly, its own message; gone it is a later note', () => {
+  const reading: AmReading = { 'lumo-prod': parseAlerts(BOT_LIST, BOT)! };
+  const r1 = amRound('lumo-bot/alertmanager', 'root@m', EMPTY, reading, T);
+  const warn = r1.messages.find((m) => m.event === 'probe.warning')!;
+  assert.deepEqual([warn.anomaly, warn.priority], [false, 'next']);
+  assert.match(warn.body, /אזהרה מ-Alertmanager/);
+  assert.match(warn.body, /PodRestarted/);
+  assert.doesNotMatch(warn.body, /PodCrashLooping/);
+  const crit = r1.messages.find((m) => m.event === 'probe.anomaly')!;
+  assert.match(crit.body, /2 התראות חדשות/);
+  assert.doesNotMatch(crit.body, /PodRestarted/);
+  assert.equal(r1.state.open['lumo-prod/bb00000000000002']!.warning, true);
+  // Only the warning goes away.
+  const onlyCrit: AmReading = { 'lumo-prod': (reading['lumo-prod'] as ReturnType<typeof parseAlerts>)!.filter((a) => a.severity === 'critical') };
+  const r2 = amRound('lumo-bot/alertmanager', 'root@m', r1.state, onlyCrit, T + 60_000);
+  const r3 = amRound('lumo-bot/alertmanager', 'root@m', r2.state, onlyCrit, T + 60_000 + RESOLVE_AFTER_MS);
+  assert.equal(r3.messages.length, 1);
+  assert.equal(r3.messages[0]!.priority, 'later');
+  assert.match(r3.messages[0]!.body, /אזהרה נעלמה/);
+});
+
+test('alertmanager probe: match, exclude, critical, warning, notify and cc from the charter; malformed is unsupported', () => {
+  const [bot, lumo, ...bad] = parseCharterProbes('x', `---
+monitoring:
+  - id: bot
+    alertmanager: root@m
+    namespaces: [lumo-prod]
+    match: {pod_namespace: lumobot}
+    critical: [PodCrashLooping]
+    warning: [PodRestarted]
+    notify: hila
+    cc: [boaz, hila]
+  - {id: lumo, alertmanager: root@m, namespaces: [lumo-prod], exclude: {pod_namespace: lumobot}}
+  - {id: bad-match, alertmanager: root@m, namespaces: [a], match: lumobot}
+  - {id: bad-exclude, alertmanager: root@m, namespaces: [a], exclude: [{}]}
+  - {id: bad-notify, alertmanager: root@m, namespaces: [a], notify: [hila]}
+  - {id: bad-cc, alertmanager: root@m, namespaces: [a], cc: [Boaz Z]}
+  - {id: both, alertmanager: root@m, namespaces: [a], critical: [X], warning: [X]}
+---
+`);
+  assert.deepEqual(bot!.alertmanager!.match, { pod_namespace: 'lumobot' });
+  assert.deepEqual([bot!.alertmanager!.critical, bot!.alertmanager!.warning], [['PodCrashLooping'], ['PodRestarted']]);
+  assert.equal(bot!.alertmanager!.notify, 'hila');
+  assert.deepEqual(bot!.alertmanager!.cc, ['boaz'], 'no copy to whoever already gets it');
+  assert.deepEqual(lumo!.alertmanager!.exclude, [{ pod_namespace: 'lumobot' }]);
+  assert.equal(lumo!.alertmanager!.notify, undefined);
+  assert.deepEqual(bad.map((x) => x.kind), ['unsupported', 'unsupported', 'unsupported', 'unsupported', 'unsupported']);
+});
+
+test('alertmanager probe: a warning alone does not fail the probe', async () => {
+  const [p] = parseCharterProbes('x', `---
+monitoring:
+  - {id: bot, alertmanager: root@m, namespaces: [lumo-prod], match: {pod_namespace: lumobot}, warning: [PodRestarted]}
+---
+`);
+  const only = JSON.stringify([alert('bb00000000000002', { alertname: 'PodRestarted', pod_namespace: 'lumobot' })]);
+  const o = await runAlertmanagerProbe(p!, async () => block('lumo-prod', only));
+  assert.equal(o.ok, true);
+  assert.match(o.error!, /1 אזהרות: lumo-prod\/PodRestarted/);
+});
+
+const BOT_CHARTER = `---
+project: lumo-bot
+monitoring:
+  - id: alertmanager
+    alertmanager: root@203.0.113.15
+    namespaces: [lumo-prod]
+    match: {pod_namespace: lumobot}
+    critical: [PodCrashLooping]
+    warning: [PodRestarted]
+    notify: hila
+    cc: [boaz]
+---
+`;
+
+const BOT_ORG = ORG_YAML.replace('  - {id: eli,', `  - {id: boaz, name: בועז, title: ראש צוות לומו בוט, symbol: smart_toy, team: management, reports_to: yoav, lifecycle: always-on}
+  - {id: hila, name: הילה, title: תשתית, symbol: dns, team: management, reports_to: boaz, lifecycle: dormant}
+  - {id: eli,`);
+
+test('alertmanager probe in the runner: notify gets it, cc a copy, רותם nothing; a warning alone holds no anomaly open', async () => {
+  const env = await makeEnv({ org: BOT_ORG, projects: { 'lumo-bot': BOT_CHARTER } });
+  try {
+    const { hq, clock } = env;
+    const [spec] = parseCharterProbes('lumo-bot', BOT_CHARTER);
+    let reading: AmReading = { 'lumo-prod': parseAlerts(BOT_LIST, spec!.alertmanager)!.filter((a) => a.severity === 'warning') };
+    hq.probes.run = async () => ({ ok: true, alerts: reading, status: null, latencyMs: 300, error: null });
+    const to = (id: string) => hq.store.db.prepare(`SELECT id, kind, urgency, priority, body FROM messages WHERE to_identity = ? AND from_identity = 'hq' ORDER BY created_at`).all(id) as
+      { id: string; kind: string; urgency: string; priority: string; body: string }[];
+    const open = () => (hq.store.db.prepare(`SELECT anomaly_open FROM probe_state WHERE probe_id = 'lumo-bot/alertmanager'`).get() as { anomaly_open: number }).anomaly_open;
+    await hq.probes.tick();
+    assert.equal(to('hila').length, 1);
+    assert.deepEqual([to('hila')[0]!.kind, to('hila')[0]!.priority], ['system', 'next']);
+    assert.match(to('hila')[0]!.body, /^אזהרה מ-Alertmanager/);
+    assert.equal(open(), 0);
+    clock.advance(61_000);
+    reading = { 'lumo-prod': parseAlerts(BOT_LIST, spec!.alertmanager)! };
+    await hq.probes.tick();
+    const hila = to('hila'), boaz = to('boaz');
+    assert.equal(hila.length, 2);
+    assert.deepEqual([hila[1]!.kind, hila[1]!.urgency, hila[1]!.priority], ['probe_anomaly', 'urgent', 'now']);
+    assert.match(hila[1]!.body, /PodCrashLooping/);
+    assert.equal(boaz.length, 2);
+    assert.match(boaz[1]!.body, /^העתק לידיעה: ההודעה נשלחה להילה \(hila\), והטיפול שם\. אין צורך לפעול או לשלוח ask\.\n/);
+    assert.match(boaz[1]!.body, /PodCrashLooping/);
+    assert.equal(boaz[1]!.id, `${hila[1]!.id}-cc-boaz`);
+    assert.deepEqual([boaz[1]!.kind, boaz[1]!.urgency, boaz[1]!.priority], ['system', 'normal', 'next'], 'a copy is not urgent: no second ask');
+    assert.match(boaz[1]!.body, /אין צורך לפעול/);
+    assert.equal(to('rotem').length, 0, 'not to רותם');
+    assert.equal(open(), 1);
+  } finally { await env.cleanup(); }
+});
+
+test('alertmanager probe in the runner: notify or cc not in org.yaml goes to רותם, with a line that says so', async () => {
+  const env = await makeEnv({ org: BOT_ORG, projects: { 'lumo-bot': BOT_CHARTER.replace('notify: hila', 'notify: hilla').replace('cc: [boaz]', 'cc: [boaz, rotem, bozz]') } });
+  try {
+    const { hq } = env;
+    hq.probes.run = async () => ({ ok: false, alerts: { 'lumo-prod': parseAlerts(BOT_LIST, BOT)! }, status: null, latencyMs: 300, error: null });
+    await hq.probes.tick();
+    const to = (id: string) => hq.store.db.prepare(`SELECT kind, body FROM messages WHERE to_identity = ? AND from_identity = 'hq'`).all(id) as { kind: string; body: string }[];
+    assert.equal(to('hilla').length, 0);
+    assert.equal(to('bozz').length, 0);
+    const rotem = to('rotem').filter((m) => m.kind === 'probe_anomaly');
+    assert.equal(rotem.length, 1, 'once: rotem in cc is whoever already gets it');
+    assert.match(rotem[0]!.body, /שלא פעילים ב-org.yaml: hilla, bozz\. ההודעה הגיעה אלייך במקום/);
+    assert.equal(to('boaz').filter((m) => /PodCrashLooping/.test(m.body)).length, 1);
+  } finally { await env.cleanup(); }
+});
+
+test('alertmanager: a warning outside production does not say critical', () => {
+  const r = amRound('x/am', 'root@m', EMPTY, { 'lumo-dev': parseAlerts(BOT_LIST, BOT)!.filter((a) => a.severity === 'warning') }, T, { nonProd: ['lumo-dev'] });
+  assert.equal(r.messages.length, 1);
+  assert.match(r.messages[0]!.body, /^התראה מ-Alertmanager מחוץ לפרודקשן/);
+});
+
+test('alertmanager probe in the runner: notify removed from org.yaml (active 0) goes to רותם', async () => {
+  const env = await makeEnv({ org: BOT_ORG, projects: { 'lumo-bot': BOT_CHARTER } });
+  try {
+    const { hq } = env;
+    hq.store.db.prepare(`UPDATE identities SET active = 0 WHERE id = 'hila'`).run();
+    hq.probes.run = async () => ({ ok: false, alerts: { 'lumo-prod': parseAlerts(BOT_LIST, BOT)! }, status: null, latencyMs: 300, error: null });
+    await hq.probes.tick();
+    const n = (id: string) => (hq.store.db.prepare(`SELECT count(*) c FROM messages WHERE to_identity = ? AND from_identity = 'hq' AND kind = 'probe_anomaly'`).get(id) as { c: number }).c;
+    assert.equal(n('hila'), 0);
+    assert.equal(n('rotem'), 1);
+  } finally { await env.cleanup(); }
+});
+
+test('alertmanager: a warning that became critical (the charter changed) is told again as critical; dev lines mark warnings', () => {
+  const warn = parseAlerts(BOT_LIST, BOT)!.filter((a) => a.fingerprint === 'bb00000000000002');
+  const r1 = amRound('x/am', 'root@m', EMPTY, { 'lumo-prod': warn }, T);
+  const crit = parseAlerts(BOT_LIST, { ...BOT, critical: ['PodRestarted'], warning: [] })!.filter((a) => a.fingerprint === 'bb00000000000002');
+  const r2 = amRound('x/am', 'root@m', r1.state, { 'lumo-prod': crit }, T + 60_000);
+  assert.equal(r2.messages.length, 1);
+  assert.equal(r2.messages[0]!.event, 'probe.anomaly');
+  assert.equal(r2.state.open['lumo-prod/bb00000000000002']!.warning, undefined);
+  const dev = amRound('x/am', 'root@m', EMPTY, { 'lumo-dev': parseAlerts(BOT_LIST, BOT)! }, T, { nonProd: ['lumo-dev'] });
+  assert.match(dev.messages[0]!.body, /- lumo-dev \(אזהרה\): PodRestarted/);
+  assert.match(dev.messages[0]!.body, /- lumo-dev: PodCrashLooping/);
 });

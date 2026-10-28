@@ -36,13 +36,14 @@ import { execFile } from 'node:child_process';
 import { memInfoMb } from './proc.ts';
 import { tzOffsetMs } from './timezone.ts';
 import { runSsh, q, type SshRun } from './nodes.ts';
+import { getIdentity } from './org.ts';
 import { parse } from 'yaml';
 import type { HqConfig } from './config.ts';
 import type { Store } from './store.ts';
 import type { Mailbox } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
 import { RootWatch, isSshTarget, type ClusterSpec } from './root-signals.ts';
-import { amRound, isNamespace, readAlertmanager, NS_TIMEOUT_S, RESOLVE_AFTER_MS, type AlertmanagerSpec, type AmReading, type AmState } from './alertmanager.ts';
+import { amRound, isNamespace, readAlertmanager, NS_TIMEOUT_S, RESOLVE_AFTER_MS, type AlertmanagerSpec, type AmReading, type AmState, type LabelSelector } from './alertmanager.ts';
 import { FAILED_AWK, FAILED_AWK_END, emptyFailedState, failedRound, parseFailed, type FailedReading, type FailedSpec, type FailedState } from './whatsapp-failed.ts';
 import { discoverCommand, discoverDue, discoverRound, emptyWsDiscovery, emptyWsState, isLabelKey, isLabelValue, kubeTs, parseDiscoverOutput, parseWsOutput, parseWsTarget, stripAnsi, wsCommand, wsRound, wsWatch, type LumoWsSpec, type WsDiscovery, type WsReading, type WsState } from './lumo-ws.ts';
 
@@ -116,6 +117,19 @@ const charterTime = (v: unknown): number => {
 /** A missing threshold takes the default; one that is there but isn't a number is NaN, and the probe becomes unsupported (as disk does). */
 const posNum = (v: unknown, dflt: number): number => { if (v == null) return dflt; const n = typeof v === 'number' ? v : NaN; return Number.isFinite(n) && n >= 0 ? n : NaN; };
 
+/** `{key: value}` of label names and values, at least one. null when it isn't one. */
+function labelSelector(v: unknown): LabelSelector | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const e = Object.entries(v as Record<string, unknown>);
+  if (!e.length || !e.every(([k, x]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && (typeof x === 'string' || typeof x === 'number'))) return null;
+  return Object.fromEntries(e.map(([k, x]) => [k, String(x)]));
+}
+
+/** A list of non-empty strings. null when it isn't one. */
+const stringList = (v: unknown): string[] | null => Array.isArray(v) && v.every((x) => typeof x === 'string' && x.trim()) ? v.map((x) => (x as string).trim()) : null;
+
+const isIdentityId = (s: string): boolean => /^[a-z][a-z0-9-]*$/.test(s);
+
 /** Extract probe declarations from a project charter. */
 export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
   const lists: unknown[] = [];
@@ -184,9 +198,22 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
       discoverEveryMs: parseDuration(r.discover_every ?? '6h', NaN), discoverTimeoutMs: parseDuration(r.discover_timeout ?? '5m', NaN) } : undefined;
     // discover_timeout at least 30s: the master stops the scan 10s before hq gives up on it.
     const lumoWs = ws && Number.isInteger(ws.downAfter) && ws.downAfter >= 1 && [ws.quietMs, ws.silentMs, ws.discoverEveryMs].every((x) => x > 0) && ws.discoverTimeoutMs >= 30_000 ? ws : undefined;
+    // Which alerts are this probe's (alertmanager.ts): `match` a selector, `exclude` one or a list, `critical`/`warning` alertnames,
+    // `notify` an identity and `cc` a list of them. Any of these there but malformed makes the probe unsupported.
+    const amMatch = r.match == null ? undefined : labelSelector(r.match);
+    const amExclude = r.exclude == null ? [] : (Array.isArray(r.exclude) ? r.exclude : [r.exclude]).map(labelSelector);
+    const amCritical = r.critical == null ? [] : stringList(r.critical);
+    const amWarning = r.warning == null ? [] : stringList(r.warning);
+    const amNotify = r.notify == null ? undefined : typeof r.notify === 'string' && isIdentityId(r.notify.trim()) ? r.notify.trim() : null;
+    const amCc = r.cc == null ? [] : stringList(typeof r.cc === 'string' ? [r.cc] : r.cc);
+    const amOk = amMatch !== null && amExclude.every((x) => x !== null) && amCritical && amWarning && amNotify !== null && amCc && amCc.every(isIdentityId)
+      && !amCritical.some((n) => amWarning.includes(n));
     const alertmanager: AlertmanagerSpec | undefined = typeof r.alertmanager === 'string' && isSshTarget(r.alertmanager.trim()) && nss.length && nss.every(isNamespace)
-      && resolveAfterMs >= 0
-      ? { target: r.alertmanager.trim(), identityFile, namespaces: [...new Set(nss)], nonProd: [...new Set(nsEntries.filter((n) => !n.prod).map((n) => n.name))], resolveAfterMs } : undefined;
+      && resolveAfterMs >= 0 && amOk
+      ? { target: r.alertmanager.trim(), identityFile, namespaces: [...new Set(nss)], nonProd: [...new Set(nsEntries.filter((n) => !n.prod).map((n) => n.name))], resolveAfterMs,
+          ...(amMatch ? { match: amMatch } : {}), ...(amExclude.length ? { exclude: amExclude as LabelSelector[] } : {}),
+          ...(amCritical!.length ? { critical: amCritical! } : {}), ...(amWarning!.length ? { warning: amWarning! } : {}),
+          ...(amNotify ? { notify: amNotify } : {}), ...(amCc!.length ? { cc: [...new Set(amCc!)].filter((c) => c !== amNotify) } : {}) } : undefined;
     out.push({
       key: `${project}/${id}`, project, id,
       kind: badFailFor ? 'unsupported' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : lumoWs ? 'lumo_ws' : 'unsupported',
@@ -481,7 +508,7 @@ export async function runKubeletProbe(p: ProbeSpec, run: SshRun = runSsh): Promi
     error: off.length ? `${off.length} נודים בגרסת kubelet שונה מהמאסטר (${v.master}): ${off.map(([n, ver]) => `${n} ${ver}`).join(', ')}` : null };
 }
 
-/** Read-only: the critical alerts of each namespace's Alertmanager. Unknown only when no namespace answered; one that didn't
+/** Read-only: this probe's alerts of each namespace's Alertmanager. Unknown only when no namespace answered; one that didn't
  *  answer while others did is in `alerts` with its error (the runner keeps its alerts as they were and counts its blindness). */
 export async function runAlertmanagerProbe(p: ProbeSpec, run: SshRun = runSsh): Promise<ProbeOutcome> {
   const t0 = performance.now();
@@ -489,10 +516,12 @@ export async function runAlertmanagerProbe(p: ProbeSpec, run: SshRun = runSsh): 
   const latencyMs = Math.round(performance.now() - t0);
   const known = Object.entries(alerts).filter((e): e is [string, Extract<AmReading[string], unknown[]>] => Array.isArray(e[1]));
   if (!known.length) return { ok: false, unknown: true, alerts, status: null, latencyMs, error: Object.values(alerts).map((v) => (v as { error: string }).error)[0] ?? null };
-  const crit = known.flatMap(([ns, a]) => a.map((x) => `${ns}/${x.labels.alertname ?? '?'}`));
-  // ok is production's: a critical alert in a `prod: false` namespace is in the error, but doesn't fail the probe.
+  const crit = known.flatMap(([ns, a]) => a.filter((x) => x.severity === 'critical').map((x) => `${ns}/${x.labels.alertname ?? '?'}`));
+  const warn = known.flatMap(([ns, a]) => a.filter((x) => x.severity === 'warning').map((x) => `${ns}/${x.labels.alertname ?? '?'}`));
+  // ok is production's critical: one in a `prod: false` namespace, or a warning, is in the error but doesn't fail the probe.
   const nonProd = new Set(p.alertmanager!.nonProd ?? []);
-  return { ok: known.every(([ns, a]) => nonProd.has(ns) || !a.length), alerts, status: null, latencyMs, error: crit.length ? `${crit.length} התראות קריטיות: ${crit.join(', ')}` : null };
+  const error = [crit.length ? `${crit.length} התראות קריטיות: ${crit.join(', ')}` : '', warn.length ? `${warn.length} אזהרות: ${warn.join(', ')}` : ''].filter(Boolean).join('; ');
+  return { ok: known.every(([ns, a]) => nonProd.has(ns) || !a.some((x) => x.severity === 'critical')), alerts, status: null, latencyMs, error: error || null };
 }
 
 export async function runHttpProbe(p: ProbeSpec): Promise<ProbeOutcome> {
@@ -1169,16 +1198,27 @@ export class ProbeRunner {
     try { prev = { ...prev, ...(JSON.parse(this.store.getMeta(key) || '{}') as Partial<AmState>) }; } catch { /* unreadable: nothing open */ }
     const am = p.alertmanager!;
     const { state, messages } = amRound(p.key, am.target, prev, reading, now, { toOwner: pre('ל', this.mailbox.names.owner.name), nonProd: am.nonProd, resolveAfterMs: am.resolveAfterMs });
+    // `notify` in the charter, else רותם. An identity that isn't in org.yaml (a typo) would wake a worker that doesn't exist and no one
+    // would know: its messages go to רותם, with a line that says why. Each of `cc` gets a copy (its own msg_id, so it is delivered once),
+    // as a system message at `next` or `later`, never urgent: the one notified handles it, the copy doesn't send a second ask.
     const lead = this.cfg.monitoringLeadId;
+    const known = (id: string) => getIdentity(this.store, id)?.active === 1;  // removed from org.yaml: active 0, the row stays
+    const to = am.notify && known(am.notify) ? am.notify : lead;
+    const unknown = [am.notify, ...(am.cc ?? [])].filter((id): id is string => !!id && !known(id));
+    const cc = [...new Set(am.cc ?? [])].filter((id) => id !== to && known(id));
+    const note = unknown.length ? `\n(באמנה ${unknown.length === 1 ? 'יש מזהה' : 'יש מזהים'} שלא פעילים ב-org.yaml: ${unknown.join(', ')}. ${am.notify && !known(am.notify) ? 'ההודעה הגיעה אלייך במקום. ' : ''}לתקן את notify/cc באמנה של ${p.project}.)` : '';
     for (const m of messages) {
-      this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system',
-        ...(m.anomaly ? { urgency: 'urgent' as const } : m.priority === 'later' ? { urgency: 'low' as const } : {}), priority: m.priority, body: m.body });
-      this.store.emit(m.event, lead, { probe: p.key, msg: m.id });
+      this.mailbox.tell({ msg_id: m.id, from: 'hq', to, kind: m.anomaly ? 'probe_anomaly' : 'system',
+        ...(m.anomaly ? { urgency: 'urgent' as const } : m.priority === 'later' ? { urgency: 'low' as const } : {}), priority: m.priority, body: m.body + note });
+      for (const c of cc) this.mailbox.tell({ msg_id: `${m.id}-cc-${c}`, from: 'hq', to: c, kind: 'system', priority: m.priority === 'later' ? 'later' : 'next',
+        ...(m.priority === 'later' ? { urgency: 'low' as const } : {}),
+        body: `העתק לידיעה: ההודעה נשלחה ${pre('ל', this.mailbox.label(to))} (${to}), והטיפול שם. אין צורך לפעול או לשלוח ask.\n${m.body}` });
+      this.store.emit(m.event, to, { probe: p.key, msg: m.id, ...(cc.length ? { cc } : {}) });
     }
     this.store.setMeta(key, JSON.stringify(state));
-    // Open in production: what isn't production doesn't hold the probe's anomaly open.
+    // Open in production and critical: what isn't production, or a warning, doesn't hold the probe's anomaly open.
     const nonProd = new Set(am.nonProd ?? []);
-    this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(Object.values(state.open).some((o) => !nonProd.has(o.ns)) ? 1 : 0, p.key);
+    this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(Object.values(state.open).some((o) => !nonProd.has(o.ns) && !o.warning) ? 1 : 0, p.key);
   }
 
   /** The workers' websocket against what was told (lumo-ws.ts). Not fail_after: each condition has its own duration.
@@ -1287,7 +1327,10 @@ export class ProbeRunner {
     return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}),
       ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.whatsappLog ? { whatsapp_log: p.whatsappLog.target } : {}), ...(p.cluster ? { cluster: p.cluster.ssh } : {}),
       ...(p.lumoWs ? { lumo_ws: p.lumoWs.target, phones: p.lumoWs.phones, ignore: p.lumoWs.ignore, discovered: this.wsDiscovery(p).phones } : {}),
-      ...(p.alertmanager ? { alertmanager: p.alertmanager.target, namespaces: p.alertmanager.namespaces, non_prod: p.alertmanager.nonProd ?? [], resolve_after_ms: p.alertmanager.resolveAfterMs ?? RESOLVE_AFTER_MS } : {}),
+      ...(p.alertmanager ? { alertmanager: p.alertmanager.target, namespaces: p.alertmanager.namespaces, non_prod: p.alertmanager.nonProd ?? [], resolve_after_ms: p.alertmanager.resolveAfterMs ?? RESOLVE_AFTER_MS,
+        ...(p.alertmanager.match ? { match: p.alertmanager.match } : {}), ...(p.alertmanager.exclude ? { exclude: p.alertmanager.exclude } : {}),
+        ...(p.alertmanager.critical ? { critical: p.alertmanager.critical } : {}), ...(p.alertmanager.warning ? { warning: p.alertmanager.warning } : {}),
+        ...(p.alertmanager.notify ? { notify: p.alertmanager.notify } : {}), ...(p.alertmanager.cc ? { cc: p.alertmanager.cc } : {}) } : {}),
       every_ms: p.everyMs, ...(p.failForMs != null ? { fail_for_ms: p.failForMs } : {}), ...(this.state(p.key) ?? {}) }));
   }
 
