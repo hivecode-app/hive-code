@@ -32,18 +32,24 @@ Finder _shown(String text) => find.byWidgetPredicate((w) => w is RichText && w.t
 Iterable<String> _icons(WidgetTester tester) => tester.widgetList<Ic>(find.byType(Ic)).map((i) => i.name);
 
 void main() {
-  testWidgets('Yoav first, then by the last message either way; a task worker only while it has something unread', (tester) async {
+  testWidgets('Yoav first, then by the last message either way; a finished task worker only while it has something unread', (tester) async {
     final store = await pumpApp(tester, home: const Scaffold(body: SizedBox()));
     final d = store.data!;
+    d.presence['shira'] = const Presence(status: WorkerStatus.done);
+    d.presence['noa'] = const Presence(status: WorkerStatus.done);
     _set(d, [
       _c('rotem', 50),
       _c('dana', 5, delivery: Delivery.delivered), // he wrote last, 5 minutes ago
       _c('yoav', 300),
-      _c('ido', 1), // a task worker, read: lives in its project
-      _c('itai', 2, unread: 1), // a task worker with an unread line
+      _c('ido', 1), // a task worker still on its task, read: stays, so he can go back to it (task 890)
+      _c('shira', 3), // a finished task worker, read: lives in its project
+      _c('noa', 4, unread: 1), // a finished task worker with an unread line
+      _c('itai', 30, unread: 1), // a task worker on its task with an unread line
       _c('eli', 20),
     ]);
-    expect([for (final c in convsByActivity(d)) c.identityId], ['yoav', 'itai', 'dana', 'eli', 'rotem']);
+    expect([for (final c in convsByActivity(d)) c.identityId], ['yoav', 'ido', 'noa', 'dana', 'eli', 'itai', 'rotem']);
+    // The search finds the finished one too: one who wrote to him is never out of reach.
+    expect([for (final c in convsByActivity(d, withDone: true)) c.identityId], ['yoav', 'ido', 'shira', 'noa', 'dana', 'eli', 'itai', 'rotem']);
   });
 
   testWidgets('his last line says "אתה: " after the ticks: queued, delivered, read', (tester) async {

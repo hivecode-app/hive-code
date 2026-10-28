@@ -20,11 +20,12 @@ import 'conversations_screen.dart';
 
 /// The list: Yoav first, then by the last message either way, newest first. Only who he has talked with (a
 /// message in his last 200, [ConversationSummary.at]); anyone else is in "שיחה חדשה", as in WhatsApp. A task
-/// worker shows while something from it is unread; the rest of them live in their project's screen.
-List<ConversationSummary> convsByActivity(CompanyData d) {
+/// worker shows until its task is done, and after that while something from it is unread; the finished ones live
+/// in their project's screen. The search ([withDone]) finds those too: a worker who wrote to him is always reachable.
+List<ConversationSummary> convsByActivity(CompanyData d, {bool withDone = false}) {
   final shown = [
     for (final c in d.conversations)
-      if (c.identityId != kSystemId && (!d.who(c.identityId).temp || c.unread > 0) && (c.at != null || c.unread > 0 || c.identityId == d.managerId)) c,
+      if (c.identityId != kSystemId && (withDone || !d.isDone(c.identityId) || c.unread > 0) && (c.at != null || c.unread > 0 || c.identityId == d.managerId)) c,
   ];
   final at = {for (final (i, c) in shown.indexed) c.identityId: i};
   int cmp(ConversationSummary a, ConversationSummary b) {
@@ -480,7 +481,7 @@ class SearchResultsV2 extends StatelessWidget {
     final p = context.p;
     bool hit(String s) => wordStart(s, q) >= 0;
     final convs = [
-      for (final c in convsByActivity(d))
+      for (final c in convsByActivity(d, withDone: true))
         if (hit('${d.who(c.identityId).name} ${d.who(c.identityId).title} ${d.teamOf(c.identityId)?.name ?? ''}')) c,
     ];
     final lines = [for (final r in d.recent) if (hit(plainLine(r.text))) r].take(30).toList();
