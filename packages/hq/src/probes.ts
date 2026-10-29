@@ -28,7 +28,7 @@
 // `cluster` reads the layer under the services of a whole k3s cluster over one ssh (root-signals.ts): its findings and messages are its own.
 // `lumo_ws` reads the summary of the Lumo websocket in easy's workers over one ssh (lumo-ws.ts): its state and messages are its own.
 // Its discovery (a full scan every discover_every) runs on its own, as `cluster`: a slow scan doesn't hold the other probes.
-// `client_outdated` reads every worker's log for whatsmeow's `Client outdated (405)` over one ssh (client-outdated.ts): one urgent message per client version.
+// `client_outdated` reads every worker's log for whatsmeow's `Client outdated (405)`, 409 and LoggedOut over one ssh (client-outdated.ts): urgent messages by its thresholds.
 import { OWNER, pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -46,7 +46,7 @@ import type { Inbox } from './inbox.ts';
 import { RootWatch, isSshTarget, type ClusterSpec } from './root-signals.ts';
 import { amRound, isNamespace, readAlertmanager, NS_TIMEOUT_S, RESOLVE_AFTER_MS, type AlertmanagerSpec, type AmReading, type AmState, type LabelSelector } from './alertmanager.ts';
 import { FAILED_AWK, FAILED_AWK_END, emptyFailedState, failedRound, parseFailed, type FailedReading, type FailedSpec, type FailedState } from './whatsapp-failed.ts';
-import { emptyOutdatedState, outdatedCommand, outdatedRound, outdatedSince, parseOutdatedOutput, parseOutdatedTarget, type ClientOutdatedSpec, type OutdatedReading, type OutdatedState } from './client-outdated.ts';
+import { LOGGED_OUT_FLEET, emptyOutdatedState, outdatedCommand, outdatedRound, outdatedSince, parseOutdatedOutput, parseOutdatedTarget, type ClientOutdatedSpec, type OutdatedReading, type OutdatedState } from './client-outdated.ts';
 import { discoverCommand, discoverDue, discoverRound, emptyWsDiscovery, emptyWsState, isLabelKey, isLabelValue, kubeTs, parseDiscoverOutput, parseWsOutput, parseWsTarget, stripAnsi, wsCommand, wsRound, wsWatch, type LumoWsSpec, type WsDiscovery, type WsReading, type WsState } from './lumo-ws.ts';
 
 export { stripAnsi };
@@ -64,7 +64,7 @@ export interface ProbeSpec {
   alertmanager?: AlertmanagerSpec;  // the cluster's Alertmanager in each namespace listed, read over ssh to its master
   cluster?: ClusterSpec;     // root signals (root-signals.ts): the k3s master to read the cluster from, over ssh
   lumoWs?: LumoWsSpec;     // the Lumo websocket of easy's workers (lumo-ws.ts), read over ssh to the master
-  clientOutdated?: ClientOutdatedSpec;  // whatsmeow's 405 in easy's workers (client-outdated.ts), read over ssh to the master
+  clientOutdated?: ClientOutdatedSpec;  // whatsmeow's 405, 409 and LoggedOut in easy's workers (client-outdated.ts), read over ssh to the master
   method: string;
   expect: number[];
   maxLatencyMs: number | null;
@@ -204,8 +204,13 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     const cot = typeof r.client_outdated === 'string' ? parseOutdatedTarget(r.client_outdated) : null;
     // client_outdated beside another kind in one entry: unsupported, not swallowed by the other.
     const coClash = r.client_outdated != null && ['http', 'disk', 'latency', 'kubelet', 'whatsapp_log', 'cluster', 'alertmanager', 'lumo_ws'].some((k) => r[k] != null);
-    const clientOutdated: ClientOutdatedSpec | undefined = cot && !coClash ? { target: String(r.client_outdated), ...cot, identityFile,
-      ...(typeof r.name === 'string' && r.name.trim() ? { name: r.name.trim() } : {}), ...(typeof r.fix === 'string' && r.fix.trim() ? { fix: r.fix.trim() } : {}) } : undefined;
+    // `pilot`: the numbers in the pod names of the pilot workers; `logged_out_fleet`: LoggedOut of the rest from this many. Malformed: unsupported.
+    const coPilot = r.pilot == null ? [] : Array.isArray(r.pilot) && r.pilot.every((x: unknown) => /^[0-9]{6,15}$/.test(String(x))) ? r.pilot.map(String) : null;
+    const coFleet = r.logged_out_fleet == null ? LOGGED_OUT_FLEET : Number(r.logged_out_fleet);
+    const coBad = r.client_outdated != null && (coPilot == null || !Number.isInteger(coFleet) || coFleet < 1);
+    const clientOutdated: ClientOutdatedSpec | undefined = cot && !coClash && !coBad ? { target: String(r.client_outdated), ...cot, identityFile,
+      ...(typeof r.name === 'string' && r.name.trim() ? { name: r.name.trim() } : {}), ...(typeof r.fix === 'string' && r.fix.trim() ? { fix: r.fix.trim() } : {}),
+      pilot: coPilot!, loggedOutFleet: coFleet } : undefined;
     // Which alerts are this probe's (alertmanager.ts): `match` a selector, `exclude` one or a list, `critical`/`warning` alertnames,
     // `notify` an identity and `cc` a list of them. Any of these there but malformed makes the probe unsupported.
     const amMatch = r.match == null ? undefined : labelSelector(r.match);
@@ -472,7 +477,7 @@ export async function runLumoWsProbe(p: ProbeSpec, run: SshRun = runSsh): Promis
   return { ok: true, ws: r, status: null, latencyMs: lat(), error: r.errors.length ? `kubectl: ${r.errors.slice(0, 3).join('; ')}` : null };
 }
 
-/** Read-only: the 405 lines in every worker's log, over one ssh (client-outdated.ts). ok is judged by the round (the runner), not here. */
+/** Read-only: the 405, 409 and LoggedOut lines in every worker's log, over one ssh (client-outdated.ts). ok is judged by the round (the runner), not here. */
 export async function runClientOutdatedProbe(p: ProbeSpec, run: SshRun = runSsh): Promise<ProbeOutcome> {
   const s = p.clientOutdated!;
   const t0 = performance.now();
@@ -484,8 +489,11 @@ export async function runClientOutdatedProbe(p: ProbeSpec, run: SshRun = runSsh)
   } catch (e) { return { ok: false, unknown: true, status: null, latencyMs: lat(), error: (e as Error).message }; }
   const r = parseOutdatedOutput(out);
   if ('error' in r) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: r.error };
-  return { ok: !r.hits.length, outdated: r, status: null, latencyMs: lat(),
-    error: r.hits.length ? `Client outdated (405) ב-${new Set(r.hits.map((h) => h.pod)).size} וורקרים` : r.errors.length ? `kubectl: ${r.errors.slice(0, 3).join('; ')}` : null };
+  const by = (k: string) => new Set(r.hits.filter((h) => h.kind === k).map((h) => h.pod)).size;
+  // ok by the lines that are urgent on their own; a LoggedOut is judged by the round (pilot, threshold), not here.
+  const found = [['Client outdated (405)', by('405')], ['409', by('409')]].filter(([, n]) => n).map(([w, n]) => `${w} ב-${n} וורקרים`);
+  return { ok: !found.length, outdated: r, status: null, latencyMs: lat(),
+    error: found.length ? found.join(', ') : r.errors.length ? `kubectl: ${r.errors.slice(0, 3).join('; ')}` : null };
 }
 
 /** Read-only: the scan of discovery (lumo-ws.ts), one ssh, discover_timeout. Throws nothing: no answer is `{ error }`. */
@@ -1300,7 +1308,7 @@ export class ProbeRunner {
     this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(open ? 1 : 0, p.key);
   }
 
-  /** whatsmeow's 405 in the workers (client-outdated.ts): one urgent message per client version, not fail_after.
+  /** whatsmeow's 405, 409 and LoggedOut in the workers (client-outdated.ts): urgent messages by its thresholds, not fail_after.
    *  What was told is in meta, so a restart doesn't tell it again. */
   private clientOutdatedRound(p: ProbeSpec, reading: OutdatedReading | { error: string }, now: number): void {
     const key = `probes.client_outdated.${p.key}`;
