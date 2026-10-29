@@ -6,7 +6,7 @@
 //
 //   node scripts/disk-clean.mjs [--dry-run] [--json] [--closed-tasks 3,7,12]
 //
-// It prunes docker build cache (6h) and unused images (24h), verifies the npm cache, trims the user journal to 300MB,
+// It prunes docker build cache (6h) and unused images (24h), cuts to 0 a running container's log over 1GB, verifies the npm cache, trims the user journal to 300MB,
 // and removes /tmp directories of tasks (t<N>, task-<N>, rev<N>, directories only) that closed more than 24 hours ago, plus audit-*
 // directories nobody touched for 24 hours. It never touches docker volumes, and never a /tmp of a task that is open.
 //
@@ -30,6 +30,12 @@
 // or a symlink, never across a mount, never a dotted name (.X11-unix, .com.google.Chrome.*), never systemd-private-*, tmux-*,
 // ssh-*, chrome or playwright, and never what belongs to another user. Each entry is checked again right before it goes.
 // Without a believable /proc this step is skipped: not knowing who holds a file is not permission to delete it.
+//
+// Task 943: on 29/10 one container left running by a finished session (kcat reading a Kafka topic to stdout) wrote 28GB of
+// json-file log in 16 hours, 1.7GB an hour, and took hq-host from 67% to 81%. docker keeps that log without a limit unless
+// the daemon has log-opts, and those apply only to containers created after a restart of the daemon. So the log of a running
+// container that passed 1GB is cut to 0 (`truncate`, as root through `sudo -n`, since the file is root's; docker keeps
+// appending to it). The container keeps running: whether it should is not a question for a disk cleaner.
 import { execFile } from 'node:child_process';
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statfsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -40,6 +46,7 @@ export const DOCKER_BUILD_CACHE_AGE = '6h';
 export const DOCKER_IMAGE_AGE = '24h';
 export const JOURNAL_SIZE = '300M';
 export const TMP_AGE_MS = 24 * 3600_000;
+export const DOCKER_LOG_MAX = 1024 ** 3;
 
 /** `/tmp` names a task leaves behind: t121, task-121, rev49 (the number is the task id); audit-* carries no number. */
 const NUMBERED = /^(?:t|task-|rev)(\d+)$/;
@@ -192,6 +199,41 @@ async function duBytes(path) {
   return Number(r.out.split('\t')[0]) * 1024 || 0;
 }
 
+/** Cuts to 0 the json-file log of every running container whose log passed DOCKER_LOG_MAX (task 943). */
+async function capLogs(docker, sudo) {
+  const name = 'docker logs';
+  const ps = await run(docker, ['ps', '-q'], 30_000);
+  if (!ps.ok) return { name, freed: 0, note: `docker ps נכשל: ${ps.err}` };
+  const ids = ps.out.split('\n').filter(Boolean);
+  if (!ids.length) return { name, freed: 0, note: 'אין קונטיינרים רצים' };
+  const r = await run(docker, ['inspect', '--format', '{{.Name}}\t{{.LogPath}}', ...ids], 30_000);
+  if (!r.ok && !r.out.trim()) return { name, freed: 0, note: `docker inspect נכשל: ${r.err}` };
+  let freed = 0;
+  const cut = [];
+  const unread = r.ok ? [] : [`inspect (${r.err})`]; // a container gone since ps fails inspect; the others still print
+  const uncut = [];
+  for (const line of r.out.split('\n').filter(Boolean)) {
+    const [cname, path] = line.split('\t');
+    if (!path) continue; // a log driver other than json-file has no file here
+    const st = await run(sudo, ['-n', 'stat', '-c', '%s', path], 30_000);
+    const out = st.out.trim();
+    if (!st.ok || !/^\d+$/.test(out)) { unread.push(`${cname} (${st.err || 'אין גודל'})`); continue; }
+    const size = Number(out);
+    if (size <= DOCKER_LOG_MAX) continue;
+    const t = await run(sudo, ['-n', 'truncate', '-s', '0', path], 30_000);
+    if (!t.ok) { uncut.push(`${cname} ${human(size)} (${t.err})`); continue; }
+    freed += size;
+    cut.push(`${cname} ${human(size)}`);
+  }
+  const list = (a) => `${a.slice(0, 4).join(', ')}${a.length > 4 ? ` ועוד ${a.length - 4}` : ''}`;
+  const note = [
+    cut.length ? `נחתכו: ${cut.join(', ')}` : `אין לוג מעל ${human(DOCKER_LOG_MAX)} שנחתך`,
+    uncut.length ? `לא נחתכו: ${list(uncut)}` : '',
+    unread.length ? `לא נבדקו: ${list(unread)}` : '',
+  ].filter(Boolean).join(' · ');
+  return { name, freed, note };
+}
+
 const used = (path) => { const s = statfsSync(path); return (s.blocks - s.bfree) * s.bsize; };
 
 /** One run. Returns { steps: [{ name, freed, note }], freed, skipped } and logs it. `opts` is for tests. */
@@ -222,6 +264,7 @@ export async function clean(opts = {}) {
       const actual = Math.max(0, b - usedFn());
       steps.push({ name, freed: actual, note: r.ok ? `docker דיווח ${reported === null ? 'כלום' : human(reported)}, הדיסק כולו (לא רק docker) השתנה ב-${human(actual)}` : `נכשל: ${r.err}` });
     }
+    steps.push(dry ? { name: 'docker logs', freed: 0, note: 'dry-run' } : await capLogs(docker, opts.sudoBin ?? 'sudo'));
   }
   if (!system) { /* no npm, no journal */ }
   else if (dry) steps.push({ name: 'npm cache', freed: 0, note: 'dry-run' });

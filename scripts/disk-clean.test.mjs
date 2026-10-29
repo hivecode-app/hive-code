@@ -107,6 +107,47 @@ test('docker: prune שנכשל נרשם עם השגיאה', async () => {
   assert.match(r.steps.find((s) => s.name === 'docker images').note, /נכשל: boom/);
 });
 
+test('docker logs: לוג של קונטיינר רץ מעל 1GB נחתך ל-0, קטן נשאר, כשלים נרשמים', async () => {
+  const dir = mkdtemp(join(tmpdir(), 'dcd-'));
+  const bin = join(dir, 'docker');
+  // inspect prints what exists and exits 1, as when a --rm container went away after ps
+  writeFileSync(bin, `#!/bin/sh
+case "$1" in
+  info) echo 29.1.3;;
+  ps) printf 'c1\\nc2\\nc3\\nc4\\nc5\\nc6\\n';;
+  inspect) printf '/big\\t${dir}/big.log\\n/small\\t${dir}/small.log\\n/gone\\t${dir}/gone.log\\n/blank\\t${dir}/blank.log\\n/ro\\t${dir}/ro.big.log\\n/journald\\t\\n'; echo 'error: no such object: c6' >&2; exit 1;;
+esac
+`, { mode: 0o755 });
+  // a fake sudo: it insists on -n, takes the size from the name, records truncate
+  const sudo = join(dir, 'sudo');
+  writeFileSync(sudo, `#!/bin/sh
+[ "$1" = -n ] || { echo "no -n" >&2; exit 9; }
+shift
+case "$1" in
+  stat) case "$4" in *ro.big.log|*/big.log) echo 2147483648;; *small.log) echo 1048576;; *blank.log) echo;; *) echo "no such file" >&2; exit 1;; esac;;
+  truncate) case "$4" in *ro.big.log) echo "read-only" >&2; exit 1;; *) echo "$4" >> "${dir}/cut";; esac;;
+esac
+`, { mode: 0o755 });
+  const home = mkdtemp(join(tmpdir(), 'dch-'));
+  const r = await clean({ tmp: mkdtemp(join(tmpdir(), 'dc-')), home, stateDir: join(home, 's'), closedTasks: [], dockerBin: bin, sudoBin: sudo, usedFn: () => 0, tmpOnly: true });
+  const step = r.steps.find((s) => s.name === 'docker logs');
+  assert.equal(step.freed, 2 * 1024 ** 3);
+  assert.match(step.note, /^נחתכו: \/big 2\.0GB · לא נחתכו: \/ro 2\.0GB \(read-only\) · לא נבדקו: inspect \(error: no such object: c6\), \/gone \(no such file\), \/blank \(אין גודל\)$/);
+  assert.equal(readFileSync(join(dir, 'cut'), 'utf8'), `${join(dir, 'big.log')}\n`);
+  const dry = await clean({ tmp: mkdtemp(join(tmpdir(), 'dc-')), home, stateDir: join(home, 's'), closedTasks: [], dockerBin: bin, sudoBin: sudo, dryRun: true, tmpOnly: true });
+  assert.equal(dry.steps.find((s) => s.name === 'docker logs').note, 'dry-run');
+  assert.equal(readFileSync(join(dir, 'cut'), 'utf8').split('\n').length, 2, 'dry-run לא חותך');
+});
+
+test('docker logs: inspect שנכשל בלי פלט נרשם, לא "אין לוג"', async () => {
+  const dir = mkdtemp(join(tmpdir(), 'dcd-'));
+  const bin = join(dir, 'docker');
+  writeFileSync(bin, `#!/bin/sh\ncase "$1" in info) echo 29.1.3;; ps) echo c1;; inspect) echo "daemon gone" >&2; exit 1;; esac\n`, { mode: 0o755 });
+  const home = mkdtemp(join(tmpdir(), 'dch-'));
+  const r = await clean({ tmp: mkdtemp(join(tmpdir(), 'dc-')), home, stateDir: join(home, 's'), closedTasks: [], dockerBin: bin, sudoBin: join(dir, 'no-sudo'), usedFn: () => 0, tmpOnly: true });
+  assert.equal(r.steps.find((s) => s.name === 'docker logs').note, 'docker inspect נכשל: daemon gone');
+});
+
 test('byName: לא שמות של שירות חי, של המערכת, של משימות או ה-caches עצמם', () => {
   const ok = ['hq-abc', 'mongo-mem-x', 'f.log', 'rev-112', 'lumo_bg_deliveryAB'];
   const no = ['.X11-unix', '.com.google.Chrome.x', 'systemd-private-1-x', 'tmux-1001', 'ssh-abc', 'com.google.Chrome.x', 'chrome-personal',
