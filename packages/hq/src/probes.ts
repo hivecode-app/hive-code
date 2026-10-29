@@ -28,6 +28,7 @@
 // `cluster` reads the layer under the services of a whole k3s cluster over one ssh (root-signals.ts): its findings and messages are its own.
 // `lumo_ws` reads the summary of the Lumo websocket in easy's workers over one ssh (lumo-ws.ts): its state and messages are its own.
 // Its discovery (a full scan every discover_every) runs on its own, as `cluster`: a slow scan doesn't hold the other probes.
+// `client_outdated` reads every worker's log for whatsmeow's `Client outdated (405)` over one ssh (client-outdated.ts): one urgent message per client version.
 import { OWNER, pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -45,6 +46,7 @@ import type { Inbox } from './inbox.ts';
 import { RootWatch, isSshTarget, type ClusterSpec } from './root-signals.ts';
 import { amRound, isNamespace, readAlertmanager, NS_TIMEOUT_S, RESOLVE_AFTER_MS, type AlertmanagerSpec, type AmReading, type AmState, type LabelSelector } from './alertmanager.ts';
 import { FAILED_AWK, FAILED_AWK_END, emptyFailedState, failedRound, parseFailed, type FailedReading, type FailedSpec, type FailedState } from './whatsapp-failed.ts';
+import { emptyOutdatedState, outdatedCommand, outdatedRound, outdatedSince, parseOutdatedOutput, parseOutdatedTarget, type ClientOutdatedSpec, type OutdatedReading, type OutdatedState } from './client-outdated.ts';
 import { discoverCommand, discoverDue, discoverRound, emptyWsDiscovery, emptyWsState, isLabelKey, isLabelValue, kubeTs, parseDiscoverOutput, parseWsOutput, parseWsTarget, stripAnsi, wsCommand, wsRound, wsWatch, type LumoWsSpec, type WsDiscovery, type WsReading, type WsState } from './lumo-ws.ts';
 
 export { stripAnsi };
@@ -53,7 +55,7 @@ export interface ProbeSpec {
   key: string;              // <project>/<id>
   project: string;
   id: string;
-  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'whatsapp_log' | 'cluster' | 'alertmanager' | 'lumo_ws' | 'unsupported';
+  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'whatsapp_log' | 'cluster' | 'alertmanager' | 'lumo_ws' | 'client_outdated' | 'unsupported';
   url?: string;
   disk?: { target: string; host: string | null; path: string; identityFile: string | null; maxPercent: number };  // host null = local
   latency?: { host: string; maxAvgMs: number; maxMdevMs: number; maxLossPercent: number };
@@ -62,6 +64,7 @@ export interface ProbeSpec {
   alertmanager?: AlertmanagerSpec;  // the cluster's Alertmanager in each namespace listed, read over ssh to its master
   cluster?: ClusterSpec;     // root signals (root-signals.ts): the k3s master to read the cluster from, over ssh
   lumoWs?: LumoWsSpec;     // the Lumo websocket of easy's workers (lumo-ws.ts), read over ssh to the master
+  clientOutdated?: ClientOutdatedSpec;  // whatsmeow's 405 in easy's workers (client-outdated.ts), read over ssh to the master
   method: string;
   expect: number[];
   maxLatencyMs: number | null;
@@ -198,6 +201,10 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
       discoverEveryMs: parseDuration(r.discover_every ?? '6h', NaN), discoverTimeoutMs: parseDuration(r.discover_timeout ?? '5m', NaN) } : undefined;
     // discover_timeout at least 30s: the master stops the scan 10s before hq gives up on it.
     const lumoWs = ws && Number.isInteger(ws.downAfter) && ws.downAfter >= 1 && [ws.quietMs, ws.silentMs, ws.discoverEveryMs].every((x) => x > 0) && ws.discoverTimeoutMs >= 30_000 ? ws : undefined;
+    const cot = typeof r.client_outdated === 'string' ? parseOutdatedTarget(r.client_outdated) : null;
+    // client_outdated beside another kind in one entry: unsupported, not swallowed by the other.
+    const coClash = r.client_outdated != null && ['http', 'disk', 'latency', 'kubelet', 'whatsapp_log', 'cluster', 'alertmanager', 'lumo_ws'].some((k) => r[k] != null);
+    const clientOutdated: ClientOutdatedSpec | undefined = cot && !coClash ? { target: String(r.client_outdated), ...cot, identityFile } : undefined;
     // Which alerts are this probe's (alertmanager.ts): `match` a selector, `exclude` one or a list, `critical`/`warning` alertnames,
     // `notify` an identity and `cc` a list of them. Any of these there but malformed makes the probe unsupported.
     const amMatch = r.match == null ? undefined : labelSelector(r.match);
@@ -216,16 +223,16 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
           ...(amNotify ? { notify: amNotify } : {}), ...(amCc!.length ? { cc: [...new Set(amCc!)].filter((c) => c !== amNotify) } : {}) } : undefined;
     out.push({
       key: `${project}/${id}`, project, id,
-      kind: badFailFor ? 'unsupported' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : lumoWs ? 'lumo_ws' : 'unsupported',
+      kind: badFailFor || coClash ? 'unsupported' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : lumoWs ? 'lumo_ws' : clientOutdated ? 'client_outdated' : 'unsupported',
       url: typeof r.http === 'string' ? r.http : undefined,
-      disk, latency, kubelet, whatsappLog, cluster, alertmanager, lumoWs,
+      disk, latency, kubelet, whatsappLog, cluster, alertmanager, lumoWs, clientOutdated,
       // Observe-only: a probe may only read. Anything but GET/HEAD in a charter is ignored.
       method: typeof r.method === 'string' && r.method.toUpperCase() === 'HEAD' ? 'HEAD' : 'GET',
       expect: (Array.isArray(exp) ? exp : [exp]).map(Number),
       maxLatencyMs: r.max_latency_ms != null ? Number(r.max_latency_ms) : (r.max_latency != null ? parseDuration(r.max_latency, 0) : null),
-      everyMs: parseDuration(r.every, cluster || lumoWs ? 300_000 : 60_000),
+      everyMs: parseDuration(r.every, clientOutdated ? 900_000 : cluster || lumoWs ? 300_000 : 60_000),
       // 20 pings at 0.2s with -W 2 end within ~6s; the default leaves room so a dead host ends in ping's summary, not a kill.
-      timeoutMs: parseDuration(r.timeout, cluster ? 180_000 : latency ? 20_000 : alertmanager ? Math.max(60_000, (alertmanager.namespaces.length * NS_TIMEOUT_S + 20) * 1000) : lumoWs ? (lumoWs.phones === '*' ? 150_000 : 60_000) : kubelet || whatsappLog ? 30_000 : 10_000),
+      timeoutMs: parseDuration(r.timeout, clientOutdated ? 240_000 : cluster ? 180_000 : latency ? 20_000 : alertmanager ? Math.max(60_000, (alertmanager.namespaces.length * NS_TIMEOUT_S + 20) * 1000) : lumoWs ? (lumoWs.phones === '*' ? 150_000 : 60_000) : kubelet || whatsappLog ? 30_000 : 10_000),
       failAfter: Number(r.fail_after ?? 3),
       failForMs: badFailFor ? null : failForMs,
       raw: r,
@@ -244,7 +251,7 @@ export function loadProbes(companyDir: string): ProbeSpec[] {
 /** `unknown`: no answer came back. Not a failure (ok is meaningless then); the runner doesn't count it.
  *  `noAnswer` (http): a DNS that didn't answer (EAI_AGAIN). A failure for fail_after as always, but it doesn't move fail_for's clock.
  *  A timeout is not noAnswer: it starts and crosses fail_for like a status. */
-export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; alerts?: AmReading; ws?: WsReading; wa?: FailedReading; percent?: number; ping?: PingStats; versions?: KubeletVersions }
+export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; alerts?: AmReading; ws?: WsReading; outdated?: OutdatedReading; wa?: FailedReading; percent?: number; ping?: PingStats; versions?: KubeletVersions }
 
 /** The apiserver's version and each node's kubelet version, as `kubectl` reported them ('' = the node has none yet, still registering). */
 export interface KubeletVersions { master: string; nodes: Record<string, string> }
@@ -462,6 +469,22 @@ export async function runLumoWsProbe(p: ProbeSpec, run: SshRun = runSsh): Promis
   const r = parseWsOutput(out);
   if ('error' in r) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: r.error };
   return { ok: true, ws: r, status: null, latencyMs: lat(), error: r.errors.length ? `kubectl: ${r.errors.slice(0, 3).join('; ')}` : null };
+}
+
+/** Read-only: the 405 lines in every worker's log, over one ssh (client-outdated.ts). ok is judged by the round (the runner), not here. */
+export async function runClientOutdatedProbe(p: ProbeSpec, run: SshRun = runSsh): Promise<ProbeOutcome> {
+  const s = p.clientOutdated!;
+  const t0 = performance.now();
+  const lat = () => Math.round(performance.now() - t0);
+  let out: string;
+  try {
+    out = await run(['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10',
+      ...(s.identityFile ? ['-i', s.identityFile] : []), s.host, outdatedCommand(s, p.everyMs, p.timeoutMs)], undefined, p.timeoutMs);
+  } catch (e) { return { ok: false, unknown: true, status: null, latencyMs: lat(), error: (e as Error).message }; }
+  const r = parseOutdatedOutput(out);
+  if ('error' in r) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: r.error };
+  return { ok: !r.hits.length, outdated: r, status: null, latencyMs: lat(),
+    error: r.hits.length ? `Client outdated (405) ב-${new Set(r.hits.map((h) => h.pod)).size} וורקרים` : r.errors.length ? `kubectl: ${r.errors.slice(0, 3).join('; ')}` : null };
 }
 
 /** Read-only: the scan of discovery (lumo-ws.ts), one ssh, discover_timeout. Throws nothing: no answer is `{ error }`. */
@@ -764,7 +787,8 @@ interface FailFor { since: number; answered: number; gap: boolean; last: number;
 export class ProbeRunner {
   probes: ProbeSpec[] = [];
   run: (p: ProbeSpec) => Promise<ProbeOutcome> = (p) => p.kind === 'disk' ? runDiskProbe(p) : p.kind === 'latency' ? runLatencyProbe(p)
-    : p.kind === 'kubelet' ? runKubeletProbe(p) : p.kind === 'alertmanager' ? runAlertmanagerProbe(p) : p.kind === 'whatsapp_log' ? runWhatsappLogProbe(p) : p.kind === 'lumo_ws' ? runLumoWsProbe(p) : runHttpProbe(p);
+    : p.kind === 'kubelet' ? runKubeletProbe(p) : p.kind === 'alertmanager' ? runAlertmanagerProbe(p) : p.kind === 'whatsapp_log' ? runWhatsappLogProbe(p) : p.kind === 'lumo_ws' ? runLumoWsProbe(p)
+    : p.kind === 'client_outdated' ? runClientOutdatedProbe(p) : runHttpProbe(p);
   /** The scan of discovery of a lumo_ws probe (runs on its own, never holds the tick). */
   discover: (p: ProbeSpec) => Promise<{ phones: string[]; lines: number } | { error: string }> = (p) => runLumoWsDiscover(p);
   /** Second vantage point, asked before an anomaly wakes רותם. null = none configured. */
@@ -820,8 +844,17 @@ export class ProbeRunner {
     // Root signals: a round per cluster, on its own (a 3-minute ssh doesn't hold the other probes back).
     for (const p of this.probes.filter((x) => x.kind === 'cluster' && !this.inflight.has(x.key) && isDue(x))) void this.clusterRound(p, now);
     // lumo_ws discovery: a minute-long scan, on its own as well; the round goes on with the list it had.
-    for (const p of this.probes.filter((x) => x.kind === 'lumo_ws' && !this.inflight.has(`${x.key}#discover`) && discoverDue(x.lumoWs!, this.wsDiscovery(x), now))) void this.discoverRound(p, now);
-    const runnable = this.probes.filter((p) => p.kind !== 'unsupported' && p.kind !== 'cluster' && !this.inflight.has(p.key));
+    // Neither starts while a read of client_outdated on the same master is on (and the other way around, below): one full read at a time there.
+    // A read is on: in this hq, or started (`started` in meta, cleared at its end) by an hq that restarted, and still within its timeout on the master.
+    const readOn = (x: ProbeSpec) => this.inflight.has(x.key) || ((s) => s != null && now - s < x.timeoutMs)(this.outdatedState(x).started);
+    const reading = (host: string) => this.probes.some((x) => x.kind === 'client_outdated' && x.clientOutdated!.host === host && readOn(x));
+    for (const p of this.probes.filter((x) => x.kind === 'lumo_ws' && !this.inflight.has(`${x.key}#discover`) && !reading(x.lumoWs!.host) && discoverDue(x.lumoWs!, this.wsDiscovery(x), now))) void this.discoverRound(p, now);
+    // client_outdated: a ~80s read of every worker, on its own too; not while a scan of lumo_ws reads the same master (it waits a tick).
+    // A scan is on the same way: in this hq, or tried (before its ssh) after the last one that answered, within discover_timeout.
+    const scanOn = (x: ProbeSpec) => this.inflight.has(`${x.key}#discover`) || ((d) => d.tried != null && d.tried > (d.at ?? -Infinity) && now - d.tried < x.lumoWs!.discoverTimeoutMs)(this.wsDiscovery(x));
+    const scanning = (host: string) => this.probes.some((x) => x.kind === 'lumo_ws' && x.lumoWs!.host === host && scanOn(x));
+    for (const p of this.probes.filter((x) => x.kind === 'client_outdated' && !readOn(x) && isDue(x) && !scanning(x.clientOutdated!.host))) void this.outdatedRun(p, now);
+    const runnable = this.probes.filter((p) => p.kind !== 'unsupported' && p.kind !== 'cluster' && p.kind !== 'client_outdated' && !this.inflight.has(p.key));
     // A round of latency is one tick: one that is due takes along those almost due, and they all record this tick's time.
     const latencyDue = runnable.some((p) => p.kind === 'latency' && isDue(p));
     const due = runnable.filter((p) => isDue(p) || (latencyDue && p.kind === 'latency' && isDue(p, ROUND_SLACK_MS)));
@@ -868,12 +901,38 @@ export class ProbeRunner {
     } finally { this.inflight.delete(p.key); }
   }
 
+  /** One read of a client_outdated probe, outside the tick. Its time is when it started: the next window reaches back to there. */
+  async outdatedRun(p: ProbeSpec, now = this.store.now()): Promise<void> {
+    this.inflight.add(p.key);
+    const meta = `probes.client_outdated.${p.key}`;
+    const mark = (started: number | undefined) => this.store.setMeta(meta, JSON.stringify({ ...this.outdatedState(p), started }));
+    try {
+      const spec = this.outdatedSpec(p, now);
+      mark(now);
+      const o = await this.run(spec);
+      // Taken out of the charter (or changed) during the read: nothing is recorded or told for it, as discovery.
+      const cur = this.probes.find((x) => x.key === p.key && x.kind === 'client_outdated');
+      if (cur) this.record(cur, o, false, now);
+    }
+    catch (e) { this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: (e as Error).message }); }
+    finally { mark(undefined); this.inflight.delete(p.key); }
+  }
+
   private wsDiscovery(p: ProbeSpec): WsDiscovery {
     try { return { ...emptyWsDiscovery(), ...(JSON.parse(this.store.getMeta(`probes.lumo_ws_discovery.${p.key}`) || '{}') as Partial<WsDiscovery>) }; } catch { return emptyWsDiscovery(); }
   }
 
   /** A lumo_ws probe as its round runs: the charter's phones and the discovered ones, without the ignored. */
   wsSpec(p: ProbeSpec): ProbeSpec { return { ...p, lumoWs: wsWatch(p.lumoWs!, this.wsDiscovery(p).phones) }; }
+
+  private outdatedState(p: ProbeSpec): OutdatedState {
+    try { return { ...emptyOutdatedState(), ...(JSON.parse(this.store.getMeta(`probes.client_outdated.${p.key}`) || '{}') as Partial<OutdatedState>) }; } catch { return emptyOutdatedState(); }
+  }
+
+  /** A client_outdated probe as its round runs: its window reaches back to the last read that answered. */
+  outdatedSpec(p: ProbeSpec, now: number): ProbeSpec {
+    return { ...p, clientOutdated: { ...p.clientOutdated!, sinceMs: outdatedSince(this.outdatedState(p), p.everyMs, p.timeoutMs, now) } };
+  }
 
   /** One scan of discovery (lumo-ws.ts). Its time, how long it took and how many lines it read are in meta and in the event. */
   async discoverRound(p: ProbeSpec, now = this.store.now()): Promise<void> {
@@ -1097,6 +1156,7 @@ export class ProbeRunner {
       this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: o.error });
       if (p.kind === 'alertmanager' && o.alerts) this.alertmanagerRound(p, o.alerts, now);  // its blindness is counted from unknowns
       if (p.kind === 'lumo_ws') this.lumoWsRound(p, { error: o.error ?? 'אין תשובה' }, now);  // so is this one's
+      if (p.kind === 'client_outdated') this.clientOutdatedRound(p, { error: o.error ?? 'אין תשובה' }, now);  // and this one's
       return undefined;
     }
     // Jitter without loss is noted (ok=0, jitter=1) and doesn't advance the loss streak; alone it wakes no one until it lasts (JITTER_SUSTAIN_ROUNDS).
@@ -1130,6 +1190,7 @@ export class ProbeRunner {
     if (p.kind === 'kubelet') { if (o.versions) this.kubeletSkew(p, o.versions, now); return undefined; }
     if (p.kind === 'alertmanager') { if (o.alerts) this.alertmanagerRound(p, o.alerts, now); return undefined; }
     if (p.kind === 'lumo_ws') { if (o.ws) this.lumoWsRound(p, o.ws, now); return undefined; }
+    if (p.kind === 'client_outdated') { if (o.outdated) this.clientOutdatedRound(p, o.outdated, now); return undefined; }
     if (p.kind === 'whatsapp_log' && o.wa) this.whatsappFailedRound(p, o.wa, now);
 
     const open = prev?.anomaly_open === 1;
@@ -1238,6 +1299,21 @@ export class ProbeRunner {
     this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(open ? 1 : 0, p.key);
   }
 
+  /** whatsmeow's 405 in the workers (client-outdated.ts): one urgent message per client version, not fail_after.
+   *  What was told is in meta, so a restart doesn't tell it again. */
+  private clientOutdatedRound(p: ProbeSpec, reading: OutdatedReading | { error: string }, now: number): void {
+    const key = `probes.client_outdated.${p.key}`;
+    const { state, messages, open } = outdatedRound(p.key, p.clientOutdated!, this.outdatedState(p), reading, now, p.timeoutMs);
+    const lead = this.cfg.monitoringLeadId;
+    for (const m of messages) {
+      this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system',
+        ...(m.urgent ? { urgency: 'urgent' as const } : {}), priority: m.urgent ? 'now' : 'next', body: m.body });
+      this.store.emit(m.event, lead, { probe: p.key, msg: m.id });
+    }
+    this.store.setMeta(key, JSON.stringify(state));
+    if (!('error' in reading)) this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(open ? 1 : 0, p.key);
+  }
+
   /** `Outbound: no status` and `Message failed` of the gateway (whatsapp-failed.ts): their own messages, beside fail_after.
    *  The counts per hour, the codes open and the ids told are in meta: the baseline survives a restart, and nothing is told twice. */
   private whatsappFailedRound(p: ProbeSpec, reading: FailedReading, now: number): void {
@@ -1326,6 +1402,7 @@ export class ProbeRunner {
   summary() {
     return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}),
       ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.whatsappLog ? { whatsapp_log: p.whatsappLog.target } : {}), ...(p.cluster ? { cluster: p.cluster.ssh } : {}),
+      ...(p.clientOutdated ? { client_outdated: p.clientOutdated.target, told: Object.keys(this.outdatedState(p).told) } : {}),
       ...(p.lumoWs ? { lumo_ws: p.lumoWs.target, phones: p.lumoWs.phones, ignore: p.lumoWs.ignore, discovered: this.wsDiscovery(p).phones } : {}),
       ...(p.alertmanager ? { alertmanager: p.alertmanager.target, namespaces: p.alertmanager.namespaces, non_prod: p.alertmanager.nonProd ?? [], resolve_after_ms: p.alertmanager.resolveAfterMs ?? RESOLVE_AFTER_MS,
         ...(p.alertmanager.match ? { match: p.alertmanager.match } : {}), ...(p.alertmanager.exclude ? { exclude: p.alertmanager.exclude } : {}),
