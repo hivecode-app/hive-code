@@ -204,7 +204,8 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     const cot = typeof r.client_outdated === 'string' ? parseOutdatedTarget(r.client_outdated) : null;
     // client_outdated beside another kind in one entry: unsupported, not swallowed by the other.
     const coClash = r.client_outdated != null && ['http', 'disk', 'latency', 'kubelet', 'whatsapp_log', 'cluster', 'alertmanager', 'lumo_ws'].some((k) => r[k] != null);
-    const clientOutdated: ClientOutdatedSpec | undefined = cot && !coClash ? { target: String(r.client_outdated), ...cot, identityFile } : undefined;
+    const clientOutdated: ClientOutdatedSpec | undefined = cot && !coClash ? { target: String(r.client_outdated), ...cot, identityFile,
+      ...(typeof r.name === 'string' && r.name.trim() ? { name: r.name.trim() } : {}), ...(typeof r.fix === 'string' && r.fix.trim() ? { fix: r.fix.trim() } : {}) } : undefined;
     // Which alerts are this probe's (alertmanager.ts): `match` a selector, `exclude` one or a list, `critical`/`warning` alertnames,
     // `notify` an identity and `cc` a list of them. Any of these there but malformed makes the probe unsupported.
     const amMatch = r.match == null ? undefined : labelSelector(r.match);
