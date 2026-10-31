@@ -29,6 +29,7 @@
 // `lumo_ws` reads the summary of the Lumo websocket in easy's workers over one ssh (lumo-ws.ts): its state and messages are its own.
 // Its discovery (a full scan every discover_every) runs on its own, as `cluster`: a slow scan doesn't hold the other probes.
 // `client_outdated` reads every worker's log for whatsmeow's `Client outdated (405)`, 409 and LoggedOut over one ssh (client-outdated.ts): urgent messages by its thresholds.
+// `ride_dupes` reads duplicate ride notifications in easy's Mongo, one read-only aggregate from hq-host (ride-dupes.ts): one message a round.
 import { OWNER, pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -47,6 +48,7 @@ import { RootWatch, isSshTarget, type ClusterSpec } from './root-signals.ts';
 import { amRound, isNamespace, readAlertmanager, NS_TIMEOUT_S, RESOLVE_AFTER_MS, type AlertmanagerSpec, type AmReading, type AmState, type LabelSelector } from './alertmanager.ts';
 import { FAILED_AWK, FAILED_AWK_END, emptyFailedState, failedRound, parseFailed, type FailedReading, type FailedSpec, type FailedState } from './whatsapp-failed.ts';
 import { LOGGED_OUT_FLEET, emptyOutdatedState, outdatedCommand, outdatedRound, outdatedSince, parseOutdatedOutput, parseOutdatedTarget, type ClientOutdatedSpec, type OutdatedReading, type OutdatedState } from './client-outdated.ts';
+import { MAX_WINDOW_MS, dupesRound, dupesSince, emptyDupesState, readDupes, type DupesReading, type DupesState, type RideDupesSpec } from './ride-dupes.ts';
 import { discoverCommand, discoverDue, discoverRound, emptyWsDiscovery, emptyWsState, isLabelKey, isLabelValue, kubeTs, parseDiscoverOutput, parseWsOutput, parseWsTarget, stripAnsi, wsCommand, wsRound, wsWatch, type LumoWsSpec, type WsDiscovery, type WsReading, type WsState } from './lumo-ws.ts';
 
 export { stripAnsi };
@@ -55,7 +57,7 @@ export interface ProbeSpec {
   key: string;              // <project>/<id>
   project: string;
   id: string;
-  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'whatsapp_log' | 'cluster' | 'alertmanager' | 'lumo_ws' | 'client_outdated' | 'unsupported';
+  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'whatsapp_log' | 'cluster' | 'alertmanager' | 'lumo_ws' | 'client_outdated' | 'ride_dupes' | 'unsupported';
   url?: string;
   disk?: { target: string; host: string | null; path: string; identityFile: string | null; maxPercent: number };  // host null = local
   latency?: { host: string; maxAvgMs: number; maxMdevMs: number; maxLossPercent: number };
@@ -65,6 +67,7 @@ export interface ProbeSpec {
   cluster?: ClusterSpec;     // root signals (root-signals.ts): the k3s master to read the cluster from, over ssh
   lumoWs?: LumoWsSpec;     // the Lumo websocket of easy's workers (lumo-ws.ts), read over ssh to the master
   clientOutdated?: ClientOutdatedSpec;  // whatsmeow's 405, 409 and LoggedOut in easy's workers (client-outdated.ts), read over ssh to the master
+  rideDupes?: RideDupesSpec;  // duplicate ride notifications in easy's worker_ride_tracker (ride-dupes.ts), read from Mongo
   method: string;
   expect: number[];
   maxLatencyMs: number | null;
@@ -211,6 +214,17 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     const clientOutdated: ClientOutdatedSpec | undefined = cot && !coClash && !coBad ? { target: String(r.client_outdated), ...cot, identityFile,
       ...(typeof r.name === 'string' && r.name.trim() ? { name: r.name.trim() } : {}), ...(typeof r.fix === 'string' && r.fix.trim() ? { fix: r.fix.trim() } : {}),
       pilot: coPilot!, loggedOutFleet: coFleet } : undefined;
+    // ride_dupes: the file with the Mongo URI; beside another kind in one entry, or malformed, unsupported.
+    const rdClash = r.ride_dupes != null && ['http', 'disk', 'latency', 'kubelet', 'whatsapp_log', 'cluster', 'alertmanager', 'lumo_ws', 'client_outdated'].some((k) => r[k] != null);
+    const rdWindow = parseDuration(r.window ?? '20m', NaN);
+    const rdCc = r.cc == null ? [] : stringList(typeof r.cc === 'string' ? [r.cc] : r.cc);
+    const rdName = (v: unknown, d: string) => v == null ? d : typeof v === 'string' && /^[A-Za-z0-9_-]+$/.test(v) ? v : null;
+    const rdDb = rdName(r.db, 'new-tiki-bot'), rdColl = rdName(r.collection, 'worker_ride_tracker');
+    // The file: absolute or under ~ (not hq's cwd). window at most MAX_WINDOW_MS and every at least a minute: a load on production otherwise.
+    const rdEvery = parseDuration(r.every ?? '5m', NaN);
+    const rideDupes: RideDupesSpec | undefined = typeof r.ride_dupes === 'string' && /^(\/|~\/)/.test(r.ride_dupes.trim()) && !rdClash && rdWindow > 0 && rdWindow <= MAX_WINDOW_MS
+      && rdEvery >= 60_000 && rdCc && rdCc.every(isIdentityId) && rdDb && rdColl
+      ? { uriFile: r.ride_dupes.trim().replace(/^~(?=\/|$)/, homedir()), db: rdDb, collection: rdColl, windowMs: rdWindow, cc: [...new Set(rdCc)] } : undefined;
     // Which alerts are this probe's (alertmanager.ts): `match` a selector, `exclude` one or a list, `critical`/`warning` alertnames,
     // `notify` an identity and `cc` a list of them. Any of these there but malformed makes the probe unsupported.
     const amMatch = r.match == null ? undefined : labelSelector(r.match);
@@ -229,16 +243,16 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
           ...(amNotify ? { notify: amNotify } : {}), ...(amCc!.length ? { cc: [...new Set(amCc!)].filter((c) => c !== amNotify) } : {}) } : undefined;
     out.push({
       key: `${project}/${id}`, project, id,
-      kind: badFailFor || coClash ? 'unsupported' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : lumoWs ? 'lumo_ws' : clientOutdated ? 'client_outdated' : 'unsupported',
+      kind: badFailFor || coClash || rdClash ? 'unsupported' : rideDupes ? 'ride_dupes' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : lumoWs ? 'lumo_ws' : clientOutdated ? 'client_outdated' : 'unsupported',
       url: typeof r.http === 'string' ? r.http : undefined,
-      disk, latency, kubelet, whatsappLog, cluster, alertmanager, lumoWs, clientOutdated,
+      disk, latency, kubelet, whatsappLog, cluster, alertmanager, lumoWs, clientOutdated, rideDupes,
       // Observe-only: a probe may only read. Anything but GET/HEAD in a charter is ignored.
       method: typeof r.method === 'string' && r.method.toUpperCase() === 'HEAD' ? 'HEAD' : 'GET',
       expect: (Array.isArray(exp) ? exp : [exp]).map(Number),
       maxLatencyMs: r.max_latency_ms != null ? Number(r.max_latency_ms) : (r.max_latency != null ? parseDuration(r.max_latency, 0) : null),
-      everyMs: parseDuration(r.every, clientOutdated ? 900_000 : cluster || lumoWs ? 300_000 : 60_000),
+      everyMs: parseDuration(r.every, clientOutdated ? 900_000 : cluster || lumoWs || rideDupes ? 300_000 : 60_000),
       // 20 pings at 0.2s with -W 2 end within ~6s; the default leaves room so a dead host ends in ping's summary, not a kill.
-      timeoutMs: parseDuration(r.timeout, clientOutdated ? 240_000 : cluster ? 180_000 : latency ? 20_000 : alertmanager ? Math.max(60_000, (alertmanager.namespaces.length * NS_TIMEOUT_S + 20) * 1000) : lumoWs ? (lumoWs.phones === '*' ? 150_000 : 60_000) : kubelet || whatsappLog ? 30_000 : 10_000),
+      timeoutMs: parseDuration(r.timeout, clientOutdated ? 240_000 : rideDupes ? 20_000 : cluster ? 180_000 : latency ? 20_000 : alertmanager ? Math.max(60_000, (alertmanager.namespaces.length * NS_TIMEOUT_S + 20) * 1000) : lumoWs ? (lumoWs.phones === '*' ? 150_000 : 60_000) : kubelet || whatsappLog ? 30_000 : 10_000),
       failAfter: Number(r.fail_after ?? 3),
       failForMs: badFailFor ? null : failForMs,
       raw: r,
@@ -257,7 +271,7 @@ export function loadProbes(companyDir: string): ProbeSpec[] {
 /** `unknown`: no answer came back. Not a failure (ok is meaningless then); the runner doesn't count it.
  *  `noAnswer` (http): a DNS that didn't answer (EAI_AGAIN). A failure for fail_after as always, but it doesn't move fail_for's clock.
  *  A timeout is not noAnswer: it starts and crosses fail_for like a status. */
-export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; alerts?: AmReading; ws?: WsReading; outdated?: OutdatedReading; wa?: FailedReading; percent?: number; ping?: PingStats; versions?: KubeletVersions }
+export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; alerts?: AmReading; ws?: WsReading; outdated?: OutdatedReading; dupes?: DupesReading; wa?: FailedReading; percent?: number; ping?: PingStats; versions?: KubeletVersions }
 
 /** The apiserver's version and each node's kubelet version, as `kubectl` reported them ('' = the node has none yet, still registering). */
 export interface KubeletVersions { master: string; nodes: Record<string, string> }
@@ -494,6 +508,20 @@ export async function runClientOutdatedProbe(p: ProbeSpec, run: SshRun = runSsh)
   const found = [['Client outdated (405)', by('405')], ['409', by('409')]].filter(([, n]) => n).map(([w, n]) => `${w} ב-${n} וורקרים`);
   return { ok: !found.length, outdated: r, status: null, latencyMs: lat(),
     error: found.length ? found.join(', ') : r.errors.length ? `kubectl: ${r.errors.slice(0, 3).join('; ')}` : null };
+}
+
+/** Read-only: one aggregate on easy's Mongo (ride-dupes.ts). ok when no driver got the same ride twice in the window. */
+export async function runRideDupesProbe(p: ProbeSpec, read = readDupes): Promise<ProbeOutcome> {
+  const t0 = performance.now();
+  const lat = () => Math.round(performance.now() - t0);
+  const s = p.rideDupes!;
+  const now = s.now ?? Date.now();
+  let r: DupesReading;
+  try { r = await read(s, s.since ?? now - s.windowMs - p.everyMs, now, p.timeoutMs); }
+  catch (e) { return { ok: false, unknown: true, status: null, latencyMs: lat(), error: (e as Error).message }; }
+  const dupes = r.groups.filter((g) => g.times.some((t, i) => i > 0 && t - g.times[i - 1]! <= p.rideDupes!.windowMs));
+  return { ok: !dupes.length, dupes: r, status: null, latencyMs: lat(),
+    error: dupes.length ? `${dupes.length} נסיעות שנשלחו יותר מפעם אחת ל-${new Set(dupes.map((g) => g.driver)).size} נהגים` : null };
 }
 
 /** Read-only: the scan of discovery (lumo-ws.ts), one ssh, discover_timeout. Throws nothing: no answer is `{ error }`. */
@@ -797,7 +825,7 @@ export class ProbeRunner {
   probes: ProbeSpec[] = [];
   run: (p: ProbeSpec) => Promise<ProbeOutcome> = (p) => p.kind === 'disk' ? runDiskProbe(p) : p.kind === 'latency' ? runLatencyProbe(p)
     : p.kind === 'kubelet' ? runKubeletProbe(p) : p.kind === 'alertmanager' ? runAlertmanagerProbe(p) : p.kind === 'whatsapp_log' ? runWhatsappLogProbe(p) : p.kind === 'lumo_ws' ? runLumoWsProbe(p)
-    : p.kind === 'client_outdated' ? runClientOutdatedProbe(p) : runHttpProbe(p);
+    : p.kind === 'client_outdated' ? runClientOutdatedProbe(p) : p.kind === 'ride_dupes' ? runRideDupesProbe(p) : runHttpProbe(p);
   /** The scan of discovery of a lumo_ws probe (runs on its own, never holds the tick). */
   discover: (p: ProbeSpec) => Promise<{ phones: string[]; lines: number } | { error: string }> = (p) => runLumoWsDiscover(p);
   /** Second vantage point, asked before an anomaly wakes רותם. null = none configured. */
@@ -863,7 +891,9 @@ export class ProbeRunner {
     const scanOn = (x: ProbeSpec) => this.inflight.has(`${x.key}#discover`) || ((d) => d.tried != null && d.tried > (d.at ?? -Infinity) && now - d.tried < x.lumoWs!.discoverTimeoutMs)(this.wsDiscovery(x));
     const scanning = (host: string) => this.probes.some((x) => x.kind === 'lumo_ws' && x.lumoWs!.host === host && scanOn(x));
     for (const p of this.probes.filter((x) => x.kind === 'client_outdated' && !readOn(x) && isDue(x) && !scanning(x.clientOutdated!.host))) void this.outdatedRun(p, now);
-    const runnable = this.probes.filter((p) => p.kind !== 'unsupported' && p.kind !== 'cluster' && p.kind !== 'client_outdated' && !this.inflight.has(p.key));
+    // ride_dupes: on its own as well, so a Mongo that stopped answering holds no other probe.
+    for (const p of this.probes.filter((x) => x.kind === 'ride_dupes' && !this.inflight.has(x.key) && isDue(x))) void this.dupesRun(p, now);
+    const runnable = this.probes.filter((p) => p.kind !== 'unsupported' && p.kind !== 'cluster' && p.kind !== 'client_outdated' && p.kind !== 'ride_dupes' && !this.inflight.has(p.key));
     // A round of latency is one tick: one that is due takes along those almost due, and they all record this tick's time.
     const latencyDue = runnable.some((p) => p.kind === 'latency' && isDue(p));
     const due = runnable.filter((p) => isDue(p) || (latencyDue && p.kind === 'latency' && isDue(p, ROUND_SLACK_MS)));
@@ -925,6 +955,22 @@ export class ProbeRunner {
     }
     catch (e) { this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: (e as Error).message }); }
     finally { mark(undefined); this.inflight.delete(p.key); }
+  }
+
+  private dupesState(p: ProbeSpec): DupesState {
+    try { return { ...emptyDupesState(), ...(JSON.parse(this.store.getMeta(`probes.ride_dupes.${p.key}`) || '{}') as Partial<DupesState>) }; } catch { return emptyDupesState(); }
+  }
+
+  /** One read of a ride_dupes probe, outside the tick. Its window reaches back from the last read that answered (dupesSince). */
+  async dupesRun(p: ProbeSpec, now = this.store.now()): Promise<void> {
+    this.inflight.add(p.key);
+    try {
+      const o = await this.run({ ...p, rideDupes: { ...p.rideDupes!, since: dupesSince(p.rideDupes!, this.dupesState(p), p.everyMs, now), now } });
+      const cur = this.probes.find((x) => x.key === p.key && x.kind === 'ride_dupes');
+      if (cur) this.record(cur, o, false, now);
+    }
+    catch (e) { this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: (e as Error).message }); }
+    finally { this.inflight.delete(p.key); }
   }
 
   private wsDiscovery(p: ProbeSpec): WsDiscovery {
@@ -1166,6 +1212,7 @@ export class ProbeRunner {
       if (p.kind === 'alertmanager' && o.alerts) this.alertmanagerRound(p, o.alerts, now);  // its blindness is counted from unknowns
       if (p.kind === 'lumo_ws') this.lumoWsRound(p, { error: o.error ?? 'אין תשובה' }, now);  // so is this one's
       if (p.kind === 'client_outdated') this.clientOutdatedRound(p, { error: o.error ?? 'אין תשובה' }, now);  // and this one's
+      if (p.kind === 'ride_dupes') this.rideDupesRound(p, { error: o.error ?? 'אין תשובה' }, now);  // and this one's
       return undefined;
     }
     // Jitter without loss is noted (ok=0, jitter=1) and doesn't advance the loss streak; alone it wakes no one until it lasts (JITTER_SUSTAIN_ROUNDS).
@@ -1200,6 +1247,7 @@ export class ProbeRunner {
     if (p.kind === 'alertmanager') { if (o.alerts) this.alertmanagerRound(p, o.alerts, now); return undefined; }
     if (p.kind === 'lumo_ws') { if (o.ws) this.lumoWsRound(p, o.ws, now); return undefined; }
     if (p.kind === 'client_outdated') { if (o.outdated) this.clientOutdatedRound(p, o.outdated, now); return undefined; }
+    if (p.kind === 'ride_dupes') { if (o.dupes) this.rideDupesRound(p, o.dupes, now); return undefined; }
     if (p.kind === 'whatsapp_log' && o.wa) this.whatsappFailedRound(p, o.wa, now);
 
     const open = prev?.anomaly_open === 1;
@@ -1323,6 +1371,27 @@ export class ProbeRunner {
     if (!('error' in reading)) this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(open ? 1 : 0, p.key);
   }
 
+  /** Duplicate ride notifications (ride-dupes.ts): one message a round to the lead and the charter's cc, not fail_after.
+   *  What was told is in meta, so a restart doesn't tell it again. */
+  private rideDupesRound(p: ProbeSpec, reading: DupesReading | { error: string }, now: number): void {
+    const key = `probes.ride_dupes.${p.key}`;
+    const { state, messages, open } = dupesRound(p.key, p.rideDupes!, this.dupesState(p), reading, now, p.everyMs);
+    const lead = this.cfg.monitoringLeadId;
+    // cc as alertmanager's: a copy, `system`, to the active ones; one removed from org.yaml is said to the lead.
+    const known = (id: string) => getIdentity(this.store, id)?.active === 1;
+    const unknown = p.rideDupes!.cc.filter((id) => !known(id));
+    const cc = p.rideDupes!.cc.filter((id) => id !== lead && known(id));
+    const note = unknown.length ? `\n(באמנה של ${p.project} יש ב-cc ${unknown.length === 1 ? 'מזהה' : 'מזהים'} שלא פעילים ב-org.yaml: ${unknown.join(', ')}. לתקן את cc.)` : '';
+    for (const m of messages) {
+      this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system', priority: 'next', body: m.body + (m.cc ? note : '') });
+      if (m.cc) for (const c of cc) this.mailbox.tell({ msg_id: `${m.id}-cc-${c}`, from: 'hq', to: c, kind: 'system', priority: 'next',
+        body: `העתק לידיעה: ההודעה נשלחה ${pre('ל', this.mailbox.label(lead))} (${lead}), והניטור שם. אין צורך לשלוח ask.\n${m.body}` });
+      this.store.emit(m.event, lead, { probe: p.key, msg: m.id, ...(m.cc && cc.length ? { cc } : {}) });
+    }
+    this.store.setMeta(key, JSON.stringify(state));
+    if (!('error' in reading)) this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(open ? 1 : 0, p.key);
+  }
+
   /** `Outbound: no status` and `Message failed` of the gateway (whatsapp-failed.ts): their own messages, beside fail_after.
    *  The counts per hour, the codes open and the ids told are in meta: the baseline survives a restart, and nothing is told twice. */
   private whatsappFailedRound(p: ProbeSpec, reading: FailedReading, now: number): void {
@@ -1412,6 +1481,7 @@ export class ProbeRunner {
     return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}),
       ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.whatsappLog ? { whatsapp_log: p.whatsappLog.target } : {}), ...(p.cluster ? { cluster: p.cluster.ssh } : {}),
       ...(p.clientOutdated ? { client_outdated: p.clientOutdated.target, told: Object.keys(this.outdatedState(p).told) } : {}),
+      ...(p.rideDupes ? { ride_dupes: `${p.rideDupes.db}.${p.rideDupes.collection}` } : {}),
       ...(p.lumoWs ? { lumo_ws: p.lumoWs.target, phones: p.lumoWs.phones, ignore: p.lumoWs.ignore, discovered: this.wsDiscovery(p).phones } : {}),
       ...(p.alertmanager ? { alertmanager: p.alertmanager.target, namespaces: p.alertmanager.namespaces, non_prod: p.alertmanager.nonProd ?? [], resolve_after_ms: p.alertmanager.resolveAfterMs ?? RESOLVE_AFTER_MS,
         ...(p.alertmanager.match ? { match: p.alertmanager.match } : {}), ...(p.alertmanager.exclude ? { exclude: p.alertmanager.exclude } : {}),
