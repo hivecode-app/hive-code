@@ -36,7 +36,7 @@ export interface NodeDef {
   maxLoad: number;
   /**
    * A machine with a user of its own (the laptop, ci-host): the shifts run as that user, on its own Claude login (its
-   * ~/.claude, never a token file), and node-install leaves its ~/.claude, git identity, gh login and packages as they are.
+   * ~/.claude, or node-oauth-token there when node-install.sh --token wrote one: never ours), and node-install leaves its ~/.claude, git identity, gh login and packages as they are.
    */
   ownLogin?: boolean;
   /** A laptop: it sleeps and leaves the network. On battery it takes no new shift; its tasks do not wait for it (PORTABLE_AWAY_MS). */
@@ -283,8 +283,12 @@ export class RemoteLauncher {
 
   async launch(spec: LaunchSpec): Promise<{ unit?: string }> {
     const args = hostArgs({ ...spec, configDir: null }, this.stateDir);
-    // ownLogin: the login in that user's ~/.claude, as the CLI finds it by itself.
-    if (!this.node.def.ownLogin) args['oauth-token-file'] = this.tokenFile;
+    // ownLogin: the login in that user's ~/.claude, as the CLI finds it by itself, unless the node has its own token
+    // file (claude setup-token, node-install.sh --token): an interactive login there expires when nobody refreshes it.
+    if (!this.node.def.ownLogin || await this.node.exec(`test -s ${q(this.tokenFile)}`, undefined, 30_000)
+      .then(() => true, (e: { code?: unknown }) => { if (e?.code === 1) return false; throw e; })) {
+      args['oauth-token-file'] = this.tokenFile;
+    }
     const files: Record<string, string> = { [join(this.stateDir, 'shifts', spec.shiftId, 'host-args.json')]: JSON.stringify(args, null, 2) };
     for (const f of [join(this.stateDir, 'shifts', spec.shiftId, 'prime.json'), spec.systemPromptFile]) {
       if (f && existsSync(f)) files[f] = readFileSync(f, 'utf8');

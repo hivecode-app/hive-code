@@ -455,20 +455,30 @@ test('task-288: closing a task from a node fetches back the preserved ref and th
 
 test('RemoteLauncher ownLogin: a machine with a user of its own runs the shift on its own login, as that user', async () => {
   const calls: { args: string[]; input?: string }[] = [];
-  const run: SshRun = async (args, input) => { calls.push({ args, input }); return ''; };
+  let hasToken = false;
+  const run: SshRun = async (args, input) => {
+    calls.push({ args, input });
+    if (args.at(-1)!.includes('test -s') && !hasToken) throw Object.assign(new Error('exit 1'), { code: 1 });
+    return '';
+  };
   const state = mkdtempSync(join(tmpdir(), 'rl-'));
   const node = new RemoteNode({ ...NODE, ssh: 'ran@laptop.test', ownLogin: true }, state, run);
   node.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
-  try {
-    const l = new RemoteLauncher(node, '/home/owner/.local/state/agent-company');
-    await l.launch({ shiftId: 'p-t1-1', identity: 'p-t1', shiftNo: 1, sessionId: 's', resume: false, kind: 'work', cwd: '/w',
+  const STATE = '/home/owner/.local/state/agent-company';
+  const launch = async () => {
+    calls.length = 0;
+    await new RemoteLauncher(node, STATE).launch({ shiftId: 'p-t1-1', identity: 'p-t1', shiftNo: 1, sessionId: 's', resume: false, kind: 'work', cwd: '/w',
       socketPath: '/s.sock', taskId: 1, unit: 'company-shift@p-t1-1.service', account: 'node:n2', configDir: null, machine: 'n2' });
     const write = calls.find((c) => c.args.at(-1)!.includes('; node -e'))!;
-    const args = JSON.parse((JSON.parse(write.input!) as Record<string, string>)['/home/owner/.local/state/agent-company/shifts/p-t1-1/host-args.json']!) as Record<string, unknown>;
-    assert.equal(args['oauth-token-file'], undefined, 'its ~/.claude login, no token file');
+    return JSON.parse((JSON.parse(write.input!) as Record<string, string>)[`${STATE}/shifts/p-t1-1/host-args.json`]!) as Record<string, unknown>;
+  };
+  try {
+    assert.equal((await launch())['oauth-token-file'], undefined, 'its ~/.claude login, no token file');
     const cmd = calls.at(-1)!.args.at(-1)!;
     assert.match(cmd, /systemctl --user/, 'not root: the user manager');
     assert.match(cmd, /PATH='\/[^']+\/\.local\/share\/agent-company\/bin':\/usr\/local\/bin:/, 'the node\'s own bin first');
+    hasToken = true;
+    assert.equal((await launch())['oauth-token-file'], `${STATE}/node-oauth-token`, 'a token file of its own (setup-token) wins: a login there expires');
   } finally { node.close(); rmSync(state, { recursive: true, force: true }); }
 });
 
