@@ -136,6 +136,8 @@ void main() {
     for (var i = 0; i < 40; i++) {
       chat.items.add(TextMsg(id: 'pad$i', ts: _at(14, 0), text: 'שורה $i'));
     }
+    // Open in hq too: the banner counts what hq has open (task 1014).
+    store.data!.waiting.add(WaitItem(id: 'w-dq', kind: WaitKind.softAsk, from: 'dana', time: '13:45', kicker: 'שאלה', body: 'q', askId: 'ask-dq', inboxId: 45, createdAt: _at(13, 45)));
     await pumpScreen(tester, store, const ChatScreen(identityId: 'dana'));
     expect(find.text('2 החלטות פתוחות'), findsOneWidget);
     expect(find.text('אישור'), findsNothing);

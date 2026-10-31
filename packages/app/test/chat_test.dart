@@ -93,7 +93,8 @@ void main() {
     expect(sent.priority, Priority.next);
     expect(sent.delivery, Delivery.queued);
     expect(find.text('בתור · אחרי הצעד הנוכחי · '), findsNWidgets(2));
-    await tester.tap(find.text('משיכה חזרה').first);
+    // The one under the message just sent (the list's order in the tree is not the screen's).
+    await tester.tap(find.descendant(of: find.byWidgetPredicate((w) => w is UserBubble && identical(w.msg, sent)), matching: find.text('משיכה חזרה')));
     await tester.pump();
     expect(chat.items.contains(sent), isFalse);
     expect(find.text('ושגם ה-web יקבל את התיקון'), findsOneWidget);

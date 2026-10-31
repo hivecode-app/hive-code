@@ -11,6 +11,7 @@ import '../../theme/tokens.dart';
 import '../common.dart';
 import '../selection.dart';
 import '../convs/conversations_screen.dart';
+import 'chat_scroll.dart';
 import 'composer.dart';
 import 'items.dart';
 import 'markdown.dart';
@@ -42,7 +43,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final controller = TextEditingController();
   final focus = FocusNode();
-  final scroll = ScrollController();
+  final scroll = ChatScrollController();
   Quote? quote;
   String? selected;
   bool searching = false;
@@ -55,10 +56,14 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    scroll.addListener(() {
-      final up = scroll.hasClients && scroll.offset > 240;
-      if (up != showJump) setState(() => showJump = up);
-    });
+    scroll.addListener(_updateJump);
+  }
+
+  /// "למטה" when he is well above the end: on his scroll, and when messages pile up below him.
+  void _updateJump() {
+    if (!mounted) return;
+    final up = !scroll.atEnd && scroll.fromEnd > 240;
+    if (up != showJump) setState(() => showJump = up);
   }
 
   bool _opened = false;
@@ -92,7 +97,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (target != null) {
       _target = target;
       _targetText = targetText;
-      _targetTries = 0;
+      _targetSince = DateTime.now();
       _flashNext = ChatScreen.pendingFlash.remove(widget.identityId);
     }
   }
@@ -101,8 +106,12 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _target;
   String? _targetText;
 
-  /// The id of the item [_target] found, as of the last build: the row that carries [targetKey].
+  /// The id of the item [_target] found, as of the last build.
   String? _targetId;
+
+  /// When the target was asked for: one the history never brings is dropped after a while, so it can't pull
+  /// the view away later, in the middle of his reading.
+  DateTime _targetSince = DateTime.now();
 
   /// The item [_target] names in the conversation now; the last one, when the text matches more than one.
   String? _targetItem(Conversation chat) {
@@ -123,38 +132,89 @@ class _ChatScreenState extends State<ChatScreen> {
     final t = s.replaceAll(RegExp(r'\s+'), ' ').replaceAll(RegExp(r'…$'), '').trim();
     return t.length > 60 ? t.substring(0, 60) : t;
   }
-  int _targetTries = 0;
-  final targetKey = GlobalKey();
+  /// The newest row above the anchor (chat_scroll.dart): the history grows up from it, and what is newer
+  /// grows down below it. Null: not placed yet, at the end.
+  String? _centerLast;
 
-  /// The list is lazy: a card far up is not built yet. Scroll up a screen at a time until it is, then
-  /// bring it into view (a few tries; the history may still be loading).
-  void _seekTarget() {
-    if (!mounted || _target == null) return;
-    final c = targetKey.currentContext;
-    if (c != null) {
-      final lit = _flashNext ? _targetId : null;
-      setState(() {
-        _target = null;
-        _flashNext = false;
-        if (lit != null) _flash = lit;
-      });
-      Scrollable.ensureVisible(c, duration: const Duration(milliseconds: 250), alignment: 0.2);
+  /// The anchor just above the rows still changing at the end (the live line, a reply streaming in, a tool
+  /// running): from here on they grow below it, and what he reads stays put.
+  String _endAnchor(List<_Entry> rows) {
+    var i = rows.length - 1;
+    while (i > 0 && _changing(rows[i - 1])) {
+      i--;
+    }
+    return i == 0 ? _kTop : rows[i - 1].key;
+  }
+
+  static bool _changing(_Entry e) => switch (e.item) {
+        TextMsg(streaming: true) => true,
+        ToolGroup(outcome: Outcome.running) => true,
+        _ => false,
+      };
+
+  /// How many rows are above the anchor.
+  int _split(List<_Entry> rows) {
+    final k = _centerLast;
+    if (k == _kTop) return 0;
+    // A single line between workers that became a folded run is the run now.
+    final i = k == null ? null : _entryIndex[k] ?? _entryIndex['\u0000run:$k'];
+    if (i != null) return i + 1;
+    _centerLast = _endAnchor(rows);
+    return _split(rows);
+  }
+
+  final _rowKeys = <String, GlobalKey>{};
+
+  /// What each card showed at the last build: open, answered, replaced, a decision on its way.
+  Map<String, Object> _cardLooks = const {};
+
+  /// A card on screen above the anchor that changed since the last build (answered, here or elsewhere).
+  bool _holdChangedCard(List<_Entry> rows, Map<String, Object> looks) {
+    for (final MapEntry(:key, :value) in looks.entries) {
+      final before = _cardLooks[key];
+      if (before != null && before != value && _holdCard(rows, key)) return true;
+    }
+    return false;
+  }
+
+  /// The anchor goes right above a card on screen, at the place its top is now, so it folds or opens in place
+  /// and nothing above it moves. Below the anchor a card keeps its top anyway; at the end the view follows
+  /// the end, as everywhere.
+  bool _holdCard(List<_Entry> rows, String key) {
+    if (!scroll.hasClients || scroll.atEnd) return false;
+    final t = _entryIndex[key];
+    if (t == null || t >= _split(rows)) return false;
+    final box = _rowKeys[key]?.currentContext?.findRenderObject();
+    final view = scroll.position.context.notificationContext?.findRenderObject();
+    if (box is! RenderBox || view is! RenderBox || !box.attached || !box.hasSize || !view.hasSize) return false;
+    final top = box.localToGlobal(Offset.zero, ancestor: view).dy;
+    final h = view.size.height;
+    if (top < 0 || top >= h || h <= 0) return false;
+    _centerLast = t == 0 ? _kTop : rows[t - 1].key;
+    scroll.showAnchor(pixels: h - top, relayout: false);
+    WidgetsBinding.instance.addPostFrameCallback((_) => scroll.settle());
+    return true;
+  }
+
+  /// Brings the sought row into view in one jump: the anchor goes right above it, and the view puts it a
+  /// fifth of the screen from the top (chat_scroll.dart). It is built at once, however far up it is.
+  void _showTarget(List<_Entry> rows) {
+    final id = _targetId!;
+    final t = _entryIndex[_groupOf[id] ?? id];
+    if (t == null) return;
+    _centerLast = t == 0 ? _kTop : rows[t - 1].key;
+    scroll.showAnchor(fraction: 0.8, relayout: false);
+    final lit = _flashNext ? id : null;
+    _target = null;
+    _flashNext = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) => scroll.settle());
+    if (lit != null) {
       // Lit for a moment, so the eye finds the card it was brought to (#258).
-      if (lit != null) {
-        Future.delayed(const Duration(milliseconds: 1200), () {
-          if (mounted && _flash == lit) setState(() => _flash = null);
-        });
-      }
-      return;
+      _flash = lit;
+      Future.delayed(const Duration(milliseconds: 1200), () {
+        if (mounted && _flash == lit) setState(() => _flash = null);
+      });
     }
-    if (++_targetTries > 40) {
-      setState(() => _target = null);
-      return;
-    }
-    if (scroll.hasClients && scroll.position.maxScrollExtent > scroll.offset) {
-      scroll.jumpTo((scroll.offset + scroll.position.viewportDimension * 0.8).clamp(0, scroll.position.maxScrollExtent));
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _seekTarget());
   }
 
   @override
@@ -173,6 +233,10 @@ class _ChatScreenState extends State<ChatScreen> {
       searching = false;
       _scrolledToHit = null;
       _rowCache.clear();
+      _rowKeys.clear();
+      _cardLooks = const {};
+      _centerLast = null;
+      scroll.showEnd();
     }
   }
 
@@ -188,7 +252,20 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  void _toBottom() => scroll.animateTo(0, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+  /// To the end: a short way glides there; from far up it is one jump, with the anchor back at the end.
+  void _toBottom() {
+    if (!scroll.hasClients) return;
+    if (scroll.fromEnd < scroll.position.viewportDimension * 2) {
+      // Text that grew on the way moved the end: from where the glide stops, the rest is one step.
+      // Stopped by his finger on the way, it stays where he stopped it.
+      scroll.animateTo(scroll.position.minScrollExtent, duration: const Duration(milliseconds: 200), curve: Curves.easeOut).then((_) {
+        if (mounted && scroll.hasClients && scroll.fromEnd < 120 && !scroll.held) scroll.showEnd();
+      });
+      return;
+    }
+    setState(() => _centerLast = null);
+    scroll.showEnd();
+  }
 
   /// The card the banner names, wherever it is in the history: the list is lazy, so a card far up is not
   /// built yet and has no context to scroll to. Seek it like a target from "מחכה לך", and light it (#258).
@@ -196,7 +273,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _target = card.id;
       _targetText = null;
-      _targetTries = 0;
+      _targetSince = DateTime.now();
       _flashNext = true;
     });
   }
@@ -282,17 +359,10 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     final who = d.who(widget.identityId);
     final presence = d.presence[widget.identityId] ?? const Presence(status: WorkerStatus.free);
-    // What is still his to decide here, oldest first (#258): open questions and the newest open GO. Writing in
-    // the composer is a message, never an answer by itself: answering is a button, or a quote he chose.
     final superseded = supersededGos(chat.items);
-    final open = [
-      for (final a in chat.items.whereType<AskCard>())
-        if (a.state == AskState.open && !superseded.contains(a.id) && store.decision(a.askId, a.id) == null && !_notNow(d, a)) a,
-    ];
+    final open = chatDecisions(d, chat, superseded: superseded, pending: (a) => store.decision(a.askId, a.id) != null);
     _targetId = _targetItem(chat);
-    if (_targetId != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _seekTarget());
-    }
+    if (_targetId == null && _target != null && DateTime.now().difference(_targetSince) > const Duration(seconds: 15)) _target = null;
 
     // Search: local over loaded items (hq FTS replaces this when it ships, chat.md §6).
     final hits = query.isEmpty ? <String>[] : [for (final it in chat.items) if (_textOf(it).contains(query)) it.id];
@@ -307,6 +377,20 @@ class _ChatScreenState extends State<ChatScreen> {
     for (final id in [_targetId, hitId]) {
       if (id != null && _groupOf[id] != null) _openGroups.add(_groupOf[id]!);
     }
+    final looks = {
+      for (final a in chat.items.whereType<AskCard>()) a.id: (a.state, a.answer, superseded.contains(a.id), store.decision(a.askId, a.id) != null),
+    };
+    if (_targetId != null && _target != null) {
+      _showTarget(rows);
+    } else if (_holdChangedCard(rows, looks)) {
+      // A card that folds (an answer, here or elsewhere) keeps its top where it was.
+    } else if (scroll.atEnd && !scroll.held && rows.length - _split(rows) > 40) {
+      // At the end, a long run below the anchor goes back above it: nothing moves, the view follows the end.
+      _centerLast = _endAnchor(rows);
+    }
+    _cardLooks = looks;
+    final split = _split(rows);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateJump());
     _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, openAllTools, _targetId]);
     final selectedItem = selected == null ? null : chat.items.where((i) => i.id == selected).firstOrNull;
 
@@ -363,6 +447,30 @@ class _ChatScreenState extends State<ChatScreen> {
                 },
               );
 
+    // Desktop keeps lines readable: messages in a 780px column (mockup `.dmain .msgs`).
+    Widget rowAt(int index) {
+      final e = rows[index];
+      final row = _row(context, e, chat, d, superseded, hitId);
+      // Desktop: text selects with the mouse like a page (APP-SPEC §3, #55). The phone
+      // selects a whole message with a long press and copies it from the top bar, or
+      // picks part of it in "בחירת טקסט" (_selectText).
+      Widget w = Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 780), child: widget.embedded ? CopySelectionArea(child: row) : row));
+      // A row keeps its state (an open tool group, a card's details) when the anchor moves past it and it
+      // goes over to the other sliver.
+      w = KeyedSubtree(key: _rowKeys.putIfAbsent(e.key, GlobalKey.new), child: w);
+      // A touch on a card (its details open, an answer) puts the anchor above it first: whatever it does to
+      // its height, it does it below its top.
+      if (e.item is AskCard) {
+        w = Listener(
+          onPointerDown: (_) {
+            if (_holdCard(rows, e.key)) setState(() {});
+          },
+          child: w,
+        );
+      }
+      return KeyedSubtree(key: ValueKey(e.key), child: w);
+    }
+
     final body = Column(children: [
       header,
       if (open.isNotEmpty && selectedItem == null) _PinBar(open: open, onTap: () => _toAsk(open.first)),
@@ -370,28 +478,38 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Container(
           color: p.chatBg,
           child: Stack(children: [
-            ListView.builder(
+            CustomScrollView(
               controller: scroll,
               reverse: true,
-              padding: const EdgeInsets.only(top: 6, bottom: 12),
-              itemCount: rows.length,
-              // Rows keep their element (and state, like an open tool group) when new ones arrive.
-              findChildIndexCallback: (key) {
-                final i = _entryIndex[(key as ValueKey<String>).value];
-                return i == null ? null : rows.length - 1 - i;
-              },
-              // Desktop keeps lines readable: messages in a 780px column (mockup `.dmain .msgs`).
-              itemBuilder: (context, i) {
-                final e = rows[rows.length - 1 - i];
-                final row = _row(context, e, chat, d, superseded, hitId);
-                return KeyedSubtree(
-                  key: ValueKey(e.key),
-                  // Desktop: text selects with the mouse like a page (APP-SPEC §3, #55). The phone
-                  // selects a whole message with a long press and copies it from the top bar, or
-                  // picks part of it in "בחירת טקסט" (_selectText).
-                  child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 780), child: widget.embedded ? CopySelectionArea(child: row) : row)),
-                );
-              },
+              center: _kCenter,
+              slivers: [
+                const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                // Below the anchor: what came after it, oldest first, growing down.
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, i) => rowAt(split + i),
+                    childCount: rows.length - split,
+                    findChildIndexCallback: (key) {
+                      final i = _entryIndex[(key as ValueKey<String>).value];
+                      return i == null || i < split ? null : i - split;
+                    },
+                  ),
+                ),
+                // The anchor and the history above it, newest first, growing up.
+                SliverList(
+                  key: _kCenter,
+                  delegate: SliverChildBuilderDelegate(
+                    (context, i) => rowAt(split - 1 - i),
+                    childCount: split,
+                    // Rows keep their element (and state, like an open tool group) when new ones arrive.
+                    findChildIndexCallback: (key) {
+                      final i = _entryIndex[(key as ValueKey<String>).value];
+                      return i == null || i >= split ? null : split - 1 - i;
+                    },
+                  ),
+                ),
+                const SliverToBoxAdapter(child: SizedBox(height: 6)),
+              ],
             ),
             if (showJump)
               PositionedDirectional(
@@ -545,7 +663,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// What marks a row as the one sought: the key the list scrolls to, the moment it is lit, a search hit.
   Widget _decorate(ChatItem it, Widget w, String? hitId, Palette p) {
-    if (it.id == _targetId) w = KeyedSubtree(key: targetKey, child: w);
     // Cards light themselves (flash:); a message, or a line between workers, is lit here.
     if (_flash == it.id && it is! AskCard) w = Container(color: p.accentSoft, child: w);
     if (it.id == hitId) {
@@ -610,10 +727,6 @@ class _ChatScreenState extends State<ChatScreen> {
       UnknownItem() => ServiceLine(text: 'אירוע: ${it.kind}'),
     };
   }
-
-  /// A GO he put off ("לא עכשיו") is not open here until he takes it back.
-  static bool _notNow(CompanyData d, AskCard a) =>
-      a is GoCard && d.waiting.any((w) => w.askId != null && w.askId == a.askId && w.state == WaitState.notNow);
 
   static String _dayLabel(DateTime d) {
     final ago = daysAgo(d, CompanyTime.now());
@@ -960,6 +1073,26 @@ class _SelectableState extends State<_Selectable> {
 }
 
 const _kLive = '\u0000live';
+
+/// The anchor key when every row is below the anchor.
+const _kTop = '\u0000top';
+const _kCenter = ValueKey('\u0000center');
+
+/// What is his to decide in this conversation, oldest first (#258): the questions and the newest GO that hq
+/// still has open for him. hq is the source: a card the history shows as open, but that was closed, replaced
+/// or handed back to the manager, is not counted, and a task to check is not a decision. Writing in the
+/// composer is a message, never an answer by itself: answering is a button, or a quote he chose.
+List<AskCard> chatDecisions(CompanyData d, Conversation chat, {required Set<String> superseded, required bool Function(AskCard) pending}) {
+  final his = {
+    for (final w in d.waiting)
+      if (w.askId != null && w.from == chat.identityId && (w.kind == WaitKind.go || w.kind == WaitKind.blockingAsk || w.kind == WaitKind.softAsk) && (w.state == WaitState.open || w.state == WaitState.pending))
+        w.askId!,
+  };
+  return [
+    for (final a in chat.items.whereType<AskCard>())
+      if (a is! CheckCard && a.state == AskState.open && his.contains(a.askId) && !superseded.contains(a.id) && !pending(a)) a,
+  ];
+}
 
 /// One row of the chat list: a day separator, an item, the empty-chat header or the live line.
 class _Entry {
