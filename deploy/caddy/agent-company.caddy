@@ -31,22 +31,6 @@ app.hq.example.com {
 		reverse_proxy 127.0.0.1:7420
 	}
 
-	# Old secret path, until 27/10/2026 (docs/RUNBOOK.md, "המעבר לשורש"). Clients built before
-	# 20/10/2026 still call hq under it, and POST and WebSocket do not follow redirects, so /hq stays
-	# a proxy for that week. Everything else there is a 301 to the same page at the root.
-	handle_path /00000000000000000000000000000000/hq/* {
-		reverse_proxy 127.0.0.1:7420 {
-			flush_interval -1
-		}
-	}
-	handle /00000000000000000000000000000000* {
-		# route: keeps this order (Caddy otherwise runs redir before uri, and {uri} would loop).
-		route {
-			uri strip_prefix /00000000000000000000000000000000
-			redir {uri} 301
-		}
-	}
-
 	# A QA copy of the web build (packages/app/tool/qa/publish_qa.sh), with its own way to hq.
 	handle_path /qa/hq/* {
 		reverse_proxy 127.0.0.1:7420 {

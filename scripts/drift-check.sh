@@ -14,7 +14,7 @@
 #
 # Checks: the production checkout (clean main, exactly a deployed commit), hq and the app running what main has,
 # the Caddy files (ours in /etc/caddy/sites, and only one import line of ours in the main Caddyfile),
-# the user units, hq.env, hq.config.json, the old secret path past its removal date, and leftovers of hand edits.
+# the user units, hq.env, hq.config.json, the old secret path, and leftovers of hand edits.
 set -uo pipefail
 
 PROD="${AGENT_COMPANY_PROD:-$HOME/projects/agent-company}" # override only to try this script from another checkout
@@ -60,11 +60,9 @@ shopt -u nullglob
 baks=${#our_baks[@]}
 ((baks == 0)) || d "$baks גיבויי Caddyfile.bak* עם אתרי החברה ב-/etc/caddy (שאריות של עריכות ידניות)" "נשארו בשרת שאריות של עריכות ידניות ב-Caddy"
 
-# The old secret path: a 301 for one week, then gone (docs/RUNBOOK.md).
-until_date="$(sed -n 's/.*הנתיב הסודי הישן.*עד \([0-9]\{2\}\)\/\([0-9]\{2\}\)\/\([0-9]\{4\}\).*/\3-\2-\1/p' docs/RUNBOOK.md | head -1)"
-if [[ -n "$until_date" ]] && grep -q '/[0-9a-f]\{32\}/hq/\*' /etc/caddy/sites/agent-company.caddy 2>/dev/null \
-  && [[ "$(date +%F)" > "$until_date" ]]; then
-  d "הנתיב הסודי הישן עדיין ב-Caddy, ומועד ההסרה ($until_date) עבר" "הנתיב הסודי הישן של האפליקציה עדיין פעיל אחרי מועד ההסרה"
+# The old secret path (docs/RUNBOOK.md, "המעבר לשורש") left Caddy on 01/11/2026, and deploy.sh caddy deletes its record.
+if grep -q '/[0-9a-f]\{32\}/hq/\*' /etc/caddy/sites/agent-company.caddy 2>/dev/null; then
+  d "הנתיב הסודי הישן עדיין ב-Caddy" "הנתיב הסודי הישן של האפליקציה עדיין פעיל"
 fi
 
 # ── units, hq.env, leftovers ─────────────────────────────────────────────────
@@ -103,7 +101,7 @@ for x in "$WWW"/* "$WWW"/.well-known; do
   n="$(basename "$x")"
   case "$n" in current | releases | qa) ;; *) d "שארית ב-$WWW: $n" "נשארו בשרת קבצים ישנים של האפליקציה" ;; esac
 done
-if [[ -e "$STATE/app-path" && ( -z "$until_date" || "$(date +%F)" > "$until_date" ) ]]; then d "שארית: $STATE/app-path (הנתיב הסודי הישן, מועד ההסרה עבר)" "נשארה בשרת שארית של הנתיב הסודי הישן"; fi
+if [[ -e "$STATE/app-path" ]]; then d "שארית: $STATE/app-path (הנתיב הסודי הישן)" "נשארה בשרת שארית של הנתיב הסודי הישן"; fi
 
 # ── merged and not deployed: a summary, never drift ──────────────────────────
 pending=""

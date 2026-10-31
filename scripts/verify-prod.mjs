@@ -9,15 +9,14 @@
 //   - the app: the root loads, assetlinks.json and hq's pairing page are there, the APK is downloadable, big enough, and
 //     signed with the release key that hq trusts (packages/hq/src/config.ts); hq's /api/app/latest
 //     offers that same APK for the in-app update.
-//   - the old secret path, while deploy/caddy/agent-company.caddy still has it: 301 to the root.
 //   - hq.config.json: the one hq runs with is company/hq.config.json from the company (COMPANY_HOME); the public
 //     URLs checked here are its auth.appUrl, apiUrl and tab.baseUrl (env VERIFY_*_URL override them).
 //   - COMPANY_HOME: hq and every live worker read the contract and memory from it, not from this engine repo
 //     (scripts/company-home-check.mjs).
 // Every install has COMPANY_HOME, hq's health and auth, pairing, the WebSocket, /pair and assetlinks.json. The rest runs
 // only where this install's settings say it is there (scripts/verify-plan.mjs): hq.config.json in git, dictation
-// (dictate.url), the web app, the APK and its in-app update (appReleaseDir), tab.hq (tab.baseUrl), the old path (the
-// engine's Caddy file serves this app's host). What does not apply prints as a skip with its reason, not a failure.
+// (dictate.url), the web app, the APK and its in-app update (appReleaseDir), tab.hq (tab.baseUrl).
+// What does not apply prints as a skip with its reason, not a failure.
 // --install is still accepted (older installers pass it) and changes nothing: the settings decide.
 // Prints one Hebrew line per check; exit 1 when any check fails.
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
@@ -46,8 +45,6 @@ if (!APP || !API) {
   process.exit(1);
 }
 const admin = readFileSync(join(state, 'api-token'), 'utf8').trim();
-const siteFile = join(repo, 'deploy/caddy/agent-company.caddy');
-const site = existsSync(siteFile) ? readFileSync(siteFile, 'utf8') : '';
 const apkKeyHash = /android:apk-key-hash:([A-Za-z0-9_-]+)/.exec(readFileSync(join(repo, 'packages/hq/src/config.ts'), 'utf8'))?.[1];
 const apksigner = process.env.APKSIGNER ?? '/opt/android-sdk/build-tools/36.0.0/apksigner';
 
@@ -99,8 +96,7 @@ const dictate = (url, token) => {
 // ── COMPANY_HOME: hq and the workers read the company from it, not from the engine repo ──
 const companyHome = resolveCompanyHome({ stateRoot: state, fallback: repo });
 const plan = verifyPlan({ fromFile: liveCfgText ? liveCfg : null, cfg, companyHome, engine: repo,
-  appUrl: APP, site, env: process.env, apksigner, exists: existsSync });
-const legacy = plan.legacy;
+  env: process.env, apksigner, exists: existsSync });
 {
   let hqEnv = {};
   try {
@@ -226,14 +222,6 @@ await when('tab', 'tab.hq', async () => {
   expect(h.status === 410, 'tab.hq: מסירת הטאב של hq עונה (410 לקישור שלא קיים)', `tab.hq: /h/<token> ענה ${h.status}, ציפיתי ל-410 מ-hq`);
   const r = await req(`${TAB}/api/board`);
   expect(r.status === 404, 'tab.hq: שום דבר אחר של hq לא נגיש דרכו', `tab.hq: /api/board ענה ${r.status}, ציפיתי ל-404`);
-});
-
-// ── the old secret path, while it is still in the Caddy file ─────────────────
-await when('legacyPath', 'הנתיב הסודי הישן', async () => {
-  const r = await req(`${APP}/${legacy}/`);
-  expect(r.status === 301 && r.headers.get('location') === '/', 'הנתיב הסודי הישן מפנה לשורש (301)', `הנתיב הישן ענה ${r.status} → ${r.headers.get('location')}`);
-  const h = await req(`${APP}/${legacy}/hq/health`);
-  expect(h.status === 200, 'APK ישן עדיין מגיע ל-hq בנתיב הישן (עד מועד ההסרה)', `hq בנתיב הישן ענה ${h.status}`);
 });
 
 const failed = results.filter((x) => !x).length;

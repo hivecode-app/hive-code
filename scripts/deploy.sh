@@ -375,6 +375,7 @@ deploy_caddy() {
     || fail "caddy validate נכשל (הלוג: $DSTATE/caddy-validate.log)"
   if cmp -s "$stage/Caddyfile" /etc/caddy/Caddyfile && cmp -s "$stage/sites/agent-company.caddy" /etc/caddy/sites/agent-company.caddy; then
     say "Caddy ללא שינוי"
+    rm -f "$STATE/app-path"
     rm -rf "$stage"
     return
   fi
@@ -392,6 +393,8 @@ deploy_caddy() {
   sudo -n systemctl reload caddy || fail "systemctl reload caddy נכשל"
   sleep 2
   [[ "$(curl -s -o /dev/null -w '%{http_code}' "$API_URL/health")" == 200 ]] || fail "$API_URL לא עונה אחרי reload"
+  # The old secret path left Caddy on 01/11/2026 (docs/RUNBOOK.md, "המעבר לשורש"); its record goes once Caddy is live without it.
+  rm -f "$STATE/app-path"
   say "Caddy: /etc/caddy/sites/agent-company.caddy מ-${sha:0:7}, validate עבר, reload"
 }
 
