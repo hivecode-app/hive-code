@@ -66,7 +66,7 @@ export class PressureWatch {
       const top = procs.length ? procs.map((p) => `- ${(p.rssMb / 1024).toFixed(1)}GB · pid ${p.pid} · ${p.cmd}`).join('\n') : 'לא הצלחתי לקרוא את רשימת התהליכים';
       inbox.add({ kind: 'incident', urgency: 'urgent', from_identity: this.owner(), dedupe_key: `pressure-${t.id}-${since}`,
         title: `משימה דחופה (${t.ref ?? `#${t.id}`}) מחכה ${Math.round((now - since) / 60_000)} דקות כי השרת עמוס`,
-        body: `${t.title}\n\n${why}.\n\n${holders ? `מי מחזיק, לפי פרויקט: ${holders}.\n\n` : ''}התהליכים שתופסים הכי הרבה זיכרון:\n${top}` });
+        body: `המשימה שמחכה: ${t.title}\n\n${why}.\n\n${holders ? `מי מחזיק, לפי פרויקט: ${holders}.\n\n` : ''}התהליכים שתופסים הכי הרבה זיכרון:\n${top}` });
       store.emit('pressure.alert', null, { task: t.id, processes: procs, holders });
     }
     // A task that started (or is no longer held back) forgets its clock: the 10 minutes are in a row.

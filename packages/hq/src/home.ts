@@ -269,7 +269,7 @@ export class Home {
     return {
       projects: new Set(this.hq.projects().map((p) => p.id)),
       identities: new Set((this.db.prepare('SELECT id FROM identities WHERE active = 1').all() as { id: string }[]).map((r) => r.id)),
-      inbox: new Set(this.hq.inbox.open().map((i) => i.id)),
+      inbox: new Set(this.hq.inbox.mine().map((i) => i.id)),
       awaiting: new Set(this.awaitingIds()),
       asked: new Set(this.asked().map((a) => a.id)),
       open: new Set(this.openIds()),
@@ -386,7 +386,7 @@ export class Home {
 
   /** Live data wins: what closed disappears, and a blocking item nobody placed yet is shown anyway. */
   live(blocks: Block[], refs: HomeRefs): Block[] {
-    const open = this.hq.inbox.open();
+    const open = this.hq.inbox.mine();
     const shiftOk = (id: string) => {
       const s = this.db.prepare('SELECT identity, state, stuck_since FROM shifts WHERE id = ?').get(id) as { identity: string; state: string; stuck_since: number | null } | undefined;
       if (!s) return false;
@@ -499,7 +499,7 @@ export class Home {
     const names = new Map(this.hq.projects().map((p) => [p.id, p.name ?? p.id]));
     // As the app counts them (backend.dart waitingCount): not put off, and a GO with a newer one open from the same
     // worker is replaced by it (#258), so the sentence never contradicts the count in front of it.
-    const open = this.hq.inbox.open();
+    const open = this.hq.inbox.mine();
     const superseded = (i: (typeof open)[number]) => i.kind === 'go'
       && open.some((x) => x.id !== i.id && x.kind === 'go' && x.from_identity === i.from_identity && (x.created_at > i.created_at || (x.created_at === i.created_at && x.id > i.id)));
     const waiting = open.filter((i) => !i.snoozed_at && !superseded(i));

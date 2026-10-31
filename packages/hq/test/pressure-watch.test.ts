@@ -1,7 +1,12 @@
 // task-297: a p0 task held back for memory for 10 minutes becomes one incident, with the top processes.
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeEnv } from './helpers.ts';
+import { makeEnv as make } from './helpers.ts';
+
+// Each hq here runs (noStart: false): it is closed at the end, or its timers keep the run up (an incident wakes the manager).
+const envs: Awaited<ReturnType<typeof make>>[] = [];
+const makeEnv = async (...a: Parameters<typeof make>) => { const e = await make(...a); envs.push(e); return e; };
+after(async () => { for (const e of envs) await e.cleanup(); });
 
 const ORG = `
 version: 1

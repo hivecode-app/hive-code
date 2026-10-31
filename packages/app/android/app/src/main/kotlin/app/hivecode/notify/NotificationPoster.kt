@@ -53,7 +53,7 @@ object NotificationPoster {
         val alerted = prefs.alerted intersect openIds
 
         val visible = snap.items.filter {
-            ActionPlanner.pushWorthy(it.kind, it.urgency, it.blocking, snap.quiet) && it.id !in snoozed &&
+            ActionPlanner.pushWorthy(it.kind, it.urgency, it.blocking, snap.quiet, it.ref) && it.id !in snoozed &&
                 // A login handoff is worthless after its 10 minutes; it stays in the app, not in the shade.
                 !(it.kind == "login" && Channels.handoffRemainingMs(it.createdAt, now) <= 0)
         }
@@ -123,7 +123,6 @@ object NotificationPoster {
             val q = item.ref?.let { snap.asks[it]?.question } ?: listOf(item.title, item.body).filter { it.isNotBlank() }.joinToString(". ")
             return (if (item.blocking) Wording.BLOCKING_PREFIX else "") + q
         }
-        if (item.kind == "incident") return item.body.ifBlank { item.title }
         return listOf(item.title.trimEnd('.'), item.body).filter { it.isNotBlank() }.joinToString(". ")
     }
 
@@ -166,7 +165,7 @@ object NotificationPoster {
                 goLabel = primary.goLabel,
             ),
         )
-        val openRoute = if (primary.kind == "login") ActionPlanner.handoffRoute(primary.id) else ActionPlanner.chatRoute(who.id)
+        val openRoute = ActionPlanner.openRoute(primary.kind, primary.id, who.id)
         val b = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_ms_front_hand)
             .setStyle(style)

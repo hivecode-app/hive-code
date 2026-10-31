@@ -156,16 +156,17 @@ void main() {
     expect(find.text('לשאלה'), findsNothing);
   });
 
-  testWidgets('the "החלטות" tab decides in place: the same folded line, and the card in the chat agrees', (tester) async {
+  testWidgets('the stack decides in place: the same folded line, and the card in the chat agrees', (tester) async {
     final store = await pumpApp(tester, size: const Size(342, 900), home: const SizedBox());
     _threeDecisions(store);
     decisionQueue
       ..order.clear()
       ..done.clear()
       ..current = null;
-    await pumpScreen(tester, store, const Scaffold(body: DecisionsScreen()));
+    await pumpScreen(tester, store, const DecisionStack());
     await tester.tap(find.text('ביטול המנוי מיד'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400)); // the card flies off first
     expect(findShown('ענית: ביטול המנוי מיד · 14:06'), findsOneWidget);
     expect(store.decision('ask-ido', 'w-ido'), isNotNull);
     await tester.pump(const Duration(seconds: 6));

@@ -41,7 +41,7 @@ class ActionPlannerTest {
         val plan = ActionPlanner.plan(input("ask", opts))
         assertEquals(listOf(Op.REPLY_ASK, Op.OPEN), plan.map { it.op })
         assertEquals(opts, plan[0].choices)
-        assertEquals("/chat/dana", plan[1].route)
+        assertEquals("/wait/42", plan[1].route)
     }
 
     @Test fun askWithoutOptions() {
@@ -133,11 +133,21 @@ class ActionPlannerTest {
         assertFalse(ActionPlanner.pushWorthy("ask", "normal", blocking = false, quiet = false))
         assertTrue(ActionPlanner.pushWorthy("go", "normal", blocking = true, quiet = false))
         assertTrue(ActionPlanner.pushWorthy("login", "normal", blocking = true, quiet = false))
-        assertFalse(ActionPlanner.pushWorthy("incident", "normal", blocking = true, quiet = false))
-        assertTrue(ActionPlanner.pushWorthy("incident", "urgent", blocking = true, quiet = false))
-        // Focus and night: only an urgent production incident.
-        assertTrue(ActionPlanner.pushWorthy("incident", "urgent", blocking = true, quiet = true))
+        // Task 986: a system fault goes to the manager and never reaches /api/inbox; what does (the manager down) is his.
+        assertTrue(ActionPlanner.pushWorthy("incident", "urgent", blocking = false, quiet = false, ref = "accounts-all-full"))
+        assertFalse(ActionPlanner.pushWorthy("incident", "urgent", blocking = false, quiet = false, ref = "pressure-adi"))
+        assertTrue(ActionPlanner.pushWorthy("delivery_failure", "normal", blocking = false, quiet = false))
+        // Focus and night push nothing.
+        assertFalse(ActionPlanner.pushWorthy("incident", "urgent", blocking = true, quiet = true))
         assertFalse(ActionPlanner.pushWorthy("go", "normal", blocking = true, quiet = true))
         assertFalse(ActionPlanner.pushWorthy("ask", "urgent", blocking = true, quiet = true))
+    }
+
+    @Test fun tapLeadsToTheItem() {
+        assertEquals("/wait/7", ActionPlanner.openRoute("ask", 7, "dana"))
+        assertEquals("/wait/8", ActionPlanner.openRoute("go", 8, "dana"))
+        assertEquals("/handoff/9", ActionPlanner.openRoute("login", 9, "dana"))
+        assertEquals("/chat/dana", ActionPlanner.openRoute("incident", 10, "dana"))
+        assertEquals("/chat/dana", ActionPlanner.openRoute("ask", 0, "dana"))
     }
 }

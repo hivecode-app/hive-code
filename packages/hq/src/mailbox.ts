@@ -4,7 +4,7 @@
 // No `delivered` in 60s → one retry with resurrection → visible failure in the sender's inbox and the owner's.
 // msg_id is the idempotency key end to end (API, host `send`, retries after crash).
 import { randomUUID } from 'node:crypto';
-import { g, loadNames, OWNER, pre, type CompanyNames, type AskDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency, type WaitingOn } from '@company/shared';
+import { g, loadNames, OWNER, pre, type CompanyNames, type AskDTO, type InboxItemDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency, type WaitingOn } from '@company/shared';
 import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
 import type { Inbox } from './inbox.ts';
@@ -218,6 +218,11 @@ export class Mailbox {
     this.store.db.prepare(`UPDATE messages SET ${sets.join(', ')} WHERE id = @id`).run({ id, state, now: this.store.now(), ...extra });
     const m = this.get(id)!;
     this.store.emit('message.state', m.to_identity, { id, state, from: m.from_identity, to: m.to_identity });
+    // The manager takes messages again: "a message to him failed" is over (fail keeps it one item while it lasts).
+    if (state === 'delivered' && m.to_identity === this.cfg.managerId) {
+      const open = this.store.db.prepare(`SELECT id FROM inbox WHERE kind = 'delivery_failure' AND from_identity = ? AND state = 'open'`).all(m.to_identity) as { id: number }[];
+      for (const r of open) this.inbox.resolve(r.id);
+    }
   }
 
   /** What his message waits for, to the app on the same `message.state` stream (the state itself is unchanged). */
@@ -242,8 +247,12 @@ export class Mailbox {
       const a = this.getAsk(req.ref);
       if (a && a.from_identity === req.to && a.state === 'escalated') {
         if (MANAGER_DECISION.test(req.body ?? '')) {
-          this.answer(a.id, req.body ?? '', 'manager', undefined, req.attachments);
-          return this.lastAnswer(a.id)!;
+          // hq's own ask (a fault the error-catcher caught) reads the decision itself, without the line around it.
+          const words = a.from_identity === 'hq' ? (req.body ?? '').replace(MANAGER_DECISION, '') : req.body ?? '';
+          this.answer(a.id, words, 'manager', undefined, req.attachments);
+          // hq has no mailbox to answer to: the manager's words are kept as a message to it, below.
+          const m = this.lastAnswer(a.id);
+          if (m) return m;
         }
         this.store.db.prepare('UPDATE asks SET manager_note = ? WHERE id = ?').run(req.body ?? '', a.id);
         this.store.emit('ask.noted', a.from_identity, this.getAsk(a.id)!);
@@ -824,13 +833,22 @@ export class Mailbox {
     const why = m.error ? ` (${m.error})` : '';
     const title = `הודעה ל-${this.label(m.to_identity)} לא נמסרה`;
     const body = `${m.body.slice(0, 400)}${why}`;
-    this.inbox.add({ kind: 'delivery_failure', title, body, from_identity: m.to_identity, urgency: m.urgency === 'urgent' ? 'urgent' : 'normal',
-      ref: m.id, dedupe_key: `delivery_failure:${m.id}` });
+    // The manager unreachable is one item for him while it lasts (inbox.managerDown), not one per message that failed.
+    const managerOpen = m.to_identity === this.cfg.managerId && !!this.store.db.prepare(
+      `SELECT 1 FROM inbox WHERE kind = 'delivery_failure' AND from_identity = ? AND state = 'open'`).get(m.to_identity);
+    if (!managerOpen) {
+      this.inbox.add({ kind: 'delivery_failure', title, body, from_identity: m.to_identity, urgency: m.urgency === 'urgent' ? 'urgent' : 'normal',
+        ref: m.id, dedupe_key: `delivery_failure:${m.id}` });
+    }
     if (m.from_identity !== OWNER && m.from_identity !== 'hq') {
       // The sender learns too, through its own mailbox. Never fails into a loop: system notes are not re-reported.
       if (m.kind !== 'system') {
+        // Where it went (task 986): the manager down is the owner's; any other is the manager's.
+        const manager = this.cfg.managerId;
+        const where = m.to_identity === manager ? ` היא מופיעה אצל ${this.names.owner.name} ב"מחכה לך".`
+          : m.from_identity === manager ? '' : ` הודעה עליה עברה ל-${this.label(manager)}.`;
         this.tell({ msg_id: `${m.id}-failed`, from: 'hq', to: m.from_identity, kind: 'system', ref: m.id, priority: 'next',
-          body: `ההודעה שלך ${m.id} ל-${this.label(m.to_identity)} לא נמסרה${why}. היא מופיעה אצל ${this.names.owner.name} ב"מחכה לך".` });
+          body: `ההודעה שלך ${m.id} ל-${this.label(m.to_identity)} לא נמסרה${why}.${where}` });
       }
     }
   }
@@ -965,9 +983,55 @@ export class Mailbox {
     // He comes first, directly from whoever asks (A.4) — the inbox item, not a relay through the manager.
     this.inbox.add({ kind: 'ask', title: req.title?.trim() || `${this.label(req.from)} שואל/ת`, body: req.question, from_identity: req.from,
       urgency: req.urgency ?? 'normal', blocking: !!req.blocking, ref: id, headline, dedupe_key: `ask:${id}` });
+    // task 986: a fault the error-catcher caught is the manager's to decide, not his. It goes there at once.
+    if (req.from === 'hq' && id.startsWith('err-')) this.toManager(this.getAsk(id)!);
     const a = this.getAsk(id)!;
     this.store.emit('ask.new', req.from, a);
     return a;
+  }
+
+  /**
+   * He left it 48 hours (inbox.ts returnStale): it is off his view, and the manager hears it, to decide it if it is theirs
+   * or word it again for him. An ask becomes escalated, so the manager can answer it ("החלטתי במקומך"); a GO stays open
+   * as it is, for its asker to close (withdraw_go) once the manager asks again.
+   */
+  returnToManager(item: InboxItemDTO): void {
+    const a = item.kind === 'ask' && item.ref ? this.getAsk(item.ref) : undefined;
+    if (a?.state === 'open') this.store.db.prepare(`UPDATE asks SET state = 'escalated', escalated_at = ? WHERE id = ?`).run(this.store.now(), a.id);
+    const who = item.from_identity ? this.label(item.from_identity) : 'המערכת';
+    const owner = this.names.owner.name;
+    const what = item.headline ?? item.title;
+    const how = a && item.from_identity && item.from_identity !== this.cfg.managerId
+      ? `אם זה בסמכותך: tell(to="${item.from_identity}", ref="${a.id}", body="החלטתי במקומך: X, כי Y"). אם לא: מנסחים ${pre('ל', owner)} מחדש, שורה אחת של מה מבקשים ממנו.`
+      : item.kind === 'go'
+        ? `אם זה עדיין צריך GO: מאחדים עם שאר מה שמחכה בפרויקט לבקשת GO אחת, ו-${who} סוגר/ת את הישנה (withdraw_go).`
+        : `אם זה עדיין שלו: מנסחים מחדש, שורה אחת של מה מבקשים ממנו.`;
+    this.tell({ msg_id: `inbox-${item.id}-returned`, from: 'hq', to: this.cfg.managerId, kind: 'system', ref: item.ref ?? `inbox-${item.id}`, priority: 'next',
+      body: [`${item.kind === 'go' ? 'בקשת GO' : 'שאלה'} של ${who} חיכתה ${pre('ל', owner)} 48 שעות בלי תשובה, ולכן ירדה מ"מחכות לך" וחזרה אליך: "${what}"`,
+        item.body && item.body !== what ? item.body.slice(0, 1500) : '', how].filter(Boolean).join('\n') });
+  }
+
+  /**
+   * The faults hq caught before task 986, still open on his card: the manager's now (once, at start; the escalation's
+   * msg_id is the ask's, so it is never sent twice). Returns how many went.
+   */
+  caughtFaultsToManager(): number {
+    const rows = this.store.db.prepare(`SELECT id FROM asks WHERE from_identity = 'hq' AND id LIKE 'err-%' AND state = 'open'`).all() as { id: string }[];
+    for (const r of rows) this.toManager(this.getAsk(r.id)!);
+    return rows.length;
+  }
+
+  /** hq's ask about a fault (error-watch.ts), escalated at once: the manager answers it in the words the card had. */
+  private toManager(a: AskDTO): void {
+    this.store.db.prepare(`UPDATE asks SET state = 'escalated', escalated_at = ? WHERE id = ? AND state = 'open'`).run(this.store.now(), a.id);
+    this.tell({ msg_id: `${a.id}-escalation`, from: 'hq', to: this.cfg.managerId, kind: 'escalation', ref: a.id, urgency: a.urgency,
+      priority: 'next', body: [
+        `תפסתי תקלה (${a.id}). היא מגיעה אליך ולא ${pre('ל', this.names.owner.name)}: תקלות מערכת הן שלך.`,
+        a.headline ?? '',
+        a.question,
+        `לטפל: tell(to="hq", ref="${a.id}", body="החלטתי במקומך: לטפל"), ונפתחת משימה. לא עכשיו: אותו דבר עם "החלטתי במקומך: לא עכשיו". אם זה חוסם על ${this.names.owner.name}, מעבירים לו שאלה משלך.`,
+      ].filter(Boolean).join('\n') });
+    this.store.emit('ask.escalated', a.from_identity, { id: a.id, why: 'caught-fault' });
   }
 
   getAsk(id: string): AskDTO | undefined {

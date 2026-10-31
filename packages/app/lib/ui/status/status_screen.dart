@@ -27,6 +27,7 @@ class StatusScreen extends StatelessWidget {
     final d = store.data;
     if (d == null) return const SizedBox.shrink();
     final waiting = [for (final w in d.waiting) if (w.state == WaitState.open || w.state == WaitState.pending) w];
+    final checks = [for (final t in d.awaiting) if (t.kind == AwaitingKind.check) t];
     final now = CompanyTime.now();
     final since = store.statusSeenAt ?? dayStart(now);
     final done = [for (final t in d.tickets) if (t.doneAt != null && t.assigneeId != null && t.doneAt!.isAfter(since)) t]..sort((a, b) => b.doneAt!.compareTo(a.doneAt!));
@@ -49,18 +50,19 @@ class StatusScreen extends StatelessWidget {
             if (waiting.isEmpty) const _Quiet(icon: 'check_circle', text: 'אין מה שמחכה לך')
             else for (final w in waiting) _WaitLine(item: w),
           ]),
-          // "מה לבדוק" (#108): only when something waits on him.
+          // "מה לבדוק" (#108): only when something waits on him. A merged task waiting for its deploy is the lead's to
+          // bundle into one GO (task 986), not his to check.
           // The last one checked folds the section away, not a jump.
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
             switchInCurve: Curves.easeOutCubic,
             switchOutCurve: Curves.easeOutCubic,
             transitionBuilder: (child, a) => SizeTransition(sizeFactor: a, alignment: Alignment.topCenter, child: child),
-            child: d.awaiting.isEmpty
+            child: checks.isEmpty
                 ? const SizedBox(key: ValueKey('awaiting-none'), width: double.infinity)
                 : Column(key: const ValueKey('awaiting'), children: [
-                    Section('מה לבדוק', count: '${d.awaiting.length}'),
-                    ListBlock(children: [AwaitingBlock(data: AwaitingData.of(d), now: now)]),
+                    Section('מה לבדוק', count: '${checks.length}'),
+                    ListBlock(children: [AwaitingBlock(data: AwaitingData(items: [for (final t in checks) AwaitingItem.of(t)]), now: now)]),
                   ]),
           ),
           Section('מאז הביקור הקודם', count: 'מ-${_since(since, now)}'),

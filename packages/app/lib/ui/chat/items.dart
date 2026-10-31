@@ -1184,7 +1184,8 @@ class _AskCardViewState extends State<AskCardView> {
     final wait = store.data?.waiting.where((w) => w.askId != null && w.askId == card.askId).firstOrNull;
     final notNow = go && wait?.state == WaitState.notNow && card.state == AskState.open;
     final closed = widget.superseded || notNow || (card.state != AskState.open && card.state != AskState.pending);
-    final label = go ? 'בקשת GO מ$from' : 'שאלה מ$from';
+    final check = card is CheckCard;
+    final label = go ? 'בקשת GO מ$from' : check ? 'בדיקה מ$from' : 'שאלה מ$from';
 
     if (pending != null || closed) {
       final (:icon, :text) = pending != null ? (icon: 'check_circle', text: pendingLine(pending)) : closedLine(card, superseded: widget.superseded, notNow: notNow);
@@ -1224,9 +1225,9 @@ class _AskCardViewState extends State<AskCardView> {
       TextSpan(children: [
         WidgetSpan(
           alignment: PlaceholderAlignment.middle,
-          child: Padding(padding: const EdgeInsetsDirectional.only(end: 4), child: Ic('front_hand', size: 16, fill: true, color: p.text2)),
+          child: Padding(padding: const EdgeInsetsDirectional.only(end: 4), child: Ic(check ? 'fact_check' : 'front_hand', size: 16, fill: true, color: p.text2)),
         ),
-        TextSpan(text: go ? 'בקשת ${ltr('GO')}' : (card.blocking ? 'שאלה · חוסמת את העבודה' : 'שאלה · יכולה לחכות')),
+        TextSpan(text: go ? 'בקשת ${ltr('GO')}' : check ? 'לבדוק' : (card.blocking ? 'שאלה · חוסמת את העבודה' : 'שאלה · יכולה לחכות')),
         if (!go && card.escalation != null) TextSpan(text: ' · ${card.escalation!.replaceAll(' ', '\u00A0')}'),
         TextSpan(text: ' · ${hm(card.ts)}'),
       ]),
@@ -1236,7 +1237,7 @@ class _AskCardViewState extends State<AskCardView> {
     final headline = card.headline;
     final keys = go
         ? DecisionKeys.go(onGo: () => store.answerCard(card, card.options.first), onNotNow: wait == null ? null : () => store.notNow(wait))
-        : DecisionKeys.ask(card.options, other: !isCaughtFault(card.from, card.askId), onPick: (o) => store.answerCard(card, o), onOther: widget.onOther, keys: MediaQuery.sizeOf(context).width >= 800 && identical(shortcutAsk(store.data?.chats[card.from]), card));
+        : DecisionKeys.ask(card.options, other: !check && !isCaughtFault(card.from, card.askId), onPick: (o) => store.answerCard(card, o), onOther: widget.onOther, keys: MediaQuery.sizeOf(context).width >= 800 && identical(shortcutAsk(store.data?.chats[card.from]), card));
 
     // The whole card is the details' toggle; the buttons are its only answers.
     final top = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [

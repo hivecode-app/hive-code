@@ -7,6 +7,7 @@ import 'package:agent_company/ui/blocks/blocks.dart';
 import 'package:agent_company/ui/chat/items.dart' show shortcutAsk;
 import 'package:agent_company/ui/common.dart' show Ic;
 import 'package:agent_company/ui/convs/conversations_screen.dart';
+import 'package:agent_company/ui/decisions/decisions_screen.dart' show waitingLine;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -60,8 +61,8 @@ void main() {
       expect(store.homeOpen, isTrue);
       expect(find.byType(HomeV2Page), findsOneWidget);
       expect(find.byType(HomeEntryRow), findsOneWidget);
-      expect(find.byType(WaitingBlock), findsNothing, reason: 'what waits is the "החלטות" tab\'s');
-      expect(find.text(decisionsLead(store.data!.waitingCount)!), findsOneWidget, reason: 'the sentence leads with the live count');
+      expect(find.byType(WaitingBlock), findsNothing, reason: 'what waits is the stack\'s');
+      expect(find.text(waitingLine(store.data!.waitingCount)), findsOneWidget, reason: 'the pinned row has the live count');
       expect(tester.takeException(), isNull);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/desktop_home/waiting-$t.png'));
     });

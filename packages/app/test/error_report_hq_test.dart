@@ -93,7 +93,7 @@ void main() {
     expect(ErrorReports.instance.active, isFalse, reason: 'signed out: nothing says "נשלח לטיפול"');
   });
 
-  test('hq: the card for a fault is titled "תפסתי תקלה" and when, with "לטפל" and "לא עכשיו"', () async {
+  test('hq: a fault it caught is the manager\'s, not a card for him; its other questions are (task 986)', () async {
     final hq = _Hq();
     await hq.start();
     addTearDown(() => hq.server.close(force: true));
@@ -101,11 +101,7 @@ void main() {
     addTearDown(b.dispose);
     await b.start();
     await until(() => b.data?.waiting.any((w) => w.from == 'hq') ?? false);
-    final card = b.data!.waiting.firstWhere((w) => w.askId == 'err-3f9a2c11d0-1');
-    expect(card.kicker, 'תפסתי תקלה · 14:02');
-    expect(card.options.map((o) => o.primary), [true, false], reason: '"לטפל" is the main answer');
-    expect(card.headline, 'שגיאה באפליקציה במסך שיחות');
-    expect(card.options.map((o) => o.label), ['לטפל', 'לא עכשיו']);
+    expect(b.data!.waiting.where((w) => w.askId == 'err-3f9a2c11d0-1'), isEmpty);
     final other = b.data!.waiting.firstWhere((w) => w.askId == 'acct-1');
     expect(other.kicker, 'שאלה', reason: "the system's other questions keep their kicker");
     expect(other.options.map((o) => o.primary), [false, false]);

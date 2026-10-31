@@ -10,9 +10,9 @@ import 'home/wait_item_screen.dart';
 import 'projects/project_screen.dart';
 import 'settings/settings_screen.dart';
 
-/// The bottom tabs (#53): chats is the main screen; status, projects and settings are secondary.
-/// [decisions] is first in the bar and last here, so the other tabs keep their places.
-enum AppTab { chats, status, projects, settings, decisions }
+/// The bottom tabs (#53): chats is the main screen; status, projects and settings are secondary. What waits for him
+/// is not a tab (task 986): a row pinned on top of the chats opens it (decisions_screen.dart).
+enum AppTab { chats, status, projects, settings }
 
 class AppNav extends ChangeNotifier {
   AppTab tab = AppTab.chats;

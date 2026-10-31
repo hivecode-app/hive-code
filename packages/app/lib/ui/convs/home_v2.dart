@@ -1,8 +1,7 @@
 // The home in design language v2 (docs/design/language-v2.md §8): the head of the conversations screen cut down to
 // these parts, in this order, each only when it has something:
-// 1. one sentence on the state. It starts with "3 החלטות מחכות לך." from the live count, which leads to the
-//    "החלטות" tab (task 306: decisions are not shown here); the rest is the composer's headline while it is fresh,
-//    else one from live data;
+// 1. one sentence on the state: the composer's headline while it is fresh, else one from live data. How many wait
+//    on him is not in it: the pinned row above the chats says that and opens them (task 986);
 // 2. a fault with no decision (a stuck worker);
 // 3. a line per project: its tone, icon and name, what runs and who, and how many wait for him;
 // 4. what finished lately;
@@ -29,11 +28,8 @@ import 'home_usage.dart';
 /// "שני דברים", "3 דברים": a count in words for one and two, as people say it.
 String _count(int n, String one, String two, String many) => n == 1 ? one : n == 2 ? two : '$n $many';
 
-/// The start of the sentence on top, from the live count: "3 החלטות מחכות לך." Null when none wait. It leads to the
-/// "החלטות" tab; the rest of the sentence ([topSentence]) is about everything else.
-String? decisionsLead(int n) => n <= 0 ? null : '${_count(n, 'החלטה אחת מחכה', 'שתי החלטות מחכות', 'החלטות מחכות')} לך.';
-
-/// The one sentence on top without the decisions, from live data, so it never contradicts what is under it.
+/// The one sentence on top, from live data, so it never contradicts what is under it. How many wait on him is not in
+/// it: the pinned row above the chats says that (task 986), and the sentence is about everything else.
 String homeSentence(CompanyData d, {required int stuck, int decisions = 0}) {
   final running = [for (final t in d.openTasks) if (t.state == OpenTaskState.running) t];
   final projects = {for (final t in running) t.project}.length;
@@ -41,17 +37,16 @@ String homeSentence(CompanyData d, {required int stuck, int decisions = 0}) {
       ? ''
       : '${_count(running.length, 'משימה אחת רצה', 'שתי משימות רצות', 'משימות רצות')}${projects > 1 ? (projects == 2 ? ' בשני פרויקטים' : ' ב-$projects פרויקטים') : ''}.';
   if (stuck > 0) return '${_count(stuck, 'תקלה אחת צריכה', 'שתי תקלות צריכות', 'תקלות צריכות')} אותך עכשיו.';
-  if (decisions > 0) return work.isEmpty ? '' : 'בינתיים $work';
+  if (decisions > 0) return work.isEmpty ? 'אין משימות שרצות עכשיו.' : 'בינתיים $work';
   return work.isEmpty ? 'שום דבר לא מחכה לך. הכול שקט.' : 'שום דבר לא מחכה לך. $work';
 }
 
 /// Workers who are stuck: a fault with no decision, the only thing the home still raises by itself.
 int stuckWorkers(CompanyData d) => d.identities.keys.where((id) => d.presence[id]?.status == WorkerStatus.stuck).length;
 
-/// The sentence on top after [decisionsLead]: the composer's headline while it is fresh, or hq's own, written from
+/// The sentence on top: the composer's headline while it is fresh, or hq's own, written from
 /// facts (`source: hq`); neither says how many wait for him, the app's count is live. Else [homeSentence]. A stuck
-/// worker or a headline older than hq's 30 minutes (a recipe from the cache) always gets the live sentence. Empty
-/// when the lead says it all.
+/// worker or a headline older than hq's 30 minutes (a recipe from the cache) always gets the live sentence.
 String topSentence(CompanyData d, HomeRecipe? recipe, {required int stuck, DateTime? now}) {
   final headline = recipe == null || !(recipe.byAgent || recipe.byHq) ? null : recipe.blocks.where((b) => b.type == 'headline').firstOrNull?.text?.trim();
   final fresh = recipe != null && (now ?? CompanyTime.now()).difference(recipe.composedAt) <= const Duration(minutes: 30);
@@ -61,7 +56,7 @@ String topSentence(CompanyData d, HomeRecipe? recipe, {required int stuck, DateT
 
 /// The whole sentence as one string (the folded bar, the desktop's row, a screen reader).
 String fullSentence(CompanyData d, HomeRecipe? recipe, {required int stuck, DateTime? now}) =>
-    [?decisionsLead(d.waitingCount), topSentence(d, recipe, stuck: stuck, now: now)].where((x) => x.isNotEmpty).join(' ');
+    topSentence(d, recipe, stuck: stuck, now: now);
 
 class HomeV2 extends StatelessWidget {
   const HomeV2({super.key, required this.data, required this.now, this.recipe, this.folded = false, this.onToggle});
@@ -83,7 +78,7 @@ class HomeV2 extends StatelessWidget {
     final p = context.p;
     final d = data;
     final blocks = recipe == null ? null : liveBlocks(recipe!, d);
-    // What waits for him as a decision is the "החלטות" tab's, and the sentence on top leads there. What stays here is a
+    // What waits for him is the pinned row's and its stack (task 986). What stays here is a
     // fault with no decision: a worker who is stuck.
     final stuck = [for (final id in d.identities.keys) if (d.presence[id]?.status == WorkerStatus.stuck) id];
 
@@ -130,11 +125,10 @@ class HomeV2 extends StatelessWidget {
     // 6. How fast it goes and on what (task 496): right under the quota, and folds with the home.
     final usage = switch (recipe?.usage) { final u? when !u.isEmpty => u, _ => null };
 
-    final lead = decisionsLead(d.waitingCount);
     final sentence = topSentence(d, recipe, stuck: stuck.length, now: now);
 
     final rows = <(String, Widget)>[
-      ('sentence', _Sentence(sentence, lead: lead, onLead: () => NavScope.read(context).go(AppTab.decisions), open: onToggle == null ? null : !folded, onTap: onToggle)),
+      ('sentence', _Sentence(sentence, open: onToggle == null ? null : !folded, onTap: onToggle)),
       if (stuck.isNotEmpty)
         (
           'stuck',
@@ -181,12 +175,8 @@ class HomeV2 extends StatelessWidget {
 }
 
 class _Sentence extends StatelessWidget {
-  const _Sentence(this.text, {this.lead, this.onLead, this.open, this.onTap});
+  const _Sentence(this.text, {this.open, this.onTap});
   final String text;
-
-  /// "3 החלטות מחכות לך.", a button to the tab, before [text].
-  final String? lead;
-  final VoidCallback? onLead;
 
   /// Null: not a toggle. Else whether the home under it is open (`expand_less`) or folded (`expand_more`).
   final bool? open;
@@ -223,35 +213,7 @@ class _Sentence extends StatelessWidget {
           child: AnimatedSwitcher(
             duration: kBlockMotion,
             layoutBuilder: (cur, prev) => Stack(alignment: AlignmentDirectional.topStart, children: [...prev, ?cur]),
-            child: Column(
-              key: ValueKey('$lead|$text'),
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (lead != null)
-                  Semantics(
-                    button: true,
-                    hint: 'מעבר להחלטות',
-                    excludeSemantics: true,
-                    label: lead,
-                    onTap: onLead,
-                    child: InkWell(
-                      onTap: onLead,
-                      borderRadius: BorderRadius.circular(8),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(minHeight: 44),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Ic('front_hand', size: 20, fill: true, color: p.text),
-                          const SizedBox(width: 8),
-                          Flexible(child: Text(lead!, style: style.copyWith(fontWeight: FontWeight.w700))),
-                          const SizedBox(width: 2),
-                          Ic('chevron_left', size: 20, color: p.text2),
-                        ]),
-                      ),
-                    ),
-                  ),
-                if (text.isNotEmpty) Rich(text, auto: true, maxLines: 3, style: style),
-              ],
-            ),
+            child: Rich(text, key: ValueKey(text), auto: true, maxLines: 3, style: style),
           ),
         ),
       ),
@@ -496,7 +458,6 @@ class HomeEntryRow extends StatelessWidget {
     final p = context.p;
     final store = StoreScope.of(context);
     final d = store.data!;
-    final waits = d.waitingCount + stuckWorkers(d);
     final sentence = fullSentence(d, d.home, stuck: stuckWorkers(d));
     return Semantics(
       button: true,
@@ -525,11 +486,7 @@ class HomeEntryRow extends StatelessWidget {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
                     Expanded(child: Text('בית', style: T.name.copyWith(color: p.text))),
-                    if (waits > 0) ...[
-                      Ic('front_hand', size: 16, fill: true, color: p.text),
-                      const SizedBox(width: 3),
-                      Text(waits == 1 ? 'מחכה לך' : '$waits מחכים לך', style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w700, fontFeatures: kTabular)),
-                    ],
+                    // How many wait is the pinned row's, right above (task 986).
                   ]),
                   const SizedBox(height: 2),
                   Rich(sentence, auto: true, maxLines: 1, style: T.small.copyWith(color: p.text2)),

@@ -9,6 +9,7 @@ import '../../theme/tokens.dart';
 import '../common.dart';
 import '../nav.dart';
 import 'convs_v2.dart';
+import '../decisions/decisions_screen.dart' show WaitingRow;
 import 'home_v2.dart';
 import 'kbd.dart';
 
@@ -62,6 +63,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
       child: Column(children: [
         TopBar(title: 'שיחות', actions: [IBtn('sort', tip: 'מיון', onTap: () => pickConvSort(context))]),
         _QuickSwitch(onChanged: (v) => setState(() => q = v)),
+        const WaitingRow(),
         Expanded(
           child: ListView(padding: EdgeInsets.zero, children: [
             // The home is the first row; it opens in the main column (desktop.dart).

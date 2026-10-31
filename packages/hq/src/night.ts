@@ -382,7 +382,7 @@ export class Night {
     }
     const done = [...byProject].map(([project, ts]) => ({ project, tasks: ts }));
 
-    const waiting = this.inbox.open().filter((i) => i.kind === 'go' || i.kind === 'ask' || i.kind === 'login' || i.kind === 'incident')
+    const waiting = this.inbox.mine()
       .map((i) => ({ id: i.id, kind: i.kind, title: i.title, from: i.from_identity, blocking: i.blocking }));
 
     const failed = new Map<number, string>();

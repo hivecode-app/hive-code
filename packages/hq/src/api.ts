@@ -149,7 +149,8 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     return hq.home.current();
   });
 
-  route('GET', '/api/inbox', () => ({ items: hq.inbox.open() }));
+  // task 986: what is his (a question, a GO, a sign-in), and apart the tasks to check, cards in their worker's conversation.
+  route('GET', '/api/inbox', () => ({ items: hq.inbox.mine(), checks: hq.inbox.checks() }));
   // request_access (access.ts): what workers asked hq to run in their name, the last days (the log he reads, and the weekly count of `unfit`).
   // resources: what each machine holds, by project, and who waits for room (resources.ts).
   route('GET', '/api/resources', () => hq.resources.view());

@@ -6,6 +6,7 @@ import 'package:agent_company/model/models.dart';
 import 'package:agent_company/theme/icons.dart';
 import 'package:agent_company/ui/common.dart';
 import 'package:agent_company/ui/convs/conversations_screen.dart';
+import 'package:agent_company/ui/decisions/decisions_screen.dart' show WaitingRow, waitingLine;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -107,18 +108,20 @@ void main() {
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -2500));
     await tester.pumpAndSettle();
     expect(find.byType(HomeBarV2), findsOneWidget);
-    // With decisions waiting the sentence leads to them; the chevron brings the home back.
+    // The chevron brings the home back.
     await tester.tap(find.descendant(of: find.byType(HomeBarV2), matching: find.byIcon(kIcons['expand_more']!)));
     await tester.pumpAndSettle();
     expect(find.byType(HomeBarV2), findsNothing);
   });
 
-  testWidgets('the home is one row with the count of decisions; its sentence leads to them, its chevron opens the rest', (tester) async {
+  testWidgets('the home is one row under the pinned "מחכות לך"; the sentence does not repeat it, its chevron opens the rest', (tester) async {
     final store = await pumpApp(tester, size: const Size(342, 3000), home: const Scaffold(body: ConversationsV2()));
     expect(store.data!.waitingCount, greaterThan(0), reason: 'the fake company has something waiting');
     expect(find.text('הפרויקטים'), findsNothing);
-    expect(find.textContaining('החלטות מחכות לך'), findsOneWidget);
+    expect(find.text(waitingLine(store.data!.waitingCount)), findsOneWidget);
+    expect(find.textContaining('החלטות מחכות לך'), findsNothing);
     expect(find.text('מחכה לך'), findsNothing);
+    expect(tester.getTopLeft(find.byType(WaitingRow)).dy, lessThan(tester.getTopLeft(find.byType(HomeBarV2).evaluate().isEmpty ? find.byIcon(kIcons['expand_more']!).first : find.byType(HomeBarV2)).dy));
     await tester.tap(find.byIcon(kIcons['expand_more']!).first);
     await tester.pumpAndSettle();
     expect(find.text('הפרויקטים'), findsOneWidget);

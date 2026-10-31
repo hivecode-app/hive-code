@@ -88,13 +88,15 @@ test('owner "done" on a tab handoff tells the requester now and closes the item 
   } finally { await env.cleanup(); }
 });
 
-test('push only when blocked on him; focus lets only urgent incidents through; Telegram only when the app is not connected', async () => {
+test('push only when blocked on him; an incident never (the manager has it), focus nothing; Telegram only when the app is not connected', async () => {
   assert.equal(pushWorthy({ kind: 'ask', blocking: true, urgency: 'normal' }, false), true);
   assert.equal(pushWorthy({ kind: 'ask', blocking: false, urgency: 'urgent' }, false), false);
   assert.equal(pushWorthy({ kind: 'delivery_failure', blocking: false, urgency: 'normal' }, false), false);
   assert.equal(pushWorthy({ kind: 'login', blocking: true, urgency: 'normal' }, false), true);
   assert.equal(pushWorthy({ kind: 'go', blocking: true, urgency: 'normal' }, true), false);
-  assert.equal(pushWorthy({ kind: 'incident', blocking: true, urgency: 'urgent' }, true), true);
+  assert.equal(pushWorthy({ kind: 'incident', blocking: true, urgency: 'urgent' }, false), false);
+  assert.equal(pushWorthy({ kind: 'incident', blocking: true, urgency: 'urgent' }, true), false);
+  assert.equal(pushWorthy({ kind: 'ask', from_identity: 'hq', ref: 'err-1', blocking: true, urgency: 'normal' }, false), false);
 
   const env = await makeEnv();
   try {
@@ -384,5 +386,99 @@ test('#297: his yes in the chat closes the worker\'s one open GO; with a ref it 
     m = hq.mailbox.tell({ msg_id: 'c-7', from: 'owner', to: 'eli', body: 'כן', chat: true });
     assert.equal(m.id, 'c-7');
     assert.equal(hq.inbox.get(acc.id)!.state, 'open');
+  } finally { await env.cleanup(); }
+});
+
+test('task 986: a fault of the system goes to the manager, never to him; his view is questions and GOs; 48 hours untaken go back', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, clock } = env;
+    hq.auth.link('phone', 1);
+    hq.pusher.subscribe({ endpoint: 'https://push.example/9', keys: { p256dh: 'p', auth: 'a' } });
+    const inc = hq.inbox.add({ kind: 'incident', urgency: 'urgent', from_identity: 'rotem', title: 'משימה דחופה מחכה כי השרת עמוס', body: 'שיווק לומו: קריאייטיב\n\nנשאר זיכרון פנוי של 4.3GB' });
+    const toManager = hq.mailbox.get(`inbox-${inc.id}-to-manager`);
+    assert.equal(toManager?.to_identity, hq.cfg.managerId, 'the manager hears it');
+    assert.match(toManager!.body, /משימה דחופה מחכה כי השרת עמוס[\s\S]*שיווק לומו/, 'its own title first, then its body');
+    assert.equal(hq.inbox.mine().length, 0, 'not in his view');
+    assert.equal(env.webPushes.length, 0, 'never pushed to him');
+    // Kept: the row is there, open, for the manager's tools and the record.
+    assert.equal(hq.inbox.get(inc.id)!.state, 'open');
+
+    hq.mailbox.ask({ msg_id: 'err-abc-1', from: 'hq', question: 'TypeError ב-api', options: ['לטפל', 'לא עכשיו'] });
+    assert.equal(hq.mailbox.getAsk('err-abc-1')!.state, 'escalated', 'a caught fault is the manager\'s at once');
+    assert.equal(hq.mailbox.get('err-abc-1-escalation')?.to_identity, hq.cfg.managerId);
+    assert.equal(hq.inbox.mine().length, 0);
+    // The manager decides it with the line, to hq.
+    hq.mailbox.tell({ from: hq.cfg.managerId, to: 'hq', ref: 'err-abc-1', body: 'החלטתי במקומך: לטפל' });
+    assert.equal(hq.mailbox.getAsk('err-abc-1')!.state, 'answered');
+    assert.equal(hq.mailbox.getAsk('err-abc-1')!.answer, 'לטפל');
+
+    const go = hq.inbox.add({ kind: 'go', from_identity: 'ac-ceo', title: 'GO: פריסה', headline: 'פריסה של hq', blocking: true });
+    hq.mailbox.ask({ msg_id: 'ask-old', from: 'ac-ceo', question: 'איזה צבע?', options: ['כחול', 'ירוק'] });
+    assert.deepEqual(hq.inbox.mine().map((i) => i.kind).sort(), ['ask', 'go']);
+    assert.deepEqual(hq.inbox.checks(), []);
+
+    clock.advance(47 * 3600_000);
+    assert.equal(hq.inbox.returnStale((i) => hq.mailbox.returnToManager(i)).length, 0, 'not yet');
+    clock.advance(2 * 3600_000);
+    const back = hq.inbox.returnStale((i) => hq.mailbox.returnToManager(i));
+    assert.equal(back.length, 2);
+    assert.equal(hq.inbox.mine().length, 0, 'out of his view');
+    assert.equal(hq.inbox.get(go.id)!.state, 'open', 'kept as it was');
+    assert.equal(hq.mailbox.getAsk('ask-old')!.state, 'escalated', 'the manager can answer it now');
+    assert.match(hq.mailbox.get(`inbox-${go.id}-returned`)!.body, /48 שעות[\s\S]*פריסה של hq/);
+    assert.equal(hq.inbox.returnStale((i) => hq.mailbox.returnToManager(i)).length, 0, 'once');
+  } finally { await env.cleanup(); }
+});
+
+test('task 986: the manager\'s own fall is his, once while it lasts; a caught fault left on his card goes to the manager at start', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    const m = hq.cfg.managerId;
+    // A message to the manager that failed: his, pushed, never routed back to the manager (it would only fail again).
+    const f = hq.inbox.add({ kind: 'delivery_failure', from_identity: m, title: 'הודעה ליואב לא נמסרה' });
+    assert.ok(hq.inbox.mine().some((i) => i.id === f.id));
+    assert.ok(pushWorthy(f, false, hq.inbox.manager));
+    assert.equal(hq.mailbox.get(`inbox-${f.id}-to-manager`), undefined);
+    // Another worker's failure is still the manager's.
+    const o = hq.inbox.add({ kind: 'shift_failure', from_identity: 'rotem', title: 'rotem נפל ולא קם מחדש' });
+    assert.ok(!hq.inbox.mine().some((i) => i.id === o.id));
+    assert.equal(hq.mailbox.get(`inbox-${o.id}-to-manager`)?.to_identity, m);
+    // The 48 hours never send the manager's own fall back to the manager.
+    env.clock.advance(49 * 3600_000);
+    assert.equal(hq.inbox.returnStale((i) => hq.mailbox.returnToManager(i)).length, 0);
+
+    // A fault caught before 986, still open on his card: escalated once at start.
+    hq.store.db.prepare(`INSERT INTO asks (id, from_identity, question, options, blocking, urgency, created_at) VALUES ('err-old-1', 'hq', 'שגיאה ישנה', '["לטפל","לא עכשיו"]', 0, 'normal', 1)`).run();
+    assert.equal(hq.mailbox.caughtFaultsToManager(), 1);
+    assert.equal(hq.mailbox.getAsk('err-old-1')!.state, 'escalated');
+    assert.equal(hq.mailbox.get('err-old-1-escalation')?.to_identity, m);
+    assert.equal(hq.mailbox.caughtFaultsToManager(), 0, 'once');
+  } finally { await env.cleanup(); }
+});
+
+test('task 986: messages to the manager that fail are one item while it lasts, closed once one goes through; the sender hears where it went', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    const m = hq.cfg.managerId;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mb = hq.mailbox as any;
+    const one = hq.mailbox.tell({ msg_id: 'to-m-1', from: 'dana', to: m, body: 'שאלה ראשונה' });
+    const two = hq.mailbox.tell({ msg_id: 'to-m-2', from: 'dana', to: m, body: 'שאלה שנייה' });
+    mb.fail({ ...one, error: 'לא עונה' });
+    mb.fail({ ...two, error: 'לא עונה' });
+    const open = () => hq.inbox.mine().filter((i) => i.kind === 'delivery_failure' && i.from_identity === m);
+    assert.equal(open().length, 1, 'one item while it lasts');
+    assert.match(hq.mailbox.get('to-m-1-failed')!.body, /מחכה לך/);
+    // A worker's message to another worker: the manager hears of it, and the sender is told so.
+    const w = hq.mailbox.tell({ msg_id: 'to-r-1', from: 'dana', to: 'rotem', body: 'היי' });
+    mb.fail({ ...w, error: 'לא עונה' });
+    assert.match(hq.mailbox.get('to-r-1-failed')!.body, /הודעה עליה עברה ל-/);
+    // The manager takes messages again: the item closes.
+    const three = hq.mailbox.tell({ msg_id: 'to-m-3', from: 'dana', to: m, body: 'שאלה שלישית' });
+    mb.setState(three.id, 'delivered');
+    assert.equal(open().length, 0);
   } finally { await env.cleanup(); }
 });

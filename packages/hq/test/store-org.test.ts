@@ -18,11 +18,11 @@ test('store: WAL, migrations idempotent across reopen, toggles seeded once', () 
     const path = join(dir, 'hq.db');
     const s1 = new Store(path);
     assert.equal(s1.db.pragma('journal_mode', { simple: true }), 'wal');
-    assert.equal(s1.schemaVersion, 35);
+    assert.equal(s1.schemaVersion, 36);
     s1.setToggle('probes', false);
     s1.close();
     const s2 = new Store(path);
-    assert.equal(s2.schemaVersion, 35);
+    assert.equal(s2.schemaVersion, 36);
     assert.equal(s2.toggle('probes'), false, 'manual off survives restart');
     assert.equal(s2.toggle('scheduler'), true);
     const e = s2.emit('x', 'eli', { a: 1 });
@@ -313,10 +313,11 @@ test('v24: an inbox with rows from before `links` upgrades, and they have none',
     for (const c of ['jitter', 'loss_percent', 'avg_ms', 'mdev_ms']) s.db.exec(`ALTER TABLE probe_results DROP COLUMN ${c}`); // v32
     s.db.exec('ALTER TABLE messages DROP COLUMN fyi'); // v34
     s.db.exec('ALTER TABLE messages DROP COLUMN first_word_at'); // v35
+    s.db.exec('ALTER TABLE inbox DROP COLUMN returned_at'); // v36
     s.db.pragma('user_version = 23');
     s.db.prepare(`INSERT INTO inbox (kind, title, body, urgency, blocking, created_at) VALUES ('go', 'GO: ישן', '', 'normal', 1, 100)`).run();
     (s as unknown as { migrate(): void }).migrate();
-    assert.equal(s.schemaVersion, 35);
+    assert.equal(s.schemaVersion, 36);
     const row = s.db.prepare('SELECT title, links FROM inbox').get() as { title: string; links: string | null };
     assert.deepEqual(row, { title: 'GO: ישן', links: null });
   } finally { s.close(); }
@@ -330,6 +331,7 @@ test('v25 (#331): an ask the manager "answered" with a plain tell goes back to i
     for (const c of ['jitter', 'loss_percent', 'avg_ms', 'mdev_ms']) s.db.exec(`ALTER TABLE probe_results DROP COLUMN ${c}`); // v32
     s.db.exec('ALTER TABLE messages DROP COLUMN fyi'); // v34
     s.db.exec('ALTER TABLE messages DROP COLUMN first_word_at'); // v35
+    s.db.exec('ALTER TABLE inbox DROP COLUMN returned_at'); // v36
     s.db.pragma('user_version = 24');
     const ask = s.db.prepare(`INSERT INTO asks (id, from_identity, question, options, blocking, state, answer, answered_by, created_at, escalated_at, answered_at) VALUES (?, 'dana', 'איזה?', '["א","ב","ג"]', 1, 'answered', ?, 'manager', 1, 2, 3)`);
     const item = s.db.prepare(`INSERT INTO inbox (kind, title, body, from_identity, urgency, blocking, ref, state, resolved_at, created_at) VALUES (?, 't', '', ?, 'low', 0, ?, ?, ?, 1)`);
@@ -340,7 +342,7 @@ test('v25 (#331): an ask the manager "answered" with a plain tell goes back to i
     item.run('ask', 'dana', 'ask-explicit', 'resolved', 3);
     item.run('escalation_note', 'yoav', 'ask-explicit', 'open', null);
     (s as unknown as { migrate(): void }).migrate();
-    assert.equal(s.schemaVersion, 35);
+    assert.equal(s.schemaVersion, 36);
     const open = s.db.prepare(`SELECT kind, from_identity, ref FROM inbox WHERE state = 'open' ORDER BY ref, kind`).all();
     assert.deepEqual(open, [{ kind: 'escalation_note', from_identity: 'yoav', ref: 'ask-explicit' }, { kind: 'ask', from_identity: 'dana', ref: 'ask-plain' }]);
     const a = s.db.prepare(`SELECT state, answer, manager_note, options FROM asks WHERE id = 'ask-plain'`).get() as Record<string, string | null>;

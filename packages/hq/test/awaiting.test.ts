@@ -157,11 +157,14 @@ test('#219: what waited before this version gets its card when hq starts', async
   } finally { await env.cleanup(); }
 });
 
-test('#219: a deploy is his only once stuck 6 hours with no GO about it; a deploy that takes it closes the card', async () => {
+test('task 986: a deploy is never his card; stuck 6 hours with no GO about it, its opener hears it once', async () => {
   const env = await makeEnv({ noStart: true });
   try {
     await env.hq.start({ timers: false });
     const { scheduler, awaiting, inbox } = env.hq;
+    const heard: number[] = [];
+    awaiting.onStuck = (t) => { heard.push(t.id); };
+    awaiting.openerOf = () => 'aviv';
     const mk = (title: string, identity?: string) => {
       const t = scheduler.addTask({ title, project: 'shop', identity });
       scheduler.setTaskState(t.id, 'done');
@@ -183,28 +186,34 @@ test('#219: a deploy is his only once stuck 6 hours with no GO about it; a deplo
     inbox.resolve(declined.id, 'dismissed');
     inbox.add({ kind: 'go', from_identity: 'other-t1', title: 'GO: other', body: '#56', blocking: true });
     awaiting.sweep();
-    assert.equal(card(a), undefined, 'not yet');
+    assert.deepEqual(heard, [], 'not yet');
     env.clock.advance(3 * 3600_000);
     awaiting.mark(a, { awaiting: 'deploy', awaiting_note: 'תיקון של ההערה' }, 'lead');
     env.clock.advance(3 * 3600_000);
     awaiting.sweep();
-    assert.ok(card(a), 'stuck 6 hours, a fixed note did not restart them: his');
-    assert.equal(card(b), undefined, 'a GO naming its PR: not his');
-    assert.equal(card(c), undefined, 'a GO its worker asked');
-    assert.equal(card(e), undefined, 'a GO naming task-<id>');
-    assert.ok(card(f), 'a declined GO: stuck again, his');
-    assert.ok(card(h), 'PR #56 of another project is not this one');
-    awaiting.sweep();
-    assert.equal(inbox.open().filter((i) => i.kind === 'awaiting').length, 3, 'idempotent');
-    // Shown, then a GO is asked (the card goes), then declined: the card comes back.
-    const go = inbox.add({ kind: 'go', from_identity: 'aviv', title: `GO: t${a}`, blocking: true });
-    awaiting.sweep();
-    assert.equal(card(a), undefined, 'a GO asked: that card is his now');
-    inbox.resolve(go.id, 'dismissed');
-    awaiting.sweep();
-    assert.ok(card(a), 'declined: stuck again, back');
+    assert.deepEqual(heard.sort((x, y) => x - y), [a, f, h], 'stuck with no GO about it (a declined one is none; a PR of another project is not this one)');
+    for (const id of [a, b, c, e, f, h]) assert.equal(card(id), undefined, 'never his card');
     awaiting.deployed({ project: 'shop', sha: 'x', prs: ['51'] });
-    assert.equal(card(a), undefined, 'deployed: gone');
+    heard.splice(0);
+    awaiting.sweep();
+    assert.ok(!(heard as number[]).includes(a), 'deployed: nothing to remind');
+  } finally { await env.cleanup(); }
+});
+
+test('task 986: the opener hears about a stuck deploy once, however many sweeps', async () => {
+  const env = await makeEnv({ noStart: true });
+  try {
+    await env.hq.start({ timers: false });
+    const { scheduler, awaiting } = env.hq;
+    const t = scheduler.addTask({ title: 'deploy me', project: 'shop', labels: ['opened-by:aviv'] });
+    scheduler.setTaskState(t.id, 'done');
+    awaiting.mark(t.id, { awaiting: 'deploy', pr: '70' }, 'w');
+    env.clock.advance(7 * 3600_000);
+    awaiting.sweep();
+    awaiting.sweep();
+    const sent = env.hq.store.db.prepare(`SELECT to_identity, body FROM messages WHERE id LIKE ?`).all(`task-${t.id}-deploy-stuck-%`) as { to_identity: string; body: string }[];
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!.body, /בקשת GO אחת/);
   } finally { await env.cleanup(); }
 });
 

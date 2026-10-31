@@ -11,6 +11,11 @@
 // #297: a `deploy` also clears when its follow-ups are through. A follow-up names the task in its title ("משימה 500:
 // פריסת ride-matcher"), as leads open them; once every follow-up is closed and none of them waits on a deploy itself,
 // the deploy they were opened for is done, even when the deploy report named only them.
+//
+// task 986: "מחכה לך" holds only what is blocked on him. A `check` or `verify` is a card in the conversation with the
+// task's opener ("עובד" / "לא עובד"), with a message there that says what to check (onCard). A `deploy` is never his
+// card: the lead bundles the project's merged work into one GO. One stuck DEPLOY_STUCK_MS with no GO about it reminds
+// its opener once (onStuck). The old deploy cards close (#478: they came back after 6 hours even when deployed).
 import type { Inbox } from './inbox.ts';
 import type { Store } from './store.ts';
 
@@ -22,7 +27,7 @@ export interface AwaitingTask {
   awaiting: Awaiting; awaiting_note: string | null; awaiting_at: number; pr: string | null;
 }
 
-/** A `deploy` with no GO about it shows up in "מחכה לך" after this long without a deploy. */
+/** A `deploy` with no GO about it reminds its opener after this long without a deploy. */
 export const DEPLOY_STUCK_MS = 6 * 3600_000;
 
 /** What he tapped on the task's card. */
@@ -62,6 +67,10 @@ export class AwaitingBoard {
   openerOf: (t: { project: string | null; labels: string }) => string | null = () => null;
   /** A project's GitHub repo (owner/name), for the PR's link under a decision. */
   repoOf: (project: string, worktree: string | null) => string | null = () => null;
+  /** A new card to check: hq.ts says so in the opener's conversation. */
+  onCard: (t: AwaitingTask, itemId: number, from: string | null) => void = () => {};
+  /** A deploy stuck with no GO about it: hq.ts reminds its opener, once per wait. */
+  onStuck: (t: AwaitingTask, to: string) => void = () => {};
   constructor(store: Store, inbox: Inbox | null = null) { this.store = store; this.inbox = inbox; }
 
   /**
@@ -156,6 +165,18 @@ export class AwaitingBoard {
     const ids = this.store.db.prepare(`SELECT id FROM tasks WHERE awaiting IS NOT NULL
       UNION SELECT CAST(substr(ref, 6) AS INTEGER) FROM inbox WHERE kind = 'awaiting' AND state = 'open'`).all() as { id: number }[];
     for (const r of ids) this.sync(r.id);
+    this.remindStuck();
+  }
+
+  /** Each deploy stuck DEPLOY_STUCK_MS with no GO about it: its opener hears it, once per wait (onStuck is idempotent by its id). */
+  private remindStuck(): void {
+    const rows = this.store.db.prepare(`SELECT ${COLS} FROM tasks WHERE awaiting = 'deploy' AND awaiting_at <= ?`)
+      .all(this.store.now() - DEPLOY_STUCK_MS) as AwaitingTask[];
+    for (const t of rows) {
+      if (this.goAbout(t)) continue;
+      const to = this.openerOf(this.taskRow(t.id));
+      if (to) this.onStuck(t, to);
+    }
   }
 
   /** One task's card in "מחכה לך": opened, its words updated, or closed, by what the task waits for now. */
@@ -185,8 +206,10 @@ export class AwaitingBoard {
     }
     // No dedupe_key: the open card by ref is the dedupe, and a card closed earlier (a GO asked, then declined) must
     // be able to come back while the task still waits.
-    this.inbox.add({ kind: 'awaiting', from_identity: this.openerOf(this.taskRow(taskId)), title, headline, body, ref, blocking: false,
+    const from = this.openerOf(this.taskRow(taskId));
+    const item = this.inbox.add({ kind: 'awaiting', from_identity: from, title, headline, body, ref, blocking: false,
       links: links ? JSON.parse(links) : null });
+    this.onCard(t, item.id, from);
   }
 
   private worktreeOf(id: number): string | null {
@@ -198,11 +221,9 @@ export class AwaitingBoard {
     return { project: r?.project ?? null, labels: r?.labels ?? '[]' };
   }
 
-  /** check and verify are his at once; a deploy only once it is stuck with no GO about it. */
+  /** check and verify are his at once; a deploy never is (the lead asks one GO for the project). */
   private isHis(t: AwaitingTask): boolean {
-    if (t.awaiting !== 'deploy') return true;
-    if (this.store.now() - t.awaiting_at < DEPLOY_STUCK_MS) return false;
-    return !this.goAbout(t);
+    return t.awaiting !== 'deploy';
   }
 
   /**

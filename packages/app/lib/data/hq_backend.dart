@@ -235,7 +235,7 @@ class HqBackend extends Backend {
   Future<void> _load() async {
     final results = await Future.wait([_get('/api/board'), _get('/api/inbox'), _get('/api/asks'), _get('/api/toggles')]);
     final board = (results[0]['identities'] as List).cast<Map<String, dynamic>>();
-    final inbox = (results[1]['items'] as List).cast<Map<String, dynamic>>();
+    final inbox = inboxOf(results[1]);
     final asks = (results[2]['asks'] as List).cast<Map<String, dynamic>>();
     final toggles = (results[3]['toggles'] as List).cast<Map<String, dynamic>>();
     // org.yaml `timezone` (#121): before the mapping, so "today" and every hour in it are his.
@@ -494,7 +494,7 @@ class HqBackend extends Backend {
       List<Map<String, dynamic>> list(String k, String f) => ((c[k] as Map)[f] as List).cast<Map<String, dynamic>>();
       company_time.CompanyTime.apply((c['board'] as Map)['timezone']);
       if (c['board'] is Map && (c['board'] as Map).containsKey('names')) companyNames = CompanyNames.fromJson(c['board']['names']);
-      _data = mapSnapshot(board: list('board', 'identities'), inbox: list('inbox', 'items'), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'),
+      _data = mapSnapshot(board: list('board', 'identities'), inbox: inboxOf(c['inbox']), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'),
           tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'), awaiting: _list(c['board'], 'awaiting'), asked: _list(c['board'], 'asked'),
           openTasks: (c['board'] as Map)['open_tasks'] is List ? _list(c['board'], 'open_tasks') : null,
           manager: ((c['board'] as Map)['manager'] as String?) ?? '');
@@ -1127,7 +1127,11 @@ class HqBackend extends Backend {
   /// Question and GO cards follow the inbox: one appears in the conversation of whoever asked, and
   /// one answered elsewhere (home, another device, a manager) stops asking here.
   void _syncAsks(Conversation chat, String identityId, CompanyData d) {
-    final open = {for (final w in d.waiting.where((w) => w.from == identityId && w.askId != null)) w.askId!: w};
+    // A task to check is a card here too, under the line that says what to check (task 986).
+    final open = {
+      for (final w in d.waiting.where((w) => w.from == identityId && w.askId != null)) w.askId!: w,
+      for (final w in d.checks.where((w) => w.from == identityId)) checkAskId(w): w,
+    };
     var added = false;
     for (final card in chat.items.whereType<AskCard>()) {
       if (card.state == AskState.open && card.askId != null && !open.containsKey(card.askId)) card.state = AskState.answered;
@@ -1138,7 +1142,9 @@ class HqBackend extends Backend {
       // At the time it was asked, not "now": a card stamped now sorted below everything and buried
       // every new message under it.
       final ts = a.createdAt ?? company_time.CompanyTime.now();
-      chat.items.add(a.kind == WaitKind.go
+      chat.items.add(a.kind == WaitKind.awaiting
+          ? CheckCard(id: 'check:${a.inboxId}', ts: ts, askId: checkAskId(a), from: identityId, headline: a.headline, details: a.body)
+          : a.kind == WaitKind.go
           ? GoCard(id: 'go:${a.inboxId}', ts: ts, askId: a.askId, ref: a.ref, from: identityId, headline: a.headline, details: a.body)
           : AskCard(id: 'ask:${a.askId}', ts: ts, askId: a.askId, from: identityId, headline: a.headline, question: a.body, options: a.options, blocking: a.blocking));
       added = true;
@@ -1467,6 +1473,23 @@ WorkerStatus mapStatus(String? s) => switch (s) {
 String _hm(int ms) => company_time.hm(DateTime.fromMillisecondsSinceEpoch(ms));
 
 /// hq DTOs -> the app's model. Pure, unit-tested (test/hq_mapping_test.dart).
+/// `/api/inbox`: what is his (`items`) and the tasks to check (`checks`, task 986). An older hq sends all of it in `items`.
+List<Map<String, dynamic>> inboxOf(dynamic r) => [
+      if (r is Map && r['items'] is List) ...(r['items'] as List).cast<Map<String, dynamic>>(),
+      if (r is Map && r['checks'] is List) ...(r['checks'] as List).cast<Map<String, dynamic>>(),
+    ];
+
+/// Blocked on him and only on him (hq's inbox.ts forOwner): a question, a GO, a sign-in, not a fault the system caught;
+/// and a fault the manager can't take ([manager]'s own fall, every account full), which would otherwise reach nobody.
+bool isHis(WaitItem w, {String manager = ''}) => switch (w.kind) {
+      WaitKind.go || WaitKind.login => true,
+      WaitKind.blockingAsk || WaitKind.softAsk => !isCaughtFault(w.from, w.askId),
+      // A failed delivery or shift (by its kicker, kickerFor below); "the manager decided" (escalation_note) is not one.
+      WaitKind.urgentProd || WaitKind.failure =>
+        w.ref == 'accounts-all-full' || (manager.isNotEmpty && w.from == manager && const {'הודעה לא נמסרה', 'עובד לא חזר אחרי קריסה'}.contains(w.kicker)),
+      _ => false,
+    };
+
 CompanyData mapSnapshot({
   required List<Map<String, dynamic>> board,
   required List<Map<String, dynamic>> inbox,
@@ -1571,6 +1594,7 @@ CompanyData mapSnapshot({
   String kickerFor(Map<String, dynamic> i) {
     final kind = i['kind'] as String;
     return switch (kind) {
+      'incident' when i['ref'] == 'accounts-all-full' => 'החשבונות מלאים',
       'incident' => 'דחוף בפרודקשן',
       'go' => 'GO לפרודקשן',
       'login' => 'כניסה לאתר',
@@ -1594,13 +1618,16 @@ CompanyData mapSnapshot({
   for (final i in inbox) {
     if (i['state'] != 'open') continue;
     final kind = switch (i['kind'] as String) {
+      // "All the accounts are full" is not a fault in prod to approve a fix for: no GO on it, only what it says.
+      'incident' when i['ref'] == 'accounts-all-full' => WaitKind.failure,
       'incident' => i['urgency'] == 'urgent' ? WaitKind.urgentProd : WaitKind.failure,
       'go' => WaitKind.go,
       'login' => WaitKind.login,
-      'delivery_failure' || 'shift_failure' => WaitKind.failure,
-      'ask' || 'escalation_note' => i['blocking'] == true ? WaitKind.blockingAsk : WaitKind.softAsk,
+      // "the manager decided for you" is the manager's line, not something waiting on him (task 986).
+      'delivery_failure' || 'shift_failure' || 'escalation_note' => WaitKind.failure,
+      'ask' => i['blocking'] == true ? WaitKind.blockingAsk : WaitKind.softAsk,
       'awaiting' => WaitKind.awaiting,
-      _ => WaitKind.softAsk,
+      _ => WaitKind.failure,
     };
     final ask = askById[i['ref']];
     final options = <AskOption>[
@@ -1782,7 +1809,9 @@ CompanyData mapSnapshot({
     teams: teams,
     identities: ids,
     presence: presence,
-    waiting: waiting,
+    // task 986: only what is blocked on him waits for him. A fault of the system is the manager's (an older hq still sends it).
+    waiting: [for (final w in waiting) if (isHis(w, manager: manager)) w],
+    checks: [for (final w in waiting) if (w.kind == WaitKind.awaiting) w],
     decisions: const [],
     digest: const [],
     digestSince: '',

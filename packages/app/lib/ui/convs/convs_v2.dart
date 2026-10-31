@@ -14,6 +14,7 @@ import '../../theme/motion.dart';
 import '../../theme/tokens.dart';
 import '../blocks/parts.dart' show kTabular;
 import '../common.dart';
+import '../decisions/decisions_screen.dart' show WaitingRow;
 import '../nav.dart';
 import '../system_bar.dart';
 import 'conversations_screen.dart';
@@ -195,6 +196,8 @@ class _ConversationsV2State extends State<ConversationsV2> {
       Column(children: [
         title,
         const SystemBar(),
+        // What waits for him, pinned above the list (task 986); not there when nothing does.
+        const WaitingRow(),
         Expanded(
           child: Stack(children: [
             NotificationListener<ScrollNotification>(
@@ -290,51 +293,11 @@ class HomeBarV2 extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
     final d = StoreScope.of(context).data!;
-    final decisions = d.waitingCount;
-    final sentence = firstSentence(fullSentence(d, d.home, stuck: stuckWorkers(d)));
+    // How many wait for him is the pinned row above (task 986): the folded home says the rest.
+    final top = firstSentence(topSentence(d, d.home, stuck: stuckWorkers(d)));
+    final sentence = top.isEmpty ? 'הבית' : top;
     final chevron = Ic('expand_more', size: 22, color: p.text2);
     final decorated = BoxDecoration(border: Border(bottom: BorderSide(color: p.line)));
-    // Something waits for him: the sentence is the way to it (the "החלטות" tab), and the chevron opens the home.
-    if (decisions > 0) {
-      return Material(
-        color: p.bg,
-        child: Container(
-          constraints: BoxConstraints(minHeight: height),
-          decoration: decorated,
-          child: Row(children: [
-            Expanded(
-              child: Semantics(
-                button: true,
-                label: sentence,
-                hint: 'מעבר להחלטות',
-                excludeSemantics: true,
-                onTap: () => NavScope.read(context).go(AppTab.decisions),
-                child: InkWell(
-                  onTap: () => NavScope.read(context).go(AppTab.decisions),
-                  child: Container(
-                    constraints: BoxConstraints(minHeight: height),
-                    padding: const EdgeInsetsDirectional.fromSTEB(16, 6, 8, 6),
-                    alignment: AlignmentDirectional.centerStart,
-                    child: Row(children: [
-                      Ic('front_hand', size: 18, fill: true, color: p.text),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(sentence, style: T.row2.copyWith(color: p.text, fontWeight: FontWeight.w500))),
-                    ]),
-                  ),
-                ),
-              ),
-            ),
-            Semantics(
-              button: true,
-              label: 'פתיחת הבית',
-              excludeSemantics: true,
-              onTap: onTap,
-              child: InkWell(onTap: onTap, child: SizedBox(width: 52, height: height, child: Center(child: chevron))),
-            ),
-          ]),
-        ),
-      );
-    }
     return Semantics(
       button: true,
       label: sentence,

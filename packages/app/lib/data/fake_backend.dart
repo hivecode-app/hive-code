@@ -309,18 +309,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
   ];
 
   final waiting = [
-    WaitItem(
-      id: 'w-rotem',
-      kind: WaitKind.urgentProd,
-      from: 'rotem',
-      time: "לפני 6 דק'",
-      kicker: 'דחוף בפרודקשן · טיקיבוט',
-      body: 'ה-webhook של וואטסאפ מחזיר 502 מ-13:58, כנראה מהפריסה של 13:55. ההצעה: לחזור ל-`r207`.',
-      options: const [AskOption(id: 'go', label: 'GO לחזרה', primary: true)],
-      askId: 'ask-rotem',
-      doneLine: 'GO נשלח · רותם מחזירה ל-r207',
-      short: 'דחוף · טיקיבוט 502',
-    ),
+    // rotem's urgent incident is not here: a system fault goes to the manager, not to him (task 986).
     WaitItem(
       id: 'w-ido',
       kind: WaitKind.blockingAsk,

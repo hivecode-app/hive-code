@@ -1,8 +1,13 @@
 // task-382: the disk at 85% is cleaned at once; at 92% after the cleaning it becomes one urgent item with the biggest consumers.
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeEnv } from './helpers.ts';
+import { makeEnv as make } from './helpers.ts';
 import { parseConsumers, parseBytes, type Machine } from '../src/disk-watch.ts';
+
+// Each hq here runs (noStart: false): it is closed at the end, or its timers keep the run up (an incident wakes the manager).
+const envs: Awaited<ReturnType<typeof make>>[] = [];
+const makeEnv = async (...a: Parameters<typeof make>) => { const e = await make(...a); envs.push(e); return e; };
+after(async () => { for (const e of envs) await e.cleanup(); });
 
 const ORG = (on: boolean) => `
 version: 1

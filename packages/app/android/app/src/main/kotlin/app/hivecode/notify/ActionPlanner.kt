@@ -63,6 +63,14 @@ object ActionPlanner {
 
     fun chatRoute(identityId: String) = "/chat/$identityId"
     fun handoffRoute(itemId: Long) = "/handoff/$itemId"
+    /** The item itself in the stack of what waits on him, not the worker's chat (task 986). */
+    fun waitRoute(itemId: Long) = "/wait/$itemId"
+    /** Where tapping an item leads: a login to its handoff, an ask or a GO to its card, anything else to the chat. */
+    fun openRoute(kind: String, itemId: Long, identityId: String) = when {
+        kind == "login" -> handoffRoute(itemId)
+        (kind == "ask" || kind == "go") && itemId > 0 -> waitRoute(itemId)
+        else -> chatRoute(identityId)
+    }
 
     /**
      * What the countdown says is about to be sent, so a GO can never be mistaken for another
@@ -91,19 +99,21 @@ object ActionPlanner {
 
     /**
      * Mirror of hq's pushWorthy (inbox.ts): only what blocks on him makes a notification (§5.1).
-     * In focus or night only an urgent production incident does. Everything else waits in the app.
+     * /api/inbox carries only what is his (task 986): system faults go to the manager, and what is left is a question,
+     * a GO, a login or the manager himself being down. A soft question waits for him quietly; in focus or night nothing pushes.
      */
-    fun pushWorthy(kind: String, urgency: String, blocking: Boolean, quiet: Boolean): Boolean {
-        val urgentIncident = kind == "incident" && urgency == "urgent"
-        if (quiet) return urgentIncident
-        if (urgentIncident) return true
-        if (kind == "go" || kind == "login") return true
-        return kind == "ask" && blocking
+    fun pushWorthy(kind: String, urgency: String, blocking: Boolean, quiet: Boolean, ref: String? = null): Boolean {
+        if (quiet) return false
+        // An hq from before task 986 still lists every incident: of those only "all the accounts are full" is his.
+        if (kind == "incident") return ref == ALL_FULL_REF
+        return kind != "ask" || blocking
     }
+
+    const val ALL_FULL_REF = "accounts-all-full"
 
     /** The button table of APP-SPEC §5.3, plus the per-worker fallback (reply, stop, handled). */
     fun plan(p: PlanInput): List<Action> {
-        val open = Action(Op.OPEN, Wording.OPEN, route = if (p.kind == "login") handoffRoute(p.itemId) else chatRoute(p.identityId))
+        val open = Action(Op.OPEN, Wording.OPEN, route = openRoute(p.kind, p.itemId, p.identityId))
         val go = Action(Op.GO, p.goLabel ?: Wording.GO)
         val actions = when {
             p.kind == "ask" && p.askOptions != null -> {

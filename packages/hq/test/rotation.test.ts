@@ -97,7 +97,8 @@ test('cap: an open GO of its own defers it too', async () => {
     await liveEli(env, 100);
     hq.inbox.add({ kind: 'go', title: 'GO: פריסה', from_identity: 'eli', blocking: true });
     launcher.hosts.get('eli-1')!.event(result(700_000));
-    await flush();
+    // A busy CI runner can take more than one flush to get there (31/10, #376).
+    await until(() => events(env, 'shift.rotation_deferred').length > 0, 3000, 'deferred');
     assert.equal(rotateAsk(env, 'eli').length, 0);
     assert.deepEqual(events(env, 'shift.rotation_deferred').map((e) => e.why), ['go']);
   } finally { await env.cleanup(); }

@@ -611,6 +611,8 @@ const MIGRATIONS: string[] = [
   // v35: when the worker began to answer his message (its first streamed word after it read it): with created_at and
   // handled_at, how long he waited for a word and for the whole reply, per worker (reply-times.ts).
   `ALTER TABLE messages ADD COLUMN first_word_at INTEGER;`,
+  // v36: an ask or GO he left 48 hours went back to the manager (inbox.ts returnStale): out of "מחכות לך", kept as it was.
+  `ALTER TABLE inbox ADD COLUMN returned_at INTEGER;`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

@@ -11,7 +11,7 @@ void main() {
 
   testWidgets('waiting list at 130% text keeps the first answer visible', (tester) async {
     await pumpApp(tester, textScale: 1.3, home: list);
-    expect(find.text('GO לחזרה'), findsOneWidget);
+    expect(find.text('ניסיון נוסף אחרי 24 שעות'), findsOneWidget);
   });
 
   testWidgets('one tap decides: folded at once with "ביטול" for 5s, then collapses (#258)', (tester) async {
@@ -28,7 +28,7 @@ void main() {
     expect(find.textContaining('ענית: ניסיון נוסף אחרי 24 שעות'), findsOneWidget);
     final ido = store.data!.waiting.firstWhere((w) => w.from == 'ido');
     expect(ido.state, WaitState.answered);
-    expect(store.data!.waitingCount, 3);
+    expect(store.data!.waitingCount, 2);
   });
 
   testWidgets('undo cancels the answer and brings the buttons back', (tester) async {
@@ -45,12 +45,12 @@ void main() {
   testWidgets('rows keep their place after an answer (nothing moves under the finger)', (tester) async {
     await pumpApp(tester, home: list);
     final before = tester.getTopLeft(find.text('עמית').first);
-    await tester.tap(find.text('GO לחזרה'));
+    await tester.tap(find.text('אישור').first);
     await tester.pump(const Duration(seconds: 6));
     await tester.pump();
     final after = tester.getTopLeft(find.text('עמית').first);
     // The answered row collapses (buttons -> one line), rows below may move up but never reorder.
     expect(after.dy <= before.dy, isTrue);
-    expect(findShown('GO נשלח · רותם מחזירה ל-r207'), findsOneWidget);
+    expect(findShown('GO נשלח · דנה מתחילה פריסה'), findsOneWidget);
   });
 }

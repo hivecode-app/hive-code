@@ -214,7 +214,16 @@ class AppStore extends ChangeNotifier {
     final to = nameOf(card.from);
     final key = decisionKey(card.askId, card.id);
     final at = company_time.CompanyTime.now();
-    if (option.id == 'go') {
+    if (card is CheckCard) {
+      // A task to check (task 986): its outcome, through the same call as on the task's item.
+      final w = data?.checks.where((w) => checkAskId(w) == card.askId).firstOrNull;
+      if (w == null) return;
+      startUndo(key, to, () async {
+        final r = await backend.awaitingOutcome(w, option.id);
+        _closeCard(card, option.label, at);
+        return r;
+      }, line: option.label, seconds: decisionUndoSeconds);
+    } else if (option.id == 'go') {
       startUndo(key, to, () async {
         final w = data?.waiting.where((w) => w.askId == card.askId).firstOrNull;
         _closeCard(card, 'GO', at);

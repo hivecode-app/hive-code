@@ -222,7 +222,8 @@ test('automatic switch: rate limit rejected → same session resumes on the othe
     launcher.hosts.get(row.id)!.event({ kind: 'rate_limit', status: 'rejected', resetsAt: resetsAt + 60 } as EngineEvent);
     await until(() => e.acct.blocked(e.acct.get('hive-owner')!), 2000, 'second blocked');
     await new Promise((r) => setTimeout(r, 100));
-    assert.equal(launcher.launches.length, 2);
+    // rotem's: no third.
+    assert.equal(launcher.launches.filter((x) => x.shiftId === row.id).length, 2);
   } finally { await e.cleanup(); }
 });
 
@@ -297,7 +298,7 @@ test('adapter: a managed account runs with its own CLAUDE_CONFIG_DIR; no account
   assert.equal(buildEnv(spec, { CLAUDE_CONFIG_DIR: '/other' }).CLAUDE_CONFIG_DIR, undefined);
 });
 
-test('all accounts full: one urgent item with the first reset, kept as one, closed by itself with a "חזרנו" message', async () => {
+test('all accounts full: one urgent item for him (the manager can\'t work either) with the first reset, kept as one, closed by itself with a "חזרנו" message', async () => {
   const e = await env();
   try {
     e.hq.store.db.prepare(`UPDATE accounts SET health = 'ok' WHERE name = 'hive-owner'`).run();
@@ -322,7 +323,11 @@ test('all accounts full: one urgent item with the first reset, kept as one, clos
     assert.equal(it[0]!.title, 'כל החשבונות של Claude מלאים, והעבודה עומדת עד מחר ב-12:00');
     assert.match(it[0]!.body, /hive-owner: 5 שעות 10%, שבועי 100%\. נפתח מחר ב-12:00\./);
     assert.match(it[0]!.body, /החשבון הראשי: 5 שעות 40%, שבועי 100%\. נפתח יום חמישי 22\/10 ב-04:00\./);
-    assert.ok(pushWorthy(e.hq.inbox.get(it[0]!.id)!, false), 'an urgent incident is pushed');
+    // Task 986: a fault of the system is the manager's, but not this one: with every account full the manager can't work
+    // either, so it is his, pushed, and not sent to the manager (who would only fail to get it).
+    assert.ok(pushWorthy(e.hq.inbox.get(it[0]!.id)!, false, e.hq.inbox.manager), 'pushed to him');
+    assert.ok(e.hq.inbox.mine().some((i) => i.id === it[0]!.id), 'in what waits on him');
+    assert.equal(e.hq.store.db.prepare(`SELECT 1 FROM messages WHERE id = ?`).get(`inbox-${it[0]!.id}-to-manager`), undefined, 'not to the manager');
 
     // Still full on the next sweeps: still the same one item.
     await e.acct.refresh();

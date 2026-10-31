@@ -11,7 +11,7 @@ import 'package:agent_company/data/store.dart';
 import 'package:agent_company/main.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/common.dart';
-import 'package:agent_company/ui/decisions/decisions_screen.dart';
+import 'package:agent_company/data/hq_backend.dart' show isHis;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -268,26 +268,10 @@ void main() {
       expect(took, isEmpty);
     });
 
-    for (final (look, dark) in [('light', false), ('dark', true)]) {
-      testWidgets('hq\'s card for a fault in the "החלטות" tab: its title, the line, "לטפל" and "לא עכשיו" ($look)', (tester) async {
-        final store = await pumpApp(tester, dark: dark, size: const Size(342, 900), home: const SizedBox());
-        store.data!.waiting
-          ..clear()
-          ..add(_faultCard());
-        decisionQueue
-          ..order.clear()
-          ..done.clear()
-          ..current = null;
-        await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: const Scaffold(body: DecisionsScreen())));
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull);
-        expect(findShown('תפסתי תקלה · 3 פעמים מ-13:40'), findsOneWidget);
-        expect(find.text('לטפל'), findsOneWidget);
-        expect(find.text('לא עכשיו'), findsWidgets);
-        expect(find.text('תשובה אחרת'), findsNothing, reason: 'the fault card has two answers');
-        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/errors/fault_card_$look.png'));
-      });
-    }
+    test('a fault hq caught is the manager\'s, not his: it never reaches what waits on him (task 986)', () {
+      expect(isCaughtFault(_faultCard().from, _faultCard().askId), isTrue);
+      expect(isHis(_faultCard()), isFalse);
+    });
   });
 
 }

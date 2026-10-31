@@ -32,6 +32,7 @@ class CompanyData {
     this.focus = false,
     this.night,
     this.awaiting = const [],
+    this.checks = const [],
     this.asked = const [],
     this.home,
     this.managerId = '',
@@ -44,7 +45,11 @@ class CompanyData {
   final Map<String, Team> teams;
   final Map<String, Identity> identities;
   final Map<String, Presence> presence;
+  /// What is blocked on him and only on him (task 986): a question, a GO, a sign-in. The rest is the manager's.
   final List<WaitItem> waiting;
+
+  /// Tasks he is asked to check: cards in their worker's conversation ("עובד" / "לא עובד"), never counted as waiting.
+  final List<WaitItem> checks;
   final List<DecisionByManager> decisions;
 
   /// Yoav's digest lines since the last visit (markup), max 5 on home.

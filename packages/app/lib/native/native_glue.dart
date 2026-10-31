@@ -14,6 +14,7 @@ import '../model/models.dart';
 import '../theme/tokens.dart';
 import '../ui/chat/chat_screen.dart';
 import '../ui/common.dart';
+import '../ui/decisions/decisions_screen.dart' show DecisionStack, openDecisions;
 import '../ui/nav.dart';
 import 'app_update.dart';
 import 'native_bridge.dart';
@@ -98,17 +99,23 @@ class NativeGlue {
 
   BuildContext? get _ctx => navigatorKey.currentContext;
 
-  /// `/chat/<identityId>`, `/handoff/<inboxId>`, `/`.
+  /// `/wait/<inboxId>`, `/chat/<identityId>`, `/handoff/<inboxId>`, `/`.
   void open(String route) {
     final ctx = _ctx;
     if (ctx == null) return;
     final parts = Uri.parse(route).pathSegments;
-    if (parts.length == 2 && parts[0] == 'chat' && parts[1] == kSystemId) {
-      // A notification from the system: its item, not a conversation that doesn't exist (#55).
+    if (parts.length == 2 && parts[0] == 'wait') {
+      // A notification of a question or a GO: that item, on top of the pile (task 986), not a conversation that may be empty.
+      if (!DecisionStack.shown) navigatorKey.currentState!.popUntil((r) => r.isFirst);
+      final open = navigatorKey.currentContext ?? ctx;
+      final w = store.data?.waiting.where((w) => '${w.inboxId}' == parts[1]).firstOrNull;
+      if (w != null && w.kind == WaitKind.login) return Nav.handoff(open, w);
+      openDecisions(open, at: 'inbox:${parts[1]}');
+    } else if (parts.length == 2 && parts[0] == 'chat' && parts[1] == kSystemId) {
+      // A notification from the system: what waits for him, not a conversation that doesn't exist (#55).
       navigatorKey.currentState!.popUntil((r) => r.isFirst);
-      final w = store.data?.waiting.where((w) => w.from == kSystemId && w.state == WaitState.open).firstOrNull;
-      if (w != null) {
-        Nav.waitItem(ctx, w);
+      if ((store.data?.waitingCount ?? 0) > 0) {
+        openDecisions(navigatorKey.currentContext ?? ctx);
       } else {
         NavScope.read(ctx).go(AppTab.chats);
       }

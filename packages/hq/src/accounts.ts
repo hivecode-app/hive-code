@@ -325,7 +325,8 @@ export class AccountManager {
   }
 
   /**
-   * All accounts full → one urgent item in his "החלטות" (pushed), with when the first one reopens, in his time.
+   * All accounts full → one urgent incident for the owner (task 986: the manager is down with everyone else, so this
+   * one is his, inbox.ts managerDown), with when the first one reopens, in his time.
    * It stays one item while it lasts (new words if the times move), closes by itself once an account takes work
    * again, and then he gets a short message that we are back. Part of the `accounts` automation.
    */

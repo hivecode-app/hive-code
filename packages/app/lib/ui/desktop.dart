@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../data/backend.dart' show CompanyData;
 import '../data/store.dart';
 import '../model/models.dart';
 import '../theme/tokens.dart';
@@ -12,7 +11,6 @@ import 'chat/items.dart' show shortcutAsk, shortcutOptions;
 import 'chat/tool_details.dart';
 import 'common.dart';
 import 'convs/conversations_screen.dart';
-import 'decisions/decisions_strip.dart';
 import 'decisions/decisions_screen.dart';
 import 'nav.dart';
 import 'projects/projects_screen.dart';
@@ -55,10 +53,6 @@ class _DesktopFrameState extends State<DesktopFrame> {
   /// The main column shows a conversation (not the home).
   static bool _chatShown(AppNav nav, AppStore store) => !(nav.tab == AppTab.chats && store.homeOpen);
 
-  /// The conversation on the screen has a decision of his open in its card: the line above the keys would say it twice.
-  static bool _decisionShown(AppNav nav, AppStore store, CompanyData d) =>
-      _chatShown(nav, store) && d.waiting.any((w) => w.from == store.currentConversation && (w.state == WaitState.open || w.state == WaitState.pending) && !d.superseded(w));
-
   KeyEventResult _onKey(FocusNode _, KeyEvent e) {
     if (e is! KeyDownEvent) return KeyEventResult.ignored;
     final nav = NavScope.read(context);
@@ -83,11 +77,14 @@ class _DesktopFrameState extends State<DesktopFrame> {
     }
     // Single-letter shortcuts are off while a text field has focus (§8.2).
     if (_typing || ctrl) return KeyEventResult.ignored;
-    if (nav.tab == AppTab.decisions && !gPrefix && decisionKey(context, k)) return KeyEventResult.handled;
     if (gPrefix) {
       gPrefix = false;
+      // G D: what waits for him, as the pile (task 986: no tab).
+      if (k == PhysicalKeyboardKey.keyD) {
+        openDecisions(context);
+        return KeyEventResult.handled;
+      }
       final t = {
-        PhysicalKeyboardKey.keyD: AppTab.decisions,
         PhysicalKeyboardKey.keyC: AppTab.chats,
         PhysicalKeyboardKey.keyS: AppTab.status,
         PhysicalKeyboardKey.keyP: AppTab.projects,
@@ -234,11 +231,6 @@ class _DesktopFrameState extends State<DesktopFrame> {
         list = const ProjectsScreen();
         main = ChatScreen(identityId: selected, embedded: true);
         side = _ContextColumn(identityId: selected);
-      case AppTab.decisions:
-        // Its own list and the decision, across the whole width (decisions_screen.dart).
-        list = const SizedBox.shrink();
-        main = const SizedBox.shrink();
-        side = null;
     }
 
     // A tool's details take the side column while its conversation is open; Esc or the X give it back.
@@ -268,7 +260,6 @@ class _DesktopFrameState extends State<DesktopFrame> {
                   ),
               ]),
             ),
-            if (nav.tab == AppTab.decisions) const Expanded(child: DecisionsDesktop()) else ...[
             Container(
               // The chats column holds the home over the phone's two-line rows (convs_v2.dart), 360 wide.
               width: nav.tab == AppTab.chats ? 360 : 380,
@@ -282,12 +273,8 @@ class _DesktopFrameState extends State<DesktopFrame> {
               ),
             ),
             if (side != null && ctxCol) SizedBox(width: toolSide ? 420 : 330, child: Container(color: p.surface, child: side)),
-            ],
           ]),
         ),
-        // The line says how many decisions wait; not on the tab itself, and not in a conversation whose decision is
-        // open right there in its card.
-        DecisionsStrip(hidden: nav.tab == AppTab.decisions || (nav.tab == AppTab.chats && store.homeOpen) || (d != null && _decisionShown(nav, store, d))),
         _KeyBar(chat: _chatShown(nav, store)),
       ]),
     );
@@ -299,7 +286,7 @@ const kShortcuts = [
   ('Ctrl K', 'מעבר מהיר'),
   ('Ctrl F', 'חיפוש בשיחה'),
   ('G  H / C / B / O', 'בית, שיחות, לוח, ארגון'),
-  ('G  D', 'החלטות'),
+  ('G  D', 'מחכות לך'),
   ('J / K', 'הבא, הקודם'),
   ('Enter', 'שליחה אחרי הצעד הנוכחי'),
   ('Ctrl Enter', 'שליחה עכשיו'),
@@ -320,31 +307,21 @@ class _KeyBar extends StatelessWidget {
           for (final k in keys) ...[Kbd(k), const SizedBox(width: 4)],
           Text(label, style: T.meta.copyWith(color: p.text2)),
         ]);
-    return ListenableBuilder(listenable: decisionQueue, builder: (context, _) => Container(
+    return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(color: p.surface, border: Border(top: BorderSide(color: p.line))),
       child: Wrap(spacing: 18, runSpacing: 6, children: [
-        if (NavScope.of(context).tab == AppTab.decisions) ...[
-          // Keys that do nothing are not listed: with nothing to decide, 1-4 and J K have no effect.
-          if (decisionQueue.remaining > 0) ...[
-            item(['1', '4'], 'תשובה'),
-            item(['J', 'K'], 'הבאה, הקודמת'),
-          ],
-          item(['G', 'C'], 'שיחות'),
-          item(['?'], 'כל הקיצורים'),
-        ] else ...[
-          item(['Ctrl K'], 'מעבר מהיר'),
-          item(['Ctrl F'], 'חיפוש בשיחה'),
-          item(['G', 'D'], 'החלטות'),
-          if (chat) ...[
-            item(['1', '3'], 'תשובה לשאלה'),
-            item(['Ctrl .'], 'עצירת העובד'),
-          ],
-          item(['?'], 'כל הקיצורים'),
+        item(['Ctrl K'], 'מעבר מהיר'),
+        item(['Ctrl F'], 'חיפוש בשיחה'),
+        if ((StoreScope.of(context).data?.waitingCount ?? 0) > 0) item(['G', 'D'], 'מחכות לך'),
+        if (chat) ...[
+          item(['1', '3'], 'תשובה לשאלה'),
+          item(['Ctrl .'], 'עצירת העובד'),
         ],
+        item(['?'], 'כל הקיצורים'),
       ]),
-    ));
+    );
   }
 }
 

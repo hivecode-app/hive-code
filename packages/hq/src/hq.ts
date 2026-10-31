@@ -1,7 +1,7 @@
 // `company hq` composition root: one process (B.1) wiring store, mailboxes, inbox, scheduler,
 // watchdog, probe-runner, push, backups and the API. Timers are plain intervals; every loop is
 // independently guarded so one failing loop never stops the others.
-import { g, loadNames, OWNER } from '@company/shared';
+import { g, loadNames, OWNER, pre } from '@company/shared';
 import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 import type { HqConfig } from './config.ts';
@@ -10,7 +10,7 @@ import { readCharter, repoOfWorktree } from './workspace.ts';
 import { syncOrg, getIdentity, listIdentities, listProjects, listTones, projectLead, renameTaskWorkers } from './org.ts';
 import { Inbox } from './inbox.ts';
 import { Conversations } from './conversations.ts';
-import { AwaitingBoard } from './awaiting.ts';
+import { AwaitingBoard, DEPLOY_STUCK_MS } from './awaiting.ts';
 import { Estimates } from './estimates.ts';
 import { Access, type JobRunner } from './access.ts';
 import { Leases } from './leases.ts';
@@ -177,6 +177,17 @@ export class Hq {
     this.resources = new Resources(this);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
+    // task 986: a fault of the system (an incident, a failed delivery or shift) is the manager's, the moment it comes in.
+    // He hears from the manager only what is blocked on him. A fault the error-catcher caught goes there as an ask (mailbox.ask).
+    this.inbox.setRouter((item) => {
+      if (item.kind === 'ask') return;
+      const kind = { incident: 'תקלה', delivery_failure: 'הודעה שלא נמסרה', shift_failure: 'עובד שנפל ולא קם' }[item.kind as string] ?? item.kind;
+      const from = item.from_identity && item.from_identity !== this.cfg.managerId ? ` (${pre('מ', this.mailbox.label(item.from_identity))})` : '';
+      this.mailbox.tell({ msg_id: `inbox-${item.id}-to-manager`, from: 'hq', to: this.cfg.managerId, kind: 'system', ref: item.ref ?? `inbox-${item.id}`,
+        priority: item.urgency === 'urgent' ? 'now' : 'next', urgency: item.urgency,
+        body: [`${kind}${from}: ${item.title}`, item.body.slice(0, 2000),
+          `זה מגיע אליך ולא ${pre('ל', this.mailbox.names.owner.name)}: תקלות מערכת הן שלך. מעבירים לו רק מה שחסום עליו, כשאלה או בקשת GO.`].filter(Boolean).join('\n\n') });
+    }, this.cfg.managerId);
     this.awaiting = new AwaitingBoard(this.store, this.inbox);
     // Whose the card is and who hears "נכשל": the task's opener, else its project's lead, else the manager. One that
     // can't hear it (gone from org.yaml, or a task worker whose task closed) is skipped: the message would bounce
@@ -198,6 +209,17 @@ export class Hq {
       }
       this.mailbox.tell({ msg_id: `inbox-${itemId}-failed`, from: OWNER, to, kind: 'answer', ref: `task-${t.id}`, priority: 'now',
         body: `${o.name} ${g(o, 'סימן', 'סימנה')} "נכשל" על משימה ${t.id} (${t.title}): ${what}\nאם יש פרטים, הם יגיעו ${g(o, 'ממנו', 'ממנה')} בהודעה נפרדת. המשימה ירדה מ"מחכה לך".` });
+    };
+    // task 986: a task to check is a card in the opener's conversation, with a line there that says what to check.
+    this.awaiting.onCard = (t, itemId, from) => {
+      this.mailbox.tell({ msg_id: `inbox-${itemId}-check`, from: from ?? this.cfg.managerId, to: OWNER, kind: 'tell', ref: `task-${t.id}`, priority: 'next',
+        body: `${t.awaiting === 'verify' ? 'לבדוק לפני שחרור' : 'לבדוק'}: ${t.awaiting_note ?? t.summary ?? t.title}` });
+    };
+    // A deploy is never his card: its opener bundles what waits in the project into one GO (once per wait).
+    this.awaiting.onStuck = (t, to) => {
+      this.mailbox.tell({ msg_id: `task-${t.id}-deploy-stuck-${t.awaiting_at}`, from: 'hq', to, kind: 'system', ref: `task-${t.id}`, priority: 'next',
+        body: `משימה ${t.id} (${t.title}${t.pr ? `, PR #${t.pr}` : ''}) מוזגה ומחכה לפריסה כבר ${Math.round(DEPLOY_STUCK_MS / 3600_000)} שעות, בלי בקשת GO. `
+          + `מאחדים את כל מה שמחכה לפריסה בפרויקט לבקשת GO אחת (request_go). אם היא כבר נפרסה: status עם awaiting: "none" על המשימה, או דיווח פריסה.` });
     };
     this.estimates = new Estimates(this.store);
     this.access = new Access(this, deps.accessRunner);
@@ -338,6 +360,8 @@ export class Hq {
     // #219: what waited on him before this version (and anything a crash left half-done) gets its card now.
     this.awaiting.sweep();
     this.store.emit('hq.started', null, { pid: process.pid });
+    // task 986: a fault caught while the card was still his goes to the manager, as a new one does.
+    this.mailbox.caughtFaultsToManager();
     if (opts.timers !== false) {
       const T = this.cfg.timers;
       this.loopWatch.start();
@@ -346,7 +370,12 @@ export class Hq {
       this.every(5_000, 'spool', () => this.shifts.collectSpools());
       this.every(T.watchdogMs, 'watchdog', async () => { await this.watchdog.sweep(); await this.shifts.releaseEnded(); });
       this.every(T.livenessMs, 'liveness', () => this.shifts.pingAll());
-      this.every(T.schedulerMs, 'scheduler', async () => { await this.scheduler.sweep(); if (!this.cfg.codexLean) { await this.night.sweep(); this.home.watchAsked(); } this.awaiting.sweep(); });
+      this.every(T.schedulerMs, 'scheduler', async () => {
+        await this.scheduler.sweep();
+        if (!this.cfg.codexLean) { await this.night.sweep(); this.home.watchAsked(); }
+        this.awaiting.sweep();
+        this.inbox.returnStale((i) => this.mailbox.returnToManager(i));
+      });
       this.every(5_000, 'probes', () => this.probes.tick());
       // reserve (leases.ts): the ceiling of a class, a company-run that stopped answering, a place nobody takes; then whoever waits is served.
       this.every(5_000, 'leases', () => this.leases.sweep());

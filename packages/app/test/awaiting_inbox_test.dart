@@ -49,7 +49,7 @@ List<Map<String, dynamic>> _load(String name, String key) =>
     (jsonDecode(File('test/fixtures/samples/hq/$name.json').readAsStringSync())[key] as List).cast<Map<String, dynamic>>();
 
 void main() {
-  test('an hq `awaiting` item maps to a non-blocking card with "עובד" and "לא עובד"', () {
+  test('an hq `awaiting` item maps to a check with "עובד" and "לא עובד", not to what waits on him (task 986)', () {
     final at = DateTime(2026, 10, 22, 1, 58).millisecondsSinceEpoch;
     final d = mapSnapshot(
       board: _load('board', 'identities'),
@@ -62,7 +62,8 @@ void main() {
       asks: const [],
       toggles: const [],
     );
-    final w = d.waiting.single;
+    expect(d.waiting, isEmpty, reason: 'a check is a message in the worker\'s chat, not a card in the stack');
+    final w = d.checks.single;
     expect(w.kind, WaitKind.awaiting);
     expect(w.blocking, isFalse);
     expect(w.kicker, 'לבדוק');

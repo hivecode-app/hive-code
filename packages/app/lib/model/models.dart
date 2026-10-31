@@ -648,6 +648,27 @@ class GoCard extends AskCard {
         ]);
 }
 
+/// A task he is asked to check (task 986), in its worker's conversation: "עובד" or "לא עובד". Its askId is `check:<inbox id>`.
+class CheckCard extends AskCard {
+  CheckCard({
+    required super.id,
+    required super.ts,
+    required super.from,
+    super.headline,
+    required String details,
+    super.state,
+    super.answer,
+    super.askId,
+    super.seq,
+  }) : super(question: details, blocking: false, options: kCheckOptions);
+}
+
+/// The answers on a task to check: it works, it doesn't, or it isn't relevant any more (#297).
+const kCheckOptions = kAwaitingOptions;
+
+/// The card's id for a task to check.
+String checkAskId(WaitItem w) => 'check:${w.inboxId}';
+
 enum PermissionState { open, allowed, denied, allowedForTask }
 
 class PermissionCard extends ChatItem {

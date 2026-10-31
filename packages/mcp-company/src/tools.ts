@@ -27,7 +27,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
   const awaitingArgs: Record<string, Schema> = {
     awaiting: oneOf(['deploy', 'check', 'verify', 'none'], 'מה המשימה עוד מחכה ' + G('לו', 'לה') + ': deploy = מוזג ומחכה ל-GO או לפריסה (מתנקה לבד כשפריסה כוללת אותה), '
       + 'check = כבר בפרודקשן ' + pre('ו', O) + ' ' + G('צריך', 'צריכה') + ' לבדוק משהו ' + G('בעצמו', 'בעצמה') + ' (מתנקה ' + G('כשהוא מסמן', 'כשהיא מסמנת') + ' "בוצע"), verify = לבדוק לפני שחרור, למשל build ב-TestFlight, none = כלום, מנקה. בלי: לא מחכה לכלום. '
-      + 'check ו-verify מופיעים מיד ' + G('אצלו', 'אצלה') + ' בטאב "החלטות" עם "עובד", "לא עובד" ו"לא רלוונטי", ושני האחרונים מגיעים לפותח המשימה. deploy מופיע שם רק אם עברו 6 שעות בלי פריסה ובלי בקשת GO עליו, ומתנקה גם כשמשימות ההמשך שלו (שבכותרת שלהן "משימה <id>") נסגרו. '
+      + 'check ו-verify מגיעים מיד ' + G('אליו', 'אליה') + ' כהודעה בשיחה איתך, עם "עובד" ו"לא עובד", ו"לא עובד" מגיע לפותח המשימה. deploy לא מגיע ' + G('אליו', 'אליה') + ' אף פעם: מאחדים פריסות לבקשת GO אחת לפרויקט (request_go), ואחרי 6 שעות בלי פריסה ובלי בקשת GO hq מזכיר לך. '
       + 'רק מה שבאמת מחכה ' + G('לו', 'לה') + ' וחוסם: בלי ' + G('הבדיקה שלו', 'הבדיקה שלה') + ' או בלי הפריסה העבודה לא גמורה. הצעה, "אם בא לך" או משהו שאפשר לעשות בלי ' + G('אותו', 'אותה') + ' לא נכנסים ל-awaiting: כותבים אותם ב-tell. '
       + '/ only what truly waits on ' + G('him', 'her') + ' and blocks; a suggestion or an optional check goes in a tell. deploy = merged, waits for GO or a deploy; check = live, ' + G('he has', 'she has') + ' to check something ' + G('himself', 'herself') + '; verify = to check before release (a TestFlight build); none = clears'),
     awaiting_note: s('עם awaiting: שורה אחת במילים ' + G('שלו', 'שלה') + ', מה מחכה או מה לבדוק, פותחים במה מבקשים, e.g. "לבדוק בטלפון שתמונה נשלחת ועולה בצ\'אט" '
@@ -109,7 +109,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
     }, ['state']),
     tool('status', 'עדכון מצב העובד. עם state: "done" המשימה נסגרת, ותמיד כותבים summary: זו השורה ' + pre('ש', O) + ' רואה ב"מאז שהיית פה" וב"מה הסתיים". '
       + 'בלי summary ' + G('הוא רואה', 'היא רואה') + ' רק את שם המשימה. '
-      + 'אם משהו עוד מחכה ' + G('לו', 'לה') + ' (פריסה אחרי GO, או משהו ' + G('שהוא צריך', 'שהיא צריכה') + ' לבדוק ' + G('בעצמו', 'בעצמה') + '), מוסיפים awaiting ו-awaiting_note, וזה מופיע ' + G('אצלו', 'אצלה') + ' בטאב "החלטות". '
+      + 'אם משהו עוד מחכה ' + G('לו', 'לה') + ' (פריסה אחרי GO, או משהו ' + G('שהוא צריך', 'שהיא צריכה') + ' לבדוק ' + G('בעצמו', 'בעצמה') + '), מוסיפים awaiting ו-awaiting_note, ו-check או verify מגיעים ' + G('אליו', 'אליה') + ' כהודעה בשיחה עם "עובד" ו"לא עובד". '
       + 'המשימה נסגרת כשהסבב נגמר, ורק אם ענית על כל מה ' + pre('ש', O) + ' ' + G('שלח', 'שלחה') + ' לך. אחרת hq כותב לך "' + O + ' מחכה לתשובה על…" והיא נשארת פתוחה. '
       + 'The task closes when the turn ends, and only if every message ' + G('he', 'she') + ' sent you was answered; else hq tells you so and it stays open. '
       + 'Update your working status. With state "done" the task closes; always give summary: it is the line ' + G('he sees', 'she sees') + ' under "since you were here" '
@@ -160,7 +160,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
         + '/ close even though the owner is still waiting for an answer from the worker (without it hq warns and does not close)' },
       ...awaitingArgs,
     }, ['team']),
-    tool('withdraw_ask', 'סגירת שאלה שלך שההחלטה בה התקבלה בדרך אחרת, כדי שלא תישאר אצל ' + O + ' בטאב "החלטות". הקריאה מוחקת את הכרטיס ולא שולחת תשובה. '
+    tool('withdraw_ask', 'סגירת שאלה שלך שההחלטה בה התקבלה בדרך אחרת, כדי שלא תישאר אצל ' + O + ' ב"מחכות לך". הקריאה מוחקת את הכרטיס ולא שולחת תשובה. '
       + 'Withdraw an ask of yours that was decided another way, so it does not stay in ' + O + '\'s decisions tab. The card is closed; no answer is sent.', {
       ask: s('מזהה השאלה (ה-ref שחזר מ-ask) / the ask id (the ref ask returned)'),
       note: s('למה נסגרה, שורה אחת בעברית / why it closed, one line in Hebrew'),
@@ -190,12 +190,12 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
     tool('compose_home', 'הרכבת ראש מסך השיחות של ' + O + ': אילו בלוקים, באיזה סדר ובאיזה ניסוח. רק ' + (n.composer ? `${pre('ל', n.composer.name)} ${pre('ו', pre('ל', n.manager.name))}` : pre('ל', n.manager.name)) + '. '
       + 'האפליקציה מציירת כל בלוק מקומפוננטה קבועה וממלאת אותו מנתונים חיים, ולכן מפנים לנתונים לפי מזהה, והטקסט בעברית. '
       + 'אוצר הבלוקים: '
-      + 'headline {text} משפט אחד. האפליקציה מוסיפה לפניו לבד "N החלטות מחכות לך." מהנתון החי כשיש החלטות, לחיצה עליו מובילה לטאב "החלטות", ולכן לא כותבים בו כמה מחכה ' + G('לו', 'לה') + ' · alert {shift: מזהה משמרת} תקלה שאין עליה החלטה, למשל משמרת תקועה · '
+      + 'headline {text} משפט אחד. מה שמחכה ' + G('לו', 'לה') + ' מוצג בשורה נעוצה משלו בראש השיחות ("3 מחכות לך"), ולכן לא כותבים בו כמה מחכה ' + G('לו', 'לה') + ' · alert {shift: מזהה משמרת} תקלה שאין עליה החלטה, למשל משמרת תקועה · '
       + 'tasks {tasks: [מזהי משימות] או "open"} בעבודה ובתור: משימות פתוחות עם מי פתח, מי עובד והמצב. "open" מציג את כולן, ורשימה מציגה משימה מסוימת (למשל דחופה) · '
       + 'lanes {projects: [ids]} פסי היום · '
       + 'project {project, note?} שתי שורות · quiet {projects: [ids]} שורה אחת בסוף, "שקט גם ב: …", לפרויקטים שלא זזו · people {identities: [ids], caption?} · since {items: [עד 3: משפט, או {text, task: מזהה משימה}]}, עם task השורה מובילה לשיחה עם מי שעשה את המשימה · '
       + 'note {text, icon} הערה שלך, icon הוא שם של Material Symbol. לכל בלוק אפשר emphasis: normal|quiet|strong (טיפוגרפיה בלבד). '
-      + 'ההחלטות (GO, שאלות, בדיקות, תקלות עם תשובה) לא בבית: הן בטאב "החלטות" באפליקציה, ו-waiting, asked, awaiting ו-alert על inbox לא מוצגים (אם הם מגיעים, מדלגים עליהם בשקט). '
+      + 'ההחלטות (GO, שאלות, בדיקות, תקלות עם תשובה) לא בבית: הן בשורה "מחכות לך" בראש השיחות, ו-waiting, asked, awaiting ו-alert על inbox לא מוצגים (אם הם מגיעים, מדלגים עליהם בשקט). '
       + 'בלוק לא מוכר, שדה חסר או הפניה שלא קיימת נדחים עם הסיבה. מה שנסגר נעלם לבד. '
       + 'מתכון ישן מ-30 דקות מתחלף בברירת המחדל של hq. '
       + 'דוגמה: [{"type":"headline","text":"בוקר שקט, שתי משימות רצות"},'

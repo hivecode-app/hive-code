@@ -78,7 +78,7 @@ export class Pusher {
   /** Called for every new inbox item; decides whether it is allowed to interrupt him. */
   async notify(item: InboxItemDTO): Promise<void> {
     if (!this.store.toggle('push')) return;
-    if (!pushWorthy(item, this.store.toggle('focus'))) return;
+    if (!pushWorthy(item, this.store.toggle('focus'), this.inbox.manager)) return;
     const payload = JSON.stringify({ id: item.id, kind: item.kind, title: item.title, body: item.body.slice(0, 300), url: `/?inbox=${item.id}` });
     const { subs, delivered, errors } = await this.sendAll(payload);
     this.inbox.markPushed(item.id, subs && !delivered ? errors.join('; ') : null);
