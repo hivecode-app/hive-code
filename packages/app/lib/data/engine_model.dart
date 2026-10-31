@@ -19,7 +19,9 @@ class EngineModel {
   int lastSeq = 0;
   final _streams = <String, TextMsg>{};
   ToolGroup? _group;
-  final _groupTools = <String, int>{}; // toolUseId -> index in group.tools
+  // toolUseId -> its group and index there. The group, not the open one: a result can come after text closed it
+  // (Codex runs tools side by side), and an index into the next group threw RangeError or marked the wrong row.
+  final _groupTools = <String, (ToolGroup, int)>{};
   final _hiddenTools = <String>{}; // toolUseIds with no row (hiddenTool)
   final _askCards = <String, HandoffCard>{}; // toolUseId -> its card (browser_ask_user)
   final _toolNames = <String, List<String>>{}; // group id -> tool names in order
@@ -52,6 +54,7 @@ class EngineModel {
         }
         _streams.clear();
         _hiddenTools.clear();
+        _groupTools.clear();
         for (final c in _askCards.values) {
           c.ended = true;
         }
@@ -126,7 +129,7 @@ class EngineModel {
           return;
         }
         final g = _group ??= _newGroup(ts, seq);
-        _groupTools[id] = g.tools.length;
+        _groupTools[id] = (g, g.tools.length);
         _toolStarted[id] = ts;
         (_toolNames[g.id] ??= []).add(name);
         g.tools.add(ToolLine(icon: toolIcon(name), label: toolDetail(name, input), name: name, outcome: Outcome.running,
@@ -150,9 +153,9 @@ class EngineModel {
           onLive?.call(const LiveState(phase: LivePhase.thinking));
           return;
         }
-        final g = _group;
-        final i = _groupTools[id];
-        if (g == null || i == null) return;
+        final at = _groupTools.remove(id);
+        if (at == null) return;
+        final (g, i) = at;
         final old = g.tools[i];
         final err = ev['isError'] == true;
         g.tools[i] = ToolLine(icon: old.icon, label: old.label, name: old.name, trail: old.trail, outcome: err ? Outcome.error : Outcome.ok,
@@ -172,6 +175,7 @@ class EngineModel {
         final cut = ev['interrupted'] == true;
         final failed = ev['isError'] == true && !cut;
         _closeGroup(cut ? Outcome.interrupted : failed ? Outcome.error : Outcome.ok);
+        _groupTools.clear(); // a row the turn ended on stays stopped
         final toldAt = _toldAt;
         if (toldAt != null) {
           final drop = _turnTexts.skip(toldAt).toSet();

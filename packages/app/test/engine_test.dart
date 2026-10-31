@@ -287,4 +287,37 @@ void main() {
     expect((items.last as HandoffCard).failed, isFalse);
     expect(items.whereType<ToolGroup>(), isEmpty);
   });
+
+  test('a result that comes after text closed its group marks its own row, not the next group (RangeError, 31/10)', () {
+    // Codex runs tools side by side: t1's result arrives after a text and a new group of fewer tools.
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.m);
+    m.apply(ev(1, 'tool_use', {'toolUseId': 't0', 'name': 'Bash', 'input': {'command': 'ls'}}));
+    m.apply(ev(2, 'tool_use', {'toolUseId': 't1', 'name': 'Bash', 'input': {'command': 'sleep 1'}}));
+    m.apply(ev(3, 'text', {'text': 'ממשיך.', 'messageId': 'a'}));
+    m.apply(ev(4, 'tool_use', {'toolUseId': 't2', 'name': 'Read', 'input': {'file_path': 'a.dart'}}));
+    m.apply(ev(5, 'tool_result', {'toolUseId': 't1', 'isError': false, 'preview': ''}));
+    final groups = items.whereType<ToolGroup>().toList();
+    expect(groups[0].tools[1].outcome, Outcome.ok);
+    expect(groups[1].tools.single.outcome, Outcome.running);
+  });
+
+  test('a late result after the turn ended or a failed one after text: each lands where it should', () {
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.m);
+    m.apply(ev(1, 'tool_use', {'toolUseId': 'b', 'name': 'Bash', 'input': {'command': 'sleep 100'}}));
+    m.apply(ev(2, 'result', {'subtype': 'success', 'isError': false}));
+    m.apply(ev(3, 'tool_result', {'toolUseId': 'b', 'isError': false}));
+    expect((items.single as ToolGroup).tools.single.outcome, Outcome.interrupted, reason: 'the turn ended on it');
+
+    m.apply(ev(4, 'tool_use', {'toolUseId': 'c', 'name': 'Bash', 'input': {'command': 'false'}}));
+    m.apply(ev(5, 'text', {'text': 'ממשיך.', 'messageId': 'x'}));
+    m.apply(ev(6, 'tool_use', {'toolUseId': 'd', 'name': 'Bash', 'input': {'command': 'ls', 'description': 'מריץ ls'}}));
+    m.apply(ev(7, 'tool_result', {'toolUseId': 'c', 'isError': true}));
+    final groups = items.whereType<ToolGroup>().toList();
+    expect(groups[1].outcome, Outcome.error);
+    expect(groups[1].tools.single.outcome, Outcome.error);
+    expect(groups[2].liveLabel, 'מריץ ls');
+    expect(groups[2].outcome, Outcome.running);
+  });
 }
