@@ -1,0 +1,37 @@
+{
+  "name": "company-chat",
+  "displayName": "שיחה עם החברה",
+  "description": "השיחה עם עובד בחברה, כמו באפליקציה, עם הקובץ והשורות המסומנות בכל הודעה.",
+  "version": "0.1.0",
+  "publisher": "hive-owner",
+  "private": true,
+  "license": "UNLICENSED",
+  "repository": { "type": "git", "url": "https://github.com/hivecode-app/hive-code" },
+  "engines": { "vscode": "^1.90.0" },
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [{ "id": "company", "title": "החברה", "icon": "media/forum.svg" }]
+    },
+    "views": {
+      "company": [{ "type": "webview", "id": "company.chat", "name": "שיחה" }]
+    },
+    "commands": [
+      { "command": "company.pair", "title": "החברה: חיבור עם קוד התאמה" },
+      { "command": "company.choose", "title": "החברה: בחירת עובד לשיחה" },
+      { "command": "company.ask", "title": "החברה: לשאול על הקטע המסומן" }
+    ],
+    "menus": {
+      "view/title": [{ "command": "company.choose", "when": "view == company.chat", "group": "navigation" }],
+      "editor/context": [{ "command": "company.ask", "when": "editorHasSelection", "group": "company" }]
+    },
+    "configuration": {
+      "title": "החברה",
+      "properties": {
+        "company.url": { "type": "string", "default": "https://api.hq.example.com", "description": "הכתובת של hq" },
+        "company.identity": { "type": "string", "default": "avital", "description": "העובד שהשיחה איתו" }
+      }
+    }
+  }
+}
