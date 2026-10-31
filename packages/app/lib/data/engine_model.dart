@@ -21,6 +21,7 @@ class EngineModel {
   ToolGroup? _group;
   final _groupTools = <String, int>{}; // toolUseId -> index in group.tools
   final _hiddenTools = <String>{}; // toolUseIds with no row (hiddenTool)
+  final _askCards = <String, HandoffCard>{}; // toolUseId -> its card (browser_ask_user)
   final _toolNames = <String, List<String>>{}; // group id -> tool names in order
   final _toolStarted = <String, DateTime>{};
   String? _why; // the worker's last text in this turn: "למה" on the details of the tool it calls next
@@ -51,6 +52,10 @@ class EngineModel {
         }
         _streams.clear();
         _hiddenTools.clear();
+        for (final c in _askCards.values) {
+          c.ended = true;
+        }
+        _askCards.clear();
         _why = null;
         _closeGroup(Outcome.interrupted);
         onLive?.call(const LiveState());
@@ -106,6 +111,15 @@ class EngineModel {
         // A message to the owner, a question or a GO request shows as its own item, and tool
         // housekeeping means nothing to him: no tool row for those (it read "השתמש בכלים" between
         // every two messages), and no row that appears and then vanishes.
+        // A request for him in the server's browser is a card he acts on, not a tool row ("השתמש בכלי", 31/10).
+        if (name == askUserTool) {
+          _closeGroup(Outcome.ok);
+          final card = HandoffCard(id: 'ask:$id', ts: ts, what: (input['what'] ?? '').toString().trim(), seq: seq);
+          items.add(card);
+          _askCards[id] = card;
+          onLive?.call(LiveState(phase: LivePhase.tool, label: liveLabel(name, input, gender)));
+          return;
+        }
         if (hiddenTool(name, input)) {
           _hiddenTools.add(id);
           onLive?.call(LiveState(phase: LivePhase.tool, label: liveLabel(name, input, gender)));
@@ -124,6 +138,15 @@ class EngineModel {
       case 'tool_result':
         final id = ev['toolUseId'] as String? ?? '';
         if (_hiddenTools.remove(id)) {
+          onLive?.call(const LiveState(phase: LivePhase.thinking));
+          return;
+        }
+        final card = _askCards.remove(id);
+        if (card != null) {
+          card.ended = true;
+          // browser-memory says "NOT asked" / "NOT notified" when he never got it (askUser.ts, marked there as read
+          // by the app); a cancelled call is not that.
+          card.failed = ev['isError'] == true && RegExp(r'NOT (asked|notified)').hasMatch(ev['preview'] as String? ?? '');
           onLive?.call(const LiveState(phase: LivePhase.thinking));
           return;
         }
@@ -190,6 +213,9 @@ class EngineModel {
 }
 
 /// No tool row for these: the owner sees their result as its own item, or they are bookkeeping.
+/// browser-memory's hand-over to him (B.9): a [HandoffCard] in the conversation.
+const askUserTool = 'mcp__browser__browser_ask_user';
+
 bool hiddenTool(String name, Object? input) => reachesOwner(name, input) || const {'ToolSearch', 'TodoWrite', 'ExitPlanMode'}.contains(name);
 
 /// A company tool whose result the owner sees as its own item (a message, an ask card, a GO card).
@@ -280,6 +306,7 @@ String liveLabel(String name, Map<String, dynamic> input, Gender g) {
     'mcp__company__ask' => f ? 'שואלת' : 'שואל',
     'mcp__company__remember' => f ? 'רושמת לזיכרון' : 'רושם לזיכרון',
     'mcp__company__open_team' => f ? 'פותחת צוות' : 'פותח צוות',
+    askUserTool => 'מחכה לך בדפדפן',
     _ => f ? 'עובדת' : 'עובד',
   };
 }

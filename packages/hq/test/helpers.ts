@@ -240,7 +240,10 @@ export class FakeTabBrowser implements TabBrowser {
   onTargetGone: (targetId: string) => void = () => {};
   onConnected: () => void = () => {};
   async openWindow(url: string) { const id = `win-${this.opened.length + 1}`; this.opened.push(url); this.targets.add(id); return id; }
+  /** What each tab shows; a tab not listed is on an ordinary page. */
+  urls = new Map<string, string>();
   async hasTarget(id: string) { return this.targets.has(id); }
+  async targetUrl(id: string) { return this.targets.has(id) ? (this.urls.get(id) ?? 'https://example.com/') : null; }
   async closeTarget(id: string) { this.closed.push(id); this.targets.delete(id); }
   async attachPhone(targetId: string, phone: WsSocket, size: PhoneSize, cb: PhoneCallbacks) {
     this.phones.push({ targetId, phone, size, cb });

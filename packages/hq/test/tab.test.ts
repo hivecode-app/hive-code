@@ -92,6 +92,38 @@ test('handoff: link in "מחכה לך" (login, pushes), one live login per site'
   } finally { await env.cleanup(); }
 });
 
+test('handoff: the worker\'s tab is handed over whatever it shows; a blank one fails at once (#283, 31/10 gil)', async () => {
+  const env = await tabEnv();
+  try {
+    // gil, 31/10: his current page was a local image, and hq answered "url must be http(s)": no row, no card,
+    // and browser_ask_user waited out its timeout while nobody had been asked.
+    env.tabBrowser.targets.add('image-tab');
+    env.tabBrowser.urls.set('image-tab', 'file:///srv/browser-work/kl-docs/passport.jpg');
+    const file = await env.call('POST', '/v1/handoffs', { identity: 'amit', target: 'image-tab', url: 'file:///srv/browser-work/kl-docs/passport.jpg', what: 'לאשר את התמונה', need: 'other' });
+    assert.equal(file.status, 200, JSON.stringify(file.json));
+    assert.equal(env.tabBrowser.opened.length, 0, 'his own tab, not a new window');
+    const item = env.hq.inbox.get(file.json.inbox_id)!;
+    assert.equal(item.kind, 'login');
+    assert.equal(item.body, 'לאשר את התמונה');
+    assert.equal(item.link, file.json.link);
+
+    // browser-memory's own marker tab (or a new tab): a white page with only "סיימתי" on it. Refused, with why.
+    env.tabBrowser.targets.add('marker');
+    env.tabBrowser.urls.set('marker', 'about:blank#browser-memory-2933875-mvwei8ui');
+    const before = env.hq.store.db.prepare('SELECT COUNT(*) AS n FROM tab_handoffs').get() as { n: number };
+    const blank = await env.call('POST', '/v1/handoffs', { identity: 'amit', target: 'marker', url: 'about:blank#browser-memory-2933875-mvwei8ui', what: 'x' });
+    assert.equal(blank.status, 400);
+    assert.match(blank.json.error, /blank.*select the tab/);
+    assert.equal((env.hq.store.db.prepare('SELECT COUNT(*) AS n FROM tab_handoffs').get() as { n: number }).n, before.n, 'no handoff row');
+    assert.equal(env.tabBrowser.opened.length, 0);
+
+    // No tab of its own: hq can only open a window at an http(s) url.
+    const noTab = await env.call('POST', '/v1/handoffs', { identity: 'amit', target: 'gone', url: 'file:///x.jpg', what: 'x' });
+    assert.equal(noTab.status, 400);
+    assert.match(noTab.json.error, /not open/);
+  } finally { await env.cleanup(); }
+});
+
 test('handoff: preview bots never claim the link; the first phone owns it; "סיימתי" wakes the waiting tool', async () => {
   const env = await tabEnv();
   try {

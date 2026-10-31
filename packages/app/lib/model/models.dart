@@ -722,11 +722,22 @@ class InternalMsg extends ChatItem {
   String get messageId => id.startsWith('msg:') ? id.substring(4) : id;
 }
 
+/// A worker's `browser_ask_user` (B.9): what it needs from him in the server's browser, acted on from the
+/// conversation. The live link and the site come from his "מחכה לך" item; the card stays when it is gone.
 class HandoffCard extends ChatItem {
-  HandoffCard({required super.id, required super.ts, required this.domain, required this.expires, this.done = false, super.seq});
+  HandoffCard({required super.id, required super.ts, this.domain = '', this.expires = '', this.what = '', this.done = false, super.seq});
   final String domain;
   final String expires;
+
+  /// What the worker asked him to do, in its words.
+  final String what;
   bool done;
+
+  /// The call came back: nothing is waiting on this card any more (the item, if still open, still is).
+  bool ended = false;
+
+  /// The call failed before he was asked (hq refused the link): the worker got the error.
+  bool failed = false;
 }
 
 class ErrorLine extends ChatItem {

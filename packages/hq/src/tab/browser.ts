@@ -9,6 +9,8 @@ export interface TabBrowser {
   /** A new window of its own (B.9: one window per agent, so the screencast keeps producing frames). */
   openWindow(url: string): Promise<string>;
   hasTarget(targetId: string): Promise<boolean>;
+  /** The URL the tab is on now, or null when it is not open. */
+  targetUrl(targetId: string): Promise<string | null>;
   closeTarget(targetId: string): Promise<void>;
   /** Drive `targetId` from this phone socket until it closes. `onDone` = the phone pressed "סיימתי". */
   attachPhone(targetId: string, phone: WebSocket, size: PhoneSize, cb: PhoneCallbacks): Promise<void>;
@@ -97,6 +99,10 @@ export class CdpTabBrowser implements TabBrowser {
 
   async hasTarget(targetId: string): Promise<boolean> {
     return (await this.cdp.pages()).some((p) => p.targetId === targetId);
+  }
+
+  async targetUrl(targetId: string): Promise<string | null> {
+    return (await this.cdp.pages()).find((p) => p.targetId === targetId)?.url ?? null;
   }
 
   async closeTarget(targetId: string): Promise<void> {

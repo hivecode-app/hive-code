@@ -459,7 +459,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
     'itai': simple('itai', [TextMsg(id: 'i1', ts: at(13, 44), text: 'אותה בדיקה נכשלת כבר 20 דקות')]),
     'amit': simple('amit', [
       TextMsg(id: 'am1', ts: at(14, 4), text: 'נדרש קוד אימות ל-Mercury'),
-      HandoffCard(id: 'am2', ts: at(14, 4), domain: 'mercury.com', expires: "בתוקף עוד 8 דק'"),
+      HandoffCard(id: 'am2', ts: at(14, 4), domain: 'mercury.com', expires: "בתוקף עוד 8 דק'", what: "נדרש קוד אימות כדי להוריד את דוח אוקטובר. בתוקף עוד 8 דק'."),
     ]),
     'noga': simple('noga', [TextMsg(id: 'ng1', ts: at(13, 57), text: '14 זיכרונות כפולים אוחדו הלילה')]),
     'eli': simple('eli', [TextMsg(id: 'e1', ts: at(9, 0), text: 'הפוליסה חודשה. אין צורך לעשות דבר.')]),

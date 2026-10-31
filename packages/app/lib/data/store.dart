@@ -250,6 +250,14 @@ class AppStore extends ChangeNotifier {
 
   Future<void> notNow(WaitItem item) async => _check(await backend.notNow(item));
 
+  /// "סיימתי" on a browser request: true only when hq took it (the worker is woken). Otherwise the error shows
+  /// and the card keeps its buttons: "בוצע" over a worker still waiting would be a lie.
+  Future<bool> handoffDone(WaitItem item) async {
+    final r = await backend.handoffDone(item);
+    await _check(r);
+    return r.ok;
+  }
+
   /// "בדקתי" on "מה לבדוק" (#108): off the list now; back, with the error, when the server didn't take it.
   Future<void> checked(AwaitingTask t) async => _check(await backend.checked(t));
   Future<void> resume(WaitItem item) async => _check(await backend.resume(item));

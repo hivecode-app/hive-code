@@ -66,6 +66,11 @@ export function siteOf(url: string): string {
   return parts.slice(-n).join('.');
 }
 
+/** A tab with nothing on it to act on: a new tab, or browser-memory's own about:blank#browser-memory-… marker. */
+export function isBlank(url: string): boolean {
+  return !url || /^(about:blank|about:newtab|chrome:\/\/new-tab-page|chrome:\/\/newtab)([#?/]|$)/i.test(url);
+}
+
 export class TabHandoffs {
   private store: Store;
   private inbox: Inbox;
@@ -128,20 +133,31 @@ export class TabHandoffs {
 
   async create(n: NewHandoff): Promise<{ handoff: HandoffView; link: string; inbox_id: number | null }> {
     if (!n.target && !n.url) throw new HandoffError(400, 'target or url is required');
-    if (n.url && !/^https?:\/\//.test(n.url)) throw new HandoffError(400, 'url must be http(s)');
     const now = this.store.now();
     const ttl = Math.min(240, Math.max(1, Number(n.ttlMin) || this.cfg.ttlMin)) * 60_000;
-    const url = n.url ?? '';
+    // The worker's own tab is handed over as it is, whatever it shows (a file:// image, a local page): only a
+    // window hq opens itself needs an http(s) url. Rejecting any other url here was #283's "never works": the
+    // worker's current page is often browser-memory's about:blank marker, and every ask on it got a 400 that
+    // nobody saw (31/10, gil).
+    const http = n.url && /^https?:\/\//.test(n.url) ? n.url : '';
+    const onTab = n.target ? await this.browser.targetUrl(n.target) : null;
+    if (onTab !== null && isBlank(onTab)) {
+      // A white page with only "סיימתי" on it (#283): fail now, so the worker selects the right tab.
+      throw new HandoffError(400, `tab ${n.target} is blank (${onTab || 'no url'}): select the tab with the page the user must act on, then ask again`);
+    }
+    if (onTab === null && !http) {
+      throw new HandoffError(400, n.target ? `tab ${n.target} is not open and no http(s) url was given` : 'url must be http(s)');
+    }
+    const url = http || onTab || '';
     const domain = siteOf(url);
     // The login lock: one live handoff per site, checked before any await and again right before the
     // insert (the awaits in between are where a second request for the same site could slip in).
     const early = this.holderOf(domain);
     if (early) throw this.busy(early, n.from);
-    let target = n.target && (await this.browser.hasTarget(n.target)) ? n.target : null;
+    let target = onTab !== null ? n.target! : null;
     let ownWindow = 0;
     if (!target) {
-      if (!url) throw new HandoffError(400, `tab ${n.target} is not open and no url was given`);
-      target = await this.browser.openWindow(url);
+      target = await this.browser.openWindow(http);
       ownWindow = 1;
     }
     const late = this.holderOf(domain);
@@ -156,7 +172,7 @@ export class TabHandoffs {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, sha(token), n.from, target, ownWindow, url, domain, n.what ?? '', n.need ?? null, now, now + ttl);
     // Title is the site: the app shows it as the domain chip (APP-SPEC §9.1).
     const item = this.inbox.add({
-      kind: 'login', title: domain || 'כניסה לאתר', body: n.what ?? '', from_identity: n.from, blocking: true,
+      kind: 'login', title: domain || 'בקשה בדפדפן', body: n.what ?? '', from_identity: n.from, blocking: true,
       ref: `handoff:${id}`, link, dedupe_key: `handoff:${id}`,
     });
     this.store.db.prepare('UPDATE tab_handoffs SET inbox_id = ? WHERE id = ?').run(item.id, id);
@@ -268,7 +284,7 @@ export class TabHandoffs {
       const what = v.state === 'expired' ? `פג בלי ${pre('ש', o.name)} ${g(o, 'נכנס', 'נכנסה')}` : 'נסגר, כי הטאב כבר לא פתוח';
       this.mailbox.tell({
         msg_id: `handoff-${r.id}-${v.state}`, from: 'hq', to: r.from_identity, kind: 'system', ref: `inbox-${itemId}`, priority: 'next',
-        body: `הקישור לכניסה ל-${r.domain || 'האתר'} ${what}. אם עדיין צריך, קרא שוב ל-browser_ask_user.`,
+        body: `הקישור ${r.domain ? `לכניסה ל-${r.domain}` : 'לטאב'} ${what}. אם עדיין צריך, קרא שוב ל-browser_ask_user.`,
       });
     }
   }

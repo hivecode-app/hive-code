@@ -1400,38 +1400,85 @@ class FileBubble extends StatelessWidget {
   }
 }
 
-class HandoffCardView extends StatelessWidget {
+class HandoffCardView extends StatefulWidget {
   const HandoffCardView({super.key, required this.card, required this.from});
   final HandoffCard card;
   final String from;
   @override
+  State<HandoffCardView> createState() => _HandoffCardViewState();
+}
+
+class _HandoffCardViewState extends State<HandoffCardView> {
+  bool _sending = false;
+
+  @override
   Widget build(BuildContext context) {
     final p = context.p;
     final store = StoreScope.of(context);
-    return ChatCard(edge: !card.done, children: [
+    final card = widget.card;
+    // The live link is his "מחכה לך" item from this worker (hq's tab handoff); the card is only where he meets it.
+    // Its own request, by what it asked (hq's item body is the same `what`): a worker that asks twice in one
+    // conversation must not have its first, finished card close the second one.
+    final logins = store.data?.waiting.where((w) => w.kind == WaitKind.login && w.from == widget.from && (card.what.isEmpty || w.body == card.what)) ??
+        const <WaitItem>[];
+    final w = logins.where((w) => w.state != WaitState.answered).firstOrNull;
+    // Answered from "מחכה לך" rather than here: done, even before the worker's call comes back.
+    final done = card.done || (w == null && logins.any((w) => w.state == WaitState.answered));
+    // A site, not hq's fallback title for a tab with none (a local file).
+    final site = w?.domain ?? '';
+    final domain = RegExp(r'^[\w.-]+\.[a-z]{2,}$', caseSensitive: false).hasMatch(site) ? site : card.domain;
+    final open = w != null && !done && !card.failed;
+    final Widget foot;
+    if (open) {
+      foot = Wrap(spacing: 8, runSpacing: 8, children: [
+        Btn('פתיחה', kind: BtnKind.primary, onTap: () => Nav.handoff(context, w)),
+        Btn('סיימתי', onTap: _sending
+            ? null
+            : () async {
+                setState(() => _sending = true);
+                final ok = await store.handoffDone(w);
+                if (!mounted) return;
+                setState(() {
+                  _sending = false;
+                  if (ok) card.done = true;
+                });
+              }),
+      ]);
+    } else if (card.failed) {
+      foot = const DoneLine('הבקשה לא הגיעה אליך, והעובד קיבל שגיאה', top: 0, icon: 'close');
+    } else if (done) {
+      foot = const DoneLine('בוצע', top: 0);
+    } else if (card.ended) {
+      foot = const DoneLine('הבקשה נסגרה', top: 0);
+    } else {
+      foot = const DoneLine('מכין קישור…', top: 0, icon: 'schedule');
+    }
+    return ChatCard(edge: open, children: [
       _CardHead(
         icon: 'lock',
         child: Text.rich(
           TextSpan(children: [
-            TextSpan(text: 'כניסה לאתר', style: TextStyle(fontWeight: FontWeight.w700, color: p.text)),
-            const TextSpan(text: ' · '),
-            TextSpan(text: ltr(card.domain), style: T.mono(12.5)),
-            TextSpan(text: ' · ${card.expires}'),
+            TextSpan(text: 'בקשה בדפדפן', style: TextStyle(fontWeight: FontWeight.w700, color: p.text)),
+            if (domain.isNotEmpty) ...[const TextSpan(text: ' · '), TextSpan(text: ltr(domain), style: T.mono(12.5))],
           ]),
           style: T.secondary.copyWith(color: p.text2),
         ),
       ),
+      if (card.what.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+          child: Rich(card.what, auto: true, style: T.body.copyWith(color: p.text)),
+        ),
       Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
-        child: card.done
-            ? const DoneLine('נכנסת', top: 0)
-            : Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: Btn('פתיחה', kind: BtnKind.primary, onTap: () {
-                  final w = store.data?.waiting.where((w) => w.kind == WaitKind.login && w.from == from).firstOrNull;
-                  if (w != null) Nav.handoff(context, w);
-                }),
-              ),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        // How long the link lives sits with the buttons, at the far side: the head stays one line at 1.3 (נועה).
+        child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+          Expanded(child: Align(alignment: AlignmentDirectional.centerStart, child: foot)),
+          if (open && card.expires.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            Text(card.expires, style: T.meta.copyWith(color: p.text2)),
+          ],
+        ]),
       ),
     ]);
   }

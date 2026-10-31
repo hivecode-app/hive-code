@@ -261,4 +261,30 @@ void main() {
     expect(g.liveLabel, isNull);
     expect(live?.busy, isFalse);
   });
+
+  test('browser_ask_user is a card he acts on, not a "השתמש בכלי" row (31/10)', () {
+    final items = <ChatItem>[];
+    LiveState? live;
+    final m = EngineModel(items: items, gender: Gender.m, onLive: (l) => live = l);
+    m.apply(ev(1, 'tool_use', {'toolUseId': 'a1', 'name': 'mcp__browser__browser_ask_user', 'input': {'need': 'login', 'what': 'להיכנס ל-Contabo\n'}}));
+    final card = items.single as HandoffCard;
+    expect(card.what, 'להיכנס ל-Contabo');
+    expect(card.ended, isFalse);
+    expect(live?.label, 'מחכה לך בדפדפן');
+    m.apply(ev(2, 'tool_result', {'toolUseId': 'a1', 'isError': false, 'preview': 'The user has done it'}));
+    expect(items, hasLength(1), reason: 'no tool row next to it');
+    expect(card.ended, isTrue);
+    expect(card.failed, isFalse);
+
+    // hq refused the link: the worker got an error, and the card says he was never asked.
+    m.apply(ev(3, 'tool_use', {'toolUseId': 'a2', 'name': 'mcp__browser__browser_ask_user', 'input': {'need': 'other', 'what': 'x'}}));
+    m.apply(ev(4, 'tool_result', {'toolUseId': 'a2', 'isError': true, 'preview': 'the user was NOT asked — hq could not open the phone link: tab is blank'}));
+    expect((items.last as HandoffCard).failed, isTrue);
+
+    // A call the client cancelled (a message arrived) is not a failure: the link may still be on his phone.
+    m.apply(ev(5, 'tool_use', {'toolUseId': 'a3', 'name': 'mcp__browser__browser_ask_user', 'input': {'need': 'other', 'what': 'y'}}));
+    m.apply(ev(6, 'tool_result', {'toolUseId': 'a3', 'isError': true, 'preview': "The user doesn't want to proceed with this tool use."}));
+    expect((items.last as HandoffCard).failed, isFalse);
+    expect(items.whereType<ToolGroup>(), isEmpty);
+  });
 }

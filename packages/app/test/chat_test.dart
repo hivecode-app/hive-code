@@ -26,6 +26,17 @@ void main() {
     });
   }
 
+  testWidgets('a browser request is a card with what is needed, the tab and "סיימתי"; pressing it closes the card', (tester) async {
+    await pumpApp(tester, size: const Size(342, 900), home: const ChatScreen(identityId: 'amit'));
+    expect(find.textContaining('בקשה בדפדפן', findRichText: true), findsOneWidget);
+    expect(find.textContaining('נדרש קוד אימות כדי להוריד', findRichText: true), findsOneWidget);
+    expect(find.text('פתיחה'), findsOneWidget);
+    await tester.tap(find.text('סיימתי'));
+    await tester.pumpAndSettle();
+    expect(find.text('סיימתי'), findsNothing);
+    expect(find.textContaining('בוצע', findRichText: true), findsOneWidget);
+  });
+
   testWidgets('tool group and diff open on tap', (tester) async {
     await pumpApp(tester, size: const Size(342, 2300), home: const ChatScreen(identityId: 'ido'));
     expect(find.text('internal/billing/stripe.go'), findsNothing);
