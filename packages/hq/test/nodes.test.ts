@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { charter, git, makeEnv, repo, until } from './helpers.ts';
 import { HostClient } from '../src/host-client.ts';
 import { syncCompany } from '../src/workspace-cli.ts';
-import { RemoteLauncher, RemoteNode, RemoteWorkspaces, nodeToggle, type NodeDef, type SshRun } from '../src/nodes.ts';
+import { NodeUnreachable, RemoteLauncher, RemoteNode, RemoteWorkspaces, nodeToggle, type NodeDef, type SshRun } from '../src/nodes.ts';
 import type { LaunchSpec } from '../src/shifts.ts';
 
 const NODE: NodeDef = { name: 'n2', ssh: 'root@n2.test', projects: ['proj'], maxSlots: 2, maxLoad: 0.85, identityFile: null };
@@ -456,8 +456,10 @@ test('task-288: closing a task from a node fetches back the preserved ref and th
 test('RemoteLauncher ownLogin: a machine with a user of its own runs the shift on its own login, as that user', async () => {
   const calls: { args: string[]; input?: string }[] = [];
   let hasToken = false;
+  let sshDown = false;
   const run: SshRun = async (args, input) => {
     calls.push({ args, input });
+    if (args.at(-1)!.includes('test -s') && sshDown) throw Object.assign(new Error('ssh: connection closed'), { code: 255 });
     if (args.at(-1)!.includes('test -s') && !hasToken) throw Object.assign(new Error('exit 1'), { code: 1 });
     return '';
   };
@@ -479,6 +481,10 @@ test('RemoteLauncher ownLogin: a machine with a user of its own runs the shift o
     assert.match(cmd, /PATH='\/[^']+\/\.local\/share\/agent-company\/bin':\/usr\/local\/bin:/, 'the node\'s own bin first');
     hasToken = true;
     assert.equal((await launch())['oauth-token-file'], `${STATE}/node-oauth-token`, 'a token file of its own (setup-token) wins: a login there expires');
+    sshDown = true;
+    await assert.rejects(launch(), NodeUnreachable, 'ssh failing on the check stops the launch: not "no token"');
+    assert.ok(!calls.some((c) => c.args.at(-1)!.includes('; node -e')), 'no host-args.json written');
+    assert.ok(!calls.some((c) => c.args.at(-1)!.includes('enable --now')), 'no unit enabled');
   } finally { node.close(); rmSync(state, { recursive: true, force: true }); }
 });
 
