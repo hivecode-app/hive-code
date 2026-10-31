@@ -469,7 +469,8 @@ export class Hq {
     const st = await n.poll(this.store.now());
     if (was === st.up || (was === undefined && st.up)) return;
     this.store.emit(st.up ? 'node.up' : 'node.down', null, { node: name, error: st.error, running });
-    if (!st.up) {
+    // A laptop that sleeps with nothing of ours running is its everyday, not news.
+    if (!st.up && (running || !n.def.portable)) {
       this.mailbox.tell({ msg_id: `node-down-${name}-${this.store.now()}`, from: 'hq', to: this.cfg.managerId, priority: 'next',
         body: `השרת ${name} לא עונה (${st.error ?? 'בלי פרטים'}). ${running ? `${running} משמרות רצות שם, וה-watchdog יסמן אותן כמתות. ` : ''}משימות חדשות לא יוצאות אליו עד שיחזור. כיבוי: המתג \`${nodeToggle(name)}\` באוטומציות.` });
     }

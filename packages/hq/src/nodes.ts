@@ -34,6 +34,15 @@ export interface NodeDef {
   maxSlots: number;
   /** No new shift while the 1-minute load average per CPU is above this. */
   maxLoad: number;
+  /**
+   * A machine with a user of its own (the laptop, ci-host): the shifts run as that user, on its own Claude login (its
+   * ~/.claude, never a token file), and node-install leaves its ~/.claude, git identity, gh login and packages as they are.
+   */
+  ownLogin?: boolean;
+  /** A laptop: it sleeps and leaves the network. On battery it takes no new shift; its tasks do not wait for it (PORTABLE_AWAY_MS). */
+  portable?: boolean;
+  /** Memory kept free there for its own user, instead of capacity.reserveMb (the laptop: ran works on it). */
+  reserveMb?: number;
 }
 
 export const LOCAL = 'local';
@@ -53,7 +62,28 @@ export const LOCAL_LABELS = [NEEDS_LOCAL, 'needs-browser', 'needs-simulator'];
 export interface NodeStatus {
   up: boolean; at: number; error: string | null;
   totalMb: number; availableMb: number; load1: number; cpus: number;
+  /** On battery (a laptop unplugged); null = no power supply to read (a server). */
+  onBattery?: boolean | null;
 }
+
+/**
+ * A task placed on a portable node that has had no room for it this long (asleep, off the network, on battery, its user
+ * needs the memory) goes back to the queue and runs elsewhere (scheduler fill). A shift of it that slept there through
+ * its end is disabled when the node answers again (ShiftManager.releaseEnded).
+ */
+export const PORTABLE_AWAY_MS = 10 * 60_000;
+
+/**
+ * The node's own bin dir, first on the PATH of every command and shift there (node-install.sh): a private node where
+ * the machine's is too old and the user's is not ours to replace, and company-run where /usr/local is not writable.
+ */
+export const NODE_BIN = '.local/share/agent-company/bin';
+
+/**
+ * systemctl for the shift units there: the system manager as root (node-install's unit in /etc/systemd/system), the
+ * user's own manager otherwise (its unit in ~/.config/systemd/user, linger on), like the shifts here.
+ */
+export const SC = `sc() { if [ "$(id -u)" = 0 ]; then systemctl "$@"; else XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user "$@"; fi; };`;
 
 /** Thrown when the node itself could not be reached: the task waits and tries again, it does not leave the queue. */
 export class NodeUnreachable extends Error { override name = 'NodeUnreachable'; }
@@ -164,7 +194,7 @@ export class RemoteNode {
     await this.ensure();
     try {
       return await this.run(['-S', this.ctlPath, '-o', 'ControlMaster=no', ...this.base(), this.def.ssh,
-        `export HOME=${q(homedir())} PATH=/usr/local/bin:$PATH; ${cmd}`], input, timeoutMs);
+        `export HOME=${q(homedir())} PATH=${q(join(homedir(), NODE_BIN))}:/usr/local/bin:$PATH; ${cmd}`], input, timeoutMs);
     } catch (e) {
       if ((e as { code?: number }).code === SSH_FAILED) throw new NodeUnreachable(`${this.def.name}: ${(e as Error).message}`);
       throw e;
@@ -189,11 +219,15 @@ export class RemoteNode {
   /** Memory, load and CPUs there. Never throws: an unreachable node is `up: false` with the reason. */
   async poll(now: number): Promise<NodeStatus> {
     try {
-      const out = await this.exec(`grep -E '^(MemTotal|MemAvailable):' /proc/meminfo; cut -d' ' -f1 /proc/loadavg; nproc`, undefined, 20_000);
+      // ac: 1 when any mains or USB supply is online, 0 when there are such supplies and none is, empty on a server.
+      const out = await this.exec(`grep -E '^(MemTotal|MemAvailable):' /proc/meminfo; cut -d' ' -f1 /proc/loadavg; nproc; `
+        + `a=; for f in /sys/class/power_supply/*; do case "$(cat "$f/type" 2>/dev/null)" in Mains|USB*) a="$a$(cat "$f/online" 2>/dev/null)";; esac; done; `
+        + `case "$a" in '') echo ac:;; *1*) echo ac:1;; *) echo ac:0;; esac`, undefined, 20_000);
       const kb = (k: string) => Number(new RegExp(`${k}:\\s+(\\d+)`).exec(out)?.[1] ?? NaN);
-      const [load1, cpus] = out.trim().split('\n').slice(-2).map(Number);
+      const ac = /^ac:([01]?)$/m.exec(out)?.[1];
+      const [load1, cpus] = out.trim().split('\n').filter((l) => !l.startsWith('ac:')).slice(-2).map(Number);
       const s = { up: true, at: now, error: null, totalMb: Math.floor(kb('MemTotal') / 1024), availableMb: Math.floor(kb('MemAvailable') / 1024),
-        load1: load1 ?? NaN, cpus: cpus ?? NaN };
+        load1: load1 ?? NaN, cpus: cpus ?? NaN, onBattery: ac ? ac === '0' : null };
       if (![s.totalMb, s.availableMb, s.load1, s.cpus].every(Number.isFinite)) throw new Error(`unreadable health: ${out.slice(0, 200)}`);
       this.status = s;
     } catch (e) {
@@ -249,19 +283,20 @@ export class RemoteLauncher {
 
   async launch(spec: LaunchSpec): Promise<{ unit?: string }> {
     const args = hostArgs({ ...spec, configDir: null }, this.stateDir);
-    args['oauth-token-file'] = this.tokenFile;
+    // ownLogin: the login in that user's ~/.claude, as the CLI finds it by itself.
+    if (!this.node.def.ownLogin) args['oauth-token-file'] = this.tokenFile;
     const files: Record<string, string> = { [join(this.stateDir, 'shifts', spec.shiftId, 'host-args.json')]: JSON.stringify(args, null, 2) };
     for (const f of [join(this.stateDir, 'shifts', spec.shiftId, 'prime.json'), spec.systemPromptFile]) {
       if (f && existsSync(f)) files[f] = readFileSync(f, 'utf8');
     }
     await this.node.exec(`node -e ${q(WRITE_FILES)}`, JSON.stringify(files), 30_000);
-    await this.node.exec(`systemctl reset-failed ${q(spec.unit)} 2>/dev/null; systemctl enable --now ${q(spec.unit)}`, undefined, 60_000);
+    await this.node.exec(`${SC} sc reset-failed ${q(spec.unit)} 2>/dev/null; sc enable --now ${q(spec.unit)}`, undefined, 60_000);
     return { unit: spec.unit };
   }
 
   async kill(shiftId: string, unit: string | null): Promise<void> {
     const u = unit ?? shiftUnit(shiftId);
-    await this.node.exec(`systemctl disable --now ${q(u)} 2>/dev/null; ! systemctl is-active --quiet ${q(u)}`, undefined, 60_000)
+    await this.node.exec(`${SC} sc disable --now ${q(u)} 2>/dev/null; ! sc is-active --quiet ${q(u)}`, undefined, 60_000)
       .catch((e) => { throw e instanceof NodeUnreachable ? e : new Error(`${u} is still active on ${this.node.def.name} after disable --now`); });
     await this.node.unforward(join(this.stateDir, 'shifts', `${shiftId}.sock`));
   }

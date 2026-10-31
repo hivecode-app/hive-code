@@ -14,7 +14,7 @@ import { loadInfo, memInfoMb } from './proc.ts';
 import { dirname, join } from 'node:path';
 import { noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
 import { codexOf } from './codex-quota.ts';
-import { LOCAL, LOCAL_LABELS, NEEDS_LOCAL, NodeUnreachable, nodeToggle, RemoteWorkspaces, type Nodes, type RemoteNode } from './nodes.ts';
+import { LOCAL, LOCAL_LABELS, NEEDS_LOCAL, NodeUnreachable, PORTABLE_AWAY_MS, nodeToggle, RemoteWorkspaces, type Nodes, type RemoteNode } from './nodes.ts';
 
 export interface TaskRow {
   id: number; ref: string | null; project: string | null; title: string; body: string; source: string; state: string;
@@ -298,10 +298,12 @@ export class Scheduler {
       const enabled = this.store.toggle(nodeToggle(name));
       const load = st?.up && st.cpus ? Math.round((st.load1 / st.cpus) * 100) / 100 : null;
       if (!st?.up) return { name, enabled, up: false, error: st?.error ?? null, load, total: 0, running, free: 0, busy: false };
-      const c = capacity({ ...this.cfg, capacity: { ...this.cfg.capacity, maxSlots: n.def.maxSlots } }, st, running);
-      const overLoad = load == null || load > n.def.maxLoad;
+      const reserveMb = n.def.reserveMb ?? this.cfg.capacity.reserveMb;
+      const c = capacity({ ...this.cfg, capacity: { ...this.cfg.capacity, maxSlots: n.def.maxSlots, reserveMb } }, st, running);
+      // A laptop on battery is about to close its lid: what runs there goes on, nothing new starts.
+      const overLoad = load == null || load > n.def.maxLoad || (!!n.def.portable && st.onBattery === true);
       const free = overLoad ? 0 : c.free;
-      const busy = overLoad || (running < n.def.maxSlots && st.availableMb - this.cfg.capacity.reserveMb < this.cfg.capacity.rssWorkMb);
+      const busy = overLoad || (running < n.def.maxSlots && st.availableMb - reserveMb < this.cfg.capacity.rssWorkMb);
       return { name, enabled, up: true, error: null, load, total: c.total, running, free, busy };
     });
   }
@@ -454,6 +456,8 @@ export class Scheduler {
    * overlaps the new shift row briefly: never too many, and the pass after the starts settle fills what it hid.
    */
   private starting = new Map<number, string>(); // task → the machine it starts on
+  /** A task placed on a portable node: since when that node has had no room for it (fill). */
+  private noRoomSince = new Map<number, number>();
 
   /** A queued task whose start is under way (the night's empty-slot metric does not count it as waiting). */
   isStarting(id: number): boolean { return this.starting.has(id); }
@@ -481,13 +485,30 @@ export class Scheduler {
         const nodeFree = new Map(this.nodeSlots().map((n) => [n.name, n.free]));
         // A standing worker takes one task at a time: one starting in this fill holds it too.
         const busy = new Set([...this.starting.keys()].map((id) => this.task(id)?.identity).filter((x): x is string => !!x));
-        for (const t of this.queue()) {
+        const queue = this.queue();
+        // A wait that is not in the queue now (closed, started, out of it) is over: back in it, it waits from the start.
+        const queued = new Set(queue.map((t) => t.id));
+        for (const id of this.noRoomSince.keys()) if (!queued.has(id)) this.noRoomSince.delete(id);
+        for (const t of queue) {
           if (this.starting.has(t.id) || this.fallingBack.has(t.id)) continue;
           // #224: placed on a node that is switched off now (or gone from the config): back to the queue, unplaced.
           if (t.machine && t.machine !== LOCAL && (!this.nodes?.get(t.machine) || !this.store.toggle(nodeToggle(t.machine)))) {
             this.store.bg(this.unpin(t, 'node switched off'), 'scheduler.unpin');
             continue;
           }
+          // A laptop with no room for it (asleep, away, on battery, its memory his, or every slot taken by our other shifts)
+          // past PORTABLE_AWAY_MS: it runs elsewhere, with its work fetched back from there (unpin) when the laptop answers.
+          const portable = t.machine && t.machine !== LOCAL && this.nodes?.get(t.machine)?.def.portable;
+          if (portable && (nodeFree.get(t.machine!) ?? 0) <= 0 && !(t.identity && this.shifts.current(t.identity))) {
+            const since = this.noRoomSince.get(t.id) ?? this.store.now();
+            this.noRoomSince.set(t.id, since);
+            if (this.store.now() - since >= PORTABLE_AWAY_MS) {
+              this.noRoomSince.delete(t.id);
+              this.store.bg(this.unpin(t, `no room on ${t.machine}`), 'scheduler.unpin');
+            }
+            continue;
+          }
+          this.noRoomSince.delete(t.id);
           if (this.reading.size && [...this.reading.keys()].some((n) => this.couldGoTo(t, n))) continue;
           if (free <= 0 && ![...nodeFree.values()].some((n) => n > 0)) break;
           const machine = this.placeFor(t, nodeFree);

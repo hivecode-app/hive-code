@@ -16,14 +16,16 @@ import type { LaunchSpec } from '../src/shifts.ts';
 const NODE: NodeDef = { name: 'n2', ssh: 'root@n2.test', projects: ['proj'], maxSlots: 2, maxLoad: 0.85, identityFile: null };
 
 /** ssh to "n2" that is this machine: commands run here in bash; control ops, health and systemctl are recorded. */
-function fakeSsh(calls: string[][], health = { totalMb: 32_000, availableMb: 30_000, load1: 0.4, cpus: 8 }): SshRun {
+function fakeSsh(calls: string[][], health: { totalMb: number; availableMb: number; load1: number; cpus: number; ac?: string; down?: boolean }
+  = { totalMb: 32_000, availableMb: 30_000, load1: 0.4, cpus: 8 }): SshRun {
   return (args, input) => new Promise((res, rej) => {
     calls.push(args);
     const at = args.indexOf(NODE.ssh);
     const cmd = args.slice(at + 1).join(' ');
+    if (health.down && !args.includes('-O')) return rej(Object.assign(new Error('ssh: connect to host n2.test: No route to host'), { code: 255 }));
     if (!cmd || cmd.startsWith('rm -f') || cmd.includes('systemctl')) return res('');
     if (cmd.includes('/proc/meminfo')) {
-      return res(`MemTotal: ${health.totalMb * 1024} kB\nMemAvailable: ${health.availableMb * 1024} kB\n${health.load1}\n${health.cpus}\n`);
+      return res(`MemTotal: ${health.totalMb * 1024} kB\nMemAvailable: ${health.availableMb * 1024} kB\n${health.load1}\n${health.cpus}\nac:${health.ac ?? ''}\n`);
     }
     const p = spawn('bash', ['-c', cmd], { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '', err = '';
@@ -152,9 +154,9 @@ test('RemoteLauncher: the shift\'s files go to the same paths there, on the node
     assert.equal(args['oauth-token-file'], '/home/owner/.local/state/agent-company/node-oauth-token');
     assert.equal(args['config-dir'], undefined, 'never a config dir of here');
     assert.equal(args.cwd, '/w');
-    assert.match(calls.at(-1)!.args.at(-1)!, /systemctl enable --now 'company-shift@p-t1-1.service'/);
+    assert.match(calls.at(-1)!.args.at(-1)!, /sc enable --now 'company-shift@p-t1-1.service'/);
     await l.kill('p-t1-1', spec.unit);
-    assert.match(calls.at(-1)!.args.at(-1)!, /systemctl disable --now 'company-shift@p-t1-1.service'/);
+    assert.match(calls.at(-1)!.args.at(-1)!, /sc disable --now 'company-shift@p-t1-1.service'/);
   } finally { node.close(); rmSync(state, { recursive: true, force: true }); }
 });
 
@@ -449,4 +451,85 @@ test('task-288: closing a task from a node fetches back the preserved ref and th
   assert.deepEqual(await closeOn('develop'), ['refs/company/preserved/company-t9']);
   assert.deepEqual(await closeOn('HEAD'), ['refs/company/preserved/company-t9']);
   assert.deepEqual(await closeOn('company-t9', { branchDeleted: true }), ['refs/company/preserved/company-t9']);
+});
+
+test('RemoteLauncher ownLogin: a machine with a user of its own runs the shift on its own login, as that user', async () => {
+  const calls: { args: string[]; input?: string }[] = [];
+  const run: SshRun = async (args, input) => { calls.push({ args, input }); return ''; };
+  const state = mkdtempSync(join(tmpdir(), 'rl-'));
+  const node = new RemoteNode({ ...NODE, ssh: 'ran@laptop.test', ownLogin: true }, state, run);
+  node.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  try {
+    const l = new RemoteLauncher(node, '/home/owner/.local/state/agent-company');
+    await l.launch({ shiftId: 'p-t1-1', identity: 'p-t1', shiftNo: 1, sessionId: 's', resume: false, kind: 'work', cwd: '/w',
+      socketPath: '/s.sock', taskId: 1, unit: 'company-shift@p-t1-1.service', account: 'node:n2', configDir: null, machine: 'n2' });
+    const write = calls.find((c) => c.args.at(-1)!.includes('; node -e'))!;
+    const args = JSON.parse((JSON.parse(write.input!) as Record<string, string>)['/home/owner/.local/state/agent-company/shifts/p-t1-1/host-args.json']!) as Record<string, unknown>;
+    assert.equal(args['oauth-token-file'], undefined, 'its ~/.claude login, no token file');
+    const cmd = calls.at(-1)!.args.at(-1)!;
+    assert.match(cmd, /systemctl --user/, 'not root: the user manager');
+    assert.match(cmd, /PATH='\/[^']+\/\.local\/share\/agent-company\/bin':\/usr\/local\/bin:/, 'the node\'s own bin first');
+  } finally { node.close(); rmSync(state, { recursive: true, force: true }); }
+});
+
+test('nodes: a laptop on battery takes no new task; its own reserve is kept; with no room 10 minutes (asleep, on battery), its task runs here', async () => {
+  const r = repo();
+  const calls: string[][] = [];
+  const health: Parameters<typeof fakeSsh>[1] = { totalMb: 24_000, availableMb: 9_000, load1: 0.4, cpus: 16, ac: '1' };
+  const LAPTOP: NodeDef = { ...NODE, portable: true, ownLogin: true, maxSlots: 3, reserveMb: 6_000 };
+  const env = await makeEnv({ projects: { proj: charter(r.checkout) }, cfg: { nodes: [LAPTOP] }, deps: { ssh: fakeSsh(calls, health) }, noStart: true });
+  try {
+    const { hq, launcher, clock } = env;
+    git(env.dir, 'init', '--quiet', '--initial-branch=main');
+    git(env.dir, 'add', 'company');
+    git(env.dir, 'commit', '--quiet', '-m', 'company');
+    const n = hq.nodes.list[0]!;
+    n.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    (hq.scheduler.workspacesFor('n2') as RemoteWorkspaces).fetch = async () => {};
+    await hq.start({ listen: false, timers: false });
+    assert.equal(n.status?.onBattery, false);
+    // 9000 − its own 6000 reserve leaves room for 2 (rssWorkMb 1300), under maxSlots 3.
+    assert.deepEqual(hq.scheduler.nodeSlots().map((s) => [s.free, s.busy]), [[2, false]]);
+    health.ac = '0';
+    await hq.pollNodes();
+    assert.equal(n.status?.onBattery, true);
+    assert.deepEqual(hq.scheduler.nodeSlots().map((s) => s.free), [0], 'on battery: nothing new');
+
+    // Placed there, the laptop answers but is on battery: the task waits a while, then runs here.
+    hq.store.setToggle('scheduler', false);
+    const pin = (title: string) => {
+      const t = hq.scheduler.addTask({ title, project: 'proj' });
+      hq.store.db.prepare(`UPDATE tasks SET machine = 'n2', worktree = ?, state = 'interrupted', started_at = 1 WHERE id = ?`)
+        .run(join(r.checkout, '.worktrees', `company-t${t.id}-there`), t.id);
+      return t;
+    };
+    const b = pin('על סוללה');
+    hq.store.setToggle('scheduler', true);
+    await hq.scheduler.fill();
+    clock.advance(5 * 60_000);
+    await hq.scheduler.fill();
+    assert.equal(hq.scheduler.task(b.id)!.machine, 'n2', 'a short while: it waits for it');
+    clock.advance(6 * 60_000);
+    await hq.scheduler.fill();
+    await until(() => hq.scheduler.task(b.id)!.state === 'running', 8000, 'running here');
+    assert.equal(hq.scheduler.task(b.id)!.machine, null);
+    assert.equal(launcher.launches.at(-1)!.machine, 'local');
+
+    // Asleep: no word to the manager (nothing ran there), and its task runs here after a while too.
+    hq.store.setToggle('scheduler', false);
+    const t = pin('על הלפטופ');
+    health.ac = '1';
+    n.close();
+    health.down = true;
+    await hq.pollNodes();
+    assert.equal(n.status?.up, false);
+    assert.ok(!hq.mailbox.list('yoav').some((m) => m.body.includes('לא עונה')), 'a laptop asleep with nothing running is not news');
+    hq.store.setToggle('scheduler', true);
+    await hq.scheduler.fill();
+    clock.advance(11 * 60_000);
+    await hq.scheduler.fill();
+    await until(() => hq.scheduler.task(t.id)!.state === 'running', 8000, 'running here');
+    assert.equal(hq.scheduler.task(t.id)!.machine, null);
+    assert.ok(JSON.parse(hq.scheduler.task(t.id)!.labels).some((l: string) => l.startsWith('left-on:n2:')), 'its brief says the work stayed there');
+  } finally { await env.cleanup(); r.cleanup(); }
 });
