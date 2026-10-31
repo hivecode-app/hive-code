@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv } from './helpers.ts';
 import { DEFAULT_HEAVY } from '../src/heavy.ts';
-import { attribute, parseRaw, sections, type AttrCtx, type Machine } from '../src/resources.ts';
+import { execFileSync } from 'node:child_process';
+import { FAST, attribute, parseRaw, sections, type AttrCtx, type Machine } from '../src/resources.ts';
 
 const FAST_OUT = `##memory
 MemTotal:       24000000 kB
@@ -98,6 +99,34 @@ test('משמרות כיחידות user: user@1000.service נספר רק על מ�
   assert.equal(rows.reduce((n, r) => n + r.memMb, 0), 9000 + 2000);
   assert.deepEqual(rows.find((r) => r.kind === 'other')!.memMb, 5000);
   assert.equal(rows.filter((r) => r.kind === 'shift').length, 1);
+});
+
+test('סקריפט הקריאה רץ באמת: זיכרון, דיסק ו-cgroups נקראים כאן, לא רק פלט מוכן', () => {
+  const raw = parseRaw(execFileSync('bash', ['-c', FAST], { encoding: 'utf8', maxBuffer: 8 << 20 }), null);
+  assert.deepEqual(raw.unmeasured.filter((p) => p !== 'docker'), []);
+  assert.ok(raw.mem && raw.disk && raw.cgroups);
+});
+
+test('הלפטופ: שולחן העבודה של רן והאמולטור של לומו מזוהים לפי מכונה ולפי פקודה, ולא מתריעים כ"לא מזוהה"', () => {
+  const MBc = 1024 ** 2;
+  const out = FAST_OUT.replace('##rc cgroups 0', [
+    `user.slice/user-1000.slice/user@1000.service\t${7000 * MBc}\t1\t`,
+    `user.slice/user-1000.slice/user@1000.service/app.slice/company-shift@agent-company-t394-1.service\t${500 * MBc}\t1\t`,
+    `user.slice/user-1000.slice/session-10.scope\t${2200 * MBc}\t1\t/home/owner/Android/Sdk/emulator/qemu/linux-x86_64/qemu-system-x86_64-headless -avd laya2 -no-window ;; netsimd ;; `,
+    `user.slice/user-1000.slice/session-11.scope\t${900 * MBc}\t1\tbash ./dev.sh ;; `,
+    '##rc cgroups 0'].join('\n'));
+  const raw = parseRaw(out, null);
+  assert.match(raw.cgroups!.find((c) => c.path.endsWith('session-10.scope'))!.cmd!, /-avd laya2/);
+  assert.equal(raw.cgroups!.find((c) => c.path.endsWith('gradle.service'))!.cmd, undefined);
+  const map = { 'laptop:user@1000.service': 'owner-sessions', 'laptop:cmd:-avd laya2': 'lumo', 'cmd:dev.sh': 'easy', 'laptop:cmd:dev.sh': 'agent-company' };
+  const of = (machine: string, re: RegExp) => attribute(raw, ctx({ map }), new Map(), machine, 1).filter((r) => re.test(r.name)).map((r) => [r.project, r.memMb]);
+  assert.deepEqual(of('laptop', /user@1000\.service/), [['owner-sessions', 6500]]); // still counted, without the shift inside it
+  assert.deepEqual(of('laptop', /session-10/), [['lumo', 2200]]);
+  assert.deepEqual(of('laptop', /session-11/), [['agent-company', 900]]); // the machine's own key wins over the bare one
+  // another machine: its user@1000 is someone else, and only the bare keys hold
+  assert.deepEqual(of('local', /user@1000\.service/), [[null, 6500]]);
+  assert.deepEqual(of('local', /session-10/), [[null, 2200]]);
+  assert.deepEqual(of('local', /session-11/), [['easy', 900]]);
 });
 
 test('docker: טקסט שאינו גודל הוא "לא נמדד", לא קונטיינר של 0', () => {

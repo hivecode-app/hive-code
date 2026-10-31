@@ -27,7 +27,8 @@ export type Kind = 'shift' | 'ci' | 'docker' | 'other';
 /** Parts of a machine's reading that can be missing. */
 export type Part = 'disk' | 'memory' | 'cgroups' | 'docker' | 'docker-df';
 
-export interface RawCgroup { path: string; memBytes: number; cpuUsec: number | null }
+/** cmd: a scope's first command lines, " ;; " between them (only a .scope of 32MB and more); matched by `cmd:` keys of resources.map. */
+export interface RawCgroup { path: string; memBytes: number; cpuUsec: number | null; cmd?: string }
 export interface RawContainer { id: string; name: string; memBytes: number; cpuPct: number; compose: string | null }
 export interface Raw {
   mem?: { totalMb: number; availMb: number; load1: number; cpus: number };
@@ -55,7 +56,13 @@ cgroups() {
     while read -r k v; do case $k in anon) a=$v;; shmem) sh=$v;; esac; done < "$d/memory.stat" 2>/dev/null
     [ -n "$a" ] && m=$((a + \${sh:-0}))
     while read -r k v; do [ "$k" = usage_usec ] && c=$v; done < "$d/cpu.stat" 2>/dev/null
-    printf '%s\t%s\t%s\n' "\${d#./}" "$m" "$c"
+    # a scope (an ssh or desktop session) has no name of its own: its first commands say whose it is (resources.map "cmd:").
+    # Only an outer one: inside a unit it is never counted on its own.
+    x=''
+    case $d in */docker-*|*.service/*|*.scope/*) ;; *.scope) if [ -n "$m" ] && [ "$m" -ge 33554432 ]; then
+      n=0; while [ $n -lt 12 ] && read -r p; do n=$((n + 1)); l=$(head -c 300 "/proc/$p/cmdline" 2>/dev/null | tr '\0\t\n' '   '); [ -n "$l" ] && x="$x$l ;; "; done < "$d/cgroup.procs" 2>/dev/null
+    fi;; esac
+    printf '%s\t%s\t%s\t%s\n' "\${d#./}" "$m" "$c" "$x"
   done
 }
 export -f meminfo cgroups
@@ -114,8 +121,8 @@ export function parseRaw(fast: string | null, docker: string | null): Raw {
     const cg = s.get('cgroups');
     if (cg?.rc === 0 || (cg?.rc === 1 && cg.body.trim())) { // `while read … continue` may leave rc 1 on the last unreadable cgroup
       raw.cgroups = cg.body.split('\n').flatMap((l) => {
-        const [path, m, c] = l.split('\t');
-        return path && /^\d+$/.test(m ?? '') ? [{ path, memBytes: Number(m), cpuUsec: /^\d+$/.test(c ?? '') ? Number(c) : null }] : [];
+        const [path, m, c, x] = l.split('\t');
+        return path && /^\d+$/.test(m ?? '') ? [{ path, memBytes: Number(m), cpuUsec: /^\d+$/.test(c ?? '') ? Number(c) : null, ...(x?.trim() ? { cmd: x.trim() } : {}) }] : [];
       });
     } else bad('cgroups');
   }
@@ -151,7 +158,10 @@ export interface AttrCtx {
   shift: (id: string) => { task: number | null; project: string | null } | null;
   /** project ids of org.yaml */
   projects: ReadonlySet<string>;
-  /** resources.map: an exact name (a cgroup's last segment, a container, a compose project) → project id */
+  /** resources.map: an exact name (a cgroup's last segment, a container, a compose project) → project id. A key `<machine>:<name>`
+   *  holds on that machine only and wins over the bare name (user@1000.service is Ran's desktop on the laptop, not elsewhere);
+   *  a key `cmd:<text>` (or `<machine>:cmd:<text>`) takes a scope whose command lines contain the text (a session has no stable name).
+   *  Order: names (the machine's, then bare), then commands (the machine's, then bare), then the defaults. */
   map: Readonly<Record<string, string>>;
   /** docker was read: its containers are counted from `docker stats`, so their scopes in the cgroup tree are not counted again */
   dockerRead: boolean;
@@ -177,8 +187,22 @@ const UNIT = /\.(service|scope)$/;
 /** Raw cgroups and containers → rows. The cgroup tree is nested: only the outermost unit of a kind is counted, never a unit and its children. */
 export function attribute(raw: Raw, ctx: AttrCtx, prev: Map<string, { usec: number; at: number }>, machine: string, now: number): Usage[] {
   const out: Usage[] = [];
-  const mapped = (...names: (string | null | undefined)[]) => {
-    for (const n of names) if (n && ctx.map[n]) return ctx.map[n]!;
+  const byName = (n: string) => ctx.map[`${machine}:${n}`] ?? ctx.map[n];
+  const byCmd = (cmd: string | undefined) => {
+    if (!cmd) return null;
+    let hit: string | null = null;
+    for (const [k, v] of Object.entries(ctx.map)) {
+      const m = /^(?:(.+?):)?cmd:(.+)$/.exec(k);
+      if (!m || !cmd.includes(m[2]!)) continue;
+      if (m[1] === machine) return v;
+      if (m[1] === undefined) hit ??= v;
+    }
+    return hit;
+  };
+  const mapped = (names: (string | null | undefined)[], cmd?: string) => {
+    for (const n of names) if (n && byName(n)) return byName(n)!;
+    const c = byCmd(cmd);
+    if (c) return c;
     for (const n of names) { const d = n && defaultOf(n.split('/').pop()!); if (d) return d; }
     return null;
   };
@@ -207,20 +231,20 @@ export function attribute(raw: Raw, ctx: AttrCtx, prev: Map<string, { usec: numb
     } else if (ciAt >= 0) {
       if (ciAt !== seg.length - 1) continue;
       const slug = last.slice(3, -'.slice'.length);
-      const project = mapped(last, slug) ?? (ctx.projects.has(slug) ? slug : null);
+      const project = mapped([last, slug]) ?? (ctx.projects.has(slug) ? slug : null);
       out.push({ kind: 'ci', project, task: null, name: project ? `CI ${last}` : c.path, memMb, cpuPct: cpuOf(c.path, c.cpuUsec) });
     } else if (dockerAt >= 0) {
       if (ctx.dockerRead) continue;
       if (dockerAt === seg.length - 1) out.push({ kind: 'docker', project: null, task: null, name: c.path, memMb, cpuPct: cpuOf(c.path, c.cpuUsec) });
     } else if (UNIT.test(last) && seg.findIndex((s) => UNIT.test(s)) === seg.length - 1) {
-      const project = mapped(last, c.path);
+      const project = mapped([last, c.path], c.cmd);
       const inside = counted.filter((x) => x.path.startsWith(`${c.path}/`) && !counted.some((y) => y !== x && x.path.startsWith(`${y.path}/`)));
       const own = Math.max(0, memMb - Math.round((inside.reduce((n, x) => n + x.memBytes, 0) / MB) * 10) / 10);
       if (project || own >= MIN_OTHER_MB) out.push({ kind: 'other', project, task: null, name: inside.length ? `${c.path} (בלי המשמרות וה-CI שבתוכו)` : c.path, memMb: own, cpuPct: cpuOf(c.path, c.cpuUsec) });
     }
   }
   for (const k of raw.containers ?? []) {
-    const project = mapped(k.name, k.compose) ?? (k.compose && ctx.projects.has(k.compose) ? k.compose : null);
+    const project = mapped([k.name, k.compose]) ?? (k.compose && ctx.projects.has(k.compose) ? k.compose : null);
     out.push({ kind: 'docker', project, task: null, name: k.compose ? `${k.name} (${k.compose})` : k.name, memMb: Math.round((k.memBytes / MB) * 10) / 10, cpuPct: k.cpuPct });
   }
   return out;

@@ -136,7 +136,7 @@ export interface HqConfig {
   nodes: NodeDef[];
   /** A second vantage point for probes (probes.ts): ssh target that runs curl. null = no second check. */
   probeWitness: { ssh: string; identityFile: string | null } | null;
-  /** resources.ts: `map` sends an exact cgroup, container or compose-project name to a project id; what it and the defaults miss is shown as לא מזוהה. */
+  /** resources.ts: `map` sends an exact cgroup, container or compose-project name to a project id (`<machine>:<name>` on one machine only; `cmd:<text>` a scope by its command lines); what it and the defaults miss is shown as לא מזוהה. */
   resources: { map: Record<string, string> };
 }
 
