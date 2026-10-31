@@ -172,7 +172,11 @@ export const runSetup: Setup = (cwd, command, checkout, timeoutMs = 15 * 60_000)
   });
 });
 
-export interface Worktree { path: string; branch: string; checkout: string; base: string }
+export interface Worktree {
+  path: string; branch: string; checkout: string; base: string;
+  /** On a node: repos it reads beside the worktree that stayed behind the commit here (nodes.ts RemoteWorkspaces.create). */
+  stale?: string[];
+}
 export interface CloseResult { path: string; preserved: string | null; removed: boolean; branchDeleted: boolean; ignored: string[]; repaired?: boolean; error?: string }
 
 export class Workspaces {

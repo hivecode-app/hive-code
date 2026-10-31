@@ -146,13 +146,15 @@ clone() { # <owner/name> <path> [branch or commit]; stdin closed: inside `while 
         [ -z '$to' ] || git -C $2 checkout --quiet '$to' || echo 'node-install: $2 not at $to (missing in origin?)' >&2; fi" </dev/null
 }
 # A repo as it is here: its origin, and its branch (or commit, when detached).
-slug() { git -C "$1" remote get-url origin 2>/dev/null | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##'; }
-at() { local b; b="$(git -C "$1" rev-parse --abbrev-ref HEAD)"; [[ "$b" == HEAD ]] && git -C "$1" rev-parse HEAD || echo "$b"; }
-# Repos inside a checkout that git there does not track (lumo's server/ and reference/*): the same, at the same path.
-nested() {
-  find "$1" -mindepth 2 -maxdepth 3 -name .git -not -path '*/.worktrees/*' -not -path '*/node_modules/*' 2>/dev/null | while read -r g; do
+slug() { git -C "$1" remote get-url origin 2>/dev/null | sed -nE 's#^(git@github\.com:|https://github\.com/)##p' | sed -E 's#\.git$##'; }
+# Repos inside a checkout that git there does not track (lumo's server/ and reference/*): the same, at the same path
+# and commit (scripts/repo-sync.sh; nodes.ts nestedRepos finds the same ones).
+pins=()
+nested() { # <checkout> <worktree dir>
+  find "$1" -mindepth 2 -maxdepth 3 -name .git -not -path "$1/$2/*" -not -path '*/node_modules/*' 2>/dev/null | while read -r g; do
     local d; d="$(dirname "$g")"; local s; s="$(slug "$d")"
-    [[ -n "$s" ]] && echo "$d $s $(git -C "$d" rev-parse HEAD)" # pinned: reference code is read at the commit it is here
+    # GitHub only (repo-sync clones from there); pinned: reference code is read at the commit it is here
+    [[ -n "$s" ]] && echo "$d $s $(git -C "$d" rev-parse HEAD)"
   done
 }
 chome="$(node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); console.log((c.companyHome||"~/company").replace(/^~/, process.env.HOME))' "$CONFIG")"
@@ -172,7 +174,7 @@ for p in ${projects//,/ }; do
     clone "$crepo_p" "$cpath" "$cbranch"
     # The worktrees dir is never part of the checkout's status, whether or not its .gitignore says so.
     on "grep -qxF '$wdir/' $cpath/.git/info/exclude 2>/dev/null || echo '$wdir/' >> $cpath/.git/info/exclude" </dev/null
-    while read -r npath nrepo nat; do clone "$nrepo" "$npath" "$nat"; done < <(nested "$cpath")
+    while read -r npath nrepo nat; do pins+=("$npath" "$nrepo" "$nat"); done < <(nested "$cpath" "$wdir")
   done < <(node --input-type=module -e '
     const { readCharter } = await import(process.argv[1]);
     const ch = readCharter(process.argv[2], process.argv[3]);
@@ -181,9 +183,14 @@ done
 for m in ${mirror//,/ }; do
   m="${m/#\~/$HOME}"
   ms="$(slug "$m")"
-  [[ -n "$ms" ]] || { say "דילוג על $m: אין לו origin כאן"; continue; }
-  clone "$ms" "$m" "$(at "$m")"
+  [[ -n "$ms" ]] || { say "דילוג על $m: אין לו origin ב-GitHub כאן"; continue; }
+  pins+=("$m" "$ms" "$(git -C "$m" rev-parse HEAD)")
 done
+# The nested repos and the mirrors at the commit they are on here, also when they are there already (a new pin here
+# reaches the node). hq runs the same after each task's worktree there (nodes.ts RemoteWorkspaces.create).
+if ((${#pins[@]})); then
+  on "bash -s -- $own $(printf '%q ' "${pins[@]}")" <"$repo/scripts/repo-sync.sh" | while read -r line; do say "$line"; done
+fi
 say "checkouts: המנוע, החברה, ${projects:-אין פרויקטים}${mirror:+, ועוד $mirror}"
 [[ "$mode" == "--projects" ]] && exit 0
 update_engine

@@ -11,7 +11,7 @@
 //   commands (systemctl, the worktree ops of workspace-cli.ts, the health read) over the same connection.
 // The master is a child of hq: an hq restart opens it again, and attach() forwards each live shift again.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Charter, Checkout, CloseResult, Worktree } from './workspace.ts';
@@ -306,6 +306,29 @@ export class RemoteLauncher {
   }
 }
 
+/** scripts/repo-sync.sh: sent to the node on stdin, so it is this hq's version whatever the engine there is on. */
+const REPO_SYNC = join(import.meta.dirname, '..', '..', '..', 'scripts', 'repo-sync.sh');
+
+/**
+ * Repos inside a checkout that git there does not track (lumo's server/ and reference/*, which its worktrees link
+ * to): a .git one or two levels down, outside the worktrees and node_modules. Like node-install.sh `nested`.
+ */
+export function nestedRepos(checkout: string, worktreeDir = '.worktrees'): string[] {
+  const found: string[] = [];
+  const walk = (dir: string, depth: number) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name === '.git' || e.name === 'node_modules' || (depth === 1 && e.name === worktreeDir)) continue;
+      const d = join(dir, e.name);
+      if (existsSync(join(d, '.git'))) found.push(d);
+      if (depth < 2) walk(d, depth + 1);
+    }
+  };
+  walk(checkout, 1);
+  return found.sort();
+}
+
 /** Writes {path: content} from stdin, owner-only, atomically (the remote half of RemoteLauncher.launch). */
 const WRITE_FILES = `const fs=require('fs'),p=require('path');let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
 for(const [f,c] of Object.entries(JSON.parse(s))){fs.mkdirSync(p.dirname(f),{recursive:true,mode:0o700});fs.writeFileSync(f+'.tmp',c,{mode:0o600});fs.renameSync(f+'.tmp',f);}})`;
@@ -339,6 +362,7 @@ export class RemoteWorkspaces {
   private engine: string;
   /** git here (fetch of a preserved ref); tests substitute it. */
   fetch: (repo: string, ref: string) => Promise<void>;
+  private git: (cwd: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string>;
   /** The commit our company checkout is on: the node's copy goes to it before each op. */
   companySha: () => Promise<string | null>;
 
@@ -347,6 +371,7 @@ export class RemoteWorkspaces {
     this.companyHome = companyHome;
     this.engine = engine;
     const run = git ?? (async (cwd: string, args: string[], env?: NodeJS.ProcessEnv) => (await import('./workspace.ts')).runGit(cwd, args, env));
+    this.git = run;
     this.fetch = async (repo, ref) => {
       if (!existsSync(join(repo, '.git'))) return;
       await run(repo, ['fetch', '--quiet', `${this.node.def.ssh}:${repo}`, `+${ref}:${ref}`], { GIT_SSH_COMMAND: this.node.gitSsh() });
@@ -372,8 +397,42 @@ export class RemoteWorkspaces {
     return c;
   }
 
-  create(ch: Charter, c: Checkout, task: string): Promise<Worktree> {
-    return this.op({ op: 'create', project: ch.project, checkout: c.name, task });
+  /**
+   * The repos a task there reads beside its worktree, at the commit they are on here: the checkout's nested repos and
+   * the node's mirrors (scripts/repo-sync.sh, `<path> <owner/name> <sha>` each). One with no origin here is left out.
+   */
+  async pins(c: Checkout, worktreeDir?: string): Promise<string[]> {
+    const paths = [...nestedRepos(c.path, worktreeDir), ...(this.node.def.mirror ?? []).map((m) => m.replace(/^~(?=\/|$)/, homedir()))];
+    const out: string[] = [];
+    for (const p of paths) {
+      if (!existsSync(join(p, '.git'))) continue;
+      const url = (await this.git(p, ['remote', 'get-url', 'origin']).catch(() => '')).trim();
+      const slug = url.replace(/^(git@github\.com:|https:\/\/github\.com\/)/, '').replace(/\.git$/, '');
+      const sha = (await this.git(p, ['rev-parse', 'HEAD']).catch(() => '')).trim();
+      if (slug && slug !== url && sha) out.push(p, slug, sha);
+    }
+    return out;
+  }
+
+  /**
+   * Makes the worktree, then brings the pins there. A repo that stays behind (its user's moved on, changes there), or a
+   * sync that failed, does not stop the task: it comes back in `stale`, and the worker is told (scheduler prepareWorktree).
+   */
+  async create(ch: Charter, c: Checkout, task: string): Promise<Worktree> {
+    // The worktree first: with no checkout there it fails, and nothing is cloned into a path node-install has not made.
+    const w = await this.op<Worktree>({ op: 'create', project: ch.project, checkout: c.name, task });
+    const pins = await this.pins(c, ch.worktreeDir);
+    if (!pins.length) return w;
+    let stale: string[];
+    try {
+      const out = await this.node.exec(`bash -s -- ${this.node.def.ownLogin ? 1 : 0} ${pins.map(q).join(' ')}`,
+        readFileSync(REPO_SYNC, 'utf8'), 10 * 60_000);
+      stale = out.split('\n').filter((l) => / stays: /.test(l));
+    } catch (e) {
+      // The node gone too: the worktree is there already, so it is returned (and recorded); the launch fails and retries.
+      stale = [`repo-sync failed: ${(e as Error).message.slice(0, 200)}`];
+    }
+    return stale.length ? { ...w, stale } : w;
   }
 
   ensure(path: string, checkout?: string, ch?: Charter): Promise<boolean> {

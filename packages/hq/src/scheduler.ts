@@ -751,7 +751,7 @@ export class Scheduler {
     const w = await ws.create(ch, c, `company-t${t.id}`);
     this.store.db.prepare('UPDATE tasks SET worktree = ?, updated_at = ? WHERE id = ?').run(w.path, this.store.now(), t.id);
     this.store.emit('task.worktree', null, { id: t.id, path: w.path, branch: w.branch, base: w.base });
-    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) + nodeNote(t.machine) + this.charterNote(t) + movedNote(t) };
+    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) + nodeNote(t.machine) + staleNote(w.stale) + this.charterNote(t) + movedNote(t) };
   }
 
   /**
@@ -1343,6 +1343,13 @@ function nodeNote(machine?: string | null): string {
   return `\n**רץ בשרת השני (\`${machine}\`).** יש בו את ה-checkouts וה-toolchains. אין בו מפתחות ssh, \`.env\`, kubectl וסודות של hq-host: את מה שהם נותנים מבקשים מ-hq עם \`request_access\`, והוא מריץ בשמך ומחזיר לך את הפלט. `
     + 'דוגמאות: `resource: "kube:lumo-dev", argv: ["rollout","status","deploy/api"]` · `resource: "ssh:ci-host"` עם פקודה מהרשימה · `resource: "hq:query", argv: ["select …"]`. הרשימות סגורות: מה שלא ברשימה חוזר עם `unfit` והצעה, ושינוי בפרודקשן מגיע לרן ככרטיס בכל פעם (ממשיכים במה שלא תלוי בו וחוזרים עם `request`). '
     + 'מה שנשאר רק בשרת הראשי: דפדפן, סימולטור, flutter, קובץ מקומי, וסוד שנמצא בקובץ (`.env`). כשהמשימה צריכה אחד מהם, או ש-`request_access` אומר שאין חלופה: קודם `commit` למה שיש (גם WIP), ואז `status` עם `state: "needs-local"` ו-`note` שאומר מה חסר. המשמרת כאן נגמרת, והמשימה ממשיכה בשרת הראשי מהענף שלך.';
+}
+
+/** Repos the worktree reads beside it (lumo's server/) that stayed behind on the node (RemoteWorkspaces.create). */
+function staleNote(stale?: string[]): string {
+  if (!stale?.length) return '';
+  return `\n**repos שנשארו מאחור בשרת הזה** (לא באותו commit כמו בשרת הראשי): ${stale.map((l) => `\`${l}\``).join(' · ')}. `
+    + 'אם המשימה תלויה בהם: `status` עם `state: "needs-local"` ו-`note`, והיא ממשיכה בשרת הראשי.';
 }
 
 /** A task that started on a node and came back (unpin): where its work from there is now (fetched back on close). */

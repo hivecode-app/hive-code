@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
@@ -568,4 +568,145 @@ test('nodes: a laptop on battery takes no new task; its own reserve is kept; wit
     assert.equal(hq.scheduler.task(t.id)!.machine, null);
     assert.ok(JSON.parse(hq.scheduler.task(t.id)!.labels).some((l: string) => l.startsWith('left-on:n2:')), 'its brief says the work stayed there');
   } finally { await env.cleanup(); r.cleanup(); }
+});
+
+/** An origin with two commits, and the sha of each. */
+function upstream(dir: string, name: string) {
+  const origin = join(dir, `${name}.git`);
+  const work = join(dir, `${name}-src`);
+  git(dir, 'init', '--quiet', '--bare', '--initial-branch=master', origin);
+  git(dir, 'clone', '--quiet', origin, work);
+  const shas: string[] = [];
+  for (const f of ['a', 'b']) {
+    writeFileSync(join(work, f), f);
+    git(work, 'add', f);
+    git(work, 'commit', '--quiet', '-m', f);
+    git(work, 'push', '--quiet', 'origin', 'HEAD:master');
+    shas.push(git(work, 'rev-parse', 'HEAD').trim());
+  }
+  return { origin, work, old: shas[0]!, pin: shas[1]! };
+}
+
+const SYNC = join(import.meta.dirname, '..', '..', '..', 'scripts', 'repo-sync.sh');
+const sync = (dir: string, own: 0 | 1, ...args: string[]) => new Promise<string>((res, rej) => {
+  const p = spawn('bash', ['-s', '--', String(own), ...args], { env: { ...process.env, REPO_SYNC_BASE: dir } });
+  let out = '';
+  p.stdout.on('data', (d) => { out += String(d); });
+  p.on('close', (code) => (code === 0 ? res(out) : rej(new Error(`exit ${code}: ${out}`))));
+  p.stdin.end(readFileSync(SYNC));
+});
+
+test('repo-sync: a nested repo or mirror there goes to the commit here; one of its user only fast-forwards, and changes stay', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rs-'));
+  try {
+    const u = upstream(dir, 'srv');
+    const at = (p: string) => git(p, 'rev-parse', 'HEAD').trim();
+    const clone = (name: string, sha: string, mark = false) => {
+      const p = join(dir, name);
+      git(dir, 'clone', '--quiet', u.origin, p);
+      git(p, 'reset', '--quiet', '--hard', sha);
+      if (mark) writeFileSync(join(p, '.git', 'agent-company-node'), '');
+      return p;
+    };
+    // Behind and ours (own=0): fetched and detached on the pin. The clone was made before the pin was pushed.
+    const ours = join(dir, 'ours');
+    git(dir, 'clone', '--quiet', u.origin, ours);
+    git(ours, 'reset', '--quiet', '--hard', u.old);
+    git(ours, 'update-ref', 'refs/remotes/origin/master', u.old);
+    // Its user's, behind on its branch: fast-forwarded, still on the branch.
+    const his = clone('his', u.old);
+    // Its user's, diverged: stays.
+    const diverged = clone('diverged', u.old);
+    writeFileSync(join(diverged, 'c'), 'c');
+    git(diverged, 'add', 'c');
+    git(diverged, 'commit', '--quiet', '-m', 'his own');
+    const divergedAt = at(diverged);
+    // Marked, diverged: ours, so detached on the pin.
+    const marked = clone('marked', u.old, true);
+    writeFileSync(join(marked, 'c'), 'c');
+    git(marked, 'add', 'c');
+    git(marked, 'commit', '--quiet', '-m', 'left');
+    // Tracked changes: nothing moves.
+    const dirty = clone('dirty', u.old, true);
+    writeFileSync(join(dirty, 'a'), 'changed');
+    // Its user's, on a branch whose upstream does not have the pin (a feature branch): stays.
+    const feature = clone('feature', u.old);
+    git(feature, 'checkout', '--quiet', '-b', 'feat');
+    // Its user's, past the pin: left, and not behind.
+    const ahead = clone('ahead', u.pin);
+    writeFileSync(join(ahead, 'd'), 'd');
+    git(ahead, 'add', 'd');
+    git(ahead, 'commit', '--quiet', '-m', 'newer');
+    const aheadAt = at(ahead);
+    // Missing: cloned from REPO_SYNC_BASE/<owner/name>, marked, on the pin.
+    const missing = join(dir, 'missing');
+    const done = clone('done', u.pin);
+
+    const out1 = await sync(dir, 0, ours, 'srv.git', u.pin);
+    assert.match(out1, / moved /);
+    assert.equal(at(ours), u.pin);
+    assert.equal(git(ours, 'rev-parse', '--abbrev-ref', 'HEAD').trim(), 'HEAD', 'ours: detached');
+
+    const out = await sync(dir, 1, his, 'srv.git', u.pin, diverged, 'srv.git', u.pin, marked, 'srv.git', u.pin,
+      dirty, 'srv.git', u.pin, missing, 'srv.git', u.pin, done, 'srv.git', u.pin, ahead, 'srv.git', u.pin, feature, 'srv.git', u.pin);
+    const line = (p: string) => out.split('\n').find((l) => l.startsWith(`${p} `)) ?? '';
+    assert.equal(at(his), u.pin);
+    assert.equal(git(his, 'rev-parse', '--abbrev-ref', 'HEAD').trim(), 'master', 'its user\'s: fast-forwarded on its branch');
+    assert.equal(at(diverged), divergedAt);
+    assert.match(line(diverged), /stays: .* not an ancestor/);
+    assert.equal(at(marked), u.pin);
+    assert.equal(at(dirty), u.old);
+    assert.match(line(dirty), /stays: changes there/);
+    assert.equal(at(missing), u.pin);
+    assert.ok(existsSync(join(missing, '.git', 'agent-company-node')), 'a clone of ours is marked');
+    assert.match(line(done), / ok /);
+    assert.match(line(his), / moved /);
+    assert.equal(at(ahead), aheadAt);
+    assert.match(line(ahead), / ahead /);
+    assert.equal(at(feature), u.old);
+    assert.match(line(feature), /stays: .* not on the upstream of feat/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('RemoteWorkspaces.create: the checkout\'s nested repos and the node\'s mirrors go there at their commit here, after the worktree; what stays behind reaches the worker', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rwc-'));
+  try {
+    const checkout = join(dir, 'proj');
+    for (const p of [checkout, join(checkout, 'server'), join(checkout, 'reference', 'tinode-js'), join(checkout, '.worktrees', 't1', 'server'),
+      join(checkout, 'app', 'node_modules', 'x'), join(dir, 'whatsmeow')]) {
+      mkdirSync(join(p, '.git'), { recursive: true });
+    }
+    const origins: Record<string, string> = { [join(checkout, 'server')]: 'https://github.com/hive-owner/lumo-tinode.git',
+      [join(checkout, 'reference', 'tinode-js')]: 'https://github.com/tinode/tinode-js', [join(dir, 'whatsmeow')]: 'git@github.com:hive-owner/whatsmeow.git' };
+    const execs: { cmd: string; input?: string }[] = [];
+    let syncFails: Error | null = null;
+    const node = {
+      def: { name: 'laptop', ssh: 'ran@laptop.test', ownLogin: true, mirror: [join(dir, 'whatsmeow')] },
+      exec: async (cmd: string, input?: string) => {
+        execs.push({ cmd, input });
+        if (cmd.startsWith('bash -s') && syncFails) throw syncFails;
+        if (cmd.startsWith('bash -s')) return `${join(checkout, 'server')} moved 1 → 2\n${join(dir, 'whatsmeow')} stays: changes there\n`;
+        return JSON.stringify({ ok: true, result: { path: join(checkout, '.worktrees', 'company-t9'), branch: 'company-t9', checkout, base: 'origin/main' } });
+      },
+      gitSsh: () => 'ssh',
+    };
+    const ws = new RemoteWorkspaces(node as never, '/c', '/e', async (cwd, args) => (args[0] === 'remote' ? origins[cwd] ?? '' : `sha-${cwd.split('/').pop()}\n`));
+    ws.companySha = async () => null;
+    const ch = { project: 'lumo', worktreeDir: '.worktrees', checkouts: [] } as never;
+    const co = { name: 'lumo-app', path: checkout, defaultBranch: 'main' } as never;
+    const w = await ws.create(ch, co, 'company-t9');
+    assert.equal(execs.length, 2);
+    assert.match(execs[0]!.cmd, /workspace-cli/, 'the worktree first: no checkout there, nothing cloned');
+    assert.equal(execs[1]!.cmd, `bash -s -- 1 '${join(checkout, 'reference', 'tinode-js')}' 'tinode/tinode-js' 'sha-tinode-js' `
+      + `'${join(checkout, 'server')}' 'hive-owner/lumo-tinode' 'sha-server' '${join(dir, 'whatsmeow')}' 'hive-owner/whatsmeow' 'sha-whatsmeow'`,
+    'nested repos (not in the worktrees, not node_modules, not the checkout itself) and the mirror, by sha');
+    assert.equal(execs[1]!.input, readFileSync(SYNC, 'utf8'), 'the script goes on stdin');
+    assert.deepEqual(w.stale, [`${join(dir, 'whatsmeow')} stays: changes there`]);
+
+    // A sync that fails (a timeout on a slow fetch, the node gone) does not lose the worktree made there: it is said.
+    syncFails = new Error('ssh killed (SIGKILL)');
+    assert.deepEqual((await ws.create(ch, co, 'company-t10')).stale, ['repo-sync failed: ssh killed (SIGKILL)']);
+    syncFails = new NodeUnreachable('laptop: gone');
+    assert.deepEqual((await ws.create(ch, co, 'company-t11')).stale, ['repo-sync failed: laptop: gone']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
