@@ -264,7 +264,7 @@ class HqBackend extends Backend {
     _fromCache = null;
     if (!_fresh.isCompleted) _fresh.complete();
     final open = openIdentity, openChat = open == null ? null : _data!.chats[open];
-    if (open != null && openChat != null && !_midFetch.containsKey(open)) _syncAsks(openChat, open, _data!);
+    if (open != null && openChat != null && !_midFetch.containsKey(open)) syncAskCards(openChat, open, _data!);
     if (open != null && _openFailed.contains(open)) unawaited(openConversation(open));
     for (final b in board) {
       final sh = b['shift'] as Map?;
@@ -1078,7 +1078,7 @@ class HqBackend extends Backend {
           unawaited(_send('POST', '/api/messages/${Uri.encodeComponent(m['id'] as String)}/handled'));
         }
       }
-      _syncAsks(chat, identityId, _data ?? d); // the snapshot may have moved on while this loaded
+      syncAskCards(chat, identityId, _data ?? d); // the snapshot may have moved on while this loaded
       // Messages sent from here: keep the furthest delivery state either copy has seen, and keep
       // the ones hq doesn't have yet (in the queue, waiting for the link, or failed).
       final mine = {for (final m in chat.items.whereType<UserMsg>()) m.id: m};
@@ -1122,34 +1122,6 @@ class HqBackend extends Backend {
     final i = _shown.lastIndexOf(identityId);
     if (i >= 0) _shown.removeAt(i);
     if (!_disposed) _onScreenChanged();
-  }
-
-  /// Question and GO cards follow the inbox: one appears in the conversation of whoever asked, and
-  /// one answered elsewhere (home, another device, a manager) stops asking here.
-  void _syncAsks(Conversation chat, String identityId, CompanyData d) {
-    // A task to check is a card here too, under the line that says what to check (task 986).
-    final open = {
-      for (final w in d.waiting.where((w) => w.from == identityId && w.askId != null)) w.askId!: w,
-      for (final w in d.checks.where((w) => w.from == identityId)) checkAskId(w): w,
-    };
-    var added = false;
-    for (final card in chat.items.whereType<AskCard>()) {
-      if (card.state == AskState.open && card.askId != null && !open.containsKey(card.askId)) card.state = AskState.answered;
-    }
-    final have = {for (final c in chat.items.whereType<AskCard>()) c.askId};
-    for (final a in open.values) {
-      if (have.contains(a.askId)) continue;
-      // At the time it was asked, not "now": a card stamped now sorted below everything and buried
-      // every new message under it.
-      final ts = a.createdAt ?? company_time.CompanyTime.now();
-      chat.items.add(a.kind == WaitKind.awaiting
-          ? CheckCard(id: 'check:${a.inboxId}', ts: ts, askId: checkAskId(a), from: identityId, headline: a.headline, details: a.body)
-          : a.kind == WaitKind.go
-          ? GoCard(id: 'go:${a.inboxId}', ts: ts, askId: a.askId, ref: a.ref, from: identityId, headline: a.headline, details: a.body)
-          : AskCard(id: 'ask:${a.askId}', ts: ts, askId: a.askId, from: identityId, headline: a.headline, question: a.body, options: a.options, blocking: a.blocking));
-      added = true;
-    }
-    if (added) chat.items.sort((a, b) => a.ts.compareTo(b.ts));
   }
 
   // ── commands ─────────────────────────────────────────────────────────────
@@ -1864,7 +1836,7 @@ Delivery furtherDelivery(Delivery a, Delivery b) {
 
 
 /// The question and GO cards of a conversation, from its events (`inbox.new`, `ask.new`): what was asked,
-/// in the order it was asked. Whether each is still open comes from the inbox (`_syncAsks`).
+/// in the order it was asked. Whether each is still open comes from the inbox (`syncAskCards`).
 List<AskCard> historyCards(List<Map<String, dynamic>> events, String identityId) {
   final options = <String, List<String>>{};
   for (final e in events) {
@@ -1985,4 +1957,38 @@ String? _openedBy(Object? labels) {
     if (l is String && l.startsWith('opened-by:')) return l.substring(10);
   }
   return null;
+}
+
+/// Question and GO cards follow the inbox: one appears in the conversation of whoever asked, and
+/// one answered elsewhere (home, another device, a manager) stops asking here.
+void syncAskCards(Conversation chat, String identityId, CompanyData d) {
+  // A task to check is a card here too, under the line that says what to check (task 986).
+  final open = {
+    for (final w in d.waiting.where((w) => w.from == identityId && w.askId != null)) w.askId!: w,
+    for (final w in d.checks.where((w) => w.from == identityId)) checkAskId(w): w,
+  };
+  var added = false;
+  for (final card in chat.items.whereType<AskCard>()) {
+    if (card.state == AskState.open && card.askId != null && !open.containsKey(card.askId)) card.state = AskState.answered;
+  }
+  // By the key it is open under: a check's own askId is null, and comparing that added the same card again on
+  // every snapshot, two rows with one key, and the list behind the chat broke (error 802d88feff).
+  final have = {for (final c in chat.items.whereType<AskCard>()) c.askId};
+  final ids = {for (final i in chat.items) i.id};
+  for (final MapEntry(key: askId, value: a) in open.entries) {
+    if (have.contains(askId)) continue;
+    // At the time it was asked, not "now": a card stamped now sorted below everything and buried
+    // every new message under it.
+    final ts = a.createdAt ?? company_time.CompanyTime.now();
+    final card = a.kind == WaitKind.awaiting
+        ? CheckCard(id: 'check:${a.inboxId}', ts: ts, askId: askId, from: identityId, headline: a.headline, details: a.body)
+        : a.kind == WaitKind.go
+        ? GoCard(id: 'go:${a.inboxId}', ts: ts, askId: askId, ref: a.ref, from: identityId, headline: a.headline, details: a.body)
+        : AskCard(id: 'ask:$askId', ts: ts, askId: askId, from: identityId, headline: a.headline, question: a.body, options: a.options, blocking: a.blocking);
+    // A row's id is its key in the list: never two.
+    if (!ids.add(card.id)) continue;
+    chat.items.add(card);
+    added = true;
+  }
+  if (added) chat.items.sort((a, b) => a.ts.compareTo(b.ts));
 }
