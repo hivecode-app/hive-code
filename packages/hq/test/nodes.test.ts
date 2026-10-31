@@ -515,6 +515,26 @@ test('nodes: a laptop on battery takes no new task; its own reserve is kept; wit
     assert.equal(hq.scheduler.task(b.id)!.machine, null);
     assert.equal(launcher.launches.at(-1)!.machine, 'local');
 
+    // Out of the queue and back in it: its wait starts over, a full PORTABLE_AWAY_MS from its return.
+    hq.store.setToggle('scheduler', false);
+    const back = pin('יצאה וחזרה');
+    hq.store.setToggle('scheduler', true);
+    await hq.scheduler.fill();
+    clock.advance(8 * 60_000);
+    hq.store.db.prepare(`UPDATE tasks SET state = 'blocked' WHERE id = ?`).run(back.id);
+    await hq.scheduler.fill();
+    hq.store.db.prepare(`UPDATE tasks SET state = 'interrupted' WHERE id = ?`).run(back.id);
+    await hq.scheduler.fill();
+    clock.advance(5 * 60_000);
+    await hq.scheduler.fill();
+    // unpin runs in the background; it marks the task in fallingBack before its first await.
+    const falling = () => (hq.scheduler as unknown as { fallingBack: Set<number> }).fallingBack.has(back.id);
+    assert.ok(!falling() && hq.scheduler.task(back.id)!.machine === 'n2', '13 minutes since it first waited, 5 since it came back: it still waits');
+    clock.advance(6 * 60_000);
+    await hq.scheduler.fill();
+    await until(() => hq.scheduler.task(back.id)!.state === 'running', 8000, 'running here');
+    assert.equal(hq.scheduler.task(back.id)!.machine, null);
+
     // Asleep: no word to the manager (nothing ran there), and its task runs here after a while too.
     hq.store.setToggle('scheduler', false);
     const t = pin('על הלפטופ');

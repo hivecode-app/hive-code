@@ -196,7 +196,11 @@ if [[ "$own" == 1 ]]; then
   # changed stays. Its CLAUDE.md is its user's: the shifts get the Authority section from the company's directives.
   f=hooks/permission-authority.mjs
   new="$(sha256sum <"$HOME/.claude/$f" | cut -d' ' -f1)"
-  if on "[ ! -e $H/.claude/$f ] || { cur=\$(sha256sum < $H/.claude/$f | cut -d' ' -f1); [ \"\$cur\" = $new ] || [ \"\$cur\" = \"\$(cat $NSTATE/permission-authority.sha 2>/dev/null)\" ]; }" </dev/null; then
+  # One it cannot read (cur empty) is not ours to overwrite; ssh that does not answer (255) is said as such.
+  rc=0
+  on "[ ! -e $H/.claude/$f ] || { cur=\$(sha256sum < $H/.claude/$f | cut -d' ' -f1); [ -n \"\$cur\" ] && { [ \"\$cur\" = $new ] || [ \"\$cur\" = \"\$(cat $NSTATE/permission-authority.sha 2>/dev/null)\" ]; }; }" </dev/null || rc=$?
+  ((rc != 255)) || { echo "node-install: $name does not answer (ssh)" >&2; exit 1; }
+  if ((rc == 0)); then
     on "umask 077; cat > $H/.claude/$f.tmp && mv -f $H/.claude/$f.tmp $H/.claude/$f && echo $new > $NSTATE/permission-authority.sha" <"$HOME/.claude/$f"
   else
     say "permission-authority שם שונה מכאן ולא נכתב על ידינו: נשאר כמו שהוא"
