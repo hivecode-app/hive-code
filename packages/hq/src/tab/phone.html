@@ -22,6 +22,7 @@
   <button id="done">סיימתי</button>
   <button id="back" aria-label="אחורה">→</button>
   <button id="kb" aria-label="מקלדת">⌨</button>
+  <button id="paste">הדבקה</button>
   <div id="host">…</div>
 </div>
 <img id="screen" alt="">
@@ -62,8 +63,11 @@ function start() {
       } else if (m.t === 'focus') {
         if (m.editable) {
           resetKbd();
-          kbd.inputMode = (m.inputmode === 'numeric' || m.autocomplete === 'one-time-code' || m.type === 'tel' || m.type === 'number') ? 'numeric' : 'text';
-          kbd.type = m.type === 'email' ? 'email' : 'text';
+          // Never type=email: it has no selection API, so resetKbd() threw and typing, Backspace and the keyboard
+          // itself stopped on every email field (PayPal, 02/11). A password field gets a password keyboard (no learning).
+          kbd.inputMode = (m.inputmode === 'numeric' || m.autocomplete === 'one-time-code' || m.type === 'tel' || m.type === 'number') ? 'numeric'
+            : m.type === 'email' ? 'email' : 'text';
+          kbd.type = m.type === 'password' ? 'password' : 'text';
           if (document.activeElement !== kbd) kbd.focus();
         } else kbd.blur();
       } else if (m.t === 'finished') { finished = true; show('תודה! הסוכן ממשיך מכאן. אפשר לסגור את הדף.'); }
@@ -98,7 +102,7 @@ function start() {
     if (!active.has(e.pointerId)) return;
     active.set(e.pointerId, pt(e));
     if (startXY) moved = Math.max(moved, Math.hypot(e.clientX - startXY[0], e.clientY - startXY[1]));
-    if (!pendingMove) { pendingMove = true; requestAnimationFrame(() => { pendingMove = false; send({ t: 'touch', type: 'touchMove', pts: pts() }); }); }
+    if (!pendingMove) { pendingMove = true; requestAnimationFrame(() => { pendingMove = false; if (active.size) send({ t: 'touch', type: 'touchMove', pts: pts() }); }); }
   });
   function up(e) {
     if (!active.has(e.pointerId)) return;
@@ -136,6 +140,10 @@ function start() {
     else if (e.key === 'Tab') { e.preventDefault(); send({ t: 'key', k: 'Tab' }); }
   });
   $('kb').onclick = () => { resetKbd(); kbd.focus(); };
+  $('paste').onclick = async () => {
+    try { const s = await navigator.clipboard.readText(); if (s) send({ t: 'text', s }); }
+    catch { status.textContent = 'אין גישה ללוח'; }
+  };
   $('back').onclick = () => send({ t: 'back' });
   $('done').onclick = () => send({ t: 'done' });
 

@@ -1,8 +1,16 @@
 // The live view of one tab on the owner's phone (B.9), ported as-is from the bet6 spike (PASS, "פגז"):
 // phone-sized viewport, screencast with phone-paced acks, a sharp captureScreenshot once the screen settles,
 // touch and keyboard through Input.*, and a "what has focus" probe that decides whether the keyboard stays.
+// The handed-over tab is usually the worker's own, in a window it shares with other tabs (#378). Once another
+// tab there comes to the front, Chrome hides ours: no more frames, and every Input.* waits until it is shown
+// again, then replays out of order (02/11, Namecheap: "can't tap a field, can't delete"). Focus emulation
+// keeps the page visible and drivable whatever is in front, so the view never depends on window order.
 import type { WebSocket } from 'ws';
 import { Cdp } from './cdp.ts';
+
+/** The part of Cdp the view uses (tests inject a fake). */
+export type CdpLike = Pick<Cdp, 'send' | 'attach' | 'detach' | 'pages' | 'close'>
+  & { onTargetGone: Cdp['onTargetGone']; onDisconnect: Cdp['onDisconnect']; onConnect: Cdp['onConnect'] };
 
 /** What hq needs from the shared Chrome. CdpTabBrowser is the real one; tests inject a fake. */
 export interface TabBrowser {
@@ -35,6 +43,12 @@ interface View {
   targetId: string; sessionId: string; phone: WebSocket | null; cb: PhoneCallbacks;
   w: number; h: number; dsf: number; currentUrl: string;
   lastFrameSession?: number; dirty?: boolean; sharpTimer?: NodeJS.Timeout; ignoreUntil?: number;
+  /** Phone input (touch, text, key) runs one message at a time, in order: text typed after a tap goes to the
+   *  field that tap focused. Frame acks, "סיימתי", back and resize never wait behind it. */
+  input?: Promise<unknown>;
+  /** The touchMove last put in `input`, while nothing else came after it: a newer move replaces it (the finger is
+   *  already past it), so a slow Chrome never replays a whole drag. */
+  lastMove?: { skip?: boolean };
 }
 
 // What has focus inside the tab? Decides whether the phone keyboard stays open.
@@ -55,7 +69,7 @@ const KEYS: Record<string, { code: number; text?: string }> = {
 };
 
 export class CdpTabBrowser implements TabBrowser {
-  private cdp: Cdp;
+  private cdp: CdpLike;
   private views = new Map<string, View>(); // by targetId
   /** attachPhone and release on one tab run one at a time: a reload racing "סיימתי" must not leak a session. */
   private queues = new Map<string, Promise<unknown>>();
@@ -71,8 +85,8 @@ export class CdpTabBrowser implements TabBrowser {
     return run;
   }
 
-  constructor(cdpUrl: string, log: (msg: string, data?: unknown) => void = () => {}) {
-    this.cdp = new Cdp(cdpUrl);
+  constructor(cdpUrl: string, log: (msg: string, data?: unknown) => void = () => {}, cdp: CdpLike = new Cdp(cdpUrl)) {
+    this.cdp = cdp;
     this.log = log;
     this.cdp.onTargetGone = (id) => {
       const v = this.views.get(id);
@@ -133,6 +147,11 @@ export class CdpTabBrowser implements TabBrowser {
       } else {
         this.send(v, 'Page.screencastFrameAck', { sessionId: p.sessionId }).catch(() => {});
       }
+    } else if (method === 'Page.screencastVisibilityChanged' && !p.visible) {
+      // Hidden anyway: Chrome answers "on" again with a no-op when it is already on, so turn it off and on.
+      this.log('tab hidden under the phone view', { targetId: v.targetId });
+      this.send(v, 'Emulation.setFocusEmulationEnabled', { enabled: false })
+        .then(() => this.send(v, 'Emulation.setFocusEmulationEnabled', { enabled: true })).catch(() => {});
     } else if (method === 'Page.frameNavigated' && !p.frame.parentId) {
       v.currentUrl = p.frame.url;
       v.cb.onUrl(v.currentUrl);
@@ -159,6 +178,7 @@ export class CdpTabBrowser implements TabBrowser {
   private async startView(v: View): Promise<void> {
     await this.applyViewport(v);
     await this.send(v, 'Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    await this.send(v, 'Emulation.setFocusEmulationEnabled', { enabled: true });
     await this.send(v, 'Page.bringToFront').catch(() => {});
     await this.send(v, 'Page.stopScreencast').catch(() => {});
     await this.send(v, 'Page.startScreencast', {
@@ -180,7 +200,8 @@ export class CdpTabBrowser implements TabBrowser {
         break;
       case 'touch': {
         const touchPoints = msg.type === 'touchEnd' || msg.type === 'touchCancel' ? [] :
-          (msg.pts as number[][]).map(([x, y, id]) => ({ x, y, id, radiusX: 4, radiusY: 4, force: 1 }));
+          (Array.isArray(msg.pts) ? msg.pts as number[][] : []).map(([x, y, id]) => ({ x, y, id, radiusX: 4, radiusY: 4, force: 1 }));
+        if (!touchPoints.length && msg.type !== 'touchEnd' && msg.type !== 'touchCancel') break; // a move that lost the race with its touchEnd
         await this.send(v, 'Input.dispatchTouchEvent', { type: msg.type, touchPoints });
         if (msg.type === 'touchEnd' && msg.tap) {
           await new Promise((r) => setTimeout(r, 180));
@@ -233,8 +254,15 @@ export class CdpTabBrowser implements TabBrowser {
     const view = v;
     Object.assign(view, { phone, cb, w: size.w, h: size.h, dsf: size.dsf });
     phone.on('message', (raw) => {
-      let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
-      this.onPhoneMessage(view, msg).catch((e) => this.log('input error', { t: msg.t, error: String(e) }));
+      let msg: any; try { msg = JSON.parse(raw.toString()); } catch { return; }
+      if (view.phone !== phone) return;
+      const fail = (e: unknown) => this.log('input error', { t: msg.t, error: String(e) });
+      if (msg.t !== 'touch' && msg.t !== 'text' && msg.t !== 'key') { this.onPhoneMessage(view, msg).catch(fail); return; }
+      if (msg.type === 'touchMove' && view.lastMove) view.lastMove.skip = true;
+      view.lastMove = msg.type === 'touchMove' ? msg : undefined;
+      view.input = (view.input ?? Promise.resolve())
+        .then(() => (msg.skip ? undefined : this.onPhoneMessage(view, msg)))
+        .catch(fail);
     });
     phone.on('close', () => {
       if (view.phone === phone) { view.phone = null; this.send(view, 'Page.stopScreencast').catch(() => {}); }
@@ -259,6 +287,7 @@ export class CdpTabBrowser implements TabBrowser {
       await this.send(v, 'Page.stopScreencast').catch(() => {});
       await this.send(v, 'Emulation.clearDeviceMetricsOverride');
       await this.send(v, 'Emulation.setTouchEmulationEnabled', { enabled: false });
+      await this.send(v, 'Emulation.setFocusEmulationEnabled', { enabled: false });
     } catch (e) { this.log('cleanup error', String(e)); }
     await this.cdp.detach(v.sessionId);
   }
@@ -272,6 +301,7 @@ export class CdpTabBrowser implements TabBrowser {
         const s = await this.cdp.attach(targetId, () => {});
         await this.cdp.send('Emulation.clearDeviceMetricsOverride', {}, s);
         await this.cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false }, s);
+        await this.cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false }, s);
         await this.cdp.detach(s);
       } catch { /* tab already gone */ }
     }
