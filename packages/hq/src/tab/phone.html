@@ -2,38 +2,80 @@
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
 <title>כניסה לאתר</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #111; color: #eee; font: 15px -apple-system, system-ui, sans-serif; overflow: hidden; overscroll-behavior: none; }
-  #bar { position: fixed; top: 0; left: 0; right: 0; height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 8px; padding-top: env(safe-area-inset-top); background: #1c1c1e; z-index: 2; }
-  #host { flex: 1; direction: ltr; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: #9ad; }
-  button { font: inherit; border: 0; border-radius: 10px; padding: 8px 12px; color: #fff; background: #3a3a3c; }
-  #done { background: #1f9d55; font-size: 17px; font-weight: 700; padding: 9px 18px; }
-  #screen { position: fixed; top: calc(52px + env(safe-area-inset-top)); left: 0; width: 100vw; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; display: block; }
+  /* The page's own form as a phone form: the keyboard, delete, paste and autofill are the phone's (02/11).
+     The live picture you touch is the fallback, for what is not a form (a CAPTCHA). */
+  :root { --bg: #F2F3F4; --card: #fff; --text: #16181a; --sub: #5b6168; --line: #d9dcdf; --accent: #1a66d2; --on-accent: #fff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111315; --card: #1c1f22; --text: #eceef0; --sub: #a4abb2; --line: #33383d; --accent: #5b9bf0; --on-accent: #0b1220; }
+  }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px system-ui, -apple-system, sans-serif; }
+  #bar { position: sticky; top: 0; display: flex; align-items: center; gap: 8px; padding: 8px 12px; padding-top: calc(8px + env(safe-area-inset-top)); background: var(--card); border-bottom: 1px solid var(--line); z-index: 2; }
+  #host { flex: 1; direction: ltr; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; color: var(--sub); }
+  button { font: inherit; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; color: var(--text); background: var(--card); min-height: 44px; }
+  button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 700; }
+  #done { font-weight: 700; }
+  main { padding: 12px 16px 40px; max-width: 520px; margin: 0 auto; }
+  #preview { display: block; width: 100%; max-height: 34vh; object-fit: contain; object-position: top; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+  #previewNote { font-size: 13px; color: var(--sub); margin: 6px 2px 14px; }
+  #fields label { display: block; margin: 0 0 14px; }
+  #fields .name { display: block; font-size: 14px; color: var(--sub); margin: 0 2px 6px; }
+  #fields input:not([type=checkbox]), #fields select, #fields textarea { box-sizing: border-box; width: 100%; font: inherit; font-size: 17px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--text); }
+  #fields input:focus, #fields select:focus, #fields textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+  #fields .check { display: flex; align-items: center; gap: 10px; }
+  #fields .check input { width: 22px; height: 22px; }
+  #buttons { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+  #empty { color: var(--sub); line-height: 1.5; }
+  #sending { font-size: 14px; color: var(--sub); min-height: 20px; margin-top: 10px; }
+  #toLive { width: 100%; margin-top: 18px; }
+
+  /* direct control: the old live view */
+  #live { display: none; }
+  body.live main { display: none; }
+  body.live #live { display: block; }
+  #screen { display: block; width: 100vw; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; background: #000; }
+  #liveBar { display: flex; gap: 8px; padding: 8px 12px; background: var(--card); border-bottom: 1px solid var(--line); }
   #kbd { position: fixed; bottom: 0; left: 0; width: 1px; height: 1px; opacity: 0; font-size: 16px; border: 0; padding: 0; }
-  #msg { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 24px; font-size: 20px; background: #111; z-index: 3; }
-  #status { position: fixed; bottom: 10px; left: 10px; font-size: 12px; color: #888; z-index: 2; direction: ltr; }
+  #msg { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 24px; font-size: 20px; background: var(--bg); z-index: 3; }
+  #status { display: none; font-size: 12px; color: var(--sub); direction: ltr; text-align: left; padding: 4px 16px; }
 </style>
 </head>
 <body>
 <div id="bar">
-  <button id="done">סיימתי</button>
-  <button id="back" aria-label="אחורה">→</button>
-  <button id="kb" aria-label="מקלדת">⌨</button>
-  <button id="paste">הדבקה</button>
+  <button id="done" class="primary">סיימתי</button>
   <div id="host">…</div>
 </div>
-<img id="screen" alt="">
-<form id="f" autocomplete="on" onsubmit="return false"><input id="kbd" value="&#8203;" autocomplete="one-time-code" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go"></form>
-<div id="status">connecting…</div>
+<main>
+  <img id="preview" alt="הדף באתר">
+  <div id="previewNote">ככה הדף נראה עכשיו</div>
+  <form id="form" autocomplete="on">
+    <div id="fields"></div>
+    <div id="buttons"></div>
+  </form>
+  <div id="empty" hidden>אין בדף הזה שדות למלא. אם צריך ללחוץ על משהו בדף עצמו, אפשר לעבור לשליטה ישירה.</div>
+  <div id="sending"></div>
+  <button id="toLive" type="button">שליטה ישירה בדף</button>
+</main>
+<div id="live">
+  <div id="liveBar">
+    <button id="toForm" type="button">חזרה לטופס</button>
+    <button id="back" type="button" aria-label="אחורה">אחורה</button>
+    <button id="kb" type="button">מקלדת</button>
+    <button id="paste" type="button">הדבקה</button>
+  </div>
+  <img id="screen" alt="">
+</div>
+<input id="kbd" value="&#8203;" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go">
+<div id="status"></div>
 <div id="msg"></div>
 <script>
 const STATE = '__STATE__';
 const $ = (id) => document.getElementById(id);
-const screen = $('screen'), kbd = $('kbd'), msgBox = $('msg'), status = $('status');
-const BAR = $('bar').getBoundingClientRect().height;
+const screen = $('screen'), preview = $('preview'), kbd = $('kbd'), msgBox = $('msg'), status = $('status');
 function show(text) { msgBox.textContent = text; msgBox.style.display = 'flex'; }
 if (STATE === 'expired') show('הלינק פג תוקף או שכבר סיימת. אפשר לסגור את הדף.');
 else if (STATE === 'used') show('הלינק הזה כבר נפתח במכשיר אחר.');
@@ -41,36 +83,33 @@ else start();
 
 function start() {
   const token = location.pathname.split('/').pop();
-  const vw = innerWidth, vh = innerHeight - BAR;
+  // The tab gets the phone's size once, and keeps it: resizing it whenever the keyboard opened blanked the picture.
+  const vw = Math.round(innerWidth), vh = Math.round(innerHeight - 52);
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   let ws, finished = false, retry = 0, frames = 0, t0 = performance.now();
   let pageW = vw, pageH = vh; // CSS size of the emulated tab
+  const send = (o) => { if (!ws || ws.readyState !== 1) return false; ws.send(JSON.stringify(o)); return true; };
 
   function connect() {
-    ws = new WebSocket(`${proto}://${location.host}/ws/${token}?w=${vw}&h=${Math.round(vh)}&dpr=${devicePixelRatio}`);
+    ws = new WebSocket(`${proto}://${location.host}/ws/${token}?w=${vw}&h=${vh}&dpr=${devicePixelRatio}`);
     ws.onopen = () => { retry = 0; status.textContent = 'live'; };
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
       if (m.t === 'frame') {
         pageW = m.m.deviceWidth; pageH = m.m.deviceHeight;
+        const src = 'data:image/jpeg;base64,' + m.d;
         screen.onload = () => {
           if (!m.hi && ws.readyState === 1) ws.send('{"t":"ack"}');
           if (!frames++) status.textContent = `first frame ${Math.round(performance.now() - t0)}ms`;
         };
-        screen.src = 'data:image/jpeg;base64,' + m.d;
+        screen.src = src;
+        preview.src = src;
       } else if (m.t === 'url') {
         try { $('host').textContent = new URL(m.url).host + new URL(m.url).pathname; } catch { $('host').textContent = m.url; }
-      } else if (m.t === 'focus') {
-        if (m.editable) {
-          resetKbd();
-          // Never type=email: it has no selection API, so resetKbd() threw and typing, Backspace and the keyboard
-          // itself stopped on every email field (PayPal, 02/11). A password field gets a password keyboard (no learning).
-          kbd.inputMode = (m.inputmode === 'numeric' || m.autocomplete === 'one-time-code' || m.type === 'tel' || m.type === 'number') ? 'numeric'
-            : m.type === 'email' ? 'email' : 'text';
-          kbd.type = m.type === 'password' ? 'password' : 'text';
-          if (document.activeElement !== kbd) kbd.focus();
-        } else kbd.blur();
-      } else if (m.t === 'finished') { finished = true; show('תודה! הסוכן ממשיך מכאן. אפשר לסגור את הדף.'); }
+      } else if (m.t === 'form') renderForm(m);
+      else if (m.t === 'submitted') onSubmitted(m);
+      else if (m.t === 'focus') onFocus(m);
+      else if (m.t === 'finished') { finished = true; show('תודה! הסוכן ממשיך מכאן. אפשר לסגור את הדף.'); }
       else if (m.t === 'expired') { finished = true; show('הזמן נגמר. הסוכן יבקש שוב אם צריך.'); }
       else if (m.t === 'closed') { finished = true; show('הסוכן סגר את הטאב. אפשר לסגור את הדף.'); }
       else if (m.t === 'cancelled') { finished = true; show('בוטל. אפשר לסגור את הדף.'); }
@@ -82,9 +121,156 @@ function start() {
     };
   }
   connect();
-  const send = (o) => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
+  $('done').onclick = () => send({ t: 'done' });
 
-  // ---- touch: screen px -> tab CSS px ----
+  // ---- the native form ----
+  const inputs = new Map(); // field key -> { el, f, dirty }
+  let primary = null;
+  function kindOf(f) {
+    const ac = (f.autocomplete || '').toLowerCase(), l = (f.label || '').toLowerCase();
+    if (f.type === 'password') return 'password';
+    if (ac.includes('one-time-code') || f.inputmode === 'numeric' || f.type === 'number'
+      || /verif|otp|one.?time|2fa|two.?factor|authenticat|security code|^code$|^pin$|קוד אימות|קוד חד|אימות/.test(l)) return 'code';
+    if (f.type === 'tel') return 'tel';
+    if (f.type === 'email' || ac.includes('email')) return 'email';
+    if (ac.includes('username') || /user|login|משתמש/.test(l)) return 'username';
+    return 'text';
+  }
+  function makeInput(f) {
+    if (f.type === 'select') {
+      const s = document.createElement('select');
+      for (const o of f.options || []) { const op = document.createElement('option'); op.value = o.v; op.textContent = o.l; s.append(op); }
+      s.value = f.value ?? '';
+      return s;
+    }
+    if (f.type === 'textarea') { const t = document.createElement('textarea'); t.rows = 3; t.value = f.value ?? ''; return t; }
+    const i = document.createElement('input');
+    if (f.type === 'checkbox') { i.type = 'checkbox'; i.checked = !!f.checked; return i; }
+    const kind = kindOf(f);
+    i.autocapitalize = 'off'; i.spellcheck = false; i.setAttribute('autocorrect', 'off');
+    if (kind === 'password') {
+      i.type = 'password';
+      i.autocomplete = (f.autocomplete || '').includes('new-password') ? 'new-password' : 'current-password';
+      if (f.filled) i.placeholder = 'כבר מולאה בדף. אפשר להשאיר ריק';
+    } else if (kind === 'code') { i.type = 'text'; i.inputMode = 'numeric'; i.autocomplete = 'one-time-code'; }
+    else if (kind === 'tel') { i.type = 'tel'; i.autocomplete = 'tel'; }
+    else if (kind === 'email') { i.type = 'email'; i.autocomplete = 'username'; }
+    else if (kind === 'username') { i.type = 'text'; i.autocomplete = 'username'; }
+    else { i.type = 'text'; i.autocomplete = 'on'; }
+    if (f.maxlength) i.maxLength = f.maxlength;
+    if (kind !== 'password') i.value = f.value ?? '';
+    i.enterKeyHint = 'go';
+    return i;
+  }
+  let shape = '';
+  function renderForm(m) {
+    const box = $('fields'), btns = $('buttons');
+    // Same fields and buttons as now (a countdown in a label, a re-scan): change the words only. Rebuilding would
+    // take the keyboard away from the field being typed in.
+    const next = JSON.stringify([(m.fields || []).map((f) => f.k + f.type), (m.buttons || []).map((b) => b.k + b.primary)]);
+    if (next === shape) {
+      (m.fields || []).forEach((f, i) => {
+        const it = inputs.get(f.k);
+        const lab = box.children[i];
+        if (f.type === 'checkbox') { if (lab?.lastChild?.nodeType === 3) lab.lastChild.textContent = f.label || ''; }
+        else { const n = lab?.querySelector('.name'); if (n) n.textContent = f.label || ''; }
+        if (it && !it.dirty && document.activeElement !== it.el) {
+          if (f.type === 'checkbox') it.el.checked = !!f.checked; else if (f.type !== 'password') it.el.value = f.value ?? '';
+        }
+        if (it) it.f = f;
+      });
+      (m.buttons || []).forEach((b, i) => { const el = btns.children[i]; if (el) el.textContent = b.label; });
+      return;
+    }
+    shape = next;
+    const keep = new Map();
+    box.textContent = '';
+    for (const f of m.fields || []) {
+      let it = inputs.get(f.k);
+      if (!it || it.f.type !== f.type) {
+        const el = makeInput(f);
+        it = { el, f, dirty: false };
+        el.addEventListener(f.type === 'checkbox' || f.type === 'select' ? 'change' : 'input', () => { it.dirty = true; });
+      } else if (!it.dirty) { // not touched here: show what the page has now
+        if (f.type === 'checkbox') it.el.checked = !!f.checked; else if (f.type !== 'password') it.el.value = f.value ?? '';
+      }
+      it.f = f;
+      keep.set(f.k, it);
+      const lab = document.createElement('label');
+      if (f.type === 'checkbox') { lab.className = 'check'; lab.append(it.el, document.createTextNode(f.label || '')); }
+      else { const n = document.createElement('span'); n.className = 'name'; n.textContent = f.label || ''; lab.append(n, it.el); }
+      box.append(lab);
+    }
+    inputs.clear(); for (const [k, v] of keep) inputs.set(k, v);
+    btns.textContent = '';
+    primary = null;
+    for (const b of m.buttons || []) {
+      const el = document.createElement('button');
+      el.type = 'button'; el.textContent = b.label;
+      if (b.primary && !primary) { el.className = 'primary'; primary = b.k; }
+      el.onclick = () => submit(b.k);
+      btns.append(el);
+    }
+    if (!primary && (m.fields || []).length) { // a form with no button of its own: Enter, as on a computer
+      const el = document.createElement('button');
+      el.type = 'button'; el.className = 'primary'; el.textContent = 'המשך';
+      el.onclick = () => submit('enter');
+      btns.append(el);
+      primary = 'enter';
+    }
+    $('empty').hidden = (m.fields || []).length > 0 || (m.buttons || []).length > 0;
+    if (!failed) $('sending').textContent = ''; // a failure stays until the next send: the re-scan right after it must not hide it
+  }
+  let failed = false;
+  function submit(button) {
+    const values = {};
+    for (const [k, it] of inputs) {
+      if (!it.dirty) continue;
+      values[k] = it.sent = it.f.type === 'checkbox' ? it.el.checked : it.el.value;
+    }
+    failed = false;
+    if (!send({ t: 'submit', values, button })) { $('sending').textContent = 'אין חיבור כרגע. נסה שוב בעוד רגע.'; return; }
+    document.activeElement?.blur?.();
+    $('sending').textContent = 'שולח לדף…';
+  }
+  function onSubmitted(m) {
+    if (!m.ok) {
+      failed = true;
+      $('sending').textContent = m.error ? 'משהו השתבש בשליחה. בדוק בתמונה מה קרה בדף, ושלח שוב אם צריך.'
+        : 'הדף השתנה בינתיים, ולא לחצתי על הכפתור. בדוק את השדות ושלח שוב.';
+      return;
+    }
+    for (const it of inputs.values()) {
+      const now = it.f.type === 'checkbox' ? it.el.checked : it.el.value;
+      if (it.dirty && now === it.sent) { it.dirty = false; if (it.f.type === 'password') it.el.value = ''; } // edited since: still to send
+    }
+    $('sending').textContent = 'נשלח. מחכה לדף…';
+  }
+  $('form').addEventListener('submit', (e) => { e.preventDefault(); if (primary) submit(primary); });
+  $('form').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); if (primary) submit(primary); }
+  });
+
+  // ---- direct control (the live view), for what is not a form ----
+  const setLive = (on) => { document.body.classList.toggle('live', on); if (!on) { kbd.blur(); send({ t: 'scan' }); } scrollTo(0, 0); };
+  $('toLive').onclick = () => setLive(true);
+  preview.onclick = () => setLive(true);
+  $('toForm').onclick = () => setLive(false);
+  $('back').onclick = () => send({ t: 'back' });
+
+  function onFocus(m) {
+    if (!document.body.classList.contains('live')) return;
+    if (m.editable) {
+      resetKbd();
+      // Never type=email: it has no selection API, so resetKbd() would throw (PayPal, 02/11).
+      kbd.inputMode = (m.inputmode === 'numeric' || m.autocomplete === 'one-time-code' || m.type === 'tel' || m.type === 'number') ? 'numeric'
+        : m.type === 'email' ? 'email' : 'text';
+      kbd.type = m.type === 'password' ? 'password' : 'text';
+      if (document.activeElement !== kbd) kbd.focus({ preventScroll: true });
+    } else kbd.blur();
+  }
+
+  // touch: screen px -> tab CSS px
   const active = new Map();
   let downAt = 0, moved = 0, startXY = null, pendingMove = false;
   function pt(e) {
@@ -109,18 +295,16 @@ function start() {
     active.delete(e.pointerId);
     if (active.size) { send({ t: 'touch', type: 'touchMove', pts: pts() }); return; }
     const tap = moved < 10 && Date.now() - downAt < 600;
-    // Focus the hidden input INSIDE the user gesture, so iOS/Android open the keyboard.
-    // The server then tells us whether the tapped thing was editable; if not we blur again.
+    // Focus the hidden input INSIDE the user gesture, so the keyboard opens; the server then says whether it stays.
     if (tap) { resetKbd(); kbd.focus({ preventScroll: true }); }
     send({ t: 'touch', type: 'touchEnd', tap });
   }
   screen.addEventListener('pointerup', up);
   screen.addEventListener('pointercancel', up);
 
-  // ---- typing: diff the hidden input, so IME composition, autocorrect and SMS-code autofill all work.
-  // A zero-width sentinel stays in the field so Backspace on an "empty" field still produces an input event
-  // (Android keyboards send keyCode 229 instead of a real Backspace keydown).
-  const SENT = '\u200B';
+  // typing in direct control: diff the hidden input, so IME composition and autocorrect work. A zero-width sentinel
+  // stays in it so Backspace on an "empty" field still produces an input event (Android keyboards send keyCode 229).
+  const SENT = '​';
   let last = SENT;
   function resetKbd() { kbd.value = SENT; last = SENT; kbd.setSelectionRange(1, 1); }
   kbd.addEventListener('focus', () => { const n = kbd.value.length; kbd.setSelectionRange(n, n); });
@@ -133,31 +317,17 @@ function start() {
     for (; del > 0; del--) send({ t: 'key', k: 'Backspace' });
     if (ins) send({ t: 'text', s: ins });
     if (v.startsWith(SENT)) last = v;
-    else { kbd.value = SENT + v.replaceAll(SENT, ''); last = kbd.value; kbd.setSelectionRange(last.length, last.length); } // caret had slipped before the sentinel
+    else { kbd.value = SENT + v.replaceAll(SENT, ''); last = kbd.value; kbd.setSelectionRange(last.length, last.length); }
   });
   kbd.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); send({ t: 'key', k: 'Enter' }); resetKbd(); }
     else if (e.key === 'Tab') { e.preventDefault(); send({ t: 'key', k: 'Tab' }); }
   });
-  $('kb').onclick = () => { resetKbd(); kbd.focus(); };
+  $('kb').onclick = () => { resetKbd(); kbd.focus({ preventScroll: true }); };
   $('paste').onclick = async () => {
     try { const s = await navigator.clipboard.readText(); if (s) send({ t: 'text', s }); }
     catch { status.textContent = 'אין גישה ללוח'; }
   };
-  $('back').onclick = () => send({ t: 'back' });
-  $('done').onclick = () => send({ t: 'done' });
-
-  // ---- keyboard open/close: shrink the tab so the field is not under the keyboard ----
-  if (window.visualViewport) {
-    let lastH = vh, timer;
-    visualViewport.addEventListener('resize', () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        const h = Math.round(visualViewport.height - BAR);
-        if (Math.abs(h - lastH) > 60) { lastH = h; send({ t: 'resize', h }); }
-      }, 150);
-    });
-  }
 }
 </script>
 </body>
