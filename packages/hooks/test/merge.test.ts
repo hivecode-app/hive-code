@@ -128,3 +128,28 @@ test('checkMerge: ENOENT tells a missing gh from a missing directory', async () 
   assert.match(missingDir!, /התיקייה .* לא קיימת/);
   assert.doesNotMatch(missingDir!, /לא נמצא ב-PATH/);
 });
+
+test('after the narrow review: the author marks the fix of a regression, and that is the last round', async () => {
+  const full = { body: changes(OLD), createdAt: '2026-01-01T09:00' };
+  const narrow = { body: `## סקירה מצומצמת · נ\nreviewed: ${'c'.repeat(40)}\n\n**החלטה: changes**\n`, createdAt: '2026-01-01T10:00' };
+  const fixed = { body: `## תיקון אחרי הסקירה המצומצמת\nfixed-after-narrow: ${SHA}\n`, createdAt: '2026-01-01T11:00' };
+  assert.equal(await checkMerge('gh pr merge 5', W, gh(view([full, narrow, fixed]))), null);
+  assert.match((await checkMerge('gh pr merge 5', W, gh(view([full, fixed]))))!, /אין approve/, 'no narrow review before it');
+  assert.match((await checkMerge('gh pr merge 5', W, gh(view([full, narrow, { ...fixed, body: `fixed-after-narrow: ${OLD}` }]))))!, /אין approve/, 'another commit');
+  assert.match((await checkMerge('gh pr merge 5', W, gh(view([full, { ...fixed, createdAt: '2026-01-01T09:30' }, narrow]))))!, /אין approve/, 'the mark before the narrow review');
+  const narrowNoSha = { ...narrow, body: '## סקירה מצומצמת\n**החלטה: changes**\n' };
+  assert.match((await checkMerge('gh pr merge 5', W, gh(view([full, narrowNoSha, fixed]))))!, /אין approve/, 'a heading without a reviewed commit');
+  assert.match((await checkMerge('gh pr merge 5', W, gh(view([full, narrow, fixed, { body: changes(SHA), createdAt: '2026-01-01T12:00' }]))))!, /`changes`/, 'a later changes on the head wins');
+});
+
+test('fixed-after-narrow counts only after a real narrow review that asked for changes, and only as a whole line', async () => {
+  const fixed = { body: `fixed-after-narrow: ${SHA}`, createdAt: '2026-01-01T11:00' };
+  const at = (body: string) => ({ body, createdAt: '2026-01-01T10:00' });
+  const blocked = async (items: Array<{ body: string; createdAt: string }>, why: string) =>
+    assert.match((await checkMerge('gh pr merge 5', W, gh(view(items))))!, /אין approve/, why);
+  // a full review that quotes the format in a code block is not a narrow review
+  await blocked([at(`## סקירה בלתי תלויה · ס\nreviewed: ${OLD}\n\n**החלטה: changes**\n\n\`\`\`\n## סקירה מצומצמת · x\nreviewed: ${OLD}\n\`\`\`\n`), fixed], 'quoted template');
+  await blocked([at(`## סקירה מצומצמת · נ\nreviewed: ${OLD}\n\n**החלטה: approve**\n`), fixed], 'a narrow approve: new code needs its own review');
+  await blocked([at(`## סקירה מצומצמת · נ\nreviewed: ${OLD}\n\n**החלטה: changes**\n`), { ...fixed, body: `לא לכתוב fixed-after-narrow: ${SHA} עדיין` }], 'inside a sentence');
+  assert.equal(await checkMerge('gh pr merge 5', W, gh(view([at(`## סקירה מצומצמת · נ\r\nreviewed: ${OLD}\r\n\r\n**החלטה: changes**\r\n`), { ...fixed, body: `## תיקון\n\`fixed-after-narrow: ${SHA}\`\n` }]))), null, 'CRLF and backticks');
+});

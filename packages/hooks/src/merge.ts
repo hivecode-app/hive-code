@@ -1,4 +1,5 @@
-// PreToolUse merge gate (dir-0011): a PR merges only when a review comment on its LAST commit says approve.
+// PreToolUse merge gate (dir-0011): a PR merges only when a review comment on its LAST commit says approve,
+// or, after the one narrow review found a regression in the fixes, when the author's comment names the commit that fixed it.
 // `detectMerges` is pure and synchronous (every Bash call pays for it); only a command that merges pays for `gh`.
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -96,6 +97,12 @@ interface Dated { body?: string; createdAt?: string; submittedAt?: string }
 interface PrView { headRefOid?: string; comments?: Dated[]; reviews?: Dated[] }
 
 const MARKER = /(?<![\w-])reviewed:[ \t]*([0-9a-f]{7,40})\b|ship-step-4:[ \t]*reviewed[ \t]+([0-9a-f]{7,40})\b/gi;
+// The one narrow review (on the fixes of the full one), as the reviewer skill writes it. After it there is no further round:
+// a regression it found is fixed with a test, and the author marks that commit `fixed-after-narrow: <sha>` (01/11/2026).
+// Both only in the skill's exact shape: the heading on the comment's first line and `reviewed:` on its second, its decision
+// `changes`; the mark a whole line of its own. A quoted template or a sentence that mentions them counts for nothing.
+const NARROW = /^##[ \t]*סקירה מצומצמת(?![\u0590-\u05ff])[^\n]*\nreviewed:[ \t]*[0-9a-f]{7,40}[ \t]*\n/i;
+const FIXED = /^[ \t]*`?fixed-after-narrow:[ \t]*([0-9a-f]{7,40})`?[ \t]*$/gim;
 // A whole line only: a `changes` comment that quotes the string inside a sentence must not pass.
 const DECISION = /^\*\*החלטה: (approve|changes)\*\*[ \t]*$/im;
 
@@ -107,6 +114,7 @@ export function verdictFor(view: PrView): 'approve' | 'changes' | null {
     .map((x, n) => ({ body: x.body ?? '', t: x.createdAt ?? x.submittedAt ?? '', n }))
     .sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : a.n - b.n));
   let verdict: 'approve' | 'changes' | null = null;
+  let narrow = false; // a narrow review was posted before this item
   for (const it of items) {
     for (const m of it.body.matchAll(MARKER)) {
       const sha = (m[1] ?? m[2] ?? '').toLowerCase();
@@ -115,12 +123,17 @@ export function verdictFor(view: PrView): 'approve' | 'changes' | null {
       const d = DECISION.exec(it.body.replace(/\r/g, '').slice(m.index! + m[0].length));
       verdict = d && d[1]!.toLowerCase() === 'approve' ? 'approve' : 'changes';
     }
+    const body = it.body.replace(/\r/g, '').trimStart();
+    // A fix after a narrow review that asked for changes; before one it counts for nothing.
+    if (narrow) for (const m of body.matchAll(FIXED)) if (oid.startsWith(m[1]!.toLowerCase())) verdict = 'approve';
+    if (NARROW.test(body) && DECISION.exec(body)?.[1]!.toLowerCase() === 'changes') narrow = true;
   }
   return verdict;
 }
 
 const HOW = 'פותחים סוקר בלתי תלוי לפי `skills/reviewer` (סוכן משנה בלי כלי עריכה); הוא כותב הערה על ה-PR עם השורה '
-  + '`reviewed: <headRefOid>` ואחריה `**החלטה: approve**`. אחרי push חדש הסקירה צריכה לרוץ מחדש על ה-commit החדש.';
+  + '`reviewed: <headRefOid>` ואחריה `**החלטה: approve**`. אחרי תיקונים: סקירה מצומצמת אחת על ה-diff של התיקונים, עם `reviewed:` חדש. '
+  + 'אחרי הסקירה המצומצמת אין סבב נוסף: מתקנים רגרסיה עם בדיקה, מחכים ל-CI, וכותבים על ה-PR הערה עם `fixed-after-narrow: <headRefOid>`.';
 
 export const defaultGh: GhRun = (args, cwd, env) => new Promise((res, rej) => {
   execFile('gh', args, { cwd, env: { ...process.env, ...env }, timeout: 6000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => (err ? rej(err) : res(stdout)));
@@ -159,7 +172,7 @@ export async function checkMerge(command: string, cwd: string, run: GhRun = defa
     if (v === 'approve') continue;
     const sha = (view.headRefOid ?? '?').slice(0, 7);
     return `מיזוג של ${what} נחסם: אין approve רשום על ה-commit האחרון (\`${sha}\`). `
-      + (v === 'changes' ? 'הסקירה האחרונה על ה-commit הזה היא `changes`. מתקנים, דוחפים, וסוקר חוזר. ' : 'לא נמצאה הערה או review עם `reviewed: <sha>` שמתאים ל-commit הזה. ')
+      + (v === 'changes' ? 'הסקירה האחרונה על ה-commit הזה היא `changes`. מתקנים, דוחפים, ואז סקירה מצומצמת על התיקונים (או, אם זו כבר הייתה המצומצמת, הערת `fixed-after-narrow`). ' : 'לא נמצאה הערה או review עם `reviewed: <sha>` שמתאים ל-commit הזה. ')
       + HOW;
   }
   return null;

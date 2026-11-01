@@ -58,7 +58,7 @@ export function taskSteps(project: string | null, companyDir: string, o: { stand
   const review = ch?.mergeInstructions
     ? ch.mergeInstructions.map((m, n) => `${n === 0 ? 'סקירה ומיזוג לפי האמנה של הפרויקט, לא לפי ה-skills של החברה. ' : ''}${m}`)
     : [
-      `סקירה בלתי תלויה בהקשר נקי, לפי ${skill('reviewer')} (סוכן משנה בלי כלי עריכה). מתקנים מה שעלה.`,
+      `סקירה בלתי תלויה בהקשר נקי, לפי ${skill('reviewer')} (סוכן משנה בלי כלי עריכה). מתקנים מה שעלה, ואז סקירה מצומצמת אחת על ה-diff של התיקונים בלבד, וזהו (הסעיף "סבבים" שם).`,
       `ממזגים בעצמך: \`gh pr merge --squash --delete-branch\`, רק כשהסקירה אישרה ו${ci} ירוקה. לפי ${skill('ship')}.`,
     ];
   const dr = ch?.designReview;
