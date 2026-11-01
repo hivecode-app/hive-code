@@ -38,7 +38,7 @@ export const WATCHED = [...SHOWN, ...INTERNAL];
 
 /** Known and not a bug of ours: counted, never asked. */
 const KNOWN: { type?: string; re: RegExp }[] = [
-  { re: /rate.?limit|usage limit|limit reached|\b429\b|overloaded|\b529\b|credit balance/i },
+  { re: /rate.?limit|usage limit|limit reached|hit your (?:[a-z]+ )?limit\b|\b429\b|overloaded|\b529\b|credit balance/i },
   { re: /interrupted|aborted by user|request was aborted/i },
   { type: 'message.undelivered', re: /המשימה כבר נסגרה/ },
 ];

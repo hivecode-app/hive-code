@@ -37,6 +37,8 @@ test('signature: the same error with other ids, numbers and paths is one; anothe
   assert.equal(normalize('task t12 at 2026-10-22T01:08:00Z took 300ms'), 'task t# at <time> took #ms');
   assert.equal(normalizePath('/api/inbox/12/ack?x=1'), '/api/inbox/:id/ack');
   assert.equal(known({ type: 'turn.error', message: 'Claude AI usage limit reached|1792611158' }), true);
+  assert.equal(known({ type: 'turn.error', message: "You've hit your weekly limit · resets Nov 7, 5am (Europe/Berlin)" }), true);
+  assert.equal(known({ type: 'turn.error', message: 'You have hit your context window limit' }), false);
   assert.equal(known({ type: 'turn.error', message: 'Prompt is too long' }), false);
 });
 
