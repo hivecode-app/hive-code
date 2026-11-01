@@ -15,6 +15,12 @@ import { classesFor, scopeProps, type HeavyClass } from './heavy.ts';
 import { LOCAL } from './nodes.ts';
 import { totalmem } from 'node:os';
 
+/**
+ * company-run is on the PATH of every shift (the shift units), here and on the nodes. Its full path, in case a shell
+ * lost it: the engine's own script, at the same path on every machine (nodes.ts: the node mirrors this one's paths).
+ */
+const RUN_FALLBACK = 'אם `company-run` לא נמצא: `~/projects/agent-company/scripts/company-run`.';
+
 export const DEFAULT_WAIT_S = 90;
 export const MAX_WAIT_S = 100;
 /** company-run beats this often; hq lets this long pass without one before the lease is the connection's loss. */
@@ -233,7 +239,7 @@ export class Leases {
     this.hq.mailbox.tell({
       msg_id: `lease-${r.id}-granted`, from: 'hq', to: r.identity, kind: 'system', priority: 'next',
       body: `יש מקום ל-${r.class} ב-${r.machine}: ${leaseName(r.id)} ניתנה לך מהתור. מריצים דרך \`company-run --lease ${leaseName(r.id)} -- <הפקודה>\`; ` +
-        `אם אף פקודה לא רצה תחתיה תוך ${UNCLAIMED_MS / 60_000} דקות היא חוזרת, כדי שמי שמחכה אחריך יקבל מקום.`,
+        `אם אף פקודה לא רצה תחתיה תוך ${UNCLAIMED_MS / 60_000} דקות היא חוזרת, כדי שמי שמחכה אחריך יקבל מקום. ${RUN_FALLBACK}`,
     });
   }
 
@@ -339,7 +345,7 @@ export class Leases {
       const left = Math.max(0, r.timeout_ms - (this.now() - (r.granted_at ?? this.now())));
       return {
         status: 'granted', lease, machine: r.machine, run: `company-run --lease ${lease} -- <הפקודה>`,
-        message: `יש מקום ב-${r.machine}: ${lease} (${r.class}, עד ${r.mem_mb}MB זיכרון, ${mins(left)} דקות). מריצים דרך \`company-run --lease ${lease} -- <הפקודה>\`; ההזמנה משתחררת לבד כשהפקודה נגמרת, וגם אפשר \`release\`.`,
+        message: `יש מקום ב-${r.machine}: ${lease} (${r.class}, עד ${r.mem_mb}MB זיכרון, ${mins(left)} דקות). מריצים דרך \`company-run --lease ${lease} -- <הפקודה>\`; ההזמנה משתחררת לבד כשהפקודה נגמרת, וגם אפשר \`release\`. ${RUN_FALLBACK}`,
       };
     }
     const queue = this.queue(r.machine);

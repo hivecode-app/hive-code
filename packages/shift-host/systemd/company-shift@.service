@@ -13,6 +13,8 @@ StartLimitBurst=5
 [Service]
 Type=simple
 Environment=DISABLE_AUTOUPDATER=1
+# The user manager's PATH (without the games dirs), with ~/.local/bin first: company-run (reserve) and company live there (install.sh).
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
 # logs, spool, prime and sockets are owner-only
 UMask=0077
 ExecStart=/usr/bin/env node %h/projects/agent-company/packages/shift-host/src/cli.ts --args-file %h/.local/state/agent-company/shifts/%i/host-args.json

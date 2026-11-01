@@ -11,6 +11,7 @@
 # A node with `ownLogin` (a machine with a user of its own: the laptop, ci-host) is set up as that user, and only under
 # ~/.local/share/agent-company, ~/.local/state/agent-company, ~/.config/systemd/user and the checkouts: its packages,
 # ~/.claude (its login, CLAUDE.md), git identity and gh login stay as they are, and what is missing is only reported.
+# Its ~/flutter only follows this machine's version, as a fast-forward of its own channel (below).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
@@ -113,6 +114,34 @@ if [[ "$own" != 1 && -x "$HOME/flutter/bin/flutter" ]]; then
       [ \"\$(git -C $H/flutter describe --tags --exact-match 2>/dev/null)\" = $fver ] || { git -C $H/flutter fetch --quiet --depth 1 origin tag $fver && git -C $H/flutter checkout --quiet $fver; }
       $H/flutter/bin/flutter --version >/dev/null 2>&1" </dev/null
   say "flutter $fver"
+fi
+# On a machine with a user of its own ~/flutter is the user's, but the charters' commands name it, and another version
+# writes into the worktrees (3.47.0's `pub get` adds web/windows/macos/linux excludes to every analysis_options.yaml,
+# which 3.47.2 does only for the dirs that exist). So it follows this machine's tag, only as a fast-forward of the
+# branch it is on (its channel stays), with no changes of its own and no dart of it running; otherwise it is said.
+if [[ "$own" == 1 && -x "$HOME/flutter/bin/flutter" ]]; then
+  fver="$(git -C "$HOME/flutter" describe --tags --exact-match 2>/dev/null || true)"
+  if [[ -z "$fver" ]]; then
+    say "flutter כאן לא על תג, ולכן flutter שם לא הושווה אליו"
+  else
+    rc=0
+    # [/]: pgrep matches the command line of this very shell, which holds the path too, but not the pattern itself
+    on "d=$H/flutter; tagof() { git -C \$d describe --tags --exact-match 2>/dev/null; }; [ -d \$d/.git ] || exit 3
+        [ \"\$(tagof)\" = $fver ] && exit 0
+        [ -z \"\$(git -C \$d status --porcelain --untracked-files=no)\" ] && git -C \$d symbolic-ref -q HEAD >/dev/null || exit 4
+        ! pgrep -f '[/]${H#/}/flutter/bin/cache/dart-sdk' >/dev/null || exit 5
+        git -C \$d fetch --quiet origin tag $fver && git -C \$d merge --quiet --ff-only $fver || exit 4
+        [ \"\$(tagof)\" = $fver ] || exit 4 # already past it: the merge did nothing
+        \$d/bin/flutter --version >/dev/null 2>&1 || exit 6" </dev/null || rc=$?
+    case $rc in
+      0) say "flutter $fver" ;;
+      3) say "אין שם ~/flutter כ-checkout של git: הפקודות של האמנות לא ירוצו שם" ;;
+      4) say "flutter שם לא ב-$fver ולא עודכן (שינויים שם, לא על ענף, או שהוא לא לפני $fver בענף שלו): מעדכנים שם ביד" ;;
+      5) say "flutter שם לא ב-$fver, ורץ שם עכשיו: לא עודכן. מריצים שוב --projects כשהוא פנוי" ;;
+      6) say "flutter שם עבר ל-$fver, אבל flutter --version שם נכשל: בודקים שם" ;;
+      *) say "flutter שם לא נבדק: ה-ssh נכשל ($rc)" ;;
+    esac
+  fi
 fi
 
 # ── dirs, git identity and GitHub (this machine's gh token: workers push and open PRs there) ──

@@ -56,6 +56,8 @@ test('reserve: free place → granted, with the command to run; release gives it
     assert.equal(r.status, 'granted');
     assert.match(r.lease, /^lease-\d+$/);
     assert.match(r.message, /company-run --lease lease-\d+ -- /);
+    // the full path too, the same on every machine, for a shell that lost company-run from its PATH
+    assert.match(r.message, /~\/projects\/agent-company\/scripts\/company-run/);
     assert.equal(env.hq.leases.list().length, 1);
     const rel = await a({ op: 'release', lease: r.lease });
     assert.equal(rel.status, 'released');
@@ -358,6 +360,7 @@ test('reserve: a lease granted from the queue is told to the worker who is no lo
     const msg = db.prepare(`SELECT to_identity, body FROM messages WHERE id = ?`).get(`${q.lease}-granted`) as { to_identity: string; body: string };
     assert.equal(msg.to_identity, 'amit');
     assert.match(msg.body, /company-run --lease lease-\d+/);
+    assert.match(msg.body, /~\/projects\/agent-company\/scripts\/company-run/);
     // One granted at once, inside its own call, is not told twice.
     const c2 = await a({ class: 'smoke' });
     assert.equal((db.prepare(`SELECT COUNT(*) n FROM messages WHERE id = ?`).get(`${c2.lease}-granted`) as { n: number }).n, 0);
