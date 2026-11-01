@@ -13,6 +13,7 @@ import type { DictateConfig } from './dictate.ts';
 import type { NodeDef } from './nodes.ts';
 import { DEFAULT_HEAVY } from './heavy.ts';
 import { validTimeZone } from './timezone.ts';
+import type { CodemagicConfig } from './codemagic-watch.ts';
 
 /** #301: the workers write in Hebrew and think in Israel time, wherever the server or he is. */
 export const DEFAULT_ETA_TIME_ZONE = 'Asia/Jerusalem';
@@ -25,6 +26,8 @@ export interface HqConfig {
   codexBin?: string;
   /** Codex task workers (codex-quota.ts): a new task goes to Codex only while the week is under this %. Default 20. */
   codexTaskMaxPercent?: number;
+  /** codemagic-watch.ts: the token of the daily Codemagic minutes read. Absent = the automation reads nothing. */
+  codemagic?: CodemagicConfig;
   stateDir: string;
   dbPath: string;
   /** COMPANY_HOME: the company's checkout, company/ and memory/ at its root (shared company-home.ts). */

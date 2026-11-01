@@ -31,6 +31,7 @@ import { Home } from './home.ts';
 import { MemoryFiles, type Run } from './memory-files.ts';
 import { PressureWatch } from './pressure-watch.ts';
 import { UnidentifiedWatch } from './unidentified-watch.ts';
+import { CodemagicWatch } from './codemagic-watch.ts';
 import { DiskWatch } from './disk-watch.ts';
 import { Resources, SAMPLE_EVERY_MS } from './resources.ts';
 import { StallWatch, type OpenFilesReader } from './stall-watch.ts';
@@ -121,6 +122,7 @@ export class Hq {
   readonly errorWatch: ErrorWatch;
   readonly pressureWatch: PressureWatch;
   readonly unidentifiedWatch: UnidentifiedWatch;
+  readonly codemagicWatch: CodemagicWatch;
   readonly diskWatch: DiskWatch;
   readonly resources: Resources;
   readonly nodes: Nodes;
@@ -173,6 +175,7 @@ export class Hq {
     this.errorWatch = new ErrorWatch(this);
     this.pressureWatch = new PressureWatch(this);
     this.unidentifiedWatch = new UnidentifiedWatch(this);
+    this.codemagicWatch = new CodemagicWatch(this);
     this.diskWatch = new DiskWatch(this);
     this.resources = new Resources(this);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
@@ -409,6 +412,8 @@ export class Hq {
       this.every(30_000, 'pressure-watch', () => this.pressureWatch.sweep());
       // resources stage 3: a consumer no project owns holding a lot of memory for an hour → one item for him.
       this.every(60_000, 'unidentified-watch', () => this.unidentifiedWatch.sweep());
+      // task-1192: Codemagic's macOS minutes this month, once a day; past 400, 800 and 1,500 → one message to him.
+      this.every(10 * 60_000, 'codemagic-minutes', () => this.codemagicWatch.sweep());
       // task-382: the disk at 85% → scripts/disk-clean.mjs now; at 92% after it → one urgent item with the biggest consumers.
       this.every(5 * 60_000, 'disk-watch', () => this.diskWatch.sweep());
       // resources stage 1: disk, memory, cgroups and docker of each machine, by project (reads a node only while its poll says it is up).
