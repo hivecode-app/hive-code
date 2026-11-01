@@ -80,6 +80,8 @@ export interface ProbeSpec {
 
 /** How often a `fail_for` probe is looked at again while a failure is open. */
 export const FAIL_FOR_RETRY_MS = 10_000;
+/** client_outdated doesn't start when a round of lumo_ws with '*' on its master is due within this: its ~80s read ends before that round. */
+export const WS_ROUND_CLEAR_MS = 120_000;
 
 export function parseDuration(v: unknown, dflt: number): number {
   if (typeof v === 'number') return v * 1000;
@@ -890,7 +892,11 @@ export class ProbeRunner {
     // A scan is on the same way: in this hq, or tried (before its ssh) after the last one that answered, within discover_timeout.
     const scanOn = (x: ProbeSpec) => this.inflight.has(`${x.key}#discover`) || ((d) => d.tried != null && d.tried > (d.at ?? -Infinity) && now - d.tried < x.lumoWs!.discoverTimeoutMs)(this.wsDiscovery(x));
     const scanning = (host: string) => this.probes.some((x) => x.kind === 'lumo_ws' && x.lumoWs!.host === host && scanOn(x));
-    for (const p of this.probes.filter((x) => x.kind === 'client_outdated' && !readOn(x) && isDue(x) && !scanning(x.clientOutdated!.host))) void this.outdatedRun(p, now);
+    // With '*' a round of lumo_ws is a full read too (~85s for 423 workers, 01/11): client_outdated doesn't start while one is on, or
+    // due within WS_ROUND_CLEAR_MS, so it runs in the gap after a round. Its window reaches back to its last read, so waiting loses nothing.
+    const wsFull = (host: string) => this.probes.some((x) => x.kind === 'lumo_ws' && x.lumoWs!.phones === '*' && x.lumoWs!.host === host &&
+      (this.inflight.has(x.key) || ((s) => !s?.last_run_at || s.last_run_at + x.everyMs - now < WS_ROUND_CLEAR_MS)(this.state(x.key))));
+    for (const p of this.probes.filter((x) => x.kind === 'client_outdated' && !readOn(x) && isDue(x) && !scanning(x.clientOutdated!.host) && !wsFull(x.clientOutdated!.host))) void this.outdatedRun(p, now);
     // ride_dupes: on its own as well, so a Mongo that stopped answering holds no other probe.
     for (const p of this.probes.filter((x) => x.kind === 'ride_dupes' && !this.inflight.has(x.key) && isDue(x))) void this.dupesRun(p, now);
     const runnable = this.probes.filter((p) => p.kind !== 'unsupported' && p.kind !== 'cluster' && p.kind !== 'client_outdated' && p.kind !== 'ride_dupes' && !this.inflight.has(p.key));
@@ -1345,7 +1351,11 @@ export class ProbeRunner {
     const key = `probes.lumo_ws.${p.key}`;
     let prev: WsState = emptyWsState();
     try { prev = { ...prev, ...(JSON.parse(this.store.getMeta(key) || '{}') as Partial<WsState>) }; } catch { /* unreadable: nothing open */ }
-    const { state, messages, open } = wsRound(p.key, this.wsSpec(p).lumoWs!, prev, reading, now, quietHours);
+    const spec = this.wsSpec(p).lumoWs!;
+    const disc = this.wsDiscovery(p);
+    const { state, messages, open, heard } = wsRound(p.key, spec, prev, reading, now, quietHours, disc.phones);
+    // With '*' the phones heard are kept where discovery keeps its own: a restart of hq still watches one that fell right before it.
+    if (spec.phones === '*' && heard.join() !== disc.phones.join()) this.store.setMeta(`probes.lumo_ws_discovery.${p.key}`, JSON.stringify({ ...disc, phones: heard }));
     const lead = this.cfg.monitoringLeadId;
     for (const m of messages) {
       this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system',
