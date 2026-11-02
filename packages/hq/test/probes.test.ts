@@ -653,6 +653,17 @@ test('sshPingWitness: all hosts in one ssh, a summary per host; ssh failure or n
   assert.ok('unavailable' in (await mk('garbage')(['10.0.0.1'], 20_000)));
 });
 
+test('prod: false: an http probe that isn\'t production failing doesn\'t take a shared loss to the owner', async () => {
+  const { env, hq, step, to } = await netEnv(16, (h, r) => r < 3 && Number(h.split('.')[3]) <= 12, () => false);
+  try {
+    hq.probes.probes = hq.probes.probes.map((p) => p.id === 'api' ? { ...p, prod: false as const } : p);
+    hq.probes.pingWitness = async (hosts) => new Map(hosts.map((h) => [h, parsePing(lossOut(20))]));
+    for (let i = 0; i < 3; i++) await step();
+    assert.equal(to('owner').length, 0, 'held: no production http fails and ci-host answers');
+    assert.ok(to('rotem').some((m) => /לא יצאה התראה/.test(m.body)));
+  } finally { await env.cleanup(); }
+});
+
 test('shared event: a restart continues it, and the owner\'s item still closes when it ends', async () => {
   const { env, hq, step, to } = await netEnv(8, (h, r) => r < 2 && Number(h.split('.')[3]) <= 6, () => false);
   try {
@@ -735,6 +746,39 @@ test('spec 7: sustained jitter with a service failing in its project in the wind
     assert.equal(recovered(), 0);
     await step(); // clean
     assert.equal(recovered(), 1);
+  } finally { await env.cleanup(); }
+});
+
+test('prod: false (easy\'s entry link, 03/11): its fail_after arrives low and at later, and its failure is no impact of jitter', async () => {
+  const charter = NODES(1).replace('\n```\n', '\n  - {id: entry, http: https://entry.test/healthz, every: 5m, fail_after: 3, prod: false}\n```\n');
+  const env = await makeEnv({ projects: { 'tiki-bot-go': charter } });
+  try {
+    const { hq, clock } = env;
+    assert.equal(hq.probes.probes.find((p) => p.id === 'entry')!.prod, false);
+    assert.equal(hq.probes.probes.find((p) => p.id === 'api')!.prod, undefined, 'without the field: production, as before');
+    const odd = parseCharterProbes('x', '---\nmonitoring:\n  - {id: a, http: https://a/h, prod: true}\n  - {id: b, http: https://a/h, prod: \'false\'}\n  - {id: c, disk: local:/, max_percent: 80, prod: false}\n---\n');
+    assert.deepEqual(odd.map((p) => [p.id, p.kind, p.prod]), [['a', 'http', undefined], ['b', 'unsupported', undefined], ['c', 'unsupported', undefined]],
+      'a boolean, and false only on http: anything else is listed as unsupported, not silently production');
+    let round = 0;
+    // The entry link fails from the first round; the api is fine; the node jitters until round 8.
+    hq.probes.run = (p) => p.kind === 'http'
+      ? Promise.resolve(p.id === 'entry' && round < 8 ? { ok: false, status: 502, latencyMs: 40, error: 'status 502, expected 200' } : { ok: true, status: 200, latencyMs: 40, error: null })
+      : runLatencyProbe(p, async () => round < 8 ? PING_JITTER : PING_OK);
+    hq.probes.host = () => ({ load1: 0.5, cpus: 8, freeMb: 9000 });
+    const step = async () => { await hq.probes.tick(); round++; clock.advance(ROUND); };
+    const anomalies = () => hq.store.db.prepare(`SELECT body, urgency, priority FROM messages WHERE kind = 'probe_anomaly'`).all() as { body: string; urgency: string; priority: string }[];
+    for (let i = 0; i < 3; i++) await step();
+    assert.equal(anomalies().length, 1, 'fail_after still reports it');
+    assert.equal(anomalies()[0]!.urgency, 'low');
+    assert.equal(anomalies()[0]!.priority, 'later');
+    assert.match(anomalies()[0]!.body, /^חריגה \(לא פרודקשן, עדיפות נמוכה\): tiki-bot-go\/entry/);
+    assert.doesNotMatch(anomalies()[0]!.body, /ask דחוף/);
+    for (let i = 0; i < 5; i++) await step(); // six jitter samples and more, the entry link failing all along
+    assert.equal(anomalies().filter((a) => /jitter מתמשך/.test(a.body)).length, 0, 'the entry link failing is no impact of the jitter');
+    assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM events WHERE type = 'probe.jitter_quiet'`).get() as { n: number }).n, 1, 'noted quietly');
+    await step(); // all clean
+    const rec = hq.store.db.prepare(`SELECT priority FROM messages WHERE kind = 'system' AND body LIKE '%tiki-bot-go/entry חזר לתקין%'`).all() as { priority: string }[];
+    assert.deepEqual(rec.map((r) => r.priority), ['later']);
   } finally { await env.cleanup(); }
 });
 

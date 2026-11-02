@@ -24,6 +24,8 @@
 // an impact (jitterImpact, yoav 28/10): a service probe of its project failing, or the node not Ready, in that window. Without one it
 // is noted quietly (probe.jitter_quiet) and counted in the digest, which drafts a Contabo ticket only for a node that had an impact. More than SHARED_MIN_NODES nodes losing pings in one round
 // is one event; it reaches the owner only when it lasts past SHARED_PERSIST_MS and http fails too or there is no witness.
+// `prod: false` (http only; easy's entry link, 03/11): its anomaly arrives at `later`, low urgency, and its failure is no impact for jitter,
+// a shared event or a root signal.
 // `alertmanager` reads the cluster's own critical alerts over ssh (alertmanager.ts): one message per fingerprint, held until it is gone.
 // `cluster` reads the layer under the services of a whole k3s cluster over one ssh (root-signals.ts): its findings and messages are its own.
 // `lumo_ws` reads the summary of the Lumo websocket in easy's workers over one ssh (lumo-ws.ts): its state and messages are its own.
@@ -68,6 +70,7 @@ export interface ProbeSpec {
   lumoWs?: LumoWsSpec;     // the Lumo websocket of easy's workers (lumo-ws.ts), read over ssh to the master
   clientOutdated?: ClientOutdatedSpec;  // whatsmeow's 405, 409 and LoggedOut in easy's workers (client-outdated.ts), read over ssh to the master
   rideDupes?: RideDupesSpec;  // duplicate ride notifications in easy's worker_ride_tracker (ride-dupes.ts), read from Mongo
+  prod?: false;              // `prod: false` in the charter (http only): not production. Its anomaly arrives at `later`, low urgency, and its failure is no impact of jitter or a shared event
   method: string;
   expect: number[];
   maxLatencyMs: number | null;
@@ -189,6 +192,8 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     // fail_for is for http; anywhere else, or not a duration, the probe is unsupported (listed, not silently dropped).
     const failForMs = r.fail_for == null ? null : parseDuration(r.fail_for, NaN);
     const badFailFor = failForMs != null && (typeof r.http !== 'string' || !(failForMs > 0));
+    // prod is a boolean, and `false` is for http only (the other kinds' messages are their own): otherwise unsupported, not ignored.
+    const badProd = r.prod != null && (typeof r.prod !== 'boolean' || (r.prod === false && typeof r.http !== 'string'));
     // An explicit list of namespaces, every one a namespace name: a probe that can't say where to look is unsupported.
     // An entry is a name, or `{name, prod: false}` for a namespace that isn't production (its alerts arrive at `later`, low urgency).
     const nsEntries = Array.isArray(r.namespaces) ? r.namespaces.map((n) => n && typeof n === 'object'
@@ -245,7 +250,7 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
           ...(amNotify ? { notify: amNotify } : {}), ...(amCc!.length ? { cc: [...new Set(amCc!)].filter((c) => c !== amNotify) } : {}) } : undefined;
     out.push({
       key: `${project}/${id}`, project, id,
-      kind: badFailFor || coClash || rdClash ? 'unsupported' : rideDupes ? 'ride_dupes' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : lumoWs ? 'lumo_ws' : clientOutdated ? 'client_outdated' : 'unsupported',
+      kind: badFailFor || badProd || coClash || rdClash ? 'unsupported' : rideDupes ? 'ride_dupes' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : lumoWs ? 'lumo_ws' : clientOutdated ? 'client_outdated' : 'unsupported',
       url: typeof r.http === 'string' ? r.http : undefined,
       disk, latency, kubelet, whatsappLog, cluster, alertmanager, lumoWs, clientOutdated, rideDupes,
       // Observe-only: a probe may only read. Anything but GET/HEAD in a charter is ignored.
@@ -257,6 +262,7 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
       timeoutMs: parseDuration(r.timeout, clientOutdated ? 240_000 : rideDupes ? 20_000 : cluster ? 180_000 : latency ? 20_000 : alertmanager ? Math.max(60_000, (alertmanager.namespaces.length * NS_TIMEOUT_S + 20) * 1000) : lumoWs ? (lumoWs.phones === '*' ? 150_000 : 60_000) : kubelet || whatsappLog ? 30_000 : 10_000),
       failAfter: Number(r.fail_after ?? 3),
       failForMs: badFailFor ? null : failForMs,
+      ...(r.prod === false && !badProd ? { prod: false as const } : {}),
       raw: r,
     });
   }
@@ -691,11 +697,11 @@ export const lossFailed = (p: ProbeSpec, o: ProbeOutcome): boolean => p.kind ===
  *  (its findings are its own messages), so it isn't here. */
 const SERVICE_KINDS = new Set<ProbeSpec['kind']>(['http', 'whatsapp_log', 'alertmanager']);
 
-/** What jitter on `p` could have done in (from, to]: a failure of a service probe in its project, or its node not Ready in a
+/** What jitter on `p` could have done in (from, to]: a failure of a service probe in its project (not one with `prod: false`), or its node not Ready in a
  *  `cluster:` probe's rounds (root-signals.ts, `ready:<node>`; the node by the vmi name in the probe's id). Oldest first. */
 export function jitterImpact(db: Store['db'], probes: ProbeSpec[], p: ProbeSpec, from: number, to: number): { ts: number; what: string }[] {
   const out: { ts: number; what: string }[] = [];
-  const services = probes.filter((x) => x.project === p.project && SERVICE_KINDS.has(x.kind)).map((x) => x.key);
+  const services = probes.filter((x) => x.project === p.project && SERVICE_KINDS.has(x.kind) && x.prod !== false).map((x) => x.key);
   if (services.length) {
     const rows = db.prepare(`SELECT probe_id, ts FROM probe_results WHERE ok = 0 AND ts > ? AND ts <= ? AND probe_id IN (${services.map(() => '?').join(', ')})`)
       .all(from, to, ...services) as { probe_id: string; ts: number }[];
@@ -930,7 +936,7 @@ export class ProbeRunner {
     const own = crossed.filter((p) => !this.outage?.members.has(p.key));
     if (own.length) await this.confirm(own);
     // The measurer episode is about http (the witness): a disk or a jittery node failing for days must not keep it muted.
-    else if (!crossed.length && !this.probes.some((p) => p.kind === 'http' && (this.state(p.key)?.consecutive_failures ?? 0) > 0)) this.measurerEpisode = false;
+    else if (!crossed.length && !this.probes.some((p) => p.kind === 'http' && p.prod !== false && (this.state(p.key)?.consecutive_failures ?? 0) > 0)) this.measurerEpisode = false;
     this.digest(now);
   }
 
@@ -1051,10 +1057,10 @@ export class ProbeRunner {
     this.store.setMeta(OUTAGE_META, o ? JSON.stringify({ ...o, members: [...o.members] }) : '');
   }
 
-  /** http that really fails: reached its fail_after, or has an anomaly open. One blip in the same round wakes no one. */
+  /** http that really fails: reached its fail_after, or has an anomaly open. One blip in the same round wakes no one. `prod: false` isn't counted. */
   private failingHttp(): ProbeSpec[] {
     return this.probes.filter((p) => {
-      if (p.kind !== 'http') return false;
+      if (p.kind !== 'http' || p.prod === false) return false;
       const s = this.state(p.key);
       return !!s && (s.anomaly_open === 1 || s.consecutive_failures >= p.failAfter);
     });
@@ -1077,7 +1083,7 @@ export class ProbeRunner {
   /** The shared-event part of a body: the nodes, how many were checked, the measurer, and http at this moment. */
   private sharedFacts(lost: { p: ProbeSpec; o: ProbeOutcome }[], checked: number): string[] {
     const host = this.host();
-    const http = this.probes.filter((p) => p.kind === 'http');
+    const http = this.probes.filter((p) => p.kind === 'http' && p.prod !== false);  // as failingHttp: production only
     const bad = this.failingHttp();
     return [
       `${lost.length} מתוך ${checked} נודים איבדו pings באותו סבב (${checked - lost.length} תקינים):`,
@@ -1153,7 +1159,7 @@ export class ProbeRunner {
 
   /** More than half of the http probes failing at once points at the measurer, not at the projects. */
   private majorityFailing(): boolean {
-    const http = this.probes.filter((p) => p.kind === 'http');
+    const http = this.probes.filter((p) => p.kind === 'http' && p.prod !== false);
     const failing = http.filter((p) => (this.state(p.key)?.consecutive_failures ?? 0) > 0).length;
     return http.length >= 2 && failing * 2 > http.length;
   }
@@ -1269,7 +1275,7 @@ export class ProbeRunner {
       // Only a clean sample recovers: jitter after an anomaly is not "back to normal".
       this.store.db.prepare('UPDATE probe_state SET anomaly_open = 0 WHERE probe_id = ?').run(p.key);
       this.mailbox.tell({ msg_id: `probe-${p.key}-recovered-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system',
-        priority: 'next', body: p.kind === 'disk' ? `${p.key} חזר לתקין (${o.percent}% ב-${p.disk!.path} על ${p.disk!.host ?? 'local'}).`
+        priority: p.prod === false ? 'later' : 'next', body: p.kind === 'disk' ? `${p.key} חזר לתקין (${o.percent}% ב-${p.disk!.path} על ${p.disk!.host ?? 'local'}).`
           : p.kind === 'latency' && o.ping ? `${p.key} חזר לתקין (${p.latency!.host}: ${pingEvidence(o.ping)}).`
           : p.kind === 'whatsapp_log' ? `${p.key} חזר לתקין (הלוג של ${p.whatsappLog!.resource} בלי חריגה).`
           : `${p.key} חזר לתקין (status=${o.status}, ${o.latencyMs}ms).` });
@@ -1469,12 +1475,15 @@ export class ProbeRunner {
     const recent = this.store.db.prepare('SELECT ok, status, latency_ms, error, ts FROM probe_results WHERE probe_id = ? ORDER BY id DESC LIMIT ?')
       .all(p.key, sustained ? JITTER_SUSTAIN_ROUNDS : lasted != null ? Math.max(p.failAfter, Math.min(10, Math.ceil(lasted * 1000 / FAIL_FOR_RETRY_MS) + 1)) : p.failAfter) as { status: number | null; latency_ms: number | null; error: string | null; ts: number }[];
     const lastOk = st?.last_ok_at ? new Date(st.last_ok_at).toISOString() : 'אף פעם (מאז שהתחלנו לבדוק)';
+    // `prod: false`: the same evidence, at `later` and low urgency (easy's entry link, 03/11: not production).
+    const prod = p.prod !== false;
+    const head = prod ? 'חריגה בפרודקשן' : 'חריגה (לא פרודקשן, עדיפות נמוכה)';
     this.mailbox.tell({ msg_id: `probe-${p.key}-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'probe_anomaly',
-      urgency: 'urgent', priority: 'now', body: [
-        p.kind === 'disk' ? `חריגה בפרודקשן: ${p.key} (דיסק ${p.disk!.path} על ${p.disk!.host ?? 'local'}, הסף ${p.disk!.maxPercent}%)`
-          : p.kind === 'latency' ? `חריגה בפרודקשן: ${p.key} (jitter ברשת אל ${p.latency!.host}: הספים avg ${p.latency!.maxAvgMs}ms, mdev ${p.latency!.maxMdevMs}ms, אובדן ${p.latency!.maxLossPercent}%)`
-          : p.kind === 'whatsapp_log' ? `חריגה בפרודקשן: ${p.key} (הלוג של ${p.whatsappLog!.ns}/${p.whatsappLog!.resource} ב-${p.whatsappLog!.host})`
-          : `חריגה בפרודקשן: ${p.key} (${p.method} ${p.url})`,
+      urgency: prod ? 'urgent' : 'low', priority: prod ? 'now' : 'later', body: [
+        p.kind === 'disk' ? `${head}: ${p.key} (דיסק ${p.disk!.path} על ${p.disk!.host ?? 'local'}, הסף ${p.disk!.maxPercent}%)`
+          : p.kind === 'latency' ? `${head}: ${p.key} (jitter ברשת אל ${p.latency!.host}: הספים avg ${p.latency!.maxAvgMs}ms, mdev ${p.latency!.maxMdevMs}ms, אובדן ${p.latency!.maxLossPercent}%)`
+          : p.kind === 'whatsapp_log' ? `${head}: ${p.key} (הלוג של ${p.whatsappLog!.ns}/${p.whatsappLog!.resource} ב-${p.whatsappLog!.host})`
+          : `${head}: ${p.key} (${p.method} ${p.url})`,
         sustained ? `jitter מתמשך עם השפעה: ${JITTER_SUSTAIN_ROUNDS} דגימות ברצף בלי דגימה תקינה (JITTER_SUSTAIN_ROUNDS), גם כשהאובדן לא הגיע ל-fail_after. תקין לאחרונה: ${lastOk}.`
           : lasted != null && fails < p.failAfter ? `נכשל ברצף ${lasted} שניות (fail_for=${p.failForMs! / 1000}s, בדיקה חוזרת כל ${FAIL_FOR_RETRY_MS / 1000} שניות), בלי לחכות ל-fail_after=${p.failAfter}. תקין לאחרונה: ${lastOk}.`
           : `${fails} כישלונות ברצף (fail_after=${p.failAfter}). תקין לאחרונה: ${lastOk}.`,
@@ -1482,7 +1491,8 @@ export class ProbeRunner {
         'ראיות:',
         ...recent.map((r) => p.kind !== 'http' ? `- ${new Date(r.ts).toISOString()} ${r.error ?? ''}`.trim()
           : `- ${new Date(r.ts).toISOString()} status=${r.status ?? '—'} latency=${r.latency_ms ?? '—'}ms ${r.error ?? ''}`.trim()),
-        `שלב 1: observe-only. חקרי, ושלחי ${pre('ל', this.mailbox.names.owner.name)} ask דחוף עם השערה והצעה. פעולה על הפרודקשן רק עם grant באמנה.`,
+        prod ? `שלב 1: observe-only. חקרי, ושלחי ${pre('ל', this.mailbox.names.owner.name)} ask דחוף עם השערה והצעה. פעולה על הפרודקשן רק עם grant באמנה.`
+          : 'האמנה מסמנת את ה-probe הזה `prod: false`: לא דחוף, ולא מעירים עליו. בודקים כשמתפנים.',
       ].join('\n') });
     this.store.emit('probe.anomaly', this.cfg.monitoringLeadId, { probe: p.key, fails, ...(sustained ? { jitter_sustained: JITTER_SUSTAIN_ROUNDS } : {}) });
   }
