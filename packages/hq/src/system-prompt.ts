@@ -79,7 +79,7 @@ export function taskSteps(project: string | null, companyDir: string, o: { stand
     + `\`verify\` כש${G('הוא', 'היא')} ${G('צריך', 'צריכה')} לבדוק לפני שחרור (למשל build ב-TestFlight). \`check\` ו-\`verify\` מופיעים ${G('אצלו', 'אצלה')} מיד ב"מחכה לך". `
     + `רק מה שבאמת מחכה ${G('לו', 'לה')} וחוסם: הצעה, בדיקה של "אם בא לך" או משהו שכבר לא רלוונטי לא נכנסים ל-\`awaiting\`, אלא נכתבים ב-\`tell\`.`;
   const steps = [
-    'עובדים ב-worktree שבהודעת המשימה ("איפה עובדים"): hq פתח אותו בשבילך מה-checkout שבאמנה, על ענף משלו, והוא ה-cwd שלך. לא פותחים worktree נוסף, לא מסירים אותו (hq שומר ומסיר בסגירה), ולא נוגעים ב-checkout הראשי. רק אם בהודעה אין worktree: `git worktree add -b <branch> .worktrees/<task>` מתוך ה-repo.',
+    'עובדים ב-worktree שבהודעת המשימה ("איפה עובדים"): hq פתח אותו בשבילך מה-checkout שבאמנה, על ענף משלו, והוא ה-cwd שלך. לא פותחים worktree נוסף, לא מסירים אותו (hq שומר ומסיר בסגירה), ולא נוגעים ב-checkout הראשי. רק אם בהודעה אין worktree: `git fetch origin <default_branch>` ואז `git worktree add -b <branch> .worktrees/<task> origin/<default_branch>` מתוך ה-repo, לא מה-`main` המקומי, שיכול לפגר.',
     'PR עם `gh`. גוף ה-PR בעברית.',
     ...review,
     o.standing

@@ -3,30 +3,13 @@
 //   {op: 'create', project, checkout, task} · {op: 'ensure', path, checkout, project} · {op: 'close', path, defaultBranch, keepBranch}
 // Every op first moves this machine's copy of the company (companyHome) to hq's commit, so it reads the same charter.
 import { dirname, resolve } from 'node:path';
-import { existsSync, mkdirSync, rmdirSync, statSync } from 'node:fs';
-import { readCharter, runGit, Workspaces, type Git } from './workspace.ts';
+import { existsSync } from 'node:fs';
+import { readCharter, runGit, withLock, Workspaces, type Git } from './workspace.ts';
 
 export interface WorkspaceOp {
   op: 'create' | 'ensure' | 'close';
   companyHome: string; companySha?: string | null;
   project?: string | null; checkout?: string | null; task?: string; path?: string; defaultBranch?: string; keepBranch?: boolean;
-}
-
-/**
- * One op at a time in a checkout's index: a fill starts several tasks on a node at once, and two `git checkout` in the
- * company checkout side by side fail on index.lock. A lock dir in .git, taken over when older than 5 minutes (a crash).
- */
-export async function withLock<T>(dir: string, fn: () => Promise<T>, waitMs = 120_000): Promise<T> {
-  const lock = resolve(dir, '.git', 'company-sync.lock');
-  for (const t0 = Date.now(); ;) {
-    try { mkdirSync(lock); break; } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-      try { if (Date.now() - statSync(lock).mtimeMs > 5 * 60_000) rmdirSync(lock); } catch { /* gone meanwhile */ }
-      if (Date.now() - t0 > waitMs) throw new Error(`${lock} is held for over ${waitMs / 1000}s`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  }
-  try { return await fn(); } finally { try { rmdirSync(lock); } catch { /* already gone */ } }
 }
 
 /** The company checkout here at hq's commit (fetched when missing; origin's main when hq's is not on origin). */

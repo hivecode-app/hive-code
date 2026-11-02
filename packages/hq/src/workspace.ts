@@ -3,7 +3,7 @@
 // on close preserves anything uncommitted under refs/company/preserved/<task> before removing the
 // worktree without --force.
 import { execFile, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parse } from 'yaml';
@@ -172,6 +172,30 @@ export const runSetup: Setup = (cwd, command, checkout, timeoutMs = 15 * 60_000)
   });
 });
 
+/** The start of BaseFetchFailed's message: a node's workspace-cli sends only the message back (RemoteWorkspaces.op). */
+export const FETCH_FAILED = 'base fetch failed:';
+
+/** A new worktree's base could not be fetched: the task waits and tries again, it does not start from a stale branch. */
+export class BaseFetchFailed extends Error { override name = 'BaseFetchFailed'; }
+
+/**
+ * One op at a time in a checkout: a fill starts several tasks on a machine at once, and two `git checkout` (or
+ * `git fetch`) in one checkout side by side fail on a lock. A lock dir in .git (`name`), taken over when older than
+ * 5 minutes (a crash).
+ */
+export async function withLock<T>(dir: string, fn: () => Promise<T>, waitMs = 120_000, name = 'company-sync.lock'): Promise<T> {
+  const lock = resolve(dir, '.git', name);
+  for (const t0 = Date.now(); ;) {
+    try { mkdirSync(lock); break; } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      try { if (Date.now() - statSync(lock).mtimeMs > 5 * 60_000) rmdirSync(lock); } catch { /* gone meanwhile */ }
+      if (Date.now() - t0 > waitMs) throw new Error(`${lock} is held for over ${waitMs / 1000}s`);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  try { return await fn(); } finally { try { rmdirSync(lock); } catch { /* already gone */ } }
+}
+
 export interface Worktree {
   path: string; branch: string; checkout: string; base: string;
   /** On a node: repos it reads beside the worktree that stayed behind the commit here (nodes.ts RemoteWorkspaces.create). */
@@ -214,17 +238,36 @@ export class Workspaces {
   }
 
   /**
+   * The base of a new worktree: origin/<default>, just fetched. One fetch at a time in a checkout (a fill starts
+   * several tasks there at once, and side by side they fail on the lock of refs/remotes/origin/<default>), tried
+   * three times. A fetch that still fails throws BaseFetchFailed: the local default branch can be weeks behind
+   * (lumo on ci-host, 10/10 to 01/11: 388 commits), and a task started from it redoes merged work. Only a checkout
+   * with no origin at all starts from its local branch.
+   */
+  async base(c: Checkout, retryMs = 2_000): Promise<string> {
+    const hasOrigin = await this.git(c.path, ['remote', 'get-url', 'origin']).then(() => true, () => false);
+    if (!hasOrigin) return c.defaultBranch;
+    const fetch = () => this.git(c.path, ['fetch', '--quiet', 'origin', c.defaultBranch]);
+    const locked = existsSync(join(c.path, '.git', 'HEAD')) ? (fn: () => Promise<string>) => withLock(c.path, fn, 5 * 60_000, 'company-fetch.lock') : (fn: () => Promise<string>) => fn();
+    let last: Error | null = null;
+    for (let i = 0; i < 3; i++) {
+      if (i) await new Promise((r) => setTimeout(r, retryMs * i));
+      try {
+        await locked(fetch);
+        return `origin/${c.defaultBranch}`;
+      } catch (e) { last = e as Error; }
+    }
+    throw new BaseFetchFailed(`${FETCH_FAILED} git fetch origin ${c.defaultBranch} in ${c.path} failed 3 times, and the task does not start from the local ${c.defaultBranch}, which may be behind: ${last?.message.slice(0, 300)}`);
+  }
+
+  /**
    * New worktree <checkout>/<worktreeDir>/<task> on a new branch named <task> (e.g. company-t12), from origin/<default>
-   * (fetched first; the local default branch if the fetch fails). A taken name gets a suffix, never reused.
+   * after a fetch (base(): throws when the fetch fails). A taken name gets a suffix, never reused.
    * Then commands.worktree_setup runs in it; if that fails, the worktree is closed and create throws.
    */
   async create(ch: Charter, c: Checkout, task: string): Promise<Worktree> {
     if (!SLUG.test(task)) throw new Error(`invalid task slug ${task}`);
-    let base = c.defaultBranch;
-    try {
-      await this.git(c.path, ['fetch', '--quiet', 'origin', c.defaultBranch]);
-      base = `origin/${c.defaultBranch}`;
-    } catch { /* offline or no origin: the local branch */ }
+    const base = await this.base(c);
     let slug = task;
     for (let i = 0; ; i++) {
       const path = join(c.path, ch.worktreeDir, slug);

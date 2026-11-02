@@ -12,7 +12,7 @@ import { ensureRuntimeIdentity, getIdentity, isStandingWorker, projectLead, task
 import { HELPER_TEAM, taskSteps } from './system-prompt.ts';
 import { loadInfo, memInfoMb } from './proc.ts';
 import { dirname, join } from 'node:path';
-import { noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
+import { BaseFetchFailed, noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
 import { codexOf } from './codex-quota.ts';
 import { LOCAL, LOCAL_LABELS, NEEDS_LOCAL, NodeUnreachable, PORTABLE_AWAY_MS, nodeToggle, RemoteWorkspaces, type Nodes, type RemoteNode } from './nodes.ts';
 
@@ -410,7 +410,7 @@ export class Scheduler {
    * #224: a start that did not take (its brief never accepted, or the launch failed). Not his business: the task
    * waits a longer backoff and tries again, and after BRIEF_FAILS in a row the monitoring lead hears of it once.
    */
-  private startFailed(taskId: number, why: string): void {
+  private startFailed(taskId: number, why: string, what?: string): void {
     const t = this.task(taskId);
     if (!t || t.state === 'done') return;
     const now = this.store.now();
@@ -422,7 +422,7 @@ export class Scheduler {
     if (f.n !== BRIEF_FAILS) return;
     this.mailbox.tell({ msg_id: `hq-start-failing-t${taskId}-${f.since}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system', priority: 'next',
       body: [`משימה ${t.ref ?? `#${taskId}`} (${t.title}) לא עלתה ${BRIEF_FAILS} פעמים ברצף: ${why.slice(0, 300)}.`,
-        `העובד (\`${t.identity ?? '—'}\`) לא קיבל את הבריף, או שהמשמרת לא עלתה. hq ממשיך לנסות עם המתנה ארוכה יותר. כדאי לבדוק את השרת (עומס, זיכרון) ואת היומן של המשמרת.`].join('\n') });
+        what ?? `העובד (\`${t.identity ?? '—'}\`) לא קיבל את הבריף, או שהמשמרת לא עלתה. hq ממשיך לנסות עם המתנה ארוכה יותר. כדאי לבדוק את השרת (עומס, זיכרון) ואת היומן של המשמרת.`].join('\n') });
   }
 
   /** The brief of one run of a task's shift (start()'s prompt id). */
@@ -648,6 +648,15 @@ export class Scheduler {
         // on a node that answers) after the backoff.
         if (e instanceof NodeUnreachable) {
           if (!t.worktree) this.store.db.prepare('UPDATE tasks SET machine = NULL WHERE id = ? AND worktree IS NULL').run(t.id);
+          throw e;
+        }
+        // The base could not be fetched (origin/<default>): the task does not start from a local branch that may be
+        // weeks behind. It waits and tries again after the backoff, unplaced (another machine may fetch), and
+        // monitoring hears of it when it keeps failing.
+        if (e instanceof BaseFetchFailed) {
+          if (!t.worktree) this.store.db.prepare('UPDATE tasks SET machine = NULL WHERE id = ? AND worktree IS NULL').run(t.id);
+          this.store.emit('task.base_fetch_failed', t.identity, { id: t.id, machine: t.machine ?? LOCAL, why: e.message.slice(0, 400) });
+          this.startFailed(t.id, `fetch: ${e.message}`, `ה-worktree לא נפתח: ה-\`git fetch\` של הענף הראשי נכשל, ו-hq לא פותח משימה מהענף המקומי, שיכול לפגר. hq ממשיך לנסות עם המתנה ארוכה יותר. כדאי לבדוק את ה-remote ואת ההתחברות ל-GitHub ב-\`${t.machine ?? LOCAL}\`.`);
           throw e;
         }
         // #224: on a node, its worktree there is gone and its branch too: nothing there to go back to. It goes back to

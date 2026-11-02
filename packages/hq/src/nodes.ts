@@ -14,7 +14,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { Charter, Checkout, CloseResult, Worktree } from './workspace.ts';
+import { BaseFetchFailed, FETCH_FAILED, type Charter, type Checkout, type CloseResult, type Worktree } from './workspace.ts';
 import type { Launcher, LaunchSpec } from './shifts.ts';
 import { hostArgs, shiftUnit } from './shifts.ts';
 
@@ -385,7 +385,7 @@ export class RemoteWorkspaces {
     const line = out.trim().split('\n').pop() ?? '';
     let r: { ok: boolean; result?: T; error?: string };
     try { r = JSON.parse(line) as typeof r; } catch { throw new Error(`${this.node.def.name}: workspace-cli: ${out.slice(-400)}`); }
-    if (!r.ok) throw new Error(`${this.node.def.name}: ${r.error}`);
+    if (!r.ok) throw new (r.error?.startsWith(FETCH_FAILED) ? BaseFetchFailed : Error)(`${this.node.def.name}: ${r.error}`);
     return r.result as T;
   }
 

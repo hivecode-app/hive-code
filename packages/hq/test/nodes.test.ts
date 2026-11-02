@@ -12,6 +12,7 @@ import { HostClient } from '../src/host-client.ts';
 import { syncCompany } from '../src/workspace-cli.ts';
 import { NodeUnreachable, RemoteLauncher, RemoteNode, RemoteWorkspaces, nodeToggle, type NodeDef, type SshRun } from '../src/nodes.ts';
 import type { LaunchSpec } from '../src/shifts.ts';
+import { BaseFetchFailed, Workspaces } from '../src/workspace.ts';
 
 const NODE: NodeDef = { name: 'n2', ssh: 'root@n2.test', projects: ['proj'], maxSlots: 2, maxLoad: 0.85, identityFile: null };
 
@@ -451,6 +452,20 @@ test('task-288: closing a task from a node fetches back the preserved ref and th
   assert.deepEqual(await closeOn('develop'), ['refs/company/preserved/company-t9']);
   assert.deepEqual(await closeOn('HEAD'), ['refs/company/preserved/company-t9']);
   assert.deepEqual(await closeOn('company-t9', { branchDeleted: true }), ['refs/company/preserved/company-t9']);
+});
+
+test('a node whose fetch of the base fails: hq gets a BaseFetchFailed (the task waits), any other failure stays an Error', async () => {
+  // The message the node's Workspaces really throws, as workspace-cli sends it back.
+  const failing = new Workspaces(async (_cwd, args) => { if (args[0] === 'fetch') throw new Error('cannot lock ref'); return ''; });
+  const why = await failing.base({ name: 'proj', path: '/w', defaultBranch: 'main', repo: null }, 1).then(() => '', (e: Error) => e.message);
+  const on = (error: string) => {
+    const node = { def: { name: 'n2', ssh: 'root@n2.test' }, exec: async () => JSON.stringify({ ok: false, error }), gitSsh: () => 'ssh' };
+    const ws = new RemoteWorkspaces(node as never, '/c', '/e');
+    ws.companySha = async () => null;
+    return ws.create({ project: 'proj', worktreeDir: '.worktrees' } as never, { name: 'proj', path: '/w', defaultBranch: 'main', repo: null }, 'company-t9');
+  };
+  await assert.rejects(on(why), (e: Error) => e instanceof BaseFetchFailed && e.message.startsWith('n2: ') && /cannot lock ref/.test(e.message));
+  await assert.rejects(on('no checkout "proj"'), (e: Error) => !(e instanceof BaseFetchFailed) && /^n2: no checkout/.test(e.message));
 });
 
 test('RemoteLauncher ownLogin: a machine with a user of its own runs the shift on its own login, as that user', async () => {

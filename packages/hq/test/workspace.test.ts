@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { charter, git, makeEnv, repo, until } from './helpers.ts';
-import { readCharter, runGit, Workspaces, type Git } from '../src/workspace.ts';
+import { FETCH_FAILED, readCharter, runGit, Workspaces, type Git } from '../src/workspace.ts';
 import { runOp } from '../src/workspace-cli.ts';
 
 test('readCharter: checkouts, commands and ci_check from the frontmatter; ~ is expanded', () => {
@@ -359,4 +359,77 @@ test('workspace-cli close (a node): a repaired worktree reports the earlier ref 
     assert.equal(res.branchDeleted, false, 'it has a commit beyond main');
     assert.equal(git(r.checkout, 'rev-parse', 'refs/company/preserved/company-t14'), saved);
   } finally { r.cleanup(); }
+});
+
+test('Workspaces.create: several at once all start from origin/main; a fetch that keeps failing throws, never the stale local main', async () => {
+  const r = repo();
+  try {
+    const d = mkdtempSync(join(r.dir, 'company-'));
+    execFileSync('mkdir', ['-p', join(d, 'projects')]);
+    writeFileSync(join(d, 'projects', 'proj.md'), charter(r.checkout));
+    const ch = readCharter(d, 'proj')!;
+    // origin moves on; the local main stays behind (ci-host's ~/new-lumo-application, 388 commits).
+    const other = join(r.dir, 'other');
+    execFileSync('git', ['clone', '--quiet', join(r.dir, 'origin.git'), other]);
+    writeFileSync(join(other, 'new.txt'), 'new\n');
+    git(other, 'add', '.');
+    git(other, 'commit', '--quiet', '-m', 'new on origin');
+    git(other, 'push', '--quiet', 'origin', 'HEAD:main');
+    const head = git(other, 'rev-parse', 'HEAD');
+
+    const ws = new Workspaces();
+    const c = ws.checkout(ch)!;
+    const made = await Promise.all([1, 2, 3, 4].map((n) => ws.create(ch, c, `company-t${n}`)));
+    for (const w of made) {
+      assert.equal(w.base, 'origin/main');
+      assert.equal(git(w.path, 'rev-parse', 'HEAD'), head, `${w.branch} starts from origin's main, not the local one`);
+    }
+    assert.equal(existsSync(join(r.checkout, '.git', 'company-fetch.lock')), false, 'the fetch lock is let go');
+
+    // The fetch fails every time: no worktree, a BaseFetchFailed, after three tries.
+    let fetches = 0;
+    const failing: Git = (cwd, args, env) => {
+      if (args[0] === 'fetch') { fetches++; return Promise.reject(new Error('cannot lock ref')); }
+      return runGit(cwd, args, env);
+    };
+    const bad = new Workspaces(failing);
+    await assert.rejects(bad.base(c, 1), (e: Error) => e.name === 'BaseFetchFailed' && e.message.startsWith(FETCH_FAILED) && /cannot lock ref/.test(e.message));
+    assert.equal(fetches, 3);
+
+    // It fails twice, then works: the third try counts.
+    let n = 0;
+    const flaky: Git = (cwd, args, env) => (args[0] === 'fetch' && ++n < 3 ? Promise.reject(new Error('flaky')) : runGit(cwd, args, env));
+    assert.equal(await new Workspaces(flaky).base(c, 1), 'origin/main');
+
+    // A checkout with no origin at all starts from its local branch.
+    git(r.checkout, 'remote', 'remove', 'origin');
+    assert.equal(await ws.base(c, 1), 'main');
+  } finally { r.cleanup(); }
+});
+
+test('scheduler: a base that cannot be fetched → the task waits and retries (no needs-decision), recorded, no shift', async () => {
+  const r = repo();
+  const env = await makeEnv({ projects: { proj: charter(r.checkout) }, noStart: true });
+  try {
+    const { hq, launcher } = env;
+    let fail = true;
+    const ws = new Workspaces((cwd, args, e) => (fail && args[0] === 'fetch' ? Promise.reject(new Error('cannot lock ref')) : runGit(cwd, args, e)));
+    ws.base = (c) => Workspaces.prototype.base.call(ws, c, 1);
+    hq.scheduler.workspaces = ws;
+    await hq.start({ listen: false, timers: false });
+    const t = hq.scheduler.addTask({ title: 'משימה', project: 'proj' });
+    await until(() => hq.store.eventsAfter(0, 5000).some((e) => e.type === 'task.base_fetch_failed'), 5000, 'recorded');
+    const row = hq.scheduler.task(t.id)!;
+    assert.equal(row.worktree, null, 'no worktree from the local main');
+    assert.ok(!JSON.parse(row.labels).includes('needs-decision'), 'not out of the queue');
+    assert.equal(launcher.launches.length, 0);
+    assert.ok(hq.scheduler.inBackoff(t.id), 'it waits before the next try');
+    assert.ok(hq.store.eventsAfter(0, 5000).some((e) => e.type === 'task.start_not_taken' && /^fetch: /.test((e.data as { why: string }).why)));
+
+    fail = false;
+    (hq.scheduler as unknown as { lastStartAt: Map<number, number> }).lastStartAt.delete(t.id);
+    await hq.scheduler.fill();
+    await until(() => hq.scheduler.task(t.id)!.state === 'running', 5000, 'running once the fetch works');
+    assert.equal(hq.scheduler.task(t.id)!.worktree, join(r.checkout, '.worktrees', `company-t${t.id}`));
+  } finally { await env.cleanup(); r.cleanup(); }
 });
