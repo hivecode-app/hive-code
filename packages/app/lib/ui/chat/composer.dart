@@ -40,13 +40,20 @@ class _ComposerState extends State<Composer> {
     if (_portal.isShowing) _portal.hide();
   }
   bool recording = false;
-  bool transcribing = false;
   bool _starting = false;
   int recSeconds = 0;
   Timer? _rec;
+  Timer? _tick; // the elapsed time while a recording goes out
+  int _elapsed = 0;
+  final _jobs = Dictation.instance.jobs;
 
-  /// A short dictation; past this the recording stops by itself and goes to transcription.
-  static const maxRecSeconds = 120;
+  /// The recordings of this chat that wait for transcription; the one going out now, if any.
+  List<PendingDictation> get _pending => _jobs.of(widget.identityId);
+  PendingDictation? get _running => _pending.where((p) => p.running).firstOrNull;
+  bool get transcribing => _running != null;
+
+  /// Past this the recording stops by itself and goes to transcription: the 25 MB hq takes (13 min).
+  static const maxRecSeconds = 13 * 60;
 
   void Function()? _stopPaste;
 
@@ -55,6 +62,35 @@ class _ComposerState extends State<Composer> {
     super.initState();
     widget.controller.addListener(_changed);
     _stopPaste = listenPastedImages((bytes, mime, name) => _addImage(bytes, name, mime: mime));
+    _jobs.addListener(_jobsChanged);
+    _jobs.load();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _jobsChanged());
+  }
+
+  @override
+  void didUpdateWidget(Composer old) {
+    super.didUpdateWidget(old);
+    // The desktop keeps this composer when he picks another chat: that chat's text, its own clock.
+    if (old.identityId != widget.identityId) {
+      _tick?.cancel();
+      _tick = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _jobsChanged());
+    }
+  }
+
+  void _jobsChanged() {
+    if (!mounted) return;
+    // A recording of this chat that is all text goes into the field, wherever it was recorded from.
+    final text = _jobs.take(widget.identityId);
+    if (text != null && text.isNotEmpty) _insert(text);
+    if (transcribing && _tick == null) {
+      _elapsed = CompanyTime.now().difference(_running!.startedAt ?? CompanyTime.now()).inSeconds;
+      _tick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _elapsed++));
+    } else if (!transcribing) {
+      _tick?.cancel();
+      _tick = null;
+    }
+    setState(() {});
   }
 
   @override
@@ -62,6 +98,8 @@ class _ComposerState extends State<Composer> {
     _stopPaste?.call();
     widget.controller.removeListener(_changed);
     _rec?.cancel();
+    _tick?.cancel();
+    _jobs.removeListener(_jobsChanged);
     if (recording) Dictation.instance.recorder.cancel();
     super.dispose();
   }
@@ -87,15 +125,7 @@ class _ComposerState extends State<Composer> {
   }
 
   /// [fault]: sent to hq as well (error_report.dart); his own to fix (a permission, too short) only shown.
-  void _fail(String message, {bool fault = true}) {
-    final s = StoreScope.read(context);
-    if (fault) {
-      s.error = message;
-    } else {
-      s.notice(message);
-    }
-    s.touch();
-  }
+  void _fail(String message, {bool fault = true}) => _failOn(StoreScope.read(context), message, fault: fault);
 
   // Dictation goes to dictate-server and lands in the field for editing (never sent by itself).
   Future<void> _toggleRecording() async {
@@ -129,27 +159,63 @@ class _ComposerState extends State<Composer> {
     });
   }
 
+  // Nothing after the first await reads [context]: he may have left the chat by then, and the
+  // recording still goes out; its text waits for this chat's composer (DictationJobs.take).
   Future<void> _stopAndTranscribe() async {
     if (!recording) return;
     final dict = Dictation.instance;
+    final store = StoreScope.read(context);
+    final id = widget.identityId;
     _rec?.cancel();
-    setState(() {
-      recording = false;
-      transcribing = true;
-    });
+    setState(() => recording = false);
+    final PendingDictation job;
     try {
       final pcm = await dict.recorder.stop();
       if (pcm.length < kDictateRate * 2 ~/ 4) throw const DictationError('ההקלטה קצרה מדי. אפשר ללחוץ, לדבר, ואז ללחוץ שוב.', fault: false);
-      final text = await dict.client!.transcribe(wavFromPcm(pcm));
-      if (!mounted) return;
-      _insert(text);
+      job = await _jobs.add(id, pcm);
     } on DictationError catch (e) {
-      if (mounted) _fail(e.message, fault: e.fault);
+      return _failOn(store, e.message, fault: e.fault);
     } catch (_) {
-      if (mounted) _fail(kMicFailed);
-    } finally {
-      if (mounted) setState(() => transcribing = false);
+      return _failOn(store, kMicFailed);
     }
+    await _transcribeOn(store, job);
+  }
+
+  /// Sends a kept recording; a failure keeps it, with "לנסות שוב" above the field.
+  Future<void> _transcribeOn(AppStore store, PendingDictation job) async {
+    final client = Dictation.instance.client;
+    if (client == null || job.running) return;
+    try {
+      await _jobs.run(job, client);
+    } on DictationError catch (e) {
+      _failOn(store, e.message, fault: e.fault);
+    }
+  }
+
+  void _failOn(AppStore s, String message, {bool fault = true}) {
+    if (fault) {
+      s.error = message;
+    } else {
+      s.notice(message);
+    }
+    s.touch();
+  }
+
+  Future<void> _discard(PendingDictation job) async {
+    final p = context.p;
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: p.surface,
+        title: Text('למחוק את ההקלטה?', style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w700)),
+        content: Text('היא לא תומללה, ואחרי המחיקה אי אפשר לשחזר אותה.', style: T.body.copyWith(color: p.text2)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('ביטול', style: T.secondary.copyWith(color: p.accent))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('מחיקה', style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+    if (yes == true) await _jobs.discard(job);
   }
 
   void _cancelRecording() {
@@ -253,15 +319,7 @@ class _ComposerState extends State<Composer> {
       decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(23), boxShadow: p.hairShadow),
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: transcribing
-          ? SizedBox(
-              height: 46,
-              child: Row(children: [
-                const SizedBox(width: 12),
-                SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: p.accent)),
-                const SizedBox(width: 10),
-                Text('מתמלל את ההקלטה…', style: T.body.copyWith(color: p.text2)),
-              ]),
-            )
+          ? _Transcribing(job: _running!, elapsed: _elapsed)
           : recording
           ? SizedBox(
               height: 46,
@@ -269,7 +327,7 @@ class _ComposerState extends State<Composer> {
                 const SizedBox(width: 12),
                 Ic('mic', size: 20, fill: true, color: p.urgent),
                 const SizedBox(width: 8),
-                Text('${recSeconds ~/ 60}:${(recSeconds % 60).toString().padLeft(2, '0')}', style: T.body.copyWith(color: p.text)),
+                Text(_clock(recSeconds), style: T.body.copyWith(color: p.text, fontFeatures: const [FontFeature.tabularFigures()])),
                 const Spacer(),
                 TextButton(
                   onPressed: _cancelRecording,
@@ -357,6 +415,11 @@ class _ComposerState extends State<Composer> {
               padding: const EdgeInsets.only(bottom: 6),
               child: _ImagePreview(images: images, onRemove: (a) => store.removeImage(widget.identityId, a)),
             ),
+          for (final job in _pending.where((j) => !j.running && !j.done))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: _KeptRecording(job: job, onRetry: transcribing ? null : () => _transcribeOn(StoreScope.read(context), job), onDiscard: () => _discard(job)),
+            ),
           if (widget.quote != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
@@ -395,6 +458,84 @@ class _ComposerState extends State<Composer> {
             ),
           ]),
         ]),
+      ]),
+    );
+  }
+}
+
+String _clock(int s) => '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+
+/// A recording on its way: which piece, how much of it has left the phone, and for how long.
+class _Transcribing extends StatelessWidget {
+  const _Transcribing({required this.job, required this.elapsed});
+  final PendingDictation job;
+  final int elapsed;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final piece = job.pieces > 1 ? 'חלק ${job.piece + 1} מתוך ${job.pieces} · ' : '';
+    final step = job.sent < 1 ? 'שולח ${(job.sent * 100).floor()}%' : 'מתמלל';
+    // Of the whole recording: pieces done, plus the share of this one that has gone out.
+    final done = job.texts.where((t) => t != null).length;
+    final share = ((done + job.sent * 0.9) / job.pieces).clamp(0.0, 1.0);
+    return SizedBox(
+      height: 46,
+      child: Row(children: [
+        const SizedBox(width: 12),
+        SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, value: share, color: p.accent, backgroundColor: p.line)),
+        const SizedBox(width: 10),
+        Expanded(child: Text('$piece$step', style: T.body.copyWith(color: p.text2, fontFeatures: const [FontFeature.tabularFigures()]), overflow: TextOverflow.ellipsis)),
+        Text(_clock(elapsed), style: T.secondary.copyWith(color: p.text3, fontFeatures: const [FontFeature.tabularFigures()])),
+        const SizedBox(width: 12),
+      ]),
+    );
+  }
+}
+
+/// A recording that did not make it to text, kept: what happened, try again, delete. The text has
+/// the whole width and the buttons a row of their own under it, at the end (WhatsApp's unsent message).
+class _KeptRecording extends StatelessWidget {
+  const _KeptRecording({required this.job, required this.onRetry, required this.onDiscard});
+  final PendingDictation job;
+  final VoidCallback? onRetry;
+  final VoidCallback onDiscard;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final now = CompanyTime.now();
+    final ago = daysAgo(job.at, now);
+    final at = ago == 0 ? '-${hm(job.at)}' : (ago == 1 ? 'אתמול, ${hm(job.at)}' : '-${dm(job.at)}, ${hm(job.at)}');
+    final kept = job.onDisk ? 'היא שמורה במכשיר.' : 'היא שמורה עד שהאפליקציה תיסגר.';
+    const tab = TextStyle(fontFeatures: [FontFeature.tabularFigures()]);
+    return Container(
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(12), boxShadow: p.hairShadow),
+      padding: const EdgeInsetsDirectional.fromSTEB(12, 10, 12, 2),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(padding: const EdgeInsets.only(top: 2), child: Ic('mic', size: 20, color: p.text2)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('הקלטה מ$at (${_clock(job.seconds)}) לא תומללה', style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w500).merge(tab)),
+              Text('$kept אפשר לנסות שוב או למחוק אותה.', style: T.secondary.copyWith(color: p.text2)),
+            ]),
+          ),
+        ]),
+        Align(
+          alignment: AlignmentDirectional.centerEnd,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            TextButton(
+              onPressed: onDiscard,
+              style: TextButton.styleFrom(foregroundColor: p.text2, textStyle: T.secondary),
+              child: const Text('מחיקה'),
+            ),
+            TextButton(
+              onPressed: onRetry,
+              style: TextButton.styleFrom(foregroundColor: p.accent, disabledForegroundColor: p.text3, textStyle: T.secondary.copyWith(fontWeight: FontWeight.w700)),
+              child: const Text('לנסות שוב'),
+            ),
+          ]),
+        ),
       ]),
     );
   }

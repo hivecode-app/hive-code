@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:agent_company/data/dictation.dart';
+import 'package:agent_company/data/dictation_files.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -29,4 +30,24 @@ void main() {
       throwsA(isA<DictationError>().having((e) => e.message, 'message', contains('טוקן'))),
     );
   }, skip: skip);
+
+  test('five minutes go out in pieces, with upload progress, and come back as one text', () async {
+    final one = Uint8List.sublistView(File(wav!).readAsBytesSync(), 44);
+    final pcm = Uint8List(kDictateRate * 2 * 300);
+    for (var at = 0; at < pcm.length; at += one.length) {
+      pcm.setRange(at, at + one.length > pcm.length ? pcm.length : at + one.length, one);
+    }
+    final jobs = DictationJobs(MemoryDictationFiles());
+    final job = await jobs.add('live', pcm);
+    final ticks = <double>[];
+    jobs.addListener(() => ticks.add(job.sent));
+    final t = Stopwatch()..start();
+    await jobs.run(job, DictateClient(baseUrl: url!, token: token!));
+    final text = jobs.take('live')!;
+    // ignore: avoid_print
+    print('${job.pieces} pieces, ${ticks.toSet().length} progress steps, ${t.elapsedMilliseconds} ms: ${text.length} chars');
+    expect(job.pieces, inInclusiveRange(5, 6)); // cuts land at the quiet spot before each minute
+    expect(ticks.toSet().length, greaterThan(10));
+    expect(text, matches(RegExp(r'[֐-׿]')));
+  }, skip: skip, timeout: const Timeout(Duration(minutes: 3)));
 }
