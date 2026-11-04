@@ -1,3 +1,4 @@
+import 'work_settings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -128,6 +129,7 @@ class _ProductSettingsState extends State<ProductSettings> {
               row('account_circle', owner.isEmpty ? l.account : owner, subtitle: owner.isEmpty ? null : l.account),
               AccountSwitch(backend: store.backend),
               Section(l.work),
+              row('tune', l.workSettingsTitle, onTap: () => page(const WorkSettingsScreen())),
               row('dns', l.server, subtitle: store.backend.label, onTap: !kIsWeb ? () => kSwitchServer?.call() : null),
               row(
                 'shield',
@@ -136,7 +138,7 @@ class _ProductSettingsState extends State<ProductSettings> {
                   context: context,
                   builder: (_) => AlertDialog(
                     title: Text(l.access),
-                    content: SingleChildScrollView(child: Text('${l.accessDetail}\n\n${l.responsibility}')),
+                    content: SingleChildScrollView(child: Text('${l.approvedCopy15}\n\n${l.approvedCopy18}\n\n${l.setupTermsBody}')),
                     actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text(l.acknowledge))],
                   ),
                 ),

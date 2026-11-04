@@ -1,3 +1,4 @@
+import { setupMayRun } from './onboarding.ts';
 // The scheduler is code, not an LLM (A.2(8), B.5, B.16). It:
 //  - fills every free work slot from the queue immediately, in B.16 order, with no quota-percentage gate;
 //  - counts a lead idle with no task outside the work slots, and rests it when a task waits for a slot (#128);
@@ -1302,6 +1303,7 @@ export class Scheduler {
    * per identity, so a restart or a second call never sends it again. Returns the leads it woke.
    */
   wakeNewLeads(): string[] {
+    if (!setupMayRun(this.store, this.cfg.companyDir)) return [];
     if (this.cfg.codexLean) return [];
     const rows = this.store.db.prepare(`SELECT id, name, title FROM identities i WHERE lifecycle = 'lead' AND active = 1
       AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.identity = i.id)`).all() as { id: string; name: string; title: string }[];
@@ -1321,6 +1323,7 @@ export class Scheduler {
   }
 
   async sweep(): Promise<void> {
+    if (!setupMayRun(this.store, this.cfg.companyDir)) { this.store.setMeta('last_sweep_at', String(this.store.now())); return; }
     if (this.cfg.codexLean) { this.store.setMeta('last_sweep_at', String(this.store.now())); return; }
     const now = this.store.now();
     this.escalateAsks();

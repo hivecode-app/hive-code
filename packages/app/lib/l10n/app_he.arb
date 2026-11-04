@@ -1200,5 +1200,64 @@
   "ui964": "אפשר לשלוח תמונות מסוג PNG, ‏JPEG, ‏GIF או WebP.",
   "ui965": "לא הצלחתי לקרוא את התמונה ששיתפת. אפשר לצרף אותה מהגלריה.",
   "companyOverview": "פרטי החברה",
-  "works": "עובד"
+  "works": "עובד",
+  "setupContinue": "המשך",
+  "setupAlmostReady": "כמעט מוכנה",
+  "setupServer": "השרת מחובר",
+  "setupClaude": "Claude",
+  "setupGithub": "GitHub",
+  "setupConnected": "מחובר",
+  "setupNeedsConnection": "נדרש חיבור",
+  "setupClaudeHint": "יש להריץ בשרת claude auth login, ואז לנסות שוב.",
+  "setupGithubHint": "יש להריץ בשרת gh auth login, ואז לנסות שוב.",
+  "setupProjects": "בחירת פרויקטים",
+  "setupFindRepo": "חיפוש מאגר",
+  "setupNoRepos": "לא נמצאו בחשבון מאגרים עם הרשאת כתיבה.",
+  "setupNoResults": "לא נמצאו מאגרים לחיפוש הזה.",
+  "setupRepoFailure": "המאגר לא נטען. יש לבדוק את הגישה ל־GitHub ולנסות שוב.",
+  "setupMore": "טעינת מאגרים נוספים",
+  "setupStart": "הקמת החברה",
+  "setupFirstTask": "המשימה הראשונה",
+  "setupFirstTaskHint": "ההקמה ממשיכה בשיחה עם מנהל החברה. המשימה הראשונה תיצור בקשת מיזוג, תעבור סקירה בלתי תלויה ותגיע לאישור.",
+  "setupOpenConversation": "פתיחת השיחה",
+  "setupLater": "מעבר לשיחות",
+  "setupError": "השינוי לא נשמר. יש לבדוק את החיבור לשרת ולנסות שוב.",
+  "setupLoading": "בדיקת הקמת החברה",
+  "setupCommandAccess": "הרצת פקודות וקריאה, שינוי או מחיקה של קבצים בשרת",
+  "setupTermsBody": "רישיון MIT. התוכנה מסופקת כמות שהיא, ללא אחריות. האחריות לכל פעולה בשרת ובחשבונות היא של המשתמש בלבד. צריכת הטוקנים גבוהה ועלולה למצות את מכסת המנוי מהר מהרגיל.",
+  "workSettingsTitle": "הגדרות עבודה",
+  "workParallel": "עובדים במקביל",
+  "workNight": "עבודת לילה מתוזמנת",
+  "workNightHint": "לפי אזור הזמן של החברה. שחרור למשתמשים מחייב אישור שלך.",
+  "workFrom": "משעה",
+  "workUntil": "עד שעה",
+  "workAutoAccounts": "מעבר אוטומטי בין חשבונות Claude",
+  "workContinueLimit": "העבודה נמשכת עד לסיום. אם המכסה נגמרת, העבודה מתחדשת כשמתפנה מכסה.",
+  "workSave": "שמירת הגדרות העבודה",
+  "workSaved": "הגדרות העבודה נשמרו",
+  "workOffline": "הגדרות העבודה דורשות חיבור לשרת. ניתן לשנות שפה ומראה במכשיר גם ללא חיבור.",
+  "workForecastUnknown": "עדיין אין מספיק נתוני שימוש להערכה.",
+  "workForecast": "מספיק עד {date}, לפי קצב השימוש ביממה האחרונה.",
+  "serverSilentTitle": "החיבור לשרת נותק",
+  "serverSilentBody": "השרת לא ענה במשך 10 דקות. ניתן לפתוח את האפליקציה ולבדוק את החיבור.",
+  "serverSilentChannel": "חיבור לשרת",
+  "@workForecast": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "setupStep": "שלב {step} מתוך 4",
+  "@setupStep": {
+    "placeholders": {
+      "step": {
+        "type": "int"
+      }
+    }
+  },
+  "setupEnableNotifications": "הפעלת התראות",
+  "setupTokenAccess": "שימוש במנוי Claude שלך. צריכת הטוקנים גבוהה מהרגיל, והמכסה עלולה להיגמר מהר יותר",
+  "workDecreaseParallel": "הפחתת מספר העובדים במקביל",
+  "workIncreaseParallel": "הגדלת מספר העובדים במקביל"
 }

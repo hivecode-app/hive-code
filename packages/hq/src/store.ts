@@ -634,6 +634,9 @@ const MIGRATIONS: string[] = [
    CREATE INDEX IF NOT EXISTS events_task_activity ON events(json_extract(data, '$.id'), seq)
      WHERE type IN ('task.new','task.state','task.awaiting','task.labels','task.priority');`,
 
+  // v41, phase E: versioned acknowledgement, scoped to the device that gave it.
+  `CREATE TABLE consents (version TEXT NOT NULL, device TEXT NOT NULL, language TEXT NOT NULL,
+    accepted_at INTEGER NOT NULL, PRIMARY KEY(version, device));`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

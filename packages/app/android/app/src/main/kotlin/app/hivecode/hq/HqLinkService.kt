@@ -116,6 +116,7 @@ class HqLinkService : Service() {
             main.post {
                 if (webSocket !== socket) return@post
                 connected = true
+                ServerWatch.healthy(this@HqLinkService)
                 attempt = 0
                 goForeground(connected = true)
             }

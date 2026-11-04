@@ -35,8 +35,9 @@ const SEEN_EVERY_MS = 60_000;
 // Pairing codes: 8 characters without look-alikes (~40 bits), single use, 10 minutes. Wrong guesses
 // are counted per client address; past the limit, that address can't redeem until the window passes.
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-const MAX_BAD_CODES = 20;
-const BAD_CODE_WINDOW_MS = 10 * 60_000;
+// Phase E: ten failed redemptions in one minute; the 11th attempt waits for that minute to end.
+const MAX_BAD_CODES = 10;
+const BAD_CODE_WINDOW_MS = 60_000;
 // Open endpoints keep challenges in memory; the oldest go first past this many.
 const MAX_CHALLENGES = 1000;
 // One owner, one WebAuthn user. Fixed so a synced passkey manager keeps a single "רן" entry.

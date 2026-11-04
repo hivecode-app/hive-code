@@ -79,6 +79,7 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
                     return
                 }
                 Prefs(ctx).configure(base, token)
+                app.hivecode.hq.ServerWatch.configure(ctx)
                 HqLinkService.start(ctx, reconnect = true)
                 result.success(null)
             }
@@ -87,6 +88,7 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
                 result.success(if (p.isConfigured) mapOf("baseUrl" to p.baseUrl, "token" to p.token) else null)
             }
             "clearConfig" -> {
+                app.hivecode.hq.ServerWatch.cancel(ctx)
                 HqLinkService.stop(ctx)
                 Prefs(ctx).clearConfig()
                 ShortcutManagerCompat.removeAllDynamicShortcuts(ctx)

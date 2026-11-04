@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from lib/l10n/app_he.arb by tool/generate_server_copy.py -->
+<resources>
+    <string name="server_silent_title">החיבור לשרת נותק</string>
+    <string name="server_silent_body">השרת לא ענה במשך 10 דקות. ניתן לפתוח את האפליקציה ולבדוק את החיבור.</string>
+    <string name="server_silent_channel">חיבור לשרת</string>
+</resources>

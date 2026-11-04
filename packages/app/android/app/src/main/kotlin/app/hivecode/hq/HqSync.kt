@@ -41,6 +41,7 @@ object HqSync {
             val asks = hq.asksJson()
             val board = hq.boardJson()
             val toggles = hq.togglesJson()
+            ServerWatch.healthy(app)
             prefs.inboxJson = inbox
             prefs.asksJson = asks
             prefs.boardJson = board

@@ -1,3 +1,4 @@
+import { applyWorkSettings, scheduledNight, setupCommand, type SetupCommand } from './onboarding.ts';
 // `company hq` composition root: one process (B.1) wiring store, mailboxes, inbox, scheduler,
 // watchdog, probe-runner, push, backups and the API. Timers are plain intervals; every loop is
 // independently guarded so one failing loop never stops the others.
@@ -74,6 +75,7 @@ export interface HqDeps {
   accessRunner?: JobRunner;
   /** Reads Codex's rate limits (codex-quota.ts; default: a short-lived `codex app-server`). */
   codexLimits?: CodexLimitsReader;
+  setupCommand?: SetupCommand;
   now?: () => number;
 }
 
@@ -94,6 +96,7 @@ function lazyTemplateLauncher(cfg: HqConfig): Launcher {
 }
 
 export class Hq {
+  readonly setupCommand: SetupCommand;
   readonly store: Store;
   readonly auth: Auth;
   readonly inbox: Inbox;
@@ -139,6 +142,7 @@ export class Hq {
 
   readonly cfg: HqConfig;
   constructor(cfg: HqConfig, deps: HqDeps = {}) {
+    this.setupCommand = deps.setupCommand ?? setupCommand;
     this.cfg = cfg;
     this.store = new Store(cfg.dbPath, { now: deps.now, managerName: loadNames(cfg.companyDir, cfg.managerId).manager.name });
     this.store.ensureToggle('codex/lean', cfg.codexLean ?? false, 'Codex זמני: רק פניות שלך, עובד פעיל אחד בכל רגע');
@@ -356,6 +360,7 @@ export class Hq {
     if (this.cfg.codexLean && this.store.getMeta('codex.lean_active') !== '1') this.store.setMeta('codex.lean_since', String(this.store.now()));
     this.store.setMeta('codex.lean_active', this.cfg.codexLean ? '1' : '0');
     this.reloadContract();
+    applyWorkSettings(this.store, this.cfg);
     this.accounts.sync();
     // The identity check runs once at start for every account (no inference; profile + cached oauthAccount).
     for (const a of this.accounts.rows()) this.store.bg(this.accounts.verify(a.name), 'accounts.verify');
@@ -383,6 +388,7 @@ export class Hq {
       this.every(T.watchdogMs, 'watchdog', async () => { await this.watchdog.sweep(); await this.shifts.releaseEnded(); });
       this.every(T.livenessMs, 'liveness', () => this.shifts.pingAll());
       this.every(T.schedulerMs, 'scheduler', async () => {
+        await scheduledNight(this);
         await this.scheduler.sweep();
         if (!this.cfg.codexLean) { await this.night.sweep(); this.home.watchAsked(); }
         this.awaiting.sweep();

@@ -2934,5 +2934,64 @@
   "ui964": "Supported images: PNG, JPEG, GIF and WebP.",
   "ui965": "This shared image could not be read. Add it from your gallery.",
   "companyOverview": "Company overview",
-  "works": "Works"
+  "works": "Works",
+  "setupContinue": "Continue",
+  "setupAlmostReady": "Almost ready",
+  "setupServer": "Server connected",
+  "setupClaude": "Claude",
+  "setupGithub": "GitHub",
+  "setupConnected": "Connected",
+  "setupNeedsConnection": "Connection needed",
+  "setupClaudeHint": "On the server, run claude auth login, then try again.",
+  "setupGithubHint": "On the server, run gh auth login, then try again.",
+  "setupProjects": "Choose projects",
+  "setupFindRepo": "Find a repository",
+  "setupNoRepos": "No repositories with write access were found for this account.",
+  "setupNoResults": "No repositories match this search.",
+  "setupRepoFailure": "Repositories could not be loaded. Check GitHub access and try again.",
+  "setupMore": "Load more repositories",
+  "setupStart": "Set up company",
+  "setupFirstTask": "Your first task",
+  "setupFirstTaskHint": "Continue setup in the manager conversation. The first task will create a pull request, get an independent review and ask for approval.",
+  "setupOpenConversation": "Open conversation",
+  "setupLater": "Go to conversations",
+  "setupError": "The change could not be saved. Check the server connection and try again.",
+  "setupLoading": "Checking company setup",
+  "setupCommandAccess": "Run commands and read, change or delete files on this server",
+  "setupTermsBody": "MIT License. This software is provided as is, without warranty. You are solely responsible for all actions on your server and accounts. Token usage is high and may exhaust your subscription sooner.",
+  "workSettingsTitle": "Work settings",
+  "workParallel": "Workers in parallel",
+  "workNight": "Scheduled night work",
+  "workNightHint": "Uses the company time zone. Releases still require your approval.",
+  "workFrom": "From",
+  "workUntil": "Until",
+  "workAutoAccounts": "Switch Claude accounts automatically",
+  "workContinueLimit": "Work continues until complete. If the plan limit is reached, it resumes when capacity is available.",
+  "workSave": "Save work settings",
+  "workSaved": "Work settings saved",
+  "workOffline": "Work settings need a server connection. Language and appearance can still be changed on this device.",
+  "workForecastUnknown": "Not enough usage history for an estimate yet.",
+  "workForecast": "Enough until {date}, at the last day’s rate.",
+  "serverSilentTitle": "Server connection lost",
+  "serverSilentBody": "The server has not responded for 10 minutes. Open the app to check the connection.",
+  "serverSilentChannel": "Server connection",
+  "@workForecast": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "setupStep": "Step {step} of 4",
+  "@setupStep": {
+    "placeholders": {
+      "step": {
+        "type": "int"
+      }
+    }
+  },
+  "setupEnableNotifications": "Enable notifications",
+  "setupTokenAccess": "Use your Claude subscription. Token usage is higher than usual, and your plan limit may run out sooner",
+  "workDecreaseParallel": "Fewer workers in parallel",
+  "workIncreaseParallel": "More workers in parallel"
 }

@@ -1,3 +1,5 @@
+import '../../l10n/app_localizations.dart';
+import 'package:intl/intl.dart';
 import 'package:agent_company/l10n/ui_copy.dart';
 // "השימוש" on the home (task 496), under "המכסה": how fast the quota goes and on what. The weekly % the company used in
 // the last hour and day, how many tasks run side by side, and the day's spend by kind and by worker (hq usage.ts). The
@@ -62,7 +64,7 @@ class UsageCard extends StatelessWidget {
     final p = context.p;
     final u = usage;
     final rows = <Widget>[
-      _Row(icon: 'schedule', title: UiCopy.text(528), lines: rateLines(u)),
+      _Row(icon: 'schedule', title: UiCopy.text(528), lines: [...rateLines(u), if (u.sufficientUntil != null) AppLocalizations.of(context).workForecast(DateFormat.EEEE(Localizations.localeOf(context).languageCode).format(wall(u.sufficientUntil!)))]),
       _Row(icon: 'play_arrow', title: UiCopy.text(529), lines: parallelLines(u)),
       if (u.kinds.isNotEmpty)
         _Row(icon: 'data_usage', title: UiCopy.text(530), bars: kindRows(u.kinds)),

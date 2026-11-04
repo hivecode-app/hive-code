@@ -1,3 +1,4 @@
+import { onboardingRoutes } from './onboarding.ts';
 import { TaskCatalog, orgTree } from './task-product.ts';
 import { search } from './search.ts';
 import { productPreferences } from './i18n.ts';
@@ -22,7 +23,7 @@ import { readRaw, UPLOAD_PART_BYTES, toDTO, UploadError } from './uploads.ts';
 import { OWNER } from '@company/shared';
 import { HomeError } from './home.ts';
 import { assetLinks, pairPage } from './pairing.ts';
-import { guarded, guardedUpgrade, rejectUpgrade, requestUrl } from './http-guard.ts';
+import { EntryLimiter, guarded, guardedUpgrade, rejectUpgrade, requestUrl } from './http-guard.ts';
 import { normalizePath } from './error-watch.ts';
 import { companyDay, dateOf, isDate, messageBody } from './company-day.ts';
 import { recordPrMerged } from './merged.ts';
@@ -121,6 +122,8 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   const r: [string, RegExp, Handler][] = [];
   const catalog = new TaskCatalog(hq);
   const route = (method: string, path: string, h: Handler) => r.push([method, new RegExp(`^${path.replace(/:\w+/g, '([^/]+)')}$`), h]);
+
+  onboardingRoutes(hq, route);
 
   // timezone: org.yaml's (#121), so the app shows his hours wherever the phone thinks it is.
   route('GET', '/api/search', ({ url }) => search(hq, url.searchParams.get('q') ?? ''));
@@ -576,6 +579,7 @@ export function buildAuthRoutes(hq: Hq): [string, RegExp, Handler][] {
 export interface ApiServer { server: Server; wss: WebSocketServer; port: number; close(): Promise<void> }
 
 export async function startApi(hq: Hq, token: string, host: string, port: number): Promise<ApiServer> {
+  const entryLimiter = new EntryLimiter(hq.store.now);
   const routes = buildRoutes(hq);
   const authRoutes = buildAuthRoutes(hq);
   const json = (res: ServerResponse, status: number, v: unknown) => {
@@ -606,6 +610,13 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
   const server = createServer(guarded(async (req, res) => {
     const url = requestUrl(req);
     if (!url) return json(res, 400, { error: 'bad request path' });
+    const entry = url.pathname.startsWith('/api/auth/');
+    // A guessed pairing code must never lock out the owner's independent passkey.
+    const entryKey = `${url.pathname.includes('/login') ? 'passkey' : 'code'}:${clientAddress(req)}`;
+    if (entry && entryLimiter.blocked(entryKey)) {
+      res.setHeader('retry-after', '60');
+      return json(res, 429, { error: 'too many attempts, try again in a minute' });
+    }
     try {
       if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/healthz')) {
         const h = health(hq);
@@ -704,6 +715,7 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
     } catch (e) {
       const status = e instanceof HttpError || e instanceof AuthError || e instanceof UploadError ? e.status
         : e instanceof URIError || /required|invalid|must be/.test((e as Error).message) ? 400 : 500;
+      if (entry && (status === 400 || status === 401)) entryLimiter.fail(entryKey);
       if (status === 500) {
         console.error(`api: ${req.method} ${req.url} failed: ${(e as Error)?.stack ?? e}`);
         // error-watch.ts: a 5xx is an error he sees. The route without its ids, the first line of the stack.

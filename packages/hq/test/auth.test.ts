@@ -233,7 +233,7 @@ test('auth: pairing codes are single use, expire, and wrong guesses close redemp
     const good = await env.pairCode();
     // Counted per client (Caddy's X-Forwarded-For, last entry): a guesser locks only itself.
     const guess = (code: string, from: string) => call('POST', '/api/auth/pair', { code, name: 'x' }, null, from);
-    for (let i = 0; i < 20; i++) assert.equal((await guess('AAAA-AAAA', '1.2.3.4, 203.0.113.9')).status, 401);
+    for (let i = 0; i < 10; i++) assert.equal((await guess('AAAA-AAAA', '1.2.3.4, 203.0.113.9')).status, 401);
     assert.equal((await guess(good, '203.0.113.9')).status, 429, 'locked even for a good code');
     assert.equal((await guess(good, '1.2.3.4')).status, 200, 'a spoofed first entry is not the client; others are not locked');
     env.clock.advance(10 * 60_000 + 1);

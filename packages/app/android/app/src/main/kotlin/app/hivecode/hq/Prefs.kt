@@ -18,7 +18,10 @@ class Prefs(context: Context) {
 
     fun configure(baseUrl: String, token: String) = p.edit {
         // A different server means a different event log: start the cursor over.
-        if (baseUrl.trimEnd('/') != this@Prefs.baseUrl) remove(K_SEQ)
+        if (baseUrl.trimEnd('/') != this@Prefs.baseUrl) {
+            remove(K_SEQ); remove(K_INBOX); remove(K_ASKS); remove(K_BOARD); remove(K_TOGGLES); remove(K_CONVS)
+            remove(K_DISMISSED); remove(K_ALERTED); remove(K_SNOOZE)
+        }
         putString(K_BASE, baseUrl.trimEnd('/'))
         putString(K_TOKEN, token)
     }

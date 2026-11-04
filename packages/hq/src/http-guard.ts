@@ -53,3 +53,23 @@ export function rejectUpgrade(socket: Duplex, status: number, text: string): voi
   } catch { /* the peer is gone already */ }
   socket.destroy();
 }
+
+/** Bounded per-address window for public entry points. Uses the server clock in tests. */
+export class EntryLimiter {
+  private failures = new Map<string, { count: number; until: number }>();
+  private now: () => number;
+  constructor(now: () => number = Date.now) { this.now = now; }
+  blocked(client: string): boolean {
+    const now = this.now();
+    for (const [k, v] of this.failures) if (v.until <= now) this.failures.delete(k);
+    return (this.failures.get(client)?.count ?? 0) >= 10;
+  }
+  fail(client: string): void {
+    this.blocked(client);
+    // Bound memory under address churn, without evicting a blocked client's window.
+    if (!this.failures.has(client) && this.failures.size >= 10_000) return;
+    const v = this.failures.get(client) ?? { count: 0, until: this.now() + 60_000 };
+    v.count++;
+    this.failures.set(client, v);
+  }
+}

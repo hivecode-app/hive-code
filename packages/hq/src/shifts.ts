@@ -1,3 +1,4 @@
+import { setupMayRun } from './onboarding.ts';
 // Shift lifecycle in hq (B.2, B.5): request (new or resume), connect to the shift-host socket,
 // fold its logged frames into facts on the shift row, reconnect after hq restarts.
 import { EventEmitter } from 'node:events';
@@ -269,6 +270,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
   }
 
   private async requestUnlocked(identity: string, opts: RequestOpts): Promise<ShiftRow> {
+    if (!setupMayRun(this.store, this.cfg.companyDir)) throw new ShiftBusyError('Setup needs acknowledgement and project selection');
     if (this.suspendStarts) throw new ShiftBusyError('החלפת מצב מתבצעת');
     if (this.cfg.codexLean && !['message', 'manual', 'resurrect'].includes(opts.reason)) {
       throw new Error('מצב Codex רזה: עובד מתעורר רק מפנייה ישירה של הבעלים');

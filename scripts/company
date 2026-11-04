@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The `company` command: one entry point for the owner's terminal. The installer links ~/.local/bin/company here,
 # through engine/current, so it is always the live engine's.
-#   company update [<tag> | --from-tarball <file>]   a new engine version, checked, with a safe restart and a rollback (scripts/company-update.sh)
+#   company pair | company status | company update [<tag> | --from-tarball <file>]   a new engine version, checked, with a safe restart and a rollback (scripts/company-update.sh)
 #   company doctor [<file>]  everything support needs, in one file, without secrets (scripts/company-doctor.mjs)
 #   company check [<dir>]    the company's contract (scripts/check-contract.mjs), default COMPANY_HOME
 set -euo pipefail
@@ -9,11 +9,12 @@ engine="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd -P)"
 cmd="${1:-}"
 [[ $# -gt 0 ]] && shift
 case "$cmd" in
+  pair|status) exec node "$engine/scripts/company-client.mjs" "$cmd" "$@" ;;
   update) exec "$engine/scripts/company-update.sh" "$@" ;;
   doctor) exec node "$engine/scripts/company-doctor.mjs" "$@" ;;
   check) exec node "$engine/scripts/check-contract.mjs" "${1:-$(node "$engine/scripts/company-home.mjs")}" ;;
   *)
-    echo "שימוש: company update [<tag> | --from-tarball <file>] | company doctor [<file>] | company check [<dir>]" >&2
+    echo "שימוש: company pair | company status | company update [<tag> | --from-tarball <file>] | company doctor [<file>] | company check [<dir>]" >&2
     exit 2
     ;;
 esac

@@ -143,6 +143,15 @@ class AppStore extends ChangeNotifier {
     } catch (_) {
       // Tests without a mock store: drafts stay in memory.
     }
+    final scope = backend.storageScope;
+    final p = _prefs;
+    if (scope != null && p != null && p.getString('hq.url') == scope) {
+      for (final key in p.getKeys().where((k) => k.startsWith('draft:') || k == 'outbox').toList()) {
+        final text = p.getString(key);
+        if (text != null && !p.containsKey(_storageKey(key))) await p.setString(_storageKey(key), text);
+        await p.remove(key);
+      }
+    }
     _convSort = ConvSort.values.asNameMap()[_prefs?.getString(kConvSortKey)] ?? ConvSort.recent;
     final seen = _prefs?.getInt(kStatusSeenKey);
     statusSeenAt ??= seen == null ? null : DateTime.fromMillisecondsSinceEpoch(seen);
@@ -567,11 +576,13 @@ class AppStore extends ChangeNotifier {
 
   // ── drafts and outbox, persisted ─────────────────────────────────────────
 
+  String _storageKey(String key) => backend.storageScope == null ? key : 'company:${backend.storageScope}:$key';
+
   void setDraft(String identityId, String text) {
     final c = data?.chats[identityId];
     if (c == null) return;
     c.draft = text;
-    _prefs?.setString('draft:$identityId', text);
+    _prefs?.setString(_storageKey('draft:$identityId'), text);
   }
 
   void _restoreDrafts() {
@@ -579,10 +590,10 @@ class AppStore extends ChangeNotifier {
     final d = data;
     if (p == null || d == null) return;
     for (final c in d.chats.values) {
-      final saved = p.getString('draft:${c.identityId}');
+      final saved = p.getString(_storageKey('draft:${c.identityId}'));
       if (saved != null) c.draft = saved;
     }
-    final raw = p.getString('outbox');
+    final raw = p.getString(_storageKey('outbox'));
     if (raw != null) {
       for (final e in (jsonDecode(raw) as List).cast<Map<String, dynamic>>()) {
         final c = d.chats[e['to']];
@@ -638,7 +649,7 @@ class AppStore extends ChangeNotifier {
   void _rewriteOutbox(CompanyData d) {
     final p = _prefs;
     if (p == null) return;
-    final kept = (jsonDecode(p.getString('outbox') ?? '[]') as List).cast<Map<String, dynamic>>().where((e) => !d.chats.containsKey(e['to']));
+    final kept = (jsonDecode(p.getString(_storageKey('outbox')) ?? '[]') as List).cast<Map<String, dynamic>>().where((e) => !d.chats.containsKey(e['to']));
     final waiting = [
       for (final c in d.chats.values)
         for (final m in c.items.whereType<UserMsg>().where((m) => m.delivery == Delivery.pendingConnection))
@@ -646,9 +657,9 @@ class AppStore extends ChangeNotifier {
     ];
     final all = [...kept, ...waiting];
     if (all.isEmpty) {
-      p.remove('outbox');
+      p.remove(_storageKey('outbox'));
     } else {
-      p.setString('outbox', jsonEncode(all));
+      p.setString(_storageKey('outbox'), jsonEncode(all));
     }
   }
 

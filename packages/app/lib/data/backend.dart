@@ -198,6 +198,8 @@ class AccountsView {
 }
 
 abstract class Backend extends ChangeNotifier {
+  /// Stable company boundary for drafts and uploaded attachment ids.
+  String? get storageScope => null;
   CompanyData? get data;
   SystemStatus get status;
 

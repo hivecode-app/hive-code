@@ -16,6 +16,7 @@ export type UsageKind = 'tasks' | 'leads_owner' | 'leads_workers' | 'leads_hq' |
 
 export interface Usage {
   measured_at: number;
+  sufficient_until?: number | null;
   /** % of the weekly quota, the accounts as one (their average); null = no quota read in that span. */
   hour_pct: number | null;
   day_pct: number | null;
@@ -175,4 +176,10 @@ export function usage(store: Store, accounts: string[], names: (id: string) => s
     parallel: { now: live.length, avg: overlap(spans, t0, now).avg,
       peak: Math.max(0, ...Array.from({ length: 24 }, (_, i) => overlap(spans, t0 + i * HOUR, t0 + (i + 1) * HOUR).avg)) },
   };
+}
+
+/** A projection from the last 24 hours, capped at the known reset; null means insufficient evidence. */
+export function sufficientUntil(now: number, dayPct: number | null, remainingPct: number | null, resetsAt: number | null): number | null {
+  if (dayPct == null || remainingPct == null || resetsAt == null || resetsAt <= now || dayPct <= 0) return null;
+  return Math.min(resetsAt, now + Math.max(0, remainingPct) / dayPct * USAGE_WINDOW_MS);
 }

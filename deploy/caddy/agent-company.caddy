@@ -8,6 +8,7 @@
 # GET /health and /api/auth/* needs a token. WS /ws passes through.
 api.hq.example.com {
 	reverse_proxy 127.0.0.1:7420 {
+		header_up X-Forwarded-For {http.vars.client_ip}
 		flush_interval -1
 	}
 }
@@ -20,6 +21,7 @@ app.hq.example.com {
 
 	handle_path /hq/* {
 		reverse_proxy 127.0.0.1:7420 {
+			header_up X-Forwarded-For {http.vars.client_ip}
 			flush_interval -1
 		}
 	}
@@ -28,12 +30,15 @@ app.hq.example.com {
 	# (packages/hq/src/pairing.ts), the same on every server. Passkeys in the APK need assetlinks.json here.
 	@pairing path /pair /.well-known/assetlinks.json
 	handle @pairing {
-		reverse_proxy 127.0.0.1:7420
+		reverse_proxy 127.0.0.1:7420 {
+			header_up X-Forwarded-For {http.vars.client_ip}
+		}
 	}
 
 	# A QA copy of the web build (packages/app/tool/qa/publish_qa.sh), with its own way to hq.
 	handle_path /qa-app/hq/* {
 		reverse_proxy 127.0.0.1:7420 {
+			header_up X-Forwarded-For {http.vars.client_ip}
 			flush_interval -1
 		}
 	}
@@ -81,7 +86,9 @@ tab.hq.example.com {
 art.hq.example.com {
 	encode zstd gzip
 	handle /artifacts/* {
-		reverse_proxy 127.0.0.1:7420
+		reverse_proxy 127.0.0.1:7420 {
+			header_up X-Forwarded-For {http.vars.client_ip}
+		}
 	}
 	handle {
 		respond "artifact token required" 403

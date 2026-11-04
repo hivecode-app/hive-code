@@ -44,6 +44,36 @@ CONF="$HOME/.config/agent-company"
 UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 RECORD="$CONF/install.json"
 
+# Versioned copy shared with the app's ARB (scripts/install.test.mjs checks equality).
+consent_text() {
+  case "$language" in
+    en) cat <<'CONSENT_en'
+Full access and responsibility
+Workers act on your server and accounts with the same permissions you have.
+Run commands and read, change or delete files on this server
+Push code to the GitHub repositories you choose next
+Use your Claude subscription. Token usage is higher than usual, and your plan limit may run out sooner
+New versions reach your users only after you approve them
+I understand that I'm solely responsible for everything workers do on my server and accounts.
+Terms of use
+MIT License. This software is provided as is, without warranty. You are solely responsible for all actions on your server and accounts. Token usage is high and may exhaust your subscription sooner.
+CONSENT_en
+      ;;
+    he) cat <<'CONSENT_he'
+גישה מלאה ואחריות
+העובדים פועלים בשרת ובחשבונות שלך, עם אותן הרשאות שיש לך.
+הרצת פקודות וקריאה, שינוי או מחיקה של קבצים בשרת
+דחיפת קוד למאגרי GitHub שייבחרו בשלב הבא
+שימוש במנוי Claude שלך. צריכת הטוקנים גבוהה מהרגיל, והמכסה עלולה להיגמר מהר יותר
+גרסה חדשה מגיעה למשתמשים רק אחרי אישור שלך
+ידוע לי שהאחריות לכל פעולה של העובדים בשרת ובחשבונות שלי היא שלי בלבד.
+תנאי השימוש
+רישיון MIT. התוכנה מסופקת כמות שהיא, ללא אחריות. האחריות לכל פעולה בשרת ובחשבונות היא של המשתמש בלבד. צריכת הטוקנים גבוהה ועלולה למצות את מכסת המנוי מהר מהרגיל.
+CONSENT_he
+      ;;
+  esac
+}
+
 usage() {
   cat <<'EOF'
 bash scripts/install.sh [options]   (later: curl -fsSL https://get.<domain>/install | bash -s -- [options])
@@ -53,6 +83,8 @@ bash scripts/install.sh [options]   (later: curl -fsSL https://get.<domain>/inst
   --repo URL|PATH                        the engine repo (default: $AGENT_COMPANY_REPO, else GitHub)
   --version REF                          engine tag (default: the newest v* tag; main when there is none)
   --from-tarball FILE                    the engine from a release file (SHA256SUMS next to it), not from the repo
+  --dry-run                             print the plan and acknowledgement without changing anything
+  --language en|he                      acknowledgement language (default: en)
   --accept-full-access                   the consent of step 2, for a non-interactive run
   --skip-claude-login                    test runs only: no `claude auth login` and no canary
 env: CLOUDFLARE_TUNNEL_TOKEN (tunnel; replaces a saved one), INSTALL_MIN_MEM_GB (default 16)
@@ -62,7 +94,7 @@ EOF
 # Everything runs from main, called on the last line: under `curl | bash`, a download cut short runs nothing.
 main() {
 address=""; domain=""; company_home=""; repo="${AGENT_COMPANY_REPO:-$REPO_DEFAULT}"; version=""; tarball=""
-accept=0; skip_login=0
+accept=0; skip_login=0; dry_run=0; language=en
 while (($#)); do
   case "$1" in
     --address) address="${2:?}"; shift 2 ;;
@@ -71,12 +103,22 @@ while (($#)); do
     --repo) repo="${2:?}"; shift 2 ;;
     --version) version="${2:?}"; shift 2 ;;
     --from-tarball) tarball="${2:?}"; shift 2 ;;
+    --dry-run) dry_run=1; shift ;;
+    --language) language="${2:?}"; shift 2 ;;
     --accept-full-access) accept=1; shift ;;
     --skip-claude-login) skip_login=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "ארגומנט לא מוכר: $1 (--help)" >&2; exit 2 ;;
   esac
 done
+
+case "$language" in en|he) ;; *) echo 'language must be en or he' >&2; exit 2 ;; esac
+if ((dry_run)); then
+  printf '%s\n' '1/8 Requirements' '2/8 Full access and responsibility'
+  consent_text
+  printf '%s\n' '3/8 Engine' '4/8 Company' '5/8 Claude and GitHub' '6/8 Server connection' '7/8 Services, daily backup and disk cleanup' '8/8 Pair device, acknowledge and choose projects'
+  return
+fi
 
 # ── output ───────────────────────────────────────────────────────────────────
 step() { printf '\n\033[1m%s/8 · %s\033[0m\n' "$1" "$2"; }
@@ -118,7 +160,7 @@ mem_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
 # A 16GB machine reports a little less (the kernel keeps some): 93% is enough.
 [ "$mem_kb" -ge $((min_gb * 1024 * 1024 * 93 / 100)) ] || missing+=("זיכרון: $((mem_kb / 1024 / 1024))GB, צריך ${min_gb}GB לפחות (כ-5GB לכל עובד פעיל)")
 # A server set up by hand (hq-host) has these units, as symlinks or without the mark: stop before writing anything.
-for u in agent-company-hq.service agent-company-web.service agent-company-tunnel.service company-shift@.service; do
+for u in agent-company-hq.service agent-company-web.service agent-company-tunnel.service company-shift@.service agent-company-backup.service agent-company-backup.timer agent-company-disk-clean.service agent-company-disk-clean.timer; do
   f="$UNITS/$u"
   if [ -L "$f" ] || { [ -e "$f" ] && ! grep -qxF "$MARK" "$f"; }; then
     missing+=("‏$f קיים ולא נוצר על ידי ההתקנה: המכונה כבר מוגדרת ביד, וההתקנה לא נוגעת בה")
@@ -134,20 +176,15 @@ gh auth status >/dev/null 2>&1 || say "‏gh לא מחובר. לא חוסם את
 
 # ── 2. consent ───────────────────────────────────────────────────────────────
 step 2 "הגישה של העובדים"
-if [ -n "$(record_get accepted_at)" ]; then
+if [ "$(record_get consent_version)" = 2026-11-04 ]; then
   done_ "אושר ב-$(record_get accepted_at)"
 else
-  cat <<'EOF'
-  העובדים בחברה הם סשנים של Claude Code שרצים עם bypassPermissions, בשמך, על המכונה הזו:
-  - הם יכולים לקרוא, לכתוב ולמחוק כל קובץ של המשתמש הזה, ולהריץ כל פקודה בלי לשאול.
-  - הם משתמשים ב-repos, בחשבון GitHub (gh) ובדפדפן שלך, ויכולים לפרוס ולגלוש בשמך.
-  - החסימות היחידות: מחיקת שורש המערכת או הבית, פרמוט, כתיבה ישירה לדיסק, fork bomb וכיבוי המכונה.
-  - פעולה חדשה כלפי אנשים בחוץ (מייל, פרסום, תשלום) מחכה לאישור שלך.
-EOF
-  if ((accept)); then answer="כן"; say "‏--accept-full-access: אושר."
-  else answer="$(ask 'מאשר? הקלד "כן" כדי להמשיך:')"; fi
-  [ "$answer" = "כן" ] || die "לא אושר, ההתקנה נעצרה. בלי הגישה הזו המנוע לא עובד."
-  record_set accepted_at "$(date -Is)"
+  consent_text
+  if ((accept)); then answer=YES; say '--accept-full-access: accepted.'
+  elif [ "$language" = he ]; then answer="$(ask 'לאישור והמשך יש להקליד "כן":')"
+  else answer="$(ask 'Type YES to accept and continue:')"; fi
+  [[ "$answer" = YES || "$answer" = כן ]] || die "לא אושר, ההתקנה נעצרה. בלי הגישה הזו המנוע לא עובד."
+  record_set accepted_at "$(date -Is)" consent_version 2026-11-04 consent_language "$language"
   done_ "אושר"
 fi
 
@@ -386,6 +423,10 @@ $MARK
 # the web app at the root. Funnel and Tunnel point at 127.0.0.1:$WEB_PORT; a domain gets TLS from Caddy itself.
 {
 	admin off
+	servers {
+		trusted_proxies static 127.0.0.1/32 ::1/128
+		trusted_proxies_strict
+	}
 	$( [ "$address" = domain ] || printf 'auto_https off' )
 }
 
@@ -393,12 +434,15 @@ $MARK
 	encode zstd gzip
 	handle_path /hq/* {
 		reverse_proxy 127.0.0.1:7420 {
+			header_up X-Forwarded-For {http.vars.client_ip}
 			flush_interval -1
 		}
 	}
 	@pairing path /pair /.well-known/assetlinks.json
 	handle @pairing {
-		reverse_proxy 127.0.0.1:7420
+		reverse_proxy 127.0.0.1:7420 {
+			header_up X-Forwarded-For {http.vars.client_ip}
+		}
 	}
 	# The Android app, for a first install from the phone; updates go through hq (/hq/api/app).
 	handle /agent-company.apk {
@@ -586,8 +630,40 @@ if [ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)" != yes ];
 fi
 done_ "linger פעיל: החברה רצה גם בלי חיבור ואחרי הפעלה מחדש"
 
+# Daily maintenance uses this installation's state and company, under the regular user.
+for maintenance in backup disk-clean; do
+  if [ "$maintenance" = backup ]; then
+    maintenance_command="\"$node_bin\" \"$ENGINE/scripts/daily-backup.mjs\" \"$STATE\" \"$company_home\""
+  else
+    maintenance_command="\"$node_bin\" \"$ENGINE/scripts/disk-clean.mjs\" --company-only"
+  fi
+  cat >"$UNITS/agent-company-$maintenance.service" <<EOF
+$MARK
+[Unit]
+Description=Company daily $maintenance
+[Service]
+Type=oneshot
+Environment="PATH=$unit_path"
+Environment="AGENT_COMPANY_STATE=$STATE"
+Environment="COMPANY_HOME=$company_home"
+ExecStart=$maintenance_command
+UMask=0077
+EOF
+  cat >"$UNITS/agent-company-$maintenance.timer" <<EOF
+$MARK
+[Unit]
+Description=Company daily $maintenance
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=30m
+[Install]
+WantedBy=timers.target
+EOF
+done
+
 systemctl --user daemon-reload
-units=(agent-company-hq.service agent-company-web.service)
+units=(agent-company-hq.service agent-company-web.service agent-company-backup.timer agent-company-disk-clean.timer)
 [ "$address" = tunnel ] && units+=(agent-company-tunnel.service)
 systemctl --user enable --quiet "${units[@]}"
 # Restart only what changed (a restart of hq is safe: shifts are their own units and survive it).

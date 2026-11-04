@@ -1,3 +1,4 @@
+import { autoAccounts } from './onboarding.ts';
 // B.7 accounts manager (issue #25, minimal scope). Two accounts: the CLI's own ~/.claude login (never
 // written by us, dir-0016) and hive-owner in a managed config dir under state/accounts/<name>, which
 // shares projects/sessions with ~/.claude through symlinks so --resume works across accounts.
@@ -183,6 +184,7 @@ export class AccountManager {
   pick(want?: string): AccountRow | null {
     const all = this.capacity();
     if (want) { const w = all.find((r) => r.name === want); if (w) return w; }
+    if (!autoAccounts(this.store)) return all.find(r => r.name === this.pinned()) ?? all.find(r => r.name === this.primary) ?? all[0] ?? null;
     const open = all.filter((r) => !this.blocked(r));
     const pin = open.find((r) => r.name === this.pinned());
     if (pin) return pin;
@@ -260,7 +262,7 @@ export class AccountManager {
 
   /** The shift's account ran out: resume the same session on the account with the most room, if there is one. */
   async switchAway(row: ShiftRow): Promise<string | null> {
-    if (this.cfg.codexLean || row.account === 'codex') return null;
+    if (!autoAccounts(this.store) || this.cfg.codexLean || row.account === 'codex') return null;
     const from = this.get(row.account ?? this.primary);
     const next = this.pick();
     // Everyone is blocked: the shift parks; the board shows "חסום: מכסה" until the reset.

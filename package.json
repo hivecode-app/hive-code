@@ -18,7 +18,7 @@
     "test:contract": "node --test scripts/check-contract.test.mjs",
     "canary": "node scripts/canary.mjs",
     "smoke": "node scripts/smoke-shift-host.mjs",
-    "test:deploy": "node --test scripts/qa-isolation.test.mjs scripts/caddy-main.test.mjs scripts/deploy-sha.test.mjs scripts/deploy-report.test.mjs scripts/split-links.test.mjs scripts/company-home-check.test.mjs scripts/install.test.mjs scripts/engine.test.mjs scripts/company-doctor.test.mjs scripts/company-update.test.mjs scripts/verify-plan.test.mjs scripts/drift-lib.test.mjs scripts/disk-clean.test.mjs"
+    "test:deploy": "node --test scripts/phase-e.test.mjs scripts/qa-isolation.test.mjs scripts/caddy-main.test.mjs scripts/deploy-sha.test.mjs scripts/deploy-report.test.mjs scripts/split-links.test.mjs scripts/company-home-check.test.mjs scripts/install.test.mjs scripts/engine.test.mjs scripts/company-doctor.test.mjs scripts/company-update.test.mjs scripts/verify-plan.test.mjs scripts/drift-lib.test.mjs scripts/disk-clean.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -80,3 +80,21 @@ test('release.sh parses and refuses a version that is not X.Y.Z', () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /scripts\/release\.sh <X\.Y\.Z>/);
 });
+
+test('dry run prints exactly the app acknowledgement in both languages and writes nothing', () => {
+  const home = mkdtempSync(join(tmpdir(), 'install-copy-'));
+  try {
+    for (const language of ['en', 'he']) {
+      const arb = JSON.parse(readFileSync(join(dirname(script), `../packages/app/lib/l10n/app_${language}.arb`), 'utf8'));
+      const r = spawnSync('bash', [script, '--dry-run', '--language', language], { encoding: 'utf8', env: { ...process.env, HOME: home } });
+      assert.equal(r.status, 0, r.stderr);
+      for (let i = 14; i <= 21; i++) if (i !== 16 && i !== 18) assert.ok(r.stdout.split('\n').includes(arb[`approvedCopy${i}`]), `copy ${language} ${i}`);
+      assert.ok(r.stdout.split('\n').includes(arb.setupCommandAccess));
+      assert.ok(r.stdout.split('\n').includes(arb.setupTokenAccess));
+      assert.ok(r.stdout.split('\n').includes(arb.setupTermsBody));
+      assert.match(r.stdout, /MIT/);
+      assert.doesNotMatch(r.stdout, /telegram/i);
+    }
+    assert.deepEqual(readdirSync(home), []);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});

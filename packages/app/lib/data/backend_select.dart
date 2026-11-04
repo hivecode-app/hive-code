@@ -71,6 +71,15 @@ final _oldSecretPath = RegExp(r'^/[0-9a-f]{32}/hq/?$');
 
 Future<void> saveSession(Session s) async {
   final p = await SharedPreferences.getInstance();
+  final old = p.getString(kHqUrl);
+  if (old != null && old.isNotEmpty) {
+    for (final key in p.getKeys().where((k) => k.startsWith('draft:') || k == 'outbox').toList()) {
+      final value = p.getString(key);
+      final scoped = 'company:$old:$key';
+      if (value != null && !p.containsKey(scoped)) await p.setString(scoped, value);
+      await p.remove(key);
+    }
+  }
   await p.setString(kHqUrl, s.baseUrl);
   await p.setString(kHqToken, s.token);
   final u = Uri.tryParse(s.baseUrl);

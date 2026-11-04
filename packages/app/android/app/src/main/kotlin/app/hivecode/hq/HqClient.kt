@@ -24,6 +24,7 @@ class HqError(val sentence: String, cause: Throwable? = null, val code: Int = 0)
  */
 class HqClient(private val baseUrl: String, private val token: String) {
 
+    fun health(): String = get("/health")
     fun inboxJson(): String = get("/api/inbox")
     fun asksJson(): String = get("/api/asks")
     fun boardJson(): String = get("/api/board")

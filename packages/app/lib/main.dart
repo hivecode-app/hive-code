@@ -1,3 +1,4 @@
+import 'ui/onboarding/setup.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'l10n/ui_copy.dart';
 import 'l10n/app_localizations.dart';
@@ -379,7 +380,7 @@ class _CompanyAppState extends State<CompanyApp> {
             // v2: the background a screen fades through between two screens (lib/theme/motion.dart).
             return kDesignV2 ? ColoredBox(color: Theme.of(context).scaffoldBackgroundColor, child: app) : app;
           },
-          home: widget.home ?? StoreGate(child: widget.store.preferences.newInterface ? const ProductShell() : const Shell()),
+          home: widget.home ?? StoreGate(child: widget.store.backend is HqBackend ? SetupGate(child: widget.store.preferences.newInterface ? const ProductShell() : const Shell()) : widget.store.preferences.newInterface ? const ProductShell() : const Shell()),
         )),
       ),
     );

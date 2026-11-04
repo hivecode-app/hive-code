@@ -59,6 +59,8 @@ class HqBackend extends Backend {
   }
 
   /// e.g. `https://app.hq.example.com/<secret>/hq`
+  @override
+  String get storageScope => baseUrl;
   final String baseUrl;
   final String token;
   final http.Client _http;

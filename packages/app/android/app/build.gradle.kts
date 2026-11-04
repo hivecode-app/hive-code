@@ -69,6 +69,7 @@ flutter {
 }
 
 dependencies {
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation("androidx.core:core-ktx:1.17.0")
     // WebSocket + REST to hq from the service and receivers, without the Flutter engine.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

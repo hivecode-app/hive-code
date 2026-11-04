@@ -358,10 +358,30 @@ export async function clean(opts = {}) {
   return result;
 }
 
+/** New installs clean only incomplete daily snapshots left by their own dead backup process. */
+export function cleanCompany(stateDir, now = Date.now()) {
+  const root = join(stateDir, 'daily-backups');
+  const removed = [];
+  if (!existsSync(root)) return { removed };
+  for (const name of readdirSync(root)) {
+    const match = /^\.\d{4}-\d{2}-\d{2}-(\d+)$/.exec(name);
+    if (!match) continue;
+    const path = join(root, name), info = lstatSync(path);
+    if (!info.isDirectory() || info.isSymbolicLink() || now - info.mtimeMs < 86_400_000) continue;
+    try { process.kill(Number(match[1]), 0); continue; } catch (e) { if (e.code !== 'ESRCH') continue; }
+    rmSync(path, { recursive: true }); removed.push(name);
+  }
+  return { removed };
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const argv = process.argv.slice(2);
   const ki = argv.indexOf('--closed-tasks');
   const closedTasks = ki >= 0 ? (argv[ki + 1] ?? '').split(',').filter(Boolean).map(Number) : undefined;
+  if (argv.includes('--company-only')) {
+    console.log(JSON.stringify(cleanCompany(process.env.AGENT_COMPANY_STATE || join(homedir(), '.local/state/agent-company'))));
+    process.exit(0);
+  }
   const r = await clean({ dryRun: argv.includes('--dry-run'), closedTasks });
   if (argv.includes('--json')) console.log(JSON.stringify(r));
   else {

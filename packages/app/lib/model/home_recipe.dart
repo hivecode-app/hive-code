@@ -173,7 +173,7 @@ class QuotaLine {
 
 /// How fast the quota goes and on what (GET /api/home `usage`, hq usage.ts): the last hour and day, by kind and worker.
 class UsageData {
-  const UsageData({this.hourPct, this.dayPct, this.kinds = const [], this.people = const [], this.parallelNow = 0, this.parallelAvg = 0, this.parallelPeak = 0, this.measuredAt});
+  const UsageData({this.hourPct, this.dayPct, this.kinds = const [], this.people = const [], this.parallelNow = 0, this.parallelAvg = 0, this.parallelPeak = 0, this.measuredAt, this.sufficientUntil});
 
   /// % of the weekly quota, all accounts as one (hq averages them); null when hq had no quota read for it.
   final num? hourPct;
@@ -188,6 +188,7 @@ class UsageData {
   final num parallelAvg;
   final num parallelPeak;
   final DateTime? measuredAt;
+  final DateTime? sufficientUntil;
 
   bool get isEmpty => hourPct == null && dayPct == null && kinds.isEmpty && people.isEmpty && parallelNow == 0 && parallelAvg == 0 && parallelPeak == 0;
 
@@ -198,6 +199,7 @@ class UsageData {
     return UsageData(
       hourPct: j['hour_pct'] as num?,
       dayPct: j['day_pct'] as num?,
+      sufficientUntil: j['sufficient_until'] is num ? DateTime.fromMillisecondsSinceEpoch((j['sufficient_until'] as num).toInt()) : null,
       kinds: [
         for (final k in (j['kinds'] as List? ?? const []).whereType<Map>())
           if (k['kind'] is String && k['share'] is num) (k['kind'] as String, k['share'] as num),
@@ -214,6 +216,7 @@ class UsageData {
   }
 
   Map<String, dynamic> toJson() => {
+        if (sufficientUntil != null) 'sufficient_until': sufficientUntil!.millisecondsSinceEpoch,
         'hour_pct': hourPct,
         'day_pct': dayPct,
         'kinds': [for (final (k, s) in kinds) {'kind': k, 'share': s}],
