@@ -30,9 +30,11 @@ import { guarded, requestUrl } from './http-guard.ts';
 import { EstimateError, longEtaWarning, parseEta } from './estimates.ts';
 import { AccessError } from './access.ts';
 import { LeaseError } from './leases.ts';
+import type { ShowArgs, ShowResult } from './artifacts.ts';
+import { UploadError } from './uploads.ts';
 import { CODEX_LABEL, CODEX_MODEL_LABEL } from './codex-quota.ts';
 
-const OPS: ReadonlySet<OpName> = new Set(['tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home', 'withdraw_ask', 'withdraw_go']);
+const OPS: ReadonlySet<OpName> = new Set(['show', 'tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home', 'withdraw_ask', 'withdraw_go']);
 
 export class IngestError extends Error {
   status: number;
@@ -93,7 +95,7 @@ export class Ingest {
 
   async drain():Promise<void>{await Promise.allSettled(this.receiving.values());}
 
-  async receive(raw: unknown): Promise<OpAck> {
+  private async receiveFiles(raw: unknown): Promise<OpAck> {
     const {entry,args,previous}=this.checked(raw);
     if(previous)return previous;
     const existing=this.receiving.get(entry.id);if(existing)return existing;
@@ -148,6 +150,15 @@ export class Ingest {
     const { mailbox, inbox } = this.hq;
     const need = (k: string) => { const v = s(a[k]); if (!v) throw new IngestError(400, `${e.op}: ${k} is required`, `חסר השדה \`${k}\``); return v; };
     switch (e.op) {
+      case 'show': {
+        try {
+          const result = this.hq.artifacts.stage(e.identity, a as unknown as ShowArgs, e.id);
+          return { ok: true, id: e.id, ref: result.id, result };
+        } catch (err) {
+          if (err instanceof UploadError) throw new IngestError(err.status, err.message, `לא ניתן להציג: ${err.message}`);
+          throw err;
+        }
+      }
       case 'tell': {
         // mcp-company's `urgency` is the delivery priority (now|next|later); map it onto both axes.
         const pr = (['now', 'next', 'later'] as const).includes(a.urgency as Priority) ? (a.urgency as Priority) : 'next';
@@ -619,6 +630,16 @@ export class Ingest {
       return { ok: true, handoff: v };
     }
     throw new IngestError(405, 'method not allowed');
+  }
+
+  async receive(raw: unknown): Promise<OpAck> {
+    const ack = await this.receiveFiles(raw);
+    if ((raw as WalEntry).op !== 'show') return ack;
+    const result = ack.result as ShowResult;
+    const warnings = await this.hq.artifacts.finish(result.id, result.version);
+    const complete = { ...ack, result: { ...result, warnings } };
+    this.hq.store.db.prepare('UPDATE ops SET ack = ? WHERE id = ?').run(JSON.stringify(complete), ack.id);
+    return complete;
   }
 
   /** Route a request; returns false if the path is not ours. */

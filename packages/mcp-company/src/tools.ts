@@ -48,6 +48,14 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
   };
 
   return [
+    tool('show', 'להראות למשתמש HTML, דוח או הדמיה: מעתיק קובץ או תיקייה ומחזיר קישור חתום ל-12 שעות. בקשות חיצוניות חסומות כברירת מחדל; ניווט וקישורים עשויים לצאת לרשת, נשמר 30 יום מהעדכון האחרון. במקום פרסום ב-/qa/. עם id קיים מתעדכן אותו כרטיס / show a private versioned artifact', {
+      path: s('נתיב מוחלט לקובץ או לתיקייה עם index.html, מתוך תיקיית המשימה או /tmp / absolute file or directory path'),
+      html: s('או HTML ישירות, במקום path / inline HTML instead of path'),
+      title: s('שם הדוח או ההדמיה שהמשתמש רואה / artifact title'),
+      id: s('artifact קיים לעדכון גרסה / existing artifact id'),
+      note: s('מה השתנה בגרסה / version note'),
+      network: { type: 'boolean', description: 'ברירת מחדל false; true פותח פנייה לרשת ומסמן אותה בכרטיס / allow network access, visibly' },
+    }, ['title']),
     tool('tell', 'שליחת הודעה לעובד לפי identity. כשההודעה מבטיחה זמן ("יהיה מוכן בעוד שעה"), רושמים אותו בשדות eta_min או eta_at, eta_kind ו-eta_what, לא רק בטקסט; '
       + 'hq מחזיר הצעה לפי איך שהערכות כאלה יוצאות בפועל. כשזה מוכן: eta_done. Send a message to a teammate by identity. A message that promises a time goes in the eta_* fields, not only in the text.', {
       files: strs('עד 20 נתיבים לקבצים: תיקיית המשימה, /tmp או קבצי ההודעה שעליה עונים. מועתקים לשיחה; אם חזר queued שומרים את המקור עד לאישור / up to 20 allowed file paths; keep sources until acknowledgment'),
@@ -291,10 +299,10 @@ export function validateArgs(def: ToolDef, args: unknown): string | null {
 
 /** Everything a person reads goes out in Hebrew (dir-0002, #51): message text by line, titles whole. */
 const HEBREW_TEXT: Partial<Record<ToolDef['name'], string[]>> = {
-  tell: ['body'], ask: ['question'], withdraw_ask: ['note'], withdraw_go: ['note'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'], request_access: ['why'], reserve: ['note'],
+  show: ['note'], tell: ['body'], ask: ['question'], withdraw_ask: ['note'], withdraw_go: ['note'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'], request_access: ['why'], reserve: ['note'],
 };
 const HEBREW_TITLE: Partial<Record<ToolDef['name'], string[]>> = {
-  open_team: ['name'], open_ticket: ['title'], ask: ['headline'], request_go: ['headline'],
+  show: ['title'], open_team: ['name'], open_ticket: ['title'], ask: ['headline'], request_go: ['headline'],
   tell: ['eta_what'], status: ['awaiting_note', 'eta_what'], close_team: ['awaiting_note'],
 };
 /** compose_home: every text a block shows him (headline, note, caption, since items) is Hebrew too. */

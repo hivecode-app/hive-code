@@ -625,7 +625,9 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE uploads ADD COLUMN meta TEXT;
    CREATE TABLE upload_sessions (id TEXT PRIMARY KEY, name TEXT NOT NULL, bytes INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, upload_id TEXT);
    CREATE TABLE upload_parts (session TEXT NOT NULL REFERENCES upload_sessions(id) ON DELETE CASCADE, part INTEGER NOT NULL, sha256 TEXT NOT NULL, PRIMARY KEY(session, part));`,
-
+  // v39: artifact cards survive content expiration; links are signed per version.
+  `CREATE TABLE artifacts (id TEXT PRIMARY KEY, owner TEXT NOT NULL, task_id INTEGER, title TEXT NOT NULL, latest INTEGER NOT NULL, expires_at INTEGER NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, expired INTEGER NOT NULL DEFAULT 0, message_id TEXT NOT NULL, thumb TEXT);
+   CREATE TABLE artifact_versions (artifact TEXT NOT NULL REFERENCES artifacts(id), version INTEGER NOT NULL, path TEXT NOT NULL, title TEXT NOT NULL, note TEXT NOT NULL, network INTEGER NOT NULL DEFAULT 0, op_id TEXT NOT NULL UNIQUE, ready INTEGER NOT NULL DEFAULT 0, warnings TEXT NOT NULL DEFAULT '[]', PRIMARY KEY(artifact,version));`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

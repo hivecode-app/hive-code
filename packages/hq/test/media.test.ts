@@ -134,11 +134,12 @@ test('small direct uploads and peer attachments are readable before a worker rec
     const response=await env.call('/api/uploads',{method:'POST',headers:{'x-file-name':'document.docx'},body:readFileSync(doc)});
     assert.equal(response.status,200);const upload=((await response.json()) as any).upload;
     await env.call('/api/messages/tell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({msg_id:'direct-document',to:'eli',body:'לקרוא את המסמך',attachments:[upload.id]})});
-    await until(()=>!!env.launcher.hosts.get('eli-1')?.sent.some(m=>m.msgId==='direct-document'),3000,'direct document delivered');
+    // Real Office conversion competes with the full suite on the shared CI runner.
+    await until(()=>!!env.launcher.hosts.get('eli-1')?.sent.some(m=>m.msgId==='direct-document'),20_000,'direct document delivered');
     assert.match(env.launcher.hosts.get('eli-1')!.sent.find(m=>m.msgId==='direct-document')!.text,/גרסה קריאה:.*document.md/);
     const ack=await env.hq.ingest.receive({v:1,id:'peer-document',identity:'eli',shift:'eli-1',sessionId:null,ts:new Date().toISOString(),op:'tell',args:{to:'rotem',body:'תקראי את המסמך',urgency:'now',files:[doc]}});
     assert.equal(ack.ok,true);
-    await until(()=>!!env.launcher.hosts.get('rotem-1')?.sent.some(m=>m.msgId==='peer-document'),3000,'peer document delivered');
+    await until(()=>!!env.launcher.hosts.get('rotem-1')?.sent.some(m=>m.msgId==='peer-document'),20_000,'peer document delivered');
     assert.match(env.launcher.hosts.get('rotem-1')!.sent.find(m=>m.msgId==='peer-document')!.text,/גרסה קריאה:.*document.md/);
   }finally{await env.cleanup();rmSync(dir,{recursive:true,force:true});}
 });

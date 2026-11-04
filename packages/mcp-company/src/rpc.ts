@@ -9,7 +9,7 @@ import type { ToolDef } from './tools.ts';
 import type { Settled } from './wal.ts';
 
 /** Ops answered with hq's verdict instead of {queued:true}: their rejection must reach the caller in the same turn (#69). */
-const SYNC_OPS: ReadonlySet<OpName> = new Set(['open_team', 'compose_home']);
+const SYNC_OPS: ReadonlySet<OpName> = new Set(['open_team', 'compose_home', 'show']);
 
 export const SERVER_NAME = 'company';
 export const SERVER_VERSION = '0.1.0';
@@ -122,7 +122,7 @@ export function createServer(deps: ServerDeps) {
     }
     const files = entry.op === 'tell' && Array.isArray(args.files) && args.files.length > 0;
     if ((SYNC_OPS.has(entry.op) || files) && deps.waitSettled) {
-      const r = await deps.waitSettled(entry.id, deps.syncTimeoutMs ?? (files ? 60_000 : 5000));
+      const r = await deps.waitSettled(entry.id, deps.syncTimeoutMs ?? (files || entry.op === 'show' ? 60_000 : 5000));
       if (r?.outcome === 'fail') {
         const b = (r.body ?? {}) as { reason?: unknown; error?: unknown };
         const why = typeof b.reason === 'string' ? b.reason : typeof b.error === 'string' ? b.error : `HTTP ${r.status}`;

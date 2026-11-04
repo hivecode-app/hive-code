@@ -41,7 +41,7 @@ api.hq.example.com {
 `;
 
 test('the company hosts come from deploy/caddy/agent-company.caddy', () => {
-  assert.deepEqual([...hosts].sort(), ['api.hq.example.com', 'app.hq.example.com', 'tab.hq.example.com']);
+  assert.deepEqual([...hosts].sort(), ['api.hq.example.com', 'app.hq.example.com', 'art.hq.example.com', 'tab.hq.example.com']);
 });
 
 test('rewrite drops only company blocks (and their comments), keeps the rest, adds one import', () => {

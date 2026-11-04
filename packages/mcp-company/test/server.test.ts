@@ -67,7 +67,7 @@ test('handshake, tools/list, write tools queue to WAL while hq is down', async (
 
     const list = await c.call('tools/list');
     const names = list.result.tools.map((t: { name: string }) => t.name).sort();
-    assert.deepEqual(names, ['ask', 'close_team', 'compose_home', 'handoff', 'open_team', 'open_ticket', 'recall', 'release', 'remember', 'request_access', 'request_go', 'reserve', 'resources', 'status', 'tell', 'withdraw_ask', 'withdraw_go']);
+    assert.deepEqual(names, ['ask', 'close_team', 'compose_home', 'handoff', 'open_team', 'open_ticket', 'recall', 'release', 'remember', 'request_access', 'request_go', 'reserve', 'resources', 'show', 'status', 'tell', 'withdraw_ask', 'withdraw_go']);
     for (const t of list.result.tools) assert.equal(t.inputSchema.type, 'object');
 
     const tell = await c.call('tools/call', { name: 'tell', arguments: { to: 'dana', body: 'שלום', urgency: 'now' } });

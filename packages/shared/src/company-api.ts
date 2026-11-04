@@ -20,7 +20,7 @@ import type { IdentityId, ShiftId } from './index.ts';
 export const COMPANY_API_VERSION = 1 as const;
 
 export type OpName =
-  | 'tell' | 'ask' | 'remember' | 'handoff' | 'status'
+  | 'show' | 'tell' | 'ask' | 'remember' | 'handoff' | 'status'
   | 'open_team' | 'close_team' | 'request_go' | 'open_ticket' | 'compose_home' | 'withdraw_ask' | 'withdraw_go';
 
 export interface WalEntry {

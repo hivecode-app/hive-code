@@ -592,8 +592,32 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
         if (await dispatch(authRoutes, req, res, url, null)) return;
         return json(res, 404, { error: 'not found' });
       }
+      if (url.pathname.startsWith('/artifacts/')) {
+        const match = /^\/artifacts\/(a-[a-f0-9]+)\/v(\d+)\/([^/]+)\/(.+)$/.exec(url.pathname);
+        if (!match || req.method !== 'GET') return json(res, 403, { error: 'artifact token required' });
+        let file:string;
+        try {file=decodeURIComponent(match[4]!);} catch {return json(res,404,{error:'invalid artifact path'});}
+        const content = hq.artifacts.content(match[1]!, Number(match[2]), match[3]!, file);
+        res.writeHead(200, { 'content-type': content.mime, ...content.headers });
+        const stream = createReadStream(content.path); stream.on('error', () => res.destroy()); stream.pipe(res); return;
+      }
       const c = caller(req, url);
       if (!c) return json(res, 401, { error: 'unauthorized' });
+      const artifactThumb = req.method === 'GET' ? /^\/api\/artifacts\/([^/]+)\/thumb$/.exec(url.pathname) : null;
+      if (artifactThumb) {
+        const path = hq.artifacts.get(artifactThumb[1]!)?.thumb;
+        if (!path || !existsSync(path)) return json(res,404,{error:'no thumbnail'});
+        res.writeHead(200,{'content-type':'image/jpeg','cache-control':'private, max-age=60'});
+        const stream = createReadStream(path); stream.on('error',()=>res.destroy()); stream.pipe(res); return;
+      }
+      const artifactOpen = req.method === 'POST' ? /^\/api\/artifacts\/([^/]+)\/open$/.exec(url.pathname) : null;
+      if (artifactOpen) {
+        const body = await readBody(req);
+        if (body.version != null && (!Number.isInteger(body.version) || Number(body.version) < 1)) throw new UploadError(400, 'invalid version');
+        return json(res,200,hq.artifacts.open(artifactOpen[1]!, body.version as number | undefined));
+      }
+      const artifactKeep = req.method === 'POST' ? /^\/api\/artifacts\/([^/]+)\/keep$/.exec(url.pathname) : null;
+      if (artifactKeep) { const body = await readBody(req); hq.artifacts.keep(artifactKeep[1]!, body.keep !== false); return json(res,200,{ok:true}); }
       if (req.method === 'POST' && url.pathname === '/api/dictate/transcribe') return await proxyDictate(hq.cfg.dictate, req, res);
       // Attached images (uploads.ts): raw bytes in, raw bytes out, so these two skip the JSON routes.
       if (req.method === 'POST' && url.pathname === '/api/uploads') {

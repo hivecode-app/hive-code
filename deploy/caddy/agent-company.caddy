@@ -76,3 +76,14 @@ tab.hq.example.com {
 		respond "not found" 404
 	}
 }
+
+# Opaque-origin artifact documents. Only signed content paths reach hq; no app or API routes here.
+art.hq.example.com {
+	encode zstd gzip
+	handle /artifacts/* {
+		reverse_proxy 127.0.0.1:7420
+	}
+	handle {
+		respond "artifact token required" 403
+	}
+}

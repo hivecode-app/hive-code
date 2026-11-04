@@ -9,6 +9,7 @@ import { Store } from './store.ts';
 import { readCharter, repoOfWorktree } from './workspace.ts';
 import { syncOrg, getIdentity, listIdentities, listProjects, listTones, projectLead, renameTaskWorkers } from './org.ts';
 import { Inbox } from './inbox.ts';
+import { Artifacts } from './artifacts.ts';
 import { ownerCompletions } from './owner-completions.ts';
 import { Conversations } from './conversations.ts';
 import { AwaitingBoard, DEPLOY_STUCK_MS } from './awaiting.ts';
@@ -103,6 +104,7 @@ export class Hq {
   readonly leases: Leases;
   readonly shifts: ShiftManager;
   readonly mailbox: Mailbox;
+  readonly artifacts: Artifacts;
   readonly uploads: Uploads;
   readonly appReleases: AppReleases;
   readonly scheduler: Scheduler;
@@ -153,6 +155,7 @@ export class Hq {
     this.uploads = new Uploads(this.store, cfg.stateDir, cfg.dictate);
     this.appReleases = new AppReleases(cfg.appReleaseDir);
     this.mailbox = new Mailbox(this.store, cfg, this.shifts, this.inbox, deps.foreign ?? noForeignInjector, this.uploads);
+    this.artifacts = new Artifacts(this.store, cfg.stateDir, this.mailbox, cfg.auth.appUrl);
     this.scheduler = new Scheduler(this.store, cfg, this.shifts, this.mailbox);
     this.scheduler.nodes = this.nodes;
     this.scheduler.pollNode = (n) => this.pollNode(n);
@@ -371,6 +374,7 @@ export class Hq {
       const T = this.cfg.timers;
       this.loopWatch.start();
       this.every(1_000, 'conversation-alerts', () => this.conversations.flush());
+      this.every(60_000, 'artifact-expiry', () => this.artifacts.sweep());
       this.every(30_000, 'owner-completions', () => ownerCompletions(this.store, this.mailbox));
       this.every(60_000, 'upload-expiry', () => this.uploads.sweep());
       this.every(5_000, 'mailbox', () => this.mailbox.sweep());
@@ -543,6 +547,7 @@ export class Hq {
     this.shifts.closeAll();
     this.nodes.close();
     await this.uploads.drain();
+    await this.artifacts.drain();
     this.store.close();
   }
 }
