@@ -1,3 +1,4 @@
+import '../tasks/tasks_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -38,6 +39,7 @@ class ProductShell extends StatelessWidget {
               AppTab.status => const ProductDirectory(),
               AppTab.projects => const ProductDirectory(projects: true),
               AppTab.settings => const ProductSettings(embedded: true),
+              AppTab.tasks => const ProductTasks(),
             };
             final body = store.data == null
                 ? Center(
@@ -98,6 +100,7 @@ class ProductShell extends StatelessWidget {
                           NavigationDestination(icon: const Ic('group'), label: l.team),
                           NavigationDestination(icon: const Ic('folder'), label: l.projects),
                           NavigationDestination(icon: const Ic('settings'), label: l.settings),
+                          NavigationDestination(icon: const Ic('task_alt'), label: l.tasks),
                         ],
                       ),
                     ],
@@ -194,6 +197,7 @@ class _Sidebar extends StatelessWidget {
               ),
             const SizedBox(height: 8),
             item('chat', l.chats, () => nav.go(AppTab.chats), selected: nav.tab == AppTab.chats, count: d.unreadCount > 0 ? '${d.unreadCount}' : null),
+            item('task_alt', l.tasks, () => nav.go(AppTab.tasks), selected: nav.tab == AppTab.tasks),
             item('group', l.team, () => nav.go(AppTab.status), selected: nav.tab == AppTab.status),
             item('folder', l.projects, () => nav.go(AppTab.projects), selected: nav.tab == AppTab.projects),
             item('search', l.search, () => openProductSearch(context), count: 'Ctrl K'),

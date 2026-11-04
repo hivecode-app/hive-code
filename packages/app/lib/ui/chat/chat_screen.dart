@@ -38,6 +38,7 @@ class ChatScreen extends StatefulWidget {
 
   /// Conversations whose target is lit for a moment once it is on screen (a message reached from a tool's details).
   static final Set<String> pendingFlash = {};
+  static final Set<String> pendingSource = {};
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -102,10 +103,21 @@ class _ChatScreenState extends State<ChatScreen> {
       _targetText = targetText;
       _targetSince = DateTime.now();
       _flashNext = ChatScreen.pendingFlash.remove(widget.identityId);
+      if (ChatScreen.pendingSource.remove(widget.identityId)) {
+        _sourceLoading = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          try {
+            await store.backend.openConversation(widget.identityId);
+            final found = await store.backend.revealMessage(widget.identityId, target);
+            if (mounted) setState(() { _sourceMissing = !found; _sourceLoading = false; _target = found ? target : null; _targetSince = DateTime.now(); _flashNext = found; });
+          } catch (_) { if (mounted) setState(() { _sourceMissing = true; _sourceLoading = false; _target = null; }); }
+        });
+      }
     }
   }
 
   /// The card or message to bring into view (an askId or a message id), until it is on screen.
+  bool _sourceMissing = false, _sourceLoading = false;
   String? _target;
   String? _targetText;
 
@@ -127,7 +139,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _ => false,
         };
     bool byText(ChatItem i) => start != null && start.isNotEmpty && (i is TextMsg || i is UserMsg || i is InternalMsg) && _snippet(_textOf(i)).startsWith(start);
-    return (chat.items.where(hit).lastOrNull ?? chat.items.where(byText).lastOrNull)?.id;
+    return (chat.items.where(hit).lastOrNull ?? (_sourceLoading ? null : chat.items.where(byText).lastOrNull))?.id;
   }
 
   /// A message's start, spaces folded and an ellipsis dropped: what a cut copy (hq's 300) and the whole share.
@@ -477,6 +489,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final body = Column(children: [
       header,
+      if (_sourceMissing) Semantics(liveRegion: true, child: Padding(padding: const EdgeInsets.all(12), child: Text(AppLocalizations.of(context).progressSourceMissing))),
       if (open.isNotEmpty && selectedItem == null) _PinBar(open: open, onTap: () => _toAsk(open.first)),
       Expanded(
         child: Container(

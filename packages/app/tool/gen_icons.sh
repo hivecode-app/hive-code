@@ -13,7 +13,7 @@ names=(
   quickreply format_quote select_all share keyboard person devices tune text_fields help
   fingerprint passkey link logout system_update
   architecture payments flight health_and_safety monitor_heart group domain expand_less sort
-  folder push_pin chevron_right
+  folder push_pin chevron_right task_alt list pending
   lightbulb call campaign dashboard fact_check forum hub lan psychology receipt_long record_voice_over rocket_launch route smartphone
   animation done hourglass_bottom running_with_errors forward_to_inbox arrow_back data_usage
   bookmark_add manage_search group_add account_circle notifications notifications_active translate contrast key rule memory radio_button_checked

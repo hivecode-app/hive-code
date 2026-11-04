@@ -13,7 +13,7 @@ import 'settings/settings_screen.dart';
 
 /// The bottom tabs (#53): chats is the main screen; status, projects and settings are secondary. What waits for him
 /// is not a tab (task 986): a row pinned on top of the chats opens it (decisions_screen.dart).
-enum AppTab { chats, status, projects, settings }
+enum AppTab { chats, status, projects, settings, tasks }
 
 class AppNav extends ChangeNotifier {
   AppTab tab = AppTab.chats;
@@ -59,7 +59,7 @@ class Nav {
   /// [message]: a message of that conversation to bring into view and light for a moment, by its id or, when the
   /// id is not known, by the start of its text. [closeSheet]: the tap came from a sheet over the screen (the details
   /// of a tool), which closes first.
-  static void chat(BuildContext context, String identityId, {Quote? quote, bool focus = false, ({String? id, String? text})? message, bool closeSheet = false}) {
+  static void chat(BuildContext context, String identityId, {Quote? quote, bool focus = false, ({String? id, String? text})? message, bool closeSheet = false, bool preserveRoute = false}) {
     final nav = NavScope.read(context);
     final store = StoreScope.read(context);
     final navigator = Navigator.of(context);
@@ -68,8 +68,9 @@ class Nav {
       ChatScreen.pendingTarget[identityId] = message.id ?? 'text:${message.text}';
       if (message.text != null) ChatScreen.pendingTargetText[identityId] = message.text!;
       ChatScreen.pendingFlash.add(identityId);
+      if (message.id != null) ChatScreen.pendingSource.add(identityId);
     }
-    if (nav.wide) {
+    if (nav.wide && !preserveRoute) {
       // A task or advanced page may have opened over the desktop shell. Reveal its main column.
       navigator.popUntil((route) => route.isFirst);
       store.selectedConversation = identityId;

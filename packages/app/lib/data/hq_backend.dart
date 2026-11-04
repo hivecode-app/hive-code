@@ -1,3 +1,4 @@
+import '../model/task_progress.dart';
 import 'package:agent_company/l10n/input_copy.dart';
 import 'package:agent_company/l10n/ui_copy.dart';
 import 'search.dart';
@@ -40,6 +41,43 @@ class HqBackend extends Backend {
     if (res.statusCode != 200) throw StateError('search: ${res.statusCode}');
     final j = jsonDecode(res.body) as Map<String, dynamic>;
     return [for (final row in j['results'] as List) SearchHit.fromJson(Map<String, dynamic>.from(row as Map))];
+  }
+
+  @override
+  Future<List<TaskProgress>> taskProgress() async => taskRows((await _get('/api/tasks'))['pipeline']).map(TaskProgress.fromJson).toList();
+  @override
+  Future<TaskProgress?> taskDetail(int id) async => TaskProgress.fromJson(Map<String, dynamic>.from((await _get('/api/tasks/$id'))['task'] as Map));
+  @override
+  Future<TaskActivity> taskActivity(int id) async => TaskActivity.fromJson(Map<String, dynamic>.from(await _get('/api/tasks/$id/activity')));
+  @override
+  Future<CommandResult> startTask(int id) => _send('POST', '/api/tasks/$id/start');
+  @override
+  Future<List<OrgPerson>> organization() async {
+    final people = taskRows((await _get('/api/org/tree'))['people']).map(OrgPerson.fromJson).toList();
+    final d = _data;
+    if (d != null) { for (final p in people) {
+      d.identities.putIfAbsent(p.id, () => Identity(id: p.id, name: p.name, title: p.title, teamId: p.project ?? '', temp: p.tasks.isNotEmpty));
+    }
+    }
+    return people;
+  }
+  @override
+  Future<bool> revealMessage(String identity, String message) async {
+    final j = await _get('/api/messages/${Uri.encodeComponent(message)}/source');
+    if (j['identity'] != identity || _data == null) return false;
+    final d = _data!, chat = d.chats.putIfAbsent(identity, () => Conversation(identityId: identity, items: []));
+    final earlier = <ChatItem>[];
+    for (final m in taskRows(j['messages']).reversed) {
+      chat.refs[m['id'] as String] = RefMessage(from: m['from_identity'] as String, to: m['to_identity'] as String, body: m['body'] as String,
+        ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int));
+      if (!chat.items.any((x) => (x.id == m['id'] || x.id == 'msg:${m['id']}'))) {
+        final item = _messageItem(m, d, [...chat.items, ...earlier]);
+        if (item != null) earlier.add(item);
+      }
+    }
+    chat.items.insertAll(0, earlier);
+    notifyListeners();
+    return chat.refs.containsKey(message);
   }
 
   @override
@@ -740,7 +778,7 @@ class HqBackend extends Backend {
     final d = _data;
     if (d == null) return;
 
-    if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'task.new' || type == 'task.state' || type == 'toggle.changed' || type.startsWith('watchdog.')
+    if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'tasks.progress' || type == 'task.new' || type == 'task.state' || type == 'toggle.changed' || type.startsWith('watchdog.')
         || type == 'home.composed' || type == 'task.awaiting' || type == 'deploy.recorded' || type == 'asked.changed'
         // A new quota read (every 10 minutes): the home's "המכסה" card.
         || type == 'accounts.quota' || type == 'codex.quota'
@@ -1065,15 +1103,14 @@ class HqBackend extends Backend {
 
   @override
   Future<void> openConversation(String identityId) async {
-    if (!_opening.add(identityId)) return; // already fetching it
-    try {
-      await _openConversation(identityId);
-    } finally {
-      _opening.remove(identityId);
-    }
+    final current = _opening[identityId];
+    if (current != null) return current;
+    final job = _openConversation(identityId);
+    _opening[identityId] = job;
+    try { await job; } finally { _opening.remove(identityId); }
   }
 
-  final _opening = <String>{};
+  final _opening = <String, Future<void>>{};
 
   Future<void> _openConversation(String identityId) async {
     final d = _data;

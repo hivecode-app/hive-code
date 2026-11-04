@@ -87,6 +87,11 @@ class AppStore extends ChangeNotifier {
 
   /// Desktop: which conversation is open in the main column.
   String? selectedConversation;
+  String? taskProject;
+  bool taskBoard = false;
+  bool taskIncludeCompleted = false;
+  final Map<int, String> taskActivityStages = {};
+  int? selectedTask;
 
   /// Desktop: the main column shows the home (the app opens on it); opening a conversation closes it.
   bool homeOpen = true;

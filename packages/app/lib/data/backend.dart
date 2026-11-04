@@ -1,3 +1,4 @@
+import '../model/task_progress.dart';
 import 'package:agent_company/l10n/ui_copy.dart';
 import 'search.dart';
 // The one interface between the UI and a company backend.
@@ -209,6 +210,16 @@ abstract class Backend extends ChangeNotifier {
   Future<void> start();
   /// Reformat client-derived labels from retained input, without changing worker content.
   void relocalize() {}
+
+  Future<List<TaskProgress>> taskProgress() async => [for (final t in data?.openTasks ?? <OpenTask>[]) TaskProgress(
+    id: t.id, title: t.title, project: t.project, worker: t.worker, openedBy: t.openedBy,
+    stage: null, state: t.state.name)];
+  Future<TaskProgress?> taskDetail(int id) async => (await taskProgress()).where((t) => t.id == id).firstOrNull;
+  Future<TaskActivity> taskActivity(int id) async => const TaskActivity();
+  Future<List<OrgPerson>> organization() async => [for (final p in data?.identities.values ?? <Identity>[]) OrgPerson(
+    id: p.id, name: p.name, title: p.title, manager: data?.teamOf(p.id)?.leadId == p.id ? data?.managerId : data?.teamOf(p.id)?.leadId)];
+  Future<CommandResult> startTask(int id) async => const CommandResult.fail(null);
+  Future<bool> revealMessage(String identity, String message) async => data?.chats[identity]?.items.any((m) => m.id == message) ?? false;
 
   Future<List<SearchHit>> search(String query) async => searchLocal(data, query);
 

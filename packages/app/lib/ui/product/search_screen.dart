@@ -1,3 +1,6 @@
+import '../../model/task_progress.dart';
+import '../chat/chat_screen.dart';
+import '../tasks/task_screen.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -80,18 +83,26 @@ class _ProductSearchState extends State<ProductSearch> {
     if (c != null) Scrollable.ensureVisible(c, alignment: .5, duration: const Duration(milliseconds: 100));
   }
 
-  void open(SearchHit hit) {
+  Future<void> open(SearchHit hit) async {
     final root = Navigator.of(context);
     final data = StoreScope.read(context).data!;
-    root.pop();
     // The dialog shares the app navigator. Navigation uses its still-mounted parent context.
     final target = root.context;
     if (hit.kind == 'task') {
-      root.push(MaterialPageRoute<void>(builder: (_) => ProductTaskPreview(hit: hit)));
+      await root.push(MaterialPageRoute<void>(builder: (_) => ProductTaskScreen(id: int.parse(hit.id), initial: TaskProgress(id: int.parse(hit.id), title: hit.title, body: hit.body, project: hit.project, worker: hit.identity))));
     } else if (hit.kind == 'project') {
       Nav.project(target, hit.project ?? hit.id);
     } else if (hit.identity != null && data.canChat(hit.identity!)) {
-      Nav.chat(target, hit.identity!, message: hit.kind == 'message' ? (id: hit.id, text: hit.title) : null);
+      if (hit.kind == 'message') {
+        ChatScreen.pendingTarget[hit.identity!] = hit.id;
+        ChatScreen.pendingTargetText[hit.identity!] = hit.title;
+        ChatScreen.pendingFlash.add(hit.identity!);
+        ChatScreen.pendingSource.add(hit.identity!);
+      }
+      if (hit.kind == 'person') {
+        data.identities.putIfAbsent(hit.identity!, () => Identity(id: hit.identity!, name: hit.title, title: hit.subtitle, teamId: hit.project ?? ''));
+      }
+      await root.push(MaterialPageRoute<void>(builder: (_) => ChatScreen(identityId: hit.identity!)));
     } else if (hit.project != null) {
       Nav.project(target, hit.project!);
     }
@@ -190,41 +201,6 @@ class _ProductSearchState extends State<ProductSearch> {
                   ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Phase C replaces this search drill-in with the full task timeline.
-class ProductTaskPreview extends StatelessWidget {
-  const ProductTaskPreview({super.key, required this.hit});
-  final SearchHit hit;
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context), d = StoreScope.of(context).data!, p = context.p;
-    final person = hit.identity ?? d.managerId;
-    return Scaffold(
-      backgroundColor: p.bg,
-      appBar: AppBar(leading: IBtn(backIcon(context), tip: l.back, onTap: () => Navigator.pop(context)), title: Text(l.tasks)),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ProductContentText(hit.title, style: T.bar.copyWith(color: p.text)),
-            if (hit.project?.isNotEmpty == true)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: ProductContentText(hit.project!, style: T.small.copyWith(color: p.text2)),
-              ),
-            if (hit.body.isNotEmpty) Padding(padding: const EdgeInsets.symmetric(vertical: 20), child: Rich(hit.body, auto: true)),
-            if (d.identities.containsKey(person))
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: TextButton.icon(icon: const Ic('chat'), label: Text(l.messageTo(d.who(person).name)), onPressed: () => Nav.chat(context, person)),
-              ),
-          ],
-        ),
       ),
     );
   }

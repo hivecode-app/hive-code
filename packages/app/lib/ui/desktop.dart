@@ -220,6 +220,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
         list = const StatusScreen();
         main = ChatScreen(identityId: selected, embedded: true);
         side = _ContextColumn(identityId: selected);
+      case AppTab.tasks:
       case AppTab.chats:
         list = const ConversationsScreen(compact: true);
         // v2: the home is a place of its own in the main column, as wide as a chat (home_v2.dart).

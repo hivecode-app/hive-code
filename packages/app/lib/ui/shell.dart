@@ -24,6 +24,7 @@ class Shell extends StatelessWidget {
   Widget build(BuildContext context) {
     UiCopy.watch(context);
     final nav = NavScope.of(context);
+    if (nav.tab == AppTab.tasks) nav.tab = AppTab.chats;
     final store = StoreScope.of(context);
     nav.onLeaveStatus = store.markStatusSeen;
     nav.onLeaveChats = () => store.markChatsSeen(CompanyTime.now());
