@@ -76,18 +76,23 @@ export class Pusher {
   }
 
   /** Called for every new inbox item; decides whether it is allowed to interrupt him. */
+  private notifying = new Set<number>();
   async notify(item: InboxItemDTO): Promise<void> {
     if (!this.store.toggle('push')) return;
-    if (!pushWorthy(item, this.store.toggle('focus'), this.inbox.manager)) return;
-    const payload = JSON.stringify({ id: item.id, kind: item.kind, title: item.title, body: item.body.slice(0, 300), url: `/?inbox=${item.id}` });
-    const { subs, delivered, errors } = await this.sendAll(payload);
-    this.inbox.markPushed(item.id, subs && !delivered ? errors.join('; ') : null);
-    if (subs) this.store.emit(delivered ? 'push.sent' : 'push.failed', item.from_identity, { inbox: item.id, delivered, errors });
-    await this.sweepItems(item.id);
+    if (!pushWorthy(item, this.store.toggle('focus'), this.inbox.manager, this.store.toggle('night'))) return;
+    if (this.notifying.has(item.id)) return;
+    this.notifying.add(item.id);
+    try {
+      const payload = JSON.stringify({ id: item.id, kind: item.kind, title: item.title, body: item.body.slice(0, 300), url: `/?inbox=${item.id}` });
+      const { subs, delivered, errors } = await this.sendAll(payload);
+      this.inbox.markPushed(item.id, subs && !delivered ? errors.join('; ') : null);
+      if (subs) this.store.emit(delivered ? 'push.sent' : 'push.failed', item.from_identity, { inbox: item.id, delivered, errors });
+      await this.sweepItems(item.id);
+    } finally { this.notifying.delete(item.id); }
   }
 
   /** A worker's message that may alert him: "דנה · מנכ"לית לומו" and its first lines; a tap opens the conversation. */
-  async notifyMessage(m: { identity: string; title: string; body: string; message: string; priority?: string }): Promise<void> {
+  async notifyMessage(m: { identity: string; title: string; body: string; message: string; priority?: string; level?: 'sound' | 'silent' }): Promise<void> {
     if (m.priority === 'now' && !this.auth.linked()) {
       // With a live link the app has shown it already. Without one: owed until he reads it, sent once the app counts
       // as gone (seen lately = not yet), one per conversation until he reads it.
@@ -97,7 +102,7 @@ export class Pusher {
     const subs = (this.store.db.prepare('SELECT COUNT(*) n FROM push_subscriptions').get() as { n: number }).n;
     if (subs) {
       const payload = JSON.stringify({ kind: 'message', identity: m.identity, message: m.message, title: m.title, body: m.body,
-        tag: `chat-${m.identity}`, url: `/?chat=${encodeURIComponent(m.identity)}` });
+        silent: m.level === 'silent', tag: `chat-${m.identity}`, url: `/?chat=${encodeURIComponent(m.identity)}` });
       const { delivered, errors } = await this.sendAll(payload);
       if (!delivered) this.store.emit('push.failed', m.identity, { message: m.message, delivered, errors });
     }
@@ -128,6 +133,8 @@ export class Pusher {
 
   /** Sweep (every 30 s): whatever Telegram is owed now, items and messages (#204). */
   async sweepUnacked(): Promise<void> {
+    // Quiet modes leave the item in the inbox. Once they end, an unhandled item gets its first push.
+    for (const item of this.inbox.mine()) if (item.pushed_at == null && item.acked_at == null && item.snoozed_at == null) await this.notify(item);
     await this.sweepItems();
     await this.sweepMessages();
   }
@@ -136,6 +143,7 @@ export class Pusher {
     const offline = this.offline();
     const T = this.cfg.timers;
     for (const item of this.inbox.owedTelegram({ offline, urgentMs: T.pushAckTimeoutMs, ms: T.telegramAfterMs, id })) {
+      if (!this.store.toggle('push') || !pushWorthy(item, this.store.toggle('focus'), this.inbox.manager, this.store.toggle('night'))) continue;
       await this.toTelegram(item, offline ? 'האפליקציה לא מחוברת' : `לא נענה תוך ${Math.round((item.urgency === 'urgent' ? T.pushAckTimeoutMs : T.telegramAfterMs) / 60_000)} דקות`);
     }
   }
@@ -146,7 +154,8 @@ export class Pusher {
       { identity: string; read_at: number; muted_until: number | null; id: string | null; body: string | null; created_at: number | null }[];
     if (!rows.length) return;
     const now = this.store.now();
-    const quiet = !this.store.toggle('push') || this.store.toggle('focus') || this.store.toggle('night');
+    // telegram_owed is set only by urgency now, which bypasses focus and night.
+    const quiet = !this.store.toggle('push');
     const clear = this.store.db.prepare('UPDATE conversations SET telegram_owed = NULL WHERE identity = ?');
     const offline = this.offline();
     for (const r of rows) {

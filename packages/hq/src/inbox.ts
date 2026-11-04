@@ -55,8 +55,9 @@ export function forOwner(item: Who, manager?: string | null): boolean {
 }
 
 /** Kinds that mean "blocked on you" — the only ones that may push (A.4). Focus mode: nothing (an incident is the manager's now). */
-export function pushWorthy(item: Who & Pick<InboxItemDTO, 'blocking' | 'urgency'>, focus: boolean, manager?: string | null): boolean {
-  if (focus || !forOwner(item, manager)) return false;
+export function pushWorthy(item: Who & Pick<InboxItemDTO, 'blocking' | 'urgency'>, focus: boolean, manager?: string | null, night = false): boolean {
+  if (!forOwner(item, manager)) return false;
+  if ((focus || night) && !managerDown(item, manager) && !(['incident','shift_failure','delivery_failure'].includes(item.kind) && item.urgency === 'urgent')) return false;
   if (item.kind === 'ask') return item.blocking;
   return true;
 }

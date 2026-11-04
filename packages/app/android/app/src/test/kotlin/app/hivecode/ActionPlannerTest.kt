@@ -11,6 +11,14 @@ import org.junit.Test
 
 /** The button table of APP-SPEC §5.3, row by row. */
 class ActionPlannerTest {
+    @Test fun quietModesStillShowOwnerEmergencies() {
+        assertEquals(false, ActionPlanner.pushWorthy("go", "urgent", true, true))
+        assertEquals(true, ActionPlanner.pushWorthy("go", "normal", true, false))
+        assertEquals(true, ActionPlanner.pushWorthy("incident", "urgent", true, true, "accounts-all-full"))
+        assertEquals(true, ActionPlanner.pushWorthy("shift_failure", "urgent", true, true))
+        assertEquals(false, ActionPlanner.pushWorthy("incident", "urgent", true, true, "other"))
+    }
+
     private fun input(
         kind: String,
         options: List<String>? = null,

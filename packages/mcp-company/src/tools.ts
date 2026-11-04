@@ -53,7 +53,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       to: s('identity של הנמען / recipient identity, e.g. "dana"'),
       body: s('תוכן ההודעה / message text'),
       urgency: oneOf(['now', 'next', 'later'], 'now מעיר מיד (לא קוטע סבב שרץ), next ברירת מחדל, later לסוף התור / delivery priority'),
-      fyi: { type: 'boolean', description: 'לידיעה בלבד: עדכון שלא מבקש מהנמען כלום ושאף אחד לא מחכה לו ("מחכה ל-X", "העברתי לדנה"). לא מעיר אותו, '
+      fyi: { type: 'boolean', description: pre('ל', O) + ': באדג׳ בלבד, בלי צליל ובלי התראה. בין עובדים: לא מעיר ונמסר בסבב הבא. עדכון שלא מבקש מהנמען כלום ושאף אחד לא מחכה לו ("מחכה ל-X", "העברתי לדנה"). לא מעיר אותו, '
         + 'ונמסר בסבב הבא שלו. לא לשאלה, לבקשה, ל-"מוזג" או לכל דבר שמישהו מחכה לו / for the record only: never wakes the recipient, goes in with its next turn' },
       ref: s('מזהה הודעה שעליה עונים, e.g. m-8812 / message id being answered'),
       ...etaArgs,
@@ -132,6 +132,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'A task that is part of a larger effort starts its name with the effort\'s name. '
       + 'עדיפות: priority 0-3 (0 הכי דחוף, ברירת מחדל 2). בלי priority, כותרת שמתחילה ב-p0 או p1 (גם p0: או אחרי רווח או סוגריים) מקבלת אותה עדיפות. '
       + 'Priority: priority 0-3 (0 most urgent, default 2). Without priority, a name starting with p0 or p1 (also "p0:", after a space or bracket) gets that priority.', {
+      for_owner: { type: 'boolean', description: 'true למשימה שהמשתמש ביקש: בסיום ה-summary נשלח למשתמש אוטומטית אם לא דיווחת בעצמך / requested by the owner; completion is reported automatically' },
       name: s('כותרת המשימה. חלק ממאמץ גדול: שם המאמץ קודם, e.g. "מוצר גנרי, שלב 4: …" / task title; part of a larger effort: the effort\'s name first'),
       purpose: s('מה בדיוק לעשות ואיך יודעים שזה גמור / what to do and the definition of done'),
       priority: { type: 'integer', minimum: 0, maximum: 3, description: 'עדיפות 0-3, 0 הכי דחוף, ברירת מחדל 2. גובר על p0/p1 בכותרת / priority 0-3, 0 most urgent, default 2; overrides a p0/p1 title prefix' },
@@ -180,13 +181,14 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'אישור או דחייה ברורים בשיחה (או הכפתור) סוגרים את הבקשה; כל מה אחר ' + G('שהוא כותב', 'שהיא כותבת') + ' מגיע אליך כהודעה רגילה והבקשה נשארת פתוחה. אם ההחלטה כבר התקבלה בשיחה ' + G('והוא', 'והיא') + ' לא לחץ/לחצה על הכרטיס, סוגרים אותו ב-withdraw_go. לא סוגרים את המשימה כל עוד היא פתוחה. '
       + 'Request a go-ahead before acting. ' + G('He sees', 'She sees') + ' it as a message in ' + G('his', 'her') + ' chat with you with a GO button: the headline first, '
       + 'the details (what) folded. Only a clear yes or no closes it; anything else ' + G('he types', 'she types') + ' reaches you as an ordinary message and the request stays open. The task is not closed while it is open.', {
+      action: oneOf(['release', 'deploy', 'publish', 'run'], 'מה מבקשים לעשות; קובע כותרת כשאין headline / requested action; default deploy'),
       headline: s('שורה ראשונה קצרה במילים ' + G('שלו', 'שלה') + ', בלי מונחים טכניים, שאומרת מה מבקשים ממנו: מתחילה ב"להחליט אם…", '
         + 'e.g. "להחליט אם לפרוס את עדכון האפליקציה: תמונות בצ\'אט" / one short line in ' + G('his', 'her') + ' words that says what is asked, starting "להחליט אם…"'),
       what: s('הפרטים: מה נכנס, סיכון ואיך חוזרים אחורה (מקופלים) / details: what ships, risk, rollback (folded)'),
       pr: s('קישור או מספר PR. קישור מלא הופך לכפתור "ה-PR" בהחלטה / PR url or number; a full https link becomes the PR button'),
       report: s('קישור לדוח המלא (https), אם יש. כפתור "הדוח המלא" בהחלטה / link to the full report (https), if any'),
       risk: oneOf(['low', 'medium', 'high'], 'רמת סיכון / risk level'),
-    }, ['headline', 'what']),
+    }, ['what']),
     tool('compose_home', 'הרכבת ראש מסך השיחות של ' + O + ': אילו בלוקים, באיזה סדר ובאיזה ניסוח. רק ' + (n.composer ? `${pre('ל', n.composer.name)} ${pre('ו', pre('ל', n.manager.name))}` : pre('ל', n.manager.name)) + '. '
       + 'האפליקציה מציירת כל בלוק מקומפוננטה קבועה וממלאת אותו מנתונים חיים, ולכן מפנים לנתונים לפי מזהה, והטקסט בעברית. '
       + 'אוצר הבלוקים: '

@@ -134,6 +134,7 @@ export interface ConversationStateDTO {
   muted_until: number | null;
   /** created_at of the newest message that was allowed to alert him. A device alerts when it is newer than `read_at`. */
   alert_at: number | null;
+  alert_level?: 'sound' | 'silent' | null;
   /** The newest message either way. */
   last_at: number | null;
   /** The newest unread messages from the worker (oldest first, at most 5): what a notification shows. */

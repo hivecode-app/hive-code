@@ -6,8 +6,8 @@
 import { MUTE_FOREVER, OWNER, type ConversationStateDTO } from '@company/shared';
 import type { Store } from './store.ts';
 
-interface ConvRow { identity: string; read_at: number; muted_until: number | null; alert_at: number | null }
-interface MessageLike { id: string; from_identity: string; to_identity: string; kind: string; body: string; created_at: number; priority?: string }
+interface ConvRow { identity: string; read_at: number; muted_until: number | null; alert_at: number | null; alert_level: 'sound' | 'silent' | null; last_sound_at: number | null; pending_alert: string | null; pending_due: number | null }
+export interface MessageLike { id: string; from_identity: string; to_identity: string; kind: string; body: string; created_at: number; priority?: string; alert_hint?: 'fyi' | 'eta' | null }
 
 export type MuteFor = '8h' | 'week' | 'always' | 'off';
 export const MUTE_FOR: readonly MuteFor[] = ['8h', 'week', 'always', 'off'];
@@ -22,7 +22,21 @@ const NOT_A_CONVERSATION = new Set([OWNER, 'hq']);
 const counts = (m: Pick<MessageLike, 'from_identity' | 'to_identity' | 'kind'>) =>
   m.to_identity === OWNER && !NOT_A_CONVERSATION.has(m.from_identity) && m.kind !== 'system' && m.kind !== 'note';
 
-export type MessageAlert = (a: { identity: string; title: string; body: string; message: string; priority?: string }) => void;
+export type AlertLevel = 'sound' | 'silent' | 'badge' | 'none';
+export const SOUND_WINDOW_MS = 10 * 60_000;
+export const ALERT_DELAY_MS = 20_000;
+export function alertLevel(m: MessageLike, conv: { muted_until?: number | null; last_sound_at?: number | null; on_screen?: boolean },
+  toggles: { push: boolean; focus: boolean; night: boolean }, now: number): AlertLevel {
+  if (!counts(m)) return 'none';
+  if (conv.on_screen) return 'none';
+  if ((conv.muted_until ?? 0) > now || !toggles.push) return 'badge';
+  if (m.priority === 'now') return 'sound';
+  if (toggles.focus || toggles.night || m.alert_hint === 'fyi') return 'badge';
+  if (m.alert_hint === 'eta' || (conv.last_sound_at != null && now - conv.last_sound_at < SOUND_WINDOW_MS)) return 'silent';
+  return 'sound';
+}
+
+export type MessageAlert = (a: { identity: string; title: string; body: string; message: string; priority?: string; level: 'sound' | 'silent' }) => void;
 
 export class Conversations {
   private store: Store;
@@ -91,16 +105,52 @@ export class Conversations {
     return this.get(identity);
   }
 
+  private toggles() { return { push: this.store.toggle('push'), focus: this.store.toggle('focus'), night: this.store.toggle('night') }; }
+
+  /** Also used by check cards in the opener's chat, after a task worker reported the result. */
+  soundedRecently(identity: string | null | undefined): boolean {
+    if (!identity) return false;
+    const row = this.row(identity);
+    const pending = row?.pending_alert ? JSON.parse(row.pending_alert) as { level: string } : null;
+    return pending?.level === 'sound' || (row?.last_sound_at != null && this.store.now() - row.last_sound_at < SOUND_WINDOW_MS);
+  }
+
   private onMessage(m: MessageLike): void {
     if (!m || !counts(m)) return;
+    this.flush();
     const who = m.from_identity;
-    if (this.muted(who) || this.onScreen(who)) return;
-    if (!this.store.toggle('push') || this.store.toggle('focus') || this.store.toggle('night')) return;
-    this.upsert(who, { alert_at: m.created_at });
-    const title = this.titleOf(who);
-    const body = m.body.slice(0, 300);
-    this.store.emit('conv.alert', who, { identity: who, message: m.id, title, body, created_at: m.created_at });
-    this.alert({ identity: who, title, body, message: m.id, priority: m.priority });
+    const row = this.row(who);
+    const level = alertLevel(m, { ...row, on_screen: this.onScreen(who) }, this.toggles(), this.store.now());
+    if (level === 'badge') this.store.emit('conv.badge', who, { identity: who, message: m.id, level });
+    if (level === 'badge' || level === 'none') return;
+    if (m.priority === 'now') {
+      this.upsert(who, { pending_alert: null, pending_due: null });
+      this.send(m, level);
+      return;
+    }
+    const pending = row?.pending_alert ? JSON.parse(row.pending_alert) as { level: string } : null;
+    this.upsert(who, { pending_alert: JSON.stringify({ m, level: pending?.level === 'sound' ? 'sound' : level }), pending_due: this.store.now() + ALERT_DELAY_MS });
+  }
+
+  /** Durable 20-second window: the normal hq timer and fake-clock tests use the same path. */
+  flush(): void {
+    const rows = this.store.db.prepare('SELECT * FROM conversations WHERE pending_due <= ?').all(this.store.now()) as ConvRow[];
+    for (const row of rows) {
+      const { m, level } = JSON.parse(row.pending_alert!) as { m: MessageLike; level: 'sound' | 'silent' };
+      this.upsert(row.identity, { pending_alert: null, pending_due: null });
+      if (m.created_at <= row.read_at) continue;
+      const current = alertLevel({ ...m, alert_hint: null }, { ...row, on_screen: this.onScreen(row.identity) }, this.toggles(), this.store.now());
+      if (current === 'none' || current === 'badge') continue;
+      this.send(m, current === 'silent' ? 'silent' : level);
+    }
+  }
+
+  private send(m: MessageLike, level: 'sound' | 'silent'): void {
+    const who = m.from_identity;
+    this.upsert(who, { alert_at: m.created_at, alert_level: level, ...(level === 'sound' ? { last_sound_at: this.store.now() } : {}) });
+    const title = this.titleOf(who), body = m.body.slice(0, 300);
+    this.store.emit('conv.alert', who, { identity: who, message: m.id, title, body, created_at: m.created_at, level });
+    this.alert({ identity: who, title, body, message: m.id, priority: m.priority, level });
   }
 
   /** Every conversation he has, newest first. */
@@ -131,6 +181,7 @@ export class Conversations {
       read_at: readAt,
       muted_until: row?.muted_until != null && row.muted_until > this.store.now() ? row.muted_until : null,
       alert_at: row?.alert_at ?? null,
+      alert_level: row?.alert_level ?? null,
       last_at: last,
       recent: unread.slice(0, 5).reverse().map((m) => ({ id: m.id, body: m.body.slice(0, 300), created_at: m.created_at })),
     };

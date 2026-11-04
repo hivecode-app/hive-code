@@ -110,8 +110,8 @@ test('handshake, tools/list, write tools queue to WAL while hq is down', async (
     assert.equal(missing.result.isError, true);
     // The first line in his words is required on everything he answers (ask, request_go).
     const noHeadline = await c.call('tools/call', { name: 'request_go', arguments: { what: 'פריסה של hq' } });
-    assert.equal(noHeadline.result.isError, true);
-    assert.match(noHeadline.result.content[0].text, /headline/);
+    assert.notEqual(noHeadline.result.isError, true);
+    assert.match(noHeadline.result.content[0].text, /queued/);
     const enHeadline = await c.call('tools/call', { name: 'ask', arguments: { headline: 'Deploy the bots', question: 'להעביר?' } });
     assert.equal(enHeadline.result.isError, true);
 
@@ -141,7 +141,7 @@ test('handshake, tools/list, write tools queue to WAL while hq is down', async (
     assert.equal(await c.close(), 0);
   }
   // Still pending after exit: survives for the next server instance.
-  assert.equal(walLines(root, 'yoav-3', 'wal.ndjson').length, 1);
+  assert.equal(walLines(root, 'yoav-3', 'wal.ndjson').length, 2);
   assert.deepEqual(walLines(root, 'yoav-3', 'acks.ndjson'), []);
 });
 

@@ -610,3 +610,22 @@ test('tell: fyi from the worker, or a bare thank-you, is for the record only; an
     assert.deepEqual(['eli-1:f1', 'eli-1:f2', 'eli-1:f3'].map((id) => hq.mailbox.get(id)!.fyi), [1, 1, 0]);
   } finally { await env.cleanup(); }
 });
+
+test('owner alert hints: FYI delivers normally, ETA is silent, completion and now clear the hint', async () => {
+  const env = await ingestEnv();
+  try {
+    for (const [id, extra, expected] of [
+      ['fyi', { fyi: true }, 'fyi'], ['eta', { eta_min: 20 }, 'eta'],
+      ['done', { eta_min: 20, eta_done: true }, null], ['now', { fyi: true, urgency: 'now' }, null],
+    ] as const) {
+      await post(env.sock, '/v1/ops', entry('tell', { to: 'owner', body: 'עדכון התמונות', ...extra }, `hint-${id}`));
+      const m = env.hq.mailbox.get(`hint-${id}`)!;
+      assert.equal(m.alert_hint, expected); assert.equal(m.fyi, 0);
+      if (id === 'fyi') {
+        assert.equal(env.hq.conversations.get('eli').unread, 1);
+        assert.equal(env.hq.conversations.get('eli').alert_at, null);
+      }
+      await until(() => env.hq.mailbox.get(m.id)!.state === 'delivered', 1000, 'delivered to owner');
+    }
+  } finally { await env.cleanup(); }
+});

@@ -3,6 +3,7 @@
 //   resting/dead → request a shift (resume) and deliver as its first prompt.
 // No `delivered` in 60s → one retry with resurrection → visible failure in the sender's inbox and the owner's.
 // msg_id is the idempotency key end to end (API, host `send`, retries after crash).
+import { ownerSystemCopy } from './system-copy.ts';
 import { randomUUID } from 'node:crypto';
 import { g, loadNames, OWNER, pre, type CompanyNames, type AskDTO, type InboxItemDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency, type WaitingOn } from '@company/shared';
 import type { Store } from './store.ts';
@@ -52,6 +53,7 @@ export interface MessageRow {
   fyi: number;
   /** His message: the worker's first streamed word after reading it (reply-times.ts). */
   first_word_at: number | null;
+  alert_hint: 'fyi' | 'eta' | null;
 }
 
 type StoredRow = Omit<MessageRow, 'attachments' | 'waiting_on'> & { attachments: string | null; waiting_on: string | null };
@@ -233,7 +235,7 @@ export class Mailbox {
   }
 
   /** Store then deliver. Idempotent by msg_id: a retried request returns the existing message. */
-  tell(req: TellRequest & { kind?: MessageKind; text_ref?: string; attachments?: string[]; chat?: boolean; fyi?: boolean }): MessageRow {
+  tell(req: TellRequest & { kind?: MessageKind; text_ref?: string; attachments?: string[]; chat?: boolean; fyi?: boolean; alert_hint?: 'fyi' | 'eta' | null }): MessageRow {
     const id = req.msg_id ?? `m-${randomUUID()}`;
     const existing = this.get(id);
     if (existing) return existing;
@@ -283,9 +285,9 @@ export class Mailbox {
     // Nor a reply to what the recipient itself sent: it may be waiting on it (as in gathers()).
     const fyi = req.fyi === true && from !== OWNER && from !== 'hq' && req.to !== OWNER && req.to !== 'hq'
       && (req.kind ?? 'tell') === 'tell' && priority !== 'now' && !(req.ref && this.get(req.ref)?.from_identity === req.to);
-    this.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, ref, text_ref, attachments, created_at, fyi)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, from, req.to, req.kind ?? 'tell', req.body ?? '', req.urgency ?? 'normal',
-      priority, req.ref ?? null, req.text_ref ?? null, files.length ? JSON.stringify(files) : null, now, fyi ? 1 : 0);
+    this.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, ref, text_ref, attachments, created_at, fyi, alert_hint)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, from, req.to, req.kind ?? 'tell', req.to === OWNER && req.kind === 'system' ? ownerSystemCopy(req.body ?? '', (id) => this.label(id)) : req.body ?? '', req.urgency ?? 'normal',
+      priority, req.ref ?? null, req.text_ref ?? null, files.length ? JSON.stringify(files) : null, now, fyi ? 1 : 0, req.to === OWNER && priority !== 'now' ? (req.alert_hint ?? (req.fyi ? 'fyi' : null)) : null);
     const m = this.get(id)!;
     this.store.emit('message.new', req.to, m);
     // A reply that references a message marks that message handled (B.4 `handled`).

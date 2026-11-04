@@ -9,6 +9,20 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class MessagePlanTest {
+    @Test fun nullAlertLevelFromOldHqDefaultsToSound() {
+        val states = HqJson.conversations("""{"conversations":[{"identity":"eli","alert_level":null,"recent":[]}]}""")
+        assertEquals("sound", states.single().alertLevel)
+    }
+
+    @Test fun serverSilentLevelNeverSoundsButStillShows() {
+        val silent = conv("dana").copy(alertLevel = "silent")
+        val (show, _) = MessagePlan.plan(listOf(silent), emptyMap())
+        assertEquals(1, show.size)
+        assertEquals(true, show.single().silent)
+        val (sound, _) = MessagePlan.plan(listOf(silent.copy(alertLevel = "sound")), emptyMap())
+        assertEquals(false, sound.single().silent)
+    }
+
     private fun conv(id: String, unread: Int = 1, readAt: Long = 0, alertAt: Long? = 100, muted: Long? = null) =
         ConvState(id, "$id · תואר", unread, readAt, muted, alertAt, if (unread > 0) listOf(ConvMessage("m", "שלום", 100)) else emptyList())
 

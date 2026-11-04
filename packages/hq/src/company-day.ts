@@ -164,7 +164,7 @@ export function companyDay(store: Store, companyDir: string, tz: string, date: s
     upTo: Math.max(0, Math.min(DAY, now - start)),
     teams: teams.map((t) => ({ id: t.id, name: t.name, symbol: t.symbol, tone: t.tone ?? 'slate', lead: t.id === 'management' ? 'yoav' : t.lead, project: t.project })),
     people, presence, messages, marks,
-    stats: { projects, workers, estimates },
+    stats: { projects, workers, estimates, notifications: notificationCounts(store, start, end) },
   };
 }
 
@@ -173,4 +173,15 @@ export function messageBody(store: Store, id: string): { id: string; from: strin
   const r = store.db.prepare('SELECT id, from_identity f, to_identity t, kind, created_at at, body FROM messages WHERE id = ?').get(id) as
     { id: string; f: string; t: string; kind: string; at: number; body: string } | undefined;
   return r ? { id: r.id, from: r.f, to: r.t, kind: r.kind, at: r.at, body: r.body.length > 4000 ? `${r.body.slice(0, 4000).replace(/\s+\S*$/, '')}…` : r.body } : null;
+}
+
+/** Count actual emissions, not messages folded into a single notification. */
+export function notificationCounts(store: Store, start: number, end = store.now() + 1) {
+  const totals = { sound: 0, silent: 0, badge: 0 };
+  const rows = store.db.prepare("SELECT type, data FROM events WHERE ts >= ? AND ts < ? AND type IN ('conv.alert','conv.badge')").all(start, end) as { type: string; data: string }[];
+  for (const row of rows) {
+    const level = row.type === 'conv.badge' ? 'badge' : (JSON.parse(row.data) as { level?: string }).level ?? 'sound';
+    if (level in totals) totals[level as keyof typeof totals]++;
+  }
+  return totals;
 }

@@ -103,7 +103,7 @@ object ActionPlanner {
      * a GO, a login or the manager himself being down. A soft question waits for him quietly; in focus or night nothing pushes.
      */
     fun pushWorthy(kind: String, urgency: String, blocking: Boolean, quiet: Boolean, ref: String? = null): Boolean {
-        if (quiet) return false
+        if (quiet && kind !in listOf("shift_failure", "delivery_failure") && !(kind == "incident" && ref == ALL_FULL_REF)) return false
         // An hq from before task 986 still lists every incident: of those only "all the accounts are full" is his.
         if (kind == "incident") return ref == ALL_FULL_REF
         return kind != "ask" || blocking

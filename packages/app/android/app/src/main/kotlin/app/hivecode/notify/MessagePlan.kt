@@ -18,7 +18,7 @@ object MessagePlan {
             at != null && at > c.readAt && c.unread > 0 && c.mutedUntil == null && c.recent.isNotEmpty() &&
                 at > (dismissed[c.identity] ?: Long.MIN_VALUE)
         }
-        val out = show.map { c -> MessageNotif(c, silent = (alerted[c.identity] ?: Long.MIN_VALUE) >= c.alertAt!!) }
+        val out = show.map { c -> MessageNotif(c, silent = c.alertLevel != "sound" || (alerted[c.identity] ?: Long.MIN_VALUE) >= c.alertAt!!) }
         // Only the shown ones are remembered: read or muted ones drop out, and the map stays small.
         return out to show.associate { it.identity to it.alertAt!! }
     }

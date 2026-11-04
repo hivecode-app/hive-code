@@ -61,6 +61,7 @@ data class ConvState(
     val alertAt: Long?,
     /** Newest unread messages, oldest first. */
     val recent: List<ConvMessage>,
+    val alertLevel: String = "sound",
 )
 
 /** Everything the notification surface needs at one moment, from hq. */
@@ -140,6 +141,7 @@ object HqJson {
                 unread = o.optInt("unread"),
                 readAt = o.optLong("read_at"),
                 mutedUntil = if (o.isNull("muted_until")) null else o.optLong("muted_until"),
+                alertLevel = o.optStringOrNull("alert_level") ?: "sound",
                 alertAt = if (o.isNull("alert_at") || !o.has("alert_at")) null else o.optLong("alert_at"),
                 recent = o.optJSONArray("recent")?.objects()?.map {
                     ConvMessage(it.optString("id"), it.optString("body"), it.optLong("created_at"))

@@ -613,6 +613,14 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE messages ADD COLUMN first_word_at INTEGER;`,
   // v36: an ask or GO he left 48 hours went back to the manager (inbox.ts returnStale): out of "מחכות לך", kept as it was.
   `ALTER TABLE inbox ADD COLUMN returned_at INTEGER;`,
+  // v37: notification intent and durable coalescing, shared by web and linked phones.
+  `ALTER TABLE messages ADD COLUMN alert_hint TEXT CHECK (alert_hint IN ('fyi','eta'));
+   ALTER TABLE conversations ADD COLUMN alert_level TEXT;
+   ALTER TABLE conversations ADD COLUMN last_sound_at INTEGER;
+   ALTER TABLE conversations ADD COLUMN pending_alert TEXT;
+   ALTER TABLE conversations ADD COLUMN pending_due INTEGER;
+   ALTER TABLE tasks ADD COLUMN for_owner INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE tasks ADD COLUMN owner_done_at INTEGER;`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

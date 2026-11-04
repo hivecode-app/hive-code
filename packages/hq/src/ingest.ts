@@ -129,7 +129,8 @@ export class Ingest {
         }
         // For the record only: the sender says so (`fyi`), or the whole message is a thank-you or an "ok" (27/10, quota).
         const body = need('body');
-        const m = mailbox.tell({ msg_id: e.id, from: e.identity, to, body, priority: pr, urgency, ref: s(a.ref), fyi: a.fyi === true || isBareAck(body) });
+        const m = mailbox.tell({ msg_id: e.id, from: e.identity, to, body, priority: pr, urgency, ref: s(a.ref), fyi: a.fyi === true || isBareAck(body),
+          alert_hint: pr === 'now' ? null : a.fyi === true ? 'fyi' : (a.eta_min != null || a.eta_at != null) && a.eta_done !== true ? 'eta' : null });
         const estimate = this.estimate(e, a, s(a.body)?.split('\n').map((x) => x.trim()).find(Boolean)?.slice(0, 200) ?? null, false);
         return { ok: true, id: e.id, ref: m.id, ...(estimate ? { result: { estimate } } : {}) };
       }
@@ -160,7 +161,7 @@ export class Ingest {
       case 'request_go': {
         const what = need('what');
         const item = inbox.add({ kind: 'go', from_identity: e.identity, title: `GO: ${what}`.slice(0, 200), blocking: true,
-          urgency: a.risk === 'high' ? 'urgent' : 'normal', ref: e.id, dedupe_key: `op:${e.id}`, headline: s(a.headline)?.trim() || null,
+          urgency: a.risk === 'high' ? 'urgent' : 'normal', ref: e.id, dedupe_key: `op:${e.id}`, headline: s(a.headline)?.trim() || goHeadline(s(a.action), what),
           links: requestGoLinks(a, this.repoOfWorker(e.identity)),
           body: [what, s(a.pr) ? `PR: ${String(a.pr)}` : '', s(a.risk) ? `סיכון: ${String(a.risk)}` : ''].filter(Boolean).join('\n') });
         return { ok: true, id: e.id, ref: `inbox-${item.id}` };
@@ -270,7 +271,7 @@ export class Ingest {
             // `remote` (before 22/10) is ignored: every task may go to a node now.
             ...(a.local === true ? ['needs-local'] : []),
             ...(engine === 'codex' ? [CODEX_LABEL, ...(codexModel ? [`${CODEX_MODEL_LABEL}${codexModel}`] : [])] : [])],
-          identity: worker?.id,
+          identity: worker?.id, for_owner: a.for_owner === true,
         });
         return { ok: true, id: e.id, ref: `task-${task.id}`, result: { task: task.id, state: task.state } };
       }
@@ -667,4 +668,11 @@ function requestGoLinks(a: Record<string, unknown>, repo: string | null): InboxL
   const n = prNumber(a.pr);
   const pr = https(a.pr) ?? (n && repo ? `https://github.com/${repo}/pull/${n}` : null);
   return [...(report ? [{ kind: 'report' as const, url: report }] : []), ...(pr ? [{ kind: 'pr' as const, url: pr }] : [])];
+}
+
+export function goHeadline(action: string | undefined, what: string): string {
+  const subject = what.split('\n').find((s) => s.trim())?.trim().slice(0, 140) ?? '';
+  const hebrew = /[\u0590-\u05ff]/.test(subject);
+  const verbs: Record<string, [string, string]> = { release: ['לשחרר', 'Release'], deploy: ['לפרוס', 'Deploy'], publish: ['לפרסם', 'Publish'], run: ['להריץ', 'Run'] };
+  return `${(verbs[action ?? 'deploy'] ?? verbs.deploy)![hebrew ? 0 : 1]} ${subject}?`;
 }

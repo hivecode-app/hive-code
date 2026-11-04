@@ -1,3 +1,4 @@
+import { dropProductSchema } from './product-schema.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -6,8 +7,11 @@ import { MUTE_FOREVER } from '@company/shared';
 import { makeEnv, until } from './helpers.ts';
 import { Store } from '../src/store.ts';
 
-const alerts = (env: Awaited<ReturnType<typeof makeEnv>>) =>
-  env.hq.store.eventsAfter(0, 1000).filter((e) => e.type === 'conv.alert').map((e) => e.data as { identity: string; message: string; title: string; body: string });
+const flush = (env: Awaited<ReturnType<typeof makeEnv>>) => { env.clock.advance(20_000); env.hq.conversations.flush(); };
+const alerts = (env: Awaited<ReturnType<typeof makeEnv>>) => {
+  flush(env);
+  return env.hq.store.eventsAfter(0, 1000).filter((e) => e.type === 'conv.alert').map((e) => e.data as { identity: string; message: string; title: string; body: string });
+};
 
 test('unread: counted per conversation, read on any device clears it, the total skips muted ones', async () => {
   const env = await makeEnv();
@@ -52,6 +56,7 @@ test('alerts: a worker message alerts with name and team; muted, on screen, focu
     const { hq, clock } = env;
     hq.pusher.subscribe({ endpoint: 'https://push.example/1', keys: { p256dh: 'p', auth: 'a' } });
     hq.mailbox.tell({ msg_id: 'e1', from: 'eli', to: 'owner', body: 'העדכון עלה' });
+    flush(env);
     await until(() => env.webPushes.length === 1, 2000, 'push');
     const a = alerts(env);
     assert.equal(a.length, 1);
@@ -61,7 +66,7 @@ test('alerts: a worker message alerts with name and team; muted, on screen, focu
     const payload = JSON.parse(env.webPushes[0]!.payload) as Record<string, string>;
     assert.equal(payload.kind, 'message');
     assert.equal(payload.url, '/?chat=eli', 'a tap opens the conversation');
-    assert.equal(hq.conversations.get('eli').alert_at, clock.t);
+    assert.ok(hq.conversations.get('eli').alert_at! <= clock.t);
     assert.equal(env.telegrams.length, 0, 'messages never go to Telegram');
 
     // Yoav answers while the conversation is open on his screen: no alert, still unread until the app reads it.
@@ -131,6 +136,7 @@ test('API: conversations, read, mute, presence', async () => {
       return { status: res.status, json: (await res.json()) as Record<string, any> };
     };
     env.hq.mailbox.tell({ msg_id: 'e1', from: 'eli', to: 'owner', body: 'שלום' });
+    flush(env);
     let r = await call('GET', '/api/conversations');
     assert.equal(r.status, 200);
     assert.equal(r.json.unread_total, 1);
@@ -179,6 +185,7 @@ test('migration: what was there before counts as read', () => {
     s.db.exec('ALTER TABLE messages DROP COLUMN fyi'); // v34
     s.db.exec('ALTER TABLE messages DROP COLUMN first_word_at'); // v35
     s.db.exec('ALTER TABLE inbox DROP COLUMN returned_at'); // v36
+    dropProductSchema(s);
     s.db.pragma('user_version = 10');
     s.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, body, created_at) VALUES ('a', 'eli', 'owner', 'ישן', 100), ('b', 'eli', 'owner', 'ישן יותר', 50)`).run();
     (s as unknown as { migrate(): void }).migrate();

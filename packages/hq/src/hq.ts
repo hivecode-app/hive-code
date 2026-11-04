@@ -9,6 +9,7 @@ import { Store } from './store.ts';
 import { readCharter, repoOfWorktree } from './workspace.ts';
 import { syncOrg, getIdentity, listIdentities, listProjects, listTones, projectLead, renameTaskWorkers } from './org.ts';
 import { Inbox } from './inbox.ts';
+import { ownerCompletions } from './owner-completions.ts';
 import { Conversations } from './conversations.ts';
 import { AwaitingBoard, DEPLOY_STUCK_MS } from './awaiting.ts';
 import { Estimates } from './estimates.ts';
@@ -216,6 +217,7 @@ export class Hq {
     // task 986: a task to check is a card in the opener's conversation, with a line there that says what to check.
     this.awaiting.onCard = (t, itemId, from) => {
       this.mailbox.tell({ msg_id: `inbox-${itemId}-check`, from: from ?? this.cfg.managerId, to: OWNER, kind: 'tell', ref: `task-${t.id}`, priority: 'next',
+        alert_hint: this.conversations.soundedRecently(from) || this.conversations.soundedRecently(t.identity) ? 'eta' : null,
         body: `${t.awaiting === 'verify' ? 'לבדוק לפני שחרור' : 'לבדוק'}: ${t.awaiting_note ?? t.summary ?? t.title}` });
     };
     // A deploy is never his card: its opener bundles what waits in the project into one GO (once per wait).
@@ -230,7 +232,7 @@ export class Hq {
     this.scheduler.heldMb = () => this.leases.heldMb(LOCAL);
     this.shifts.on('ended', (row) => this.leases.releaseShift(row.id));
     this.night.estimates = this.estimates;
-    this.scheduler.onTaskDone = (id) => { this.estimates.cancelForTask(id); this.awaiting.followUpDone(id); };
+    this.scheduler.onTaskDone = (id) => { this.estimates.cancelForTask(id); this.awaiting.followUpDone(id); this.store.db.prepare('UPDATE tasks SET owner_done_at = COALESCE(owner_done_at, ?) WHERE id = ? AND for_owner = 1').run(this.store.now(), id); };
     this.scheduler.onTaskFrozen = (id, by) => this.estimates.freezeForTask(id, by);
     this.scheduler.onSweep = () => {
       if (!this.store.toggle('scheduler')) return;
@@ -368,6 +370,8 @@ export class Hq {
     if (opts.timers !== false) {
       const T = this.cfg.timers;
       this.loopWatch.start();
+      this.every(1_000, 'conversation-alerts', () => this.conversations.flush());
+      this.every(30_000, 'owner-completions', () => ownerCompletions(this.store, this.mailbox));
       this.every(5_000, 'mailbox', () => this.mailbox.sweep());
       if (this.nodes.list.length) this.every(30_000, 'nodes', () => this.pollNodes());
       this.every(5_000, 'spool', () => this.shifts.collectSpools());

@@ -21,7 +21,7 @@ export interface TaskRow {
   labels: string; priority: number; night_weight: number; worktree: string | null; carried_over: number;
   identity: string | null; shift_id: string | null; created_at: number; updated_at: number; started_at: number | null;
   /** One line in his words on what it did, written when it closed (status done / close_team); null = none given. */
-  summary?: string | null;
+  summary?: string | null; for_owner?: number; owner_done_at?: number | null;
   /** "מה לבדוק" (awaiting.ts): deploy | check | verify, with one line in his words; null = nothing waits. */
   awaiting?: string | null; awaiting_note?: string | null; awaiting_at?: number | null; pr?: string | null;
   /** Where its worktree and shifts are (nodes.ts): 'local' or a node's name; null = not placed yet. */
@@ -30,7 +30,7 @@ export interface TaskRow {
 
 export interface NewTask {
   ref?: string; project?: string; title: string; body?: string; source?: 'store' | 'github'; state?: string;
-  labels?: string[]; priority?: number; night_weight?: number; worktree?: string; identity?: string;
+  for_owner?: boolean; labels?: string[]; priority?: number; night_weight?: number; worktree?: string; identity?: string;
 }
 
 /** A shift this young is still growing to its working size. */
@@ -203,9 +203,9 @@ export class Scheduler {
       const ex = this.store.db.prepare('SELECT * FROM tasks WHERE ref = ?').get(t.ref) as TaskRow | undefined;
       if (ex) return ex;
     }
-    const r = this.store.db.prepare(`INSERT INTO tasks (ref, project, title, body, source, state, labels, priority, night_weight, worktree, identity, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(t.ref ?? null, t.project ?? null, t.title, t.body ?? '', t.source ?? 'store',
-      t.state ?? 'queued', JSON.stringify(t.labels ?? []), t.priority ?? 2, t.night_weight ?? 1, t.worktree ?? null, t.identity ?? null, now, now);
+    const r = this.store.db.prepare(`INSERT INTO tasks (ref, project, title, body, source, state, labels, priority, night_weight, worktree, identity, created_at, updated_at, for_owner)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(t.ref ?? null, t.project ?? null, t.title, t.body ?? '', t.source ?? 'store',
+      t.state ?? 'queued', JSON.stringify(t.labels ?? []), t.priority ?? 2, t.night_weight ?? 1, t.worktree ?? null, t.identity ?? null, now, now, t.for_owner ? 1 : 0);
     const task = this.task(Number(r.lastInsertRowid))!;
     this.store.emit('task.new', task.identity, task);
     // After the caller's transaction (ingest applies ops inside one), never inside it.
