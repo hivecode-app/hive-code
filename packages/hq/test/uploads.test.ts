@@ -37,7 +37,7 @@ test('an attached image: uploaded, stored owner-only, sent as a path the worker 
   const env = await apiEnv();
   try {
     assert.equal((await fetch(`${env.base}/api/uploads`, { method: 'POST', body: new Uint8Array(PNG) })).status, 401, 'token required');
-    assert.equal((await env.upload(Buffer.from('not an image'))).status, 415);
+    assert.equal((await env.upload(Buffer.from('not an image'))).status, 200);
     assert.equal((await env.upload(Buffer.alloc(0))).status, 400);
 
     const up = await env.upload(PNG, { 'x-file-name': encodeURIComponent('צילום מסך.png') });
@@ -63,16 +63,18 @@ test('an attached image: uploaded, stored owner-only, sent as a path the worker 
     assert.equal((await env.tell({ to: 'eli', attachments: [] })).status, 400, 'no text and no image');
     const t = await env.tell({ msg_id: 'img-1', to: 'eli', body: 'מה רואים כאן?', attachments: [a.id] });
     assert.equal(t.status, 200);
-    assert.deepEqual(t.json.message.attachments, [{ id: a.id, name: 'צילום מסך.png', mime: 'image/png', bytes: PNG.length }]);
+    assert.equal(t.json.message.attachments[0].id, a.id);
+    assert.equal(t.json.message.attachments[0].name, 'צילום מסך.png');
     await until(() => env.hq.mailbox.get('img-1')!.state === 'delivered', 3000, 'delivered');
     const sent = env.launcher.hosts.get('eli-1')!.sent.find((s) => s.msgId === 'img-1')!;
-    assert.equal(sent.text, `[הודעה מ-רן (owner) · דחיפות: רגילה · img-1]\nמה רואים כאן?\n[תמונה מצורפת: ${path} · כדי לראות אותה, פותחים את הנתיב ב-Read]`);
+    assert.match(sent.text, /קובץ מצורף: צילום מסך.png.*image\/png/);
+    assert.ok(sent.text.includes(path));
 
     const only = await env.tell({ msg_id: 'img-2', to: 'eli', attachments: [a.id] });
     assert.equal(only.status, 200);
     assert.equal(only.json.message.body, '');
     await until(() => env.launcher.hosts.get('eli-1')!.sent.some((s) => s.msgId === 'img-2'), 3000, 'img-2 sent');
-    assert.match(env.launcher.hosts.get('eli-1')!.sent.find((s) => s.msgId === 'img-2')!.text, /· img-2\]\n\[תמונה מצורפת: /);
+    assert.match(env.launcher.hosts.get('eli-1')!.sent.find((s) => s.msgId === 'img-2')!.text, /· img-2\]\n\[קובץ מצורף: /);
 
     // History carries them too, so the app can draw the bubble after a reload.
     const res = await fetch(`${env.base}/api/messages?identity=eli`, { headers: env.auth });

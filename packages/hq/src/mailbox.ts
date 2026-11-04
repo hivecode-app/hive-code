@@ -195,23 +195,27 @@ export class Mailbox {
    */
   envelope(m: Pick<MessageRow, 'id' | 'from_identity' | 'urgency' | 'body' | 'kind' | 'ref'> & { attachments?: AttachmentDTO[] | null }): string {
     const ref = m.ref ? ` · ref: ${m.ref}` : '';
-    const files = (m.attachments ?? []).map((a) => {
-      const path = this.uploads?.get(a.id)?.path ?? '(הקובץ לא נמצא בשרת)';
-      return `[תמונה מצורפת: ${path} · כדי לראות אותה, פותחים את הנתיב ב-Read]`;
-    });
+    const files = (m.attachments ?? []).map((a) => this.uploads?.description(a.id) ?? '[קובץ מצורף: הקובץ לא נמצא בשרת]');
     const body = [m.body, ...files].filter(Boolean).join('\n');
     return `[הודעה מ-${this.label(m.from_identity)} (${m.from_identity}) · דחיפות: ${URGENCY_HE[m.urgency]} · ${m.id}${ref}]\n${body}`;
   }
 
   get(id: string): MessageRow | undefined {
     const r = this.store.db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as StoredRow | undefined;
-    return r && hydrate(r);
+    if (!r) return undefined;
+    const m=hydrate(r);
+    return this.currentAttachments(m);
+  }
+
+  private currentAttachments(m:MessageRow):MessageRow {
+    if(!m.attachments?.length)return m;
+    return {...m,attachments:m.attachments.map(a=>{const u=this.uploads?.get(a.id);return u?toDTO(u):a;})};
   }
 
   /** His (OWNER) is the last line of every conversation: a note is not one, or a busy worker's notes push the others out. */
   list(identity: string, limit = 200, beforeTs?: number): MessageRow[] {
     return (this.store.db.prepare(`SELECT * FROM messages WHERE (to_identity = ? OR from_identity = ?) AND created_at < ?
-      ${identity === OWNER ? "AND kind != 'note'" : ''} ORDER BY created_at DESC, rowid DESC LIMIT ?`).all(identity, identity, beforeTs ?? Number.MAX_SAFE_INTEGER, limit) as StoredRow[]).map(hydrate);
+      ${identity === OWNER ? "AND kind != 'note'" : ''} ORDER BY created_at DESC, rowid DESC LIMIT ?`).all(identity, identity, beforeTs ?? Number.MAX_SAFE_INTEGER, limit) as StoredRow[]).map(r=>this.currentAttachments(hydrate(r)));
   }
 
   private setState(id: string, state: MessageState, extra: Record<string, unknown> = {}): void {
@@ -302,7 +306,7 @@ export class Mailbox {
   /** Upload ids → what the message carries. An id that was never uploaded is the client's error, not a silent drop. */
   private attachmentsFor(ids: string[]): AttachmentDTO[] {
     if (!ids.length) return [];
-    if (ids.length > 10) throw new Error('attachments must be at most 10');
+    if (ids.length > 20) throw new Error('attachments must be at most 20');
     return ids.map((id) => {
       const u = this.uploads?.get(id);
       if (!u) throw new Error(`attachments must be uploaded first: no upload ${id}`);
@@ -366,6 +370,8 @@ export class Mailbox {
       this.setState(id, 'delivered');
       return;
     }
+    // Files have their readable representation before a worker sees the envelope.
+    for (const file of m.attachments ?? []) await this.uploads?.prepare(file.id);
     // A standing worker's message about one task of its (its prompt, close_team's handoff ask) dies with that task:
     // it never reaches the session of the next task, and never wakes the worker in the checkout after the close.
     const bound = this.boundTask(m);
@@ -632,7 +638,7 @@ export class Mailbox {
     return (this.store.db.prepare(`SELECT * FROM messages m WHERE m.from_identity = @owner AND m.to_identity = @identity AND m.kind = 'tell'
       AND m.created_at >= @since AND m.state != 'handled' AND NOT EXISTS (SELECT 1 FROM messages r WHERE r.from_identity = m.to_identity
         AND r.to_identity = @owner AND r.kind NOT IN ('system','note') AND r.created_at >= m.created_at)
-      ORDER BY m.created_at, m.rowid`).all({ owner: OWNER, identity, since }) as StoredRow[]).map(hydrate);
+      ORDER BY m.created_at, m.rowid`).all({ owner: OWNER, identity, since }) as StoredRow[]).map(r=>this.currentAttachments(hydrate(r)));
   }
 
   /** A shift ended before echoing: its messages go back to waiting for the next shift. */
@@ -665,7 +671,7 @@ export class Mailbox {
     for (const r of held) await this.deliver(r.id);
     const cutoff = this.store.now() - this.cfg.timers.deliveryTimeoutMs;
     let stale = (this.store.db.prepare(`SELECT * FROM messages WHERE state = 'queued' AND last_attempt_at IS NOT NULL AND last_attempt_at <= ?
-      ORDER BY created_at, rowid`).all(cutoff) as StoredRow[]).map(hydrate);
+      ORDER BY created_at, rowid`).all(cutoff) as StoredRow[]).map(r=>this.currentAttachments(hydrate(r)));
     // A worker on a node that never took its task: the task moves here (scheduler fallbackLocal), its messages wait
     // for the shift here. Not a failure for him, and no resurrection there. A task worker whose task has not started
     // yet is not resurrected either: its start delivers them.
@@ -814,9 +820,8 @@ export class Mailbox {
   private forwardToResponsible(m: MessageRow, why: string): boolean {
     const to = this.responsibleFor(m.to_identity);
     if (!to || to === m.to_identity) return false;
-    const files = m.attachments?.length ? `\n(${m.attachments.length} תמונות מצורפות לא הועברו)` : '';
-    this.tell({ msg_id: `${m.id}-fwd`, from: OWNER, to, kind: m.kind === 'answer' ? 'answer' : 'tell', priority: 'next', urgency: m.urgency,
-      body: `${this.names.owner.name} כתב ל-${this.label(m.to_identity)}, שכבר נסגר (${why}), ולכן זה מגיע אליך:\n${m.body}${files}` });
+    this.tell({ msg_id: `${m.id}-fwd`, from: OWNER, to, kind: m.kind === 'answer' ? 'answer' : 'tell', priority: 'next', urgency: m.urgency, attachments: m.attachments?.map((a) => a.id),
+      body: `${this.names.owner.name} כתב ל-${this.label(m.to_identity)}, שכבר נסגר (${why}), ולכן זה מגיע אליך:\n${m.body}` });
     return true;
   }
 

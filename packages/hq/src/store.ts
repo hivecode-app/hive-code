@@ -621,6 +621,11 @@ const MIGRATIONS: string[] = [
    ALTER TABLE conversations ADD COLUMN pending_due INTEGER;
    ALTER TABLE tasks ADD COLUMN for_owner INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE tasks ADD COLUMN owner_done_at INTEGER;`,
+  // v38: resumable uploads and derived representations.
+  `ALTER TABLE uploads ADD COLUMN meta TEXT;
+   CREATE TABLE upload_sessions (id TEXT PRIMARY KEY, name TEXT NOT NULL, bytes INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, upload_id TEXT);
+   CREATE TABLE upload_parts (session TEXT NOT NULL REFERENCES upload_sessions(id) ON DELETE CASCADE, part INTEGER NOT NULL, sha256 TEXT NOT NULL, PRIMARY KEY(session, part));`,
+
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

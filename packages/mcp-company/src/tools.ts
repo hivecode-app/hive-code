@@ -50,6 +50,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
   return [
     tool('tell', 'שליחת הודעה לעובד לפי identity. כשההודעה מבטיחה זמן ("יהיה מוכן בעוד שעה"), רושמים אותו בשדות eta_min או eta_at, eta_kind ו-eta_what, לא רק בטקסט; '
       + 'hq מחזיר הצעה לפי איך שהערכות כאלה יוצאות בפועל. כשזה מוכן: eta_done. Send a message to a teammate by identity. A message that promises a time goes in the eta_* fields, not only in the text.', {
+      files: strs('עד 20 נתיבים לקבצים: תיקיית המשימה, /tmp או קבצי ההודעה שעליה עונים. מועתקים לשיחה; אם חזר queued שומרים את המקור עד לאישור / up to 20 allowed file paths; keep sources until acknowledgment'),
       to: s('identity של הנמען / recipient identity, e.g. "dana"'),
       body: s('תוכן ההודעה / message text'),
       urgency: oneOf(['now', 'next', 'later'], 'now מעיר מיד (לא קוטע סבב שרץ), next ברירת מחדל, later לסוף התור / delivery priority'),

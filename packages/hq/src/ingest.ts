@@ -67,7 +67,9 @@ export class Ingest {
   }
 
   /** Validate, store, apply. A replayed id returns the stored ack without applying again. */
-  op(raw: unknown): OpAck {
+  private preparedFiles = new Map<string,string[]>();
+  private receiving = new Map<string,Promise<OpAck>>();
+  private checked(raw: unknown): { entry: WalEntry; args: Record<string, unknown>; previous?: OpAck } {
     const e = raw as Partial<WalEntry>;
     if (!e || typeof e !== 'object') throw new IngestError(400, 'body must be a WalEntry');
     if (!s(e.id) || !s(e.identity) || !s(e.op)) throw new IngestError(400, 'id, identity and op are required');
@@ -85,8 +87,38 @@ export class Ingest {
     const args = (e.args && typeof e.args === 'object' ? e.args : {}) as Record<string, unknown>;
     const db = this.hq.store.db;
     const prev = db.prepare('SELECT ack FROM ops WHERE id = ?').get(e.id) as { ack: string } | undefined;
-    if (prev) return JSON.parse(prev.ack) as OpAck;
+    return { entry: e as WalEntry, args, previous: prev ? JSON.parse(prev.ack) as OpAck : undefined };
+  }
 
+
+  async drain():Promise<void>{await Promise.allSettled(this.receiving.values());}
+
+  async receive(raw: unknown): Promise<OpAck> {
+    const {entry,args,previous}=this.checked(raw);
+    if(previous)return previous;
+    const existing=this.receiving.get(entry.id);if(existing)return existing;
+    if(entry.op!=='tell'||args.files==null)return this.op(raw);
+    const to=s(args.to);if(!to||!s(args.body)||(to!==OWNER&&to!=='hq'&&!this.hq.identityExists(to)))return this.op(raw);
+    const transfer=(async()=>{
+      let files:string[]=[],applying=false;
+      try {
+        if(!Array.isArray(args.files)||args.files.some(f=>typeof f!=='string'))throw new IngestError(400,'files must be paths','files חייב להיות רשימת נתיבים');
+        files=await this.hq.uploads.importFiles(entry.identity,args.files as string[],s(args.ref));
+        this.preparedFiles.set(entry.id,files);applying=true;return this.op(raw);
+      }catch(err){
+        await this.hq.uploads.discard(files);
+        if(applying)throw err;
+        const client=['ENOENT','EACCES','EISDIR','ELOOP'].includes((err as {code?:string}).code??'');
+        const error=err instanceof IngestError?err:new IngestError((err as {status?:number}).status??(client?400:500),(err as Error).message,`הקובץ לא צורף: ${(err as Error).message}`);
+        if(error.status<500)this.rejected(entry,error);throw error;
+      }finally{this.preparedFiles.delete(entry.id);}
+    })().finally(()=>this.receiving.delete(entry.id));
+    this.receiving.set(entry.id,transfer);return transfer;
+  }
+
+  op(raw: unknown): OpAck {
+    const {entry:e,args,previous}=this.checked(raw);if(previous)return previous;
+    const db=this.hq.store.db;
     let ack: OpAck;
     try {
       ack = db.transaction((): OpAck => {
@@ -96,7 +128,7 @@ export class Ingest {
         return a;
       })();
     } catch (err) {
-      if (err instanceof IngestError && err.status >= 400 && err.status < 500) reject(err);
+      if (err instanceof IngestError && err.status >= 400 && err.status < 500) this.rejected(e,err);
       throw err;
     }
     this.hq.store.emit(`op.${e.op}`, e.identity!, { id: e.id, shift: e.shift ?? null, args });
@@ -129,7 +161,13 @@ export class Ingest {
         }
         // For the record only: the sender says so (`fyi`), or the whole message is a thank-you or an "ok" (27/10, quota).
         const body = need('body');
-        const m = mailbox.tell({ msg_id: e.id, from: e.identity, to, body, priority: pr, urgency, ref: s(a.ref), fyi: a.fyi === true || isBareAck(body),
+        let attachments: string[] = [];
+        if (a.files != null) {
+          if (!Array.isArray(a.files) || a.files.some((f) => typeof f !== 'string')) throw new IngestError(400, 'files must be paths', 'files חייב להיות רשימת נתיבים');
+          attachments = this.preparedFiles.get(e.id) ?? [];
+          if (!this.preparedFiles.has(e.id)) throw new IngestError(400,'files require asynchronous ingest','קבצים נשלחים דרך מסלול ההודעות הרגיל');
+        }
+        const m = mailbox.tell({ msg_id: e.id, from: e.identity, to, body, attachments, priority: pr, urgency, ref: s(a.ref), fyi: a.fyi === true || isBareAck(body),
           alert_hint: pr === 'now' ? null : a.fyi === true ? 'fyi' : (a.eta_min != null || a.eta_at != null) && a.eta_done !== true ? 'eta' : null });
         const estimate = this.estimate(e, a, s(a.body)?.split('\n').map((x) => x.trim()).find(Boolean)?.slice(0, 200) ?? null, false);
         return { ok: true, id: e.id, ref: m.id, ...(estimate ? { result: { estimate } } : {}) };
@@ -600,7 +638,7 @@ export class Ingest {
       }
       else {
         const body = await readBody();
-        out = path === '/v1/ops' ? this.op(body) : path === '/v1/resources' ? { text: this.hq.resources.text() } : path === '/v1/access' ? await this.hq.access.request(body) : path === '/v1/lease' ? await this.hq.leases.request(body) : await this.recallWithFiles(body);
+        out = path === '/v1/ops' ? await this.receive(body) : path === '/v1/resources' ? { text: this.hq.resources.text() } : path === '/v1/access' ? await this.hq.access.request(body) : path === '/v1/lease' ? await this.hq.leases.request(body) : await this.recallWithFiles(body);
       }
     } catch (e) {
       status = e instanceof IngestError || e instanceof HandoffError || e instanceof AccessError || e instanceof LeaseError ? e.status : (e as { status?: number }).status ?? 500;

@@ -9,6 +9,13 @@
    "inputSchema": {
     "type": "object",
     "properties": {
+     "files": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "עד 20 נתיבים לקבצים: תיקיית המשימה, /tmp או קבצי ההודעה שעליה עונים. מועתקים לשיחה; אם חזר queued שומרים את המקור עד לאישור / up to 20 allowed file paths; keep sources until acknowledgment"
+     },
      "to": {
       "type": "string",
       "description": "identity של הנמען / recipient identity, e.g. \"dana\""

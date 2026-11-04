@@ -351,3 +351,14 @@ test('reserve and release go to hq /v1/lease with the shift, and their answers a
     assert.equal(walLines(root, 'x-1', 'wal.ndjson').length, 0, 'not WAL ops');
   } finally { await c.close(); hq.close(); }
 });
+
+test('tell with files waits for hq copy acknowledgment and returns a clear rejection',async()=>{
+  const root=mkdtempSync(join(tmpdir(),'mcp-files-'));
+  const hq=createHttpServer((req,res)=>{req.resume();req.on('end',()=>res.writeHead(403).end(JSON.stringify({ok:false,error:'file refused',reason:'הקובץ מחוץ לתיקיית המשימה'})));});
+  await new Promise<void>(r=>hq.listen(join(root,'hq.sock'),r));
+  const c=new Client({COMPANY_STATE_DIR:root,COMPANY_SHIFT:'eli-files',COMPANY_IDENTITY:'eli',COMPANY_REPO:root});
+  try {
+    const answer=await c.call('tools/call',{name:'tell',arguments:{to:'owner',body:'הקובץ מוכן',files:['/tmp/file.pdf']}});
+    assert.equal(answer.result.isError,true);assert.match(answer.result.content[0].text,/הקובץ מחוץ לתיקיית המשימה/);
+  }finally{await c.close();hq.close();}
+});

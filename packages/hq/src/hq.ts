@@ -150,7 +150,7 @@ export class Hq {
     const launcher = deps.launcher ?? (cfg.nodes.length ? new RoutingLauncher(lazyTemplateLauncher(cfg), this.nodes, cfg.stateDir) : lazyTemplateLauncher(cfg));
     this.shifts = new ShiftManager(this.store, cfg, launcher, deps.connect);
     this.shifts.nodes = this.nodes;
-    this.uploads = new Uploads(this.store, cfg.stateDir);
+    this.uploads = new Uploads(this.store, cfg.stateDir, cfg.dictate);
     this.appReleases = new AppReleases(cfg.appReleaseDir);
     this.mailbox = new Mailbox(this.store, cfg, this.shifts, this.inbox, deps.foreign ?? noForeignInjector, this.uploads);
     this.scheduler = new Scheduler(this.store, cfg, this.shifts, this.mailbox);
@@ -372,6 +372,7 @@ export class Hq {
       this.loopWatch.start();
       this.every(1_000, 'conversation-alerts', () => this.conversations.flush());
       this.every(30_000, 'owner-completions', () => ownerCompletions(this.store, this.mailbox));
+      this.every(60_000, 'upload-expiry', () => this.uploads.sweep());
       this.every(5_000, 'mailbox', () => this.mailbox.sweep());
       if (this.nodes.list.length) this.every(30_000, 'nodes', () => this.pollNodes());
       this.every(5_000, 'spool', () => this.shifts.collectSpools());
@@ -537,9 +538,11 @@ export class Hq {
     await new Promise<void>((r) => (this.healthServer ? this.healthServer.close(() => r()) : r()));
     if (this.ingestServer) { this.ingestServer.closeAllConnections(); await new Promise<void>((r) => this.ingestServer!.close(() => r())); }
     // Shift-hosts are separate units and keep running across hq restarts (B.5): only drop our sockets.
+    await this.ingest.drain();
     await this.shifts.drain();
     this.shifts.closeAll();
     this.nodes.close();
+    await this.uploads.drain();
     this.store.close();
   }
 }

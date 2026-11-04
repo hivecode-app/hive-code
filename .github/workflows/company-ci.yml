@@ -31,6 +31,16 @@ jobs:
         run: npm run check:contract && npm run test:contract && npm run test:deploy
       - name: typecheck
         run: npm run typecheck
+      - name: media test tools
+        run: |
+          missing=0
+          for tool in python3 ffmpeg ffprobe pdfinfo pdftoppm libreoffice; do
+            command -v "$tool" >/dev/null || missing=1
+          done
+          if [ "$missing" -eq 1 ]; then
+            sudo -n apt-get update
+            sudo -n apt-get install -y --no-install-recommends python3 ffmpeg poppler-utils libreoffice-writer libreoffice-calc
+          fi
       - name: test
         run: npm test
       # The app (#97): flutter analyze and test, as deploy.sh runs them, so a failure shows on the PR and

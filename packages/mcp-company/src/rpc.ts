@@ -120,8 +120,9 @@ export function createServer(deps: ServerDeps) {
       log(`wal append failed: ${e instanceof Error ? e.message : String(e)}`);
       return text(`לא נשמר: כתיבה ל-WAL נכשלה (WAL write failed): ${e instanceof Error ? e.message : String(e)}`, true);
     }
-    if (SYNC_OPS.has(entry.op) && deps.waitSettled) {
-      const r = await deps.waitSettled(entry.id, deps.syncTimeoutMs ?? 5000);
+    const files = entry.op === 'tell' && Array.isArray(args.files) && args.files.length > 0;
+    if ((SYNC_OPS.has(entry.op) || files) && deps.waitSettled) {
+      const r = await deps.waitSettled(entry.id, deps.syncTimeoutMs ?? (files ? 60_000 : 5000));
       if (r?.outcome === 'fail') {
         const b = (r.body ?? {}) as { reason?: unknown; error?: unknown };
         const why = typeof b.reason === 'string' ? b.reason : typeof b.error === 'string' ? b.error : `HTTP ${r.status}`;

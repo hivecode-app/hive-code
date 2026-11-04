@@ -15,7 +15,7 @@ import type { AwaitingOutcome } from './awaiting.ts';
 import { AuthError, type Caller } from './auth.ts';
 import { proxyDictate } from './dictate.ts';
 import { MUTE_FOR } from './conversations.ts';
-import { readRaw, UploadError } from './uploads.ts';
+import { readRaw, UPLOAD_PART_BYTES, toDTO, UploadError } from './uploads.ts';
 import { OWNER } from '@company/shared';
 import { HomeError } from './home.ts';
 import { assetLinks, pairPage } from './pairing.ts';
@@ -594,19 +594,38 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
       if (req.method === 'POST' && url.pathname === '/api/dictate/transcribe') return await proxyDictate(hq.cfg.dictate, req, res);
       // Attached images (uploads.ts): raw bytes in, raw bytes out, so these two skip the JSON routes.
       if (req.method === 'POST' && url.pathname === '/api/uploads') {
+        if (String(req.headers['content-type']).includes('application/json') && !req.headers['x-file-name']) {
+          const body = await readBody(req) as { name?: string; bytes?: number };
+          if (typeof body.name !== 'string' || typeof body.bytes !== 'number') throw new UploadError(400, 'name and bytes are required');
+          return json(res, 200, { upload: hq.uploads.open(body.name, body.bytes) });
+        }
         const name = req.headers['x-file-name'];
         let file: string | undefined;
         try { file = typeof name === 'string' ? decodeURIComponent(name) : undefined; } catch { throw new HttpError(400, 'x-file-name must be URI-encoded'); }
-        return json(res, 200, { upload: hq.uploads.save(await readRaw(req), file) });
+        const upload = hq.uploads.save(await readRaw(req), file);
+        return json(res, 200, { upload });
       }
-      const up = req.method === 'GET' ? /^\/api\/uploads\/([^/]+)$/.exec(url.pathname) : null;
+      const part = req.method === 'PUT' ? /^\/api\/uploads\/([^/]+)\/parts\/(\d+)$/.exec(url.pathname) : null;
+      if (part) return json(res, 200, { upload: hq.uploads.part(part[1]!, Number(part[2]), await readRaw(req, UPLOAD_PART_BYTES)) });
+      const complete = req.method === 'POST' ? /^\/api\/uploads\/([^/]+)\/complete$/.exec(url.pathname) : null;
+      if (complete) {
+        const body = await readBody(req) as { sha256?: string };
+        if (body.sha256 != null && !/^[a-f0-9]{64}$/i.test(body.sha256)) throw new UploadError(400, 'invalid sha256');
+        return json(res, 200, { upload: await hq.uploads.complete(complete[1]!, body.sha256) });
+      }
+      const status = req.method === 'GET' ? /^\/api\/uploads\/([^/]+)\/status$/.exec(url.pathname) : null;
+      if (status) return json(res, 200, { upload: hq.uploads.status(status[1]!) });
+      const up = req.method === 'GET' ? /^\/api\/uploads\/([^/]+)(\/thumb)?$/.exec(url.pathname) : null;
       if (up) {
-        const f = hq.uploads.read(decodeURIComponent(up[1]!));
-        if (!f) return json(res, 404, { error: 'no such upload' });
-        // An upload never changes: the app may keep it as long as it likes, but only on this device.
-        res.writeHead(200, { 'content-type': f.upload.mime, 'content-length': f.data.length, 'cache-control': 'private, max-age=31536000, immutable',
-          'x-content-type-options': 'nosniff' });
-        return res.end(f.data);
+        const upload = hq.uploads.get(decodeURIComponent(up[1]!));
+        if (!upload) return json(res, 404, { error: 'no such upload' });
+        if (up[2]) await hq.uploads.prepare(upload.id);
+        const path = up[2] ? hq.uploads.get(upload.id)?.meta?.thumb : upload.path;
+        if (!path || !existsSync(path)) return json(res, 404, { error: 'no thumbnail' });
+        const mime = up[2] ? 'image/jpeg' : upload.mime;
+        res.writeHead(200, { 'content-type': mime, 'cache-control': 'private, max-age=31536000, immutable',
+          'x-content-type-options': 'nosniff', ...(url.searchParams.has('download') || !mime.startsWith('image/') ? { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(upload.name)}` } : {}) });
+        const stream = createReadStream(path); stream.on('error', () => res.destroy()); stream.pipe(res); return;
       }
       const apk = req.method === 'GET' ? /^\/api\/app\/apk\/(\d+)$/.exec(url.pathname) : null;
       if (apk) {

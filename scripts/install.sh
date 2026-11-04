@@ -124,8 +124,12 @@ for u in agent-company-hq.service agent-company-web.service agent-company-tunnel
     missing+=("‏$f קיים ולא נוצר על ידי ההתקנה: המכונה כבר מוגדרת ביד, וההתקנה לא נוגעת בה")
   fi
 done
+# Media helpers: Debian/Ubuntu packages poppler-utils, libreoffice, ffmpeg and python3.
 ((${#missing[@]} == 0)) || die "חסרים דברים במכונה. אחרי שמסדרים אותם מריצים שוב:" "${missing[@]}"
 done_ "$(. /etc/os-release; echo "$PRETTY_NAME") · systemd · Node $nv · git · gh · $((mem_kb / 1024 / 1024))GB"
+for c in python3 pdfinfo pdftoppm libreoffice ffmpeg ffprobe; do
+  command -v "$c" >/dev/null || say "‏$c לא מותקן: תצוגות ותמלול של חלק מהקבצים ימתינו. להתקנה: sudo apt-get install python3 poppler-utils libreoffice ffmpeg"
+done
 gh auth status >/dev/null 2>&1 || say "‏gh לא מחובר. לא חוסם את ההתקנה, אבל העובדים צריכים אותו ל-PR: gh auth login"
 
 # ── 2. consent ───────────────────────────────────────────────────────────────
