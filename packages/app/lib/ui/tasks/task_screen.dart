@@ -12,7 +12,8 @@ import '../../theme/tokens.dart';
 import '../common.dart';
 import '../nav.dart';
 import '../product/product_theme.dart';
-import '../chat/items.dart' show ImageViewer;
+import '../media/viewer.dart';
+import '../media/files_screen.dart';
 import '../../model/models.dart';
 import 'task_copy.dart';
 
@@ -176,6 +177,7 @@ class _ProductTaskScreenState extends State<ProductTaskScreen>
         ),
         title: Text(l.tasks),
         actions: [
+          IBtn('folder', tip: l.mediaFiles, onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => FilesScreen(task: widget.id)))),
           IBtn(
             'refresh',
             tip: l.progressRefresh,
@@ -444,35 +446,7 @@ class _ProductTaskScreenState extends State<ProductTaskScreen>
                                 ? 'chevron_left'
                                 : 'chevron_right',
                           ),
-                          onTap: () {
-                            if ((f['mime'] as String).startsWith('image/')) {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute<void>(
-                                  builder: (_) => ImageViewer(
-                                    images: [
-                                      Attachment(
-                                        id: f['id'] as String,
-                                        name: f['name'] as String,
-                                        mime: f['mime'] as String,
-                                        bytes: f['bytes'] as int,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            } else {
-                              Nav.chat(
-                                context,
-                                f['identity'] as String,
-                                preserveRoute: true,
-                                message: (
-                                  id: f['message'] as String,
-                                  text: null,
-                                ),
-                              );
-                            }
-                          },
+                          onTap: () => openFile(context, Attachment.fromJson(f)),
                         ),
                     ],
                   ),

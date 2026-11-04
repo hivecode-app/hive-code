@@ -121,6 +121,7 @@ test('audio and video readable forms include a transcript and video frames', asy
     execFileSync(ffmpeg,['-nostdin','-y','-loglevel','error','-f','lavfi','-i','sine=frequency=400:duration=1',join(dir,'sound.wav')]);
     const upload=env.hq.uploads.save(readFileSync(join(dir,'sound.wav')),'sound.wav');await env.hq.uploads.prepare(upload.id);
     const meta=await prepareMedia(env.hq.uploads.get(upload.id)!,{url:`http://127.0.0.1:${(server.address() as any).port}`,token:'test'});
+    assert.equal(meta.waveform?.length,48);assert.ok(meta.waveform!.every(n=>n>=0&&n<=1));assert.ok(meta.waveform!.some(n=>n>0));assert.equal(meta.transcript,true);
     assert.equal(meta.duration,1);assert.match(readFileSync(meta.readable![0]!,'utf8'),/הקובץ הוקרא בהצלחה/);assert.equal(meta.error,undefined);
     env.hq.store.db.prepare('UPDATE uploads SET meta = ? WHERE id = ?').run(JSON.stringify(meta),upload.id);
     assert.match(env.hq.uploads.description(upload.id),/גרסה קריאה:.*transcript.txt/);
@@ -276,4 +277,19 @@ test('ODF type and LibreOffice filename follow the archive mimetype',async()=>{
       assert.ok(readFileSync(join(dir,'inputs'),'utf8').trim().split('\n').at(-1)!.endsWith(`.${ext}`));
     }
   }finally{process.env.PATH=oldPath;await env.cleanup();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('waveform failure preserves the audio transcript',async()=>{
+  const env=await makeEnv(),dir=mkdtempSync(join(tmpdir(),'media-wave-failure-'));
+  const server=createServer((req,res)=>{req.resume();req.on('end',()=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({text:'Transcript survives a waveform error'}));});});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const previous=process.env.MEDIA_FFMPEG;
+  try{
+    const audio=join(dir,'source.wav');execFileSync(ffmpeg,['-nostdin','-y','-loglevel','error','-f','lavfi','-i','sine=frequency=400:duration=1',audio]);
+    const upload=env.hq.uploads.save(readFileSync(audio),'source.wav');await env.hq.uploads.prepare(upload.id);
+    const wrapper=join(dir,'ffmpeg.mjs');
+    writeFileSync(wrapper,`#!/usr/bin/env node\nimport {spawnSync} from 'node:child_process';\nconst args=process.argv.slice(2);if(args.at(-1)?.endsWith('waveform.pcm'))process.exit(3);const result=spawnSync(${JSON.stringify(ffmpeg)},args,{stdio:'inherit'});process.exit(result.status??1);\n`);chmodSync(wrapper,0o700);process.env.MEDIA_FFMPEG=wrapper;
+    const meta=await prepareMedia(env.hq.uploads.get(upload.id)!,{url:`http://127.0.0.1:${(server.address() as any).port}`,token:'test'});
+    assert.equal(meta.transcript,true);assert.match(readFileSync(meta.readable![0]!,'utf8'),/Transcript survives/);assert.equal(meta.waveform,undefined);
+  }finally{if(previous===undefined)delete process.env.MEDIA_FFMPEG;else process.env.MEDIA_FFMPEG=previous;await new Promise<void>(resolve=>server.close(()=>resolve()));await env.cleanup();rmSync(dir,{recursive:true,force:true});}
 });

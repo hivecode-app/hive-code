@@ -73,7 +73,8 @@ Future<void> saveSession(Session s) async {
   final p = await SharedPreferences.getInstance();
   final old = p.getString(kHqUrl);
   if (old != null && old.isNotEmpty) {
-    for (final key in p.getKeys().where((k) => k.startsWith('draft:') || k == 'outbox').toList()) {
+    for (final key
+        in p.getKeys().where((k) => k.startsWith('draft:') || k == 'outbox' || k == 'media-uploads' || k.startsWith('media-draft:') || k.startsWith('media-answer:')).toList()) {
       final value = p.getString(key);
       final scoped = 'company:$old:$key';
       if (value != null && !p.containsKey(scoped)) await p.setString(scoped, value);

@@ -1,4 +1,5 @@
 import 'package:agent_company/l10n/ui_copy.dart';
+
 // Domain model of the app. Shapes follow docs/app/chat.md §8 (ChatItem) and the hq DTOs
 // in packages/shared (InboxItemDTO, AskDTO, BoardEntry). Rendering never reads hq JSON directly.
 import 'dart:typed_data';
@@ -8,7 +9,16 @@ enum Gender { f, m }
 /// The owner's and the manager's names, as hq reads them from org.yaml (`/api/board` `names`). hq's own
 /// texts are built from the same names (packages/shared/src/names.ts), so the app reads them back by them.
 class CompanyNames {
-  const CompanyNames({required this.ownerId, required this.owner, required this.ownerGender, this.placeholder = false, required this.managerId, required this.manager, required this.managerGender});
+  const CompanyNames({
+    required this.ownerId,
+    required this.owner,
+    required this.ownerGender,
+    this.placeholder = false,
+    required this.managerId,
+    required this.manager,
+    required this.managerGender,
+  });
+
   /// org.yaml `owner` ("ran"), not the protocol id `owner`.
   final String ownerId;
   final bool placeholder;
@@ -19,15 +29,22 @@ class CompanyNames {
   final Gender managerGender;
 
   /// Before hq has said (and from an hq too old to say): the defaults of names.ts.
-  static CompanyNames get fallback => CompanyNames(ownerId: 'owner', placeholder: true, owner: UiCopy.text(940), ownerGender: Gender.m, managerId: 'manager', manager: UiCopy.text(941), managerGender: Gender.m);
+  static CompanyNames get fallback =>
+      CompanyNames(ownerId: 'owner', placeholder: true, owner: UiCopy.text(940), ownerGender: Gender.m, managerId: 'manager', manager: UiCopy.text(941), managerGender: Gender.m);
 
   static CompanyNames fromJson(Object? j) {
     if (j is! Map) return fallback;
     final o = j['owner'], m = j['manager'];
     String str(Object? p, String key, String or) => p is Map && p[key] is String && (p[key] as String).isNotEmpty ? p[key] as String : or;
     Gender gender(Object? p) => p is Map && p['gender'] == 'female' ? Gender.f : Gender.m;
-    return CompanyNames(ownerId: str(o, 'id', fallback.ownerId), owner: str(o, 'name', fallback.owner), ownerGender: gender(o),
-        managerId: str(m, 'id', fallback.managerId), manager: str(m, 'name', fallback.manager), managerGender: gender(m));
+    return CompanyNames(
+      ownerId: str(o, 'id', fallback.ownerId),
+      owner: str(o, 'name', fallback.owner),
+      ownerGender: gender(o),
+      managerId: str(m, 'id', fallback.managerId),
+      manager: str(m, 'name', fallback.manager),
+      managerGender: gender(m),
+    );
   }
 
   /// The owner's form of a word: `o('סגר', 'סגרה')`.
@@ -66,16 +83,8 @@ Identity get kSystem => Identity(id: kSystemId, name: UiCopy.text(942), title: U
 String toName(String name) => name == kSystem.name ? UiCopy.text(944) : UiCopy.text(19, [name]);
 
 class Identity {
-  const Identity({
-    required this.id,
-    required this.name,
-    required this.title,
-    required this.teamId,
-    this.gender = Gender.m,
-    this.temp = false,
-    this.taskRef,
-    String? short,
-  }) : short = short ?? title;
+  const Identity({required this.id, required this.name, required this.title, required this.teamId, this.gender = Gender.m, this.temp = false, this.taskRef, String? short})
+    : short = short ?? title;
   final String id;
   final String name;
   final String title;
@@ -99,17 +108,7 @@ extension on String {
 }
 
 class Presence {
-  const Presence({
-    required this.status,
-    this.activity,
-    this.blockedOn,
-    this.shift,
-    this.shiftSince,
-    this.contextPct,
-    this.currentTask,
-    this.queued = 0,
-    this.machine,
-  });
+  const Presence({required this.status, this.activity, this.blockedOn, this.shift, this.shiftSince, this.contextPct, this.currentTask, this.queued = 0, this.machine});
   final WorkerStatus status;
 
   /// The machine its shift runs on (hq `shift.machine`): hq-host, or another server that takes task shifts.
@@ -129,16 +128,16 @@ class Presence {
   final int? contextPct;
 
   Presence copyWith({WorkerStatus? status, String? activity, bool clearActivity = false}) => Presence(
-        status: status ?? this.status,
-        activity: clearActivity ? null : (activity ?? this.activity),
-        blockedOn: blockedOn,
-        shift: shift,
-        shiftSince: shiftSince,
-        contextPct: contextPct,
-        currentTask: currentTask,
-        queued: queued,
-        machine: machine,
-      );
+    status: status ?? this.status,
+    activity: clearActivity ? null : (activity ?? this.activity),
+    blockedOn: blockedOn,
+    shift: shift,
+    shiftSince: shiftSince,
+    contextPct: contextPct,
+    currentTask: currentTask,
+    queued: queued,
+    machine: machine,
+  );
 }
 
 // ───────────────────────────── waiting for you (home) ─────────────────────────────
@@ -150,8 +149,7 @@ enum WaitKind { urgentProd, blockingAsk, go, login, failure, awaiting, softAsk }
 enum WaitState { open, pending, answered, notNow }
 
 class AskOption {
-  const AskOption({required this.id, required this.label, String? shortLabel, this.primary = false})
-      : shortLabel = shortLabel ?? label;
+  const AskOption({required this.id, required this.label, String? shortLabel, this.primary = false}) : shortLabel = shortLabel ?? label;
   final String id;
   final String label;
 
@@ -186,7 +184,7 @@ class WaitItem {
     this.links = const [],
     this.doneLine,
     this.state = WaitState.open,
-    String? answerLine,
+    this._answerLine,
     this.answerLineBuilder,
     this.createdAt,
     this.headline,
@@ -195,7 +193,8 @@ class WaitItem {
     this.managerNote,
     this.managerNoteBy,
     String? short,
-  }) : short = short ?? kicker, _answerLine = answerLine, _options = options; // ignore: prefer_initializing_formals
+  }) : short = short ?? kicker,
+       _options = options; // ignore: prefer_initializing_formals
 
   /// The first line in his words ("עדכון לאפליקציה: תמונות בצ'אט"); [body] is the details under it.
   /// Null on items from before workers gave one: the body is all there is.
@@ -249,7 +248,10 @@ class WaitItem {
   String? _answerLine;
   String? Function()? answerLineBuilder;
   String? get answerLine => answerLineBuilder?.call() ?? _answerLine;
-  set answerLine(String? value) { _answerLine = value; answerLineBuilder = null; }
+  set answerLine(String? value) {
+    _answerLine = value;
+    answerLineBuilder = null;
+  }
 
   bool get blocking => kind != WaitKind.softAsk && kind != WaitKind.awaiting;
 
@@ -332,20 +334,20 @@ class ConversationSummary {
   final bool muted;
 
   ConversationSummary copyWith({int? unread, bool? muted, Delivery? delivery}) => ConversationSummary(
-        identityId: identityId,
-        lastLine: lastLine,
-        time: time,
-        lastIsMine: lastIsMine,
-        unread: unread ?? this.unread,
-        diffStat: diffStat,
-        extra: extra,
-        pinned: pinned,
-        muted: muted ?? this.muted,
-        at: at,
-        delivery: delivery ?? this.delivery,
-        text: text,
-        msgId: msgId,
-      );
+    identityId: identityId,
+    lastLine: lastLine,
+    time: time,
+    lastIsMine: lastIsMine,
+    unread: unread ?? this.unread,
+    diffStat: diffStat,
+    extra: extra,
+    pinned: pinned,
+    muted: muted ?? this.muted,
+    at: at,
+    delivery: delivery ?? this.delivery,
+    text: text,
+    msgId: msgId,
+  );
 }
 
 /// How long "השתקה" lasts (hq `POST /api/conversations/:id/mute {for}`); [off] is "ביטול השתקה".
@@ -386,8 +388,11 @@ class UserMsg extends ChatItem {
     this.replyTo,
     this.attachments = const [],
     this.waitingOn,
+    this.submitted = false,
     super.seq,
   });
+  bool cancelled = false;
+  bool submitted;
   String text;
   Delivery delivery;
   Priority priority;
@@ -433,27 +438,62 @@ class Quote {
 }
 
 class Attachment {
-  const Attachment({required this.name, required this.bytes, required this.mime, this.id, this.data});
+  // Public id stays stable for DTO callers; the local transfer can finish later.
+  // ignore: prefer_initializing_formals
+  const Attachment({required this.name, required this.bytes, required this.mime, String? id, this.data, this.transfer, this.meta = const {}}) : _id = id;
   final String name;
   final int bytes;
   final String mime;
 
   /// hq's upload id (`GET /api/uploads/:id`); null until the image is uploaded.
-  final String? id;
+  final String? _id;
+  String? get id => _id ?? transfer?.id;
+  final UploadTransfer? transfer;
+  final Map<String, dynamic> meta;
 
   /// The bytes on this device: the preview before sending, and the bubble without a round trip.
   final Uint8List? data;
 
   bool get isImage => mime.startsWith('image/');
 
-  Attachment uploaded(String id) => Attachment(name: name, bytes: bytes, mime: mime, id: id, data: data);
+  Attachment uploaded(String id) => Attachment(name: name, bytes: bytes, mime: mime, id: id, data: data, meta: meta, transfer: transfer);
+
+  Map<String, dynamic> toJson() => {'name': name, 'bytes': bytes, 'mime': mime, 'id': id, if (meta.isNotEmpty) 'meta': meta, if (transfer != null) 'local': transfer!.key};
+  factory Attachment.fromJson(Map<String, dynamic> a, {Uint8List? data, UploadTransfer? transfer}) => Attachment(
+    name: a['name'] as String? ?? '',
+    bytes: (a['bytes'] as num?)?.toInt() ?? 0,
+    mime: a['mime'] as String? ?? 'application/octet-stream',
+    id: a['id'] as String?,
+    meta: {
+      ...(a['meta'] as Map?)?.cast<String, dynamic>() ?? const {},
+      if (a['chat'] is String || a['identity'] is String) 'source_chat': a['chat'] ?? a['identity'],
+      if (a['message'] is String) 'source_message': a['message'],
+      if (a['sender'] is String) 'source_sender': a['sender'],
+    },
+    data: data,
+    transfer: transfer,
+  );
+}
+
+/// Shared by a draft and its immutable send snapshot. Persisted after every accepted part.
+class UploadTransfer {
+  UploadTransfer(this.key, {this.session, this.id});
+  final String key;
+  String? session;
+  String? id;
+  Future<Uint8List?> Function()? read;
+  Future<Uint8List?> Function(int start, int end)? readRange;
+  double progress = 0;
+  bool running = false;
+  bool failed = false;
+  bool retryable = true;
 }
 
 /// The formats hq takes (packages/hq/src/uploads.ts), and what a keyboard may hand over.
 const kImageMimes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 
 /// hq's limit (uploads.ts UPLOAD_MAX_BYTES).
-const maxImageBytes = 25 * 1024 * 1024;
+const maxImageBytes = 200 * 1024 * 1024;
 
 /// The image type by its first bytes, the way hq decides; null when it is not one hq takes.
 String? imageMime(Uint8List b) {
@@ -466,7 +506,9 @@ String? imageMime(Uint8List b) {
 }
 
 class TextMsg extends ChatItem {
-  TextMsg({required super.id, required super.ts, required this.text, this.streaming = false, this.author, this.attachments = const [], super.seq});
+  TextMsg({required super.id, required super.ts, required this.text, this.streaming = false, this.author, this.artifact, this.attachments = const [], super.seq});
+
+  Map<String, dynamic>? artifact;
 
   /// Markdown (subset): paragraphs, lists, **bold**, `code`, ``` blocks ```, > quotes.
   String text;
@@ -498,7 +540,8 @@ class ToolCall {
 }
 
 class ToolLine {
-  const ToolLine({required this.icon, required String label, this.labelBuilder, this.trail, this.outcome = Outcome.ok, this.name, this.call}) : _label = label; // ignore: prefer_initializing_formals
+  const ToolLine({required this.icon, required String label, this.labelBuilder, this.trail, this.outcome = Outcome.ok, this.name, this.call})
+    : _label = label; // ignore: prefer_initializing_formals
   final String icon;
 
   /// LTR detail: a path, a search, a command.
@@ -516,13 +559,18 @@ class ToolLine {
 }
 
 class ToolGroup extends ChatItem {
-  ToolGroup({required super.id, required super.ts, required String summary, required this.tools, this.outcome = Outcome.ok, String? liveLabel, this.elapsed, super.seq}) : _summary = summary, _liveLabel = liveLabel; // ignore: prefer_initializing_formals
+  ToolGroup({required super.id, required super.ts, required this._summary, required this.tools, this.outcome = Outcome.ok, String? liveLabel, this.elapsed, super.seq})
+    : _liveLabel = liveLabel; // ignore: prefer_initializing_formals
 
   /// The Hebrew sentence (built by hq's summarizeTools; locally until hq ships it).
   String _summary;
   String Function()? summaryBuilder;
   String get summary => summaryBuilder?.call() ?? _summary;
-  set summary(String value) { _summary = value; summaryBuilder = null; }
+  set summary(String value) {
+    _summary = value;
+    summaryBuilder = null;
+  }
+
   final List<ToolLine> tools;
   Outcome outcome;
 
@@ -530,7 +578,11 @@ class ToolGroup extends ChatItem {
   String? _liveLabel;
   String? Function()? liveLabelBuilder;
   String? get liveLabel => liveLabelBuilder?.call() ?? _liveLabel;
-  set liveLabel(String? value) { _liveLabel = value; liveLabelBuilder = null; }
+  set liveLabel(String? value) {
+    _liveLabel = value;
+    liveLabelBuilder = null;
+  }
+
   String? elapsed;
 }
 
@@ -599,7 +651,20 @@ enum PrState { open, merged, closed }
 enum Check { none, running, ok, failed }
 
 class PrCard extends ChatItem {
-  PrCard({required super.id, required super.ts, required this.number, required this.title, this.state = PrState.open, this.ci = Check.none, this.review = Check.none, this.add = 0, this.del = 0, this.files = 0, this.fileList = const [], super.seq});
+  PrCard({
+    required super.id,
+    required super.ts,
+    required this.number,
+    required this.title,
+    this.state = PrState.open,
+    this.ci = Check.none,
+    this.review = Check.none,
+    this.add = 0,
+    this.del = 0,
+    this.files = 0,
+    this.fileList = const [],
+    super.seq,
+  });
   final int number;
   final String title;
   PrState state;
@@ -666,27 +731,21 @@ class GoCard extends AskCard {
     super.askId,
     super.ref,
     super.seq,
-  }) : super(question: details, options:  [
-          AskOption(id: 'go', label: 'GO', primary: true),
-          AskOption(id: 'not_now', label: UiCopy.text(508)),
-        ]);
+  }) : super(
+         question: details,
+         options: [
+           AskOption(id: 'go', label: 'GO', primary: true),
+           AskOption(id: 'not_now', label: UiCopy.text(508)),
+         ],
+       );
 }
 
 /// A task he is asked to check (task 986), in its worker's conversation: "עובד" or "לא עובד". Its askId is `check:<inbox id>`.
 class CheckCard extends AskCard {
   @override
   List<AskOption> get options => kCheckOptions;
-  CheckCard({
-    required super.id,
-    required super.ts,
-    required super.from,
-    super.headline,
-    required String details,
-    super.state,
-    super.answer,
-    super.askId,
-    super.seq,
-  }) : super(question: details, blocking: false, options: kCheckOptions);
+  CheckCard({required super.id, required super.ts, required super.from, super.headline, required String details, super.state, super.answer, super.askId, super.seq})
+    : super(question: details, blocking: false, options: kCheckOptions);
 }
 
 /// The answers on a task to check: it works, it doesn't, or it isn't relevant any more (#297).
@@ -782,7 +841,8 @@ class UnknownItem extends ChatItem {
 enum LivePhase { idle, starting, thinking, writing, tool, compacting, stopped }
 
 class LiveState {
-  const LiveState({this.phase = LivePhase.idle, String? label, this.labelBuilder, this.seconds, this.runningCommand, this.stoppedAt}) : _label = label; // ignore: prefer_initializing_formals
+  const LiveState({this.phase = LivePhase.idle, String? label, this.labelBuilder, this.seconds, this.runningCommand, this.stoppedAt})
+    : _label = label; // ignore: prefer_initializing_formals
   final LivePhase phase;
   final String? _label;
   final String? Function()? labelBuilder;
@@ -918,7 +978,17 @@ enum OpenTaskState { running, queued, waitingForYou, blocked }
 
 /// What a worker promised for a task (hq `GET /api/estimates`, one row): the app shows it next to the task.
 class Estimate {
-  const Estimate({required this.task, required this.identity, required this.createdAt, required this.dueAt, required this.estimatedMin, this.messageId, this.closedAt, this.actualMin, this.overdueSwept = false});
+  const Estimate({
+    required this.task,
+    required this.identity,
+    required this.createdAt,
+    required this.dueAt,
+    required this.estimatedMin,
+    this.messageId,
+    this.closedAt,
+    this.actualMin,
+    this.overdueSwept = false,
+  });
   final int task;
 
   /// The worker who promised.
@@ -1022,16 +1092,18 @@ class OpenTask {
     for (final t in tickets) {
       if (t.doneAt != null) continue;
       final queued = t.group == TicketGroup.queued;
-      out.add(OpenTask(
-        id: int.tryParse(t.number.replaceFirst(RegExp(r'^\D+'), '')) ?? 0,
-        title: plainTitle(t.title),
-        project: t.project,
-        openedBy: t.openedBy ?? leadOf[t.project],
-        worker: queued ? null : t.assigneeId,
-        state: queued ? OpenTaskState.queued : (t.group == TicketGroup.waiting ? OpenTaskState.waitingForYou : OpenTaskState.running),
-        position: queued ? ++place : null,
-        since: t.startedAt,
-      ));
+      out.add(
+        OpenTask(
+          id: int.tryParse(t.number.replaceFirst(RegExp(r'^\D+'), '')) ?? 0,
+          title: plainTitle(t.title),
+          project: t.project,
+          openedBy: t.openedBy ?? leadOf[t.project],
+          worker: queued ? null : t.assigneeId,
+          state: queued ? OpenTaskState.queued : (t.group == TicketGroup.waiting ? OpenTaskState.waitingForYou : OpenTaskState.running),
+          position: queued ? ++place : null,
+          since: t.startedAt,
+        ),
+      );
     }
     const rank = {OpenTaskState.running: 0, OpenTaskState.waitingForYou: 1, OpenTaskState.queued: 2, OpenTaskState.blocked: 3};
     return out..sort((a, b) => rank[a.state]! - rank[b.state]!);

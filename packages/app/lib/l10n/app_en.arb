@@ -2747,7 +2747,7 @@
       }
     }
   },
-  "ui892": "The image could not upload. The message was not sent. Try again.",
+  "ui892": "Files could not upload. The message was not sent. Try again.",
   "ui893": "This server does not support retracting messages yet. It will be delivered as usual.",
   "ui894": "This worker has no active work to stop.",
   "ui895": "This server does not support team notes from the app yet.",
@@ -2874,7 +2874,7 @@
       }
     }
   },
-  "ui935": "You can attach up to {p0} images to a message.",
+  "ui935": "You can attach up to {p0} files to a message.",
   "@ui935": {
     "placeholders": {
       "p0": {
@@ -3085,5 +3085,249 @@
   "progressStagePending": "Not reached yet",
   "progressTeamUpdating": "Updating team…",
   "progressTeamStale": "Team refresh failed. Showing saved information.",
-  "progressTeamRetry": "Team unavailable. Retry"
+  "progressTeamRetry": "Team unavailable. Retry",
+  "mediaFiles": "Files",
+  "mediaGallery": "Gallery",
+  "mediaCamera": "Camera",
+  "mediaVideo": "Record video",
+  "mediaOriginal": "Original",
+  "mediaOriginalHint": "Send photos at full size",
+  "mediaScreenshot": "Latest screenshot",
+  "mediaRemove": "Remove {name}",
+  "@mediaRemove": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaReady": "Ready",
+  "mediaUploading": "Uploading {percent}%",
+  "@mediaUploading": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaFailed": "Not uploaded",
+  "mediaRetry": "Try again",
+  "mediaLimit": "You can attach up to 20 files. Other files and your text are kept.",
+  "mediaTooLarge": "{name} exceeds 200MB. Other files and your text are kept.",
+  "@mediaTooLarge": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaReadFailed": "Could not read {name}. Your draft is kept.",
+  "@mediaReadFailed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaWithout": "Send without {name}?",
+  "@mediaWithout": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaWithoutAction": "Send without this file",
+  "mediaWaiting": "Waiting for files to upload",
+  "mediaCancel": "Cancel sending",
+  "mediaSave": "Save original",
+  "mediaShare": "Share original",
+  "mediaSaved": "Original saved",
+  "mediaShared": "Share completed",
+  "mediaCancelled": "Cancelled",
+  "mediaActionFailed": "Could not complete the action. Try again.",
+  "mediaLoading": "Loading file…",
+  "mediaUnavailable": "This file is not on this device. Connect to download the original.",
+  "mediaPreviewFailed": "Preview unavailable. You can save the original.",
+  "mediaInChat": "In chat",
+  "mediaPrevious": "Previous",
+  "mediaNext": "Next",
+  "mediaZoomIn": "Zoom in",
+  "mediaZoomOut": "Zoom out",
+  "mediaPage": "Page {page} of {total}",
+  "@mediaPage": {
+    "placeholders": {
+      "page": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaCount": "{index} of {total}",
+  "@mediaCount": {
+    "placeholders": {
+      "index": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaPages": "{count} pages",
+  "@mediaPages": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaSheets": "{count} sheets",
+  "@mediaSheets": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaSlides": "{count} slides",
+  "@mediaSlides": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaEntries": "{count} files",
+  "@mediaEntries": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaSearch": "Search in document",
+  "mediaSearchEmpty": "No text matches. Scanned documents need a text version.",
+  "mediaImages": "Images and video",
+  "mediaDocuments": "Documents",
+  "mediaApps": "Apps",
+  "mediaAudio": "Audio",
+  "mediaOther": "Other files",
+  "mediaEmpty": "No files in this conversation yet.",
+  "mediaFilteredEmpty": "No files match this filter.",
+  "mediaFilesFailed": "Files could not load. Try again.",
+  "mediaReset": "Clear filter",
+  "mediaPlay": "Play",
+  "mediaPause": "Pause",
+  "mediaReply": "Reply about file",
+  "mediaForward": "Forward to worker",
+  "mediaCopy": "Copy file name",
+  "mediaSharedTo": "Send to {name}",
+  "@mediaSharedTo": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaShareReview": "Review shared files",
+  "mediaAddToDraft": "Add to this draft",
+  "mediaVersion": "Version {version}",
+  "@mediaVersion": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaPrivate": "Only you",
+  "mediaNetwork": "Uses network",
+  "mediaNoNetwork": "No network",
+  "mediaExpires": "Kept until {date}",
+  "@mediaExpires": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaExpired": "Content expired. The card remains in your chat.",
+  "mediaAskAgain": "Ask for a new copy",
+  "mediaKeep": "Keep",
+  "mediaKept": "Kept without expiration",
+  "mediaNewVersion": "A newer version is available",
+  "mediaOpenWindow": "Open in separate window",
+  "mediaCompare": "Compare versions",
+  "mediaBlockedNavigation": "The page tried to leave this app.",
+  "mediaRefreshAccess": "Refresh access",
+  "mediaArtifactReply": "Regarding {id}, version {version}: ",
+  "@mediaArtifactReply": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      },
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaAskCopy": "Please share {id}, version {version}, again.",
+  "@mediaAskCopy": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      },
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaOpen": "Open file",
+  "mediaMore": "File actions",
+  "mediaTranscript": "Transcript",
+  "mediaTask": "Task {id}",
+  "mediaReduced": "Reduced photo",
+  "mediaSender": "Sender",
+  "mediaDate": "Date",
+  "@mediaTask": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaCancelAction": "Cancel",
+  "mediaForwardedDraft": "Added to {name}’s draft",
+  "@mediaForwardedDraft": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaAllFiles": "All files",
+  "mediaYou": "You",
+  "mediaCancelMessage": "Cancel message and keep draft",
+  "mediaPermissionDenied": "Allow access to {source} in device settings, then try again. Your draft is kept.",
+  "@mediaPermissionDenied": {
+    "placeholders": {
+      "source": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaPhotoAccess": "Allow photo access",
+  "mediaScreenshotAccessHint": "To find the latest screenshot",
+  "mediaNoRecentScreenshot": "No screenshot from the past 10 minutes was found.",
+  "mediaPercent": "{percent}%",
+  "@mediaPercent": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaUploadFailedShort": "Failed"
 }

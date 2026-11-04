@@ -1,3 +1,4 @@
+import 'package:agent_company/data/upload_files.dart';
 // Test harness: real fonts (Heebo, JetBrains Mono, Material Symbols Rounded) so goldens show
 // what the phone shows, frozen motion, the demo backend at 14:06 on 20/10/2026.
 import 'package:agent_company/data/fake_backend.dart';
@@ -55,7 +56,7 @@ Future<AppStore> pumpApp(WidgetTester tester, {Widget? home, bool dark = false, 
   tester.platformDispatcher.textScaleFactorTestValue = textScale;
   addTearDown(tester.view.reset);
   addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-  final store = AppStore(FakeBackend(simulate: false, now: kDemoNow));
+  final store = AppStore(FakeBackend(simulate: false, now: kDemoNow), uploadFiles: MemoryUploadFiles());
   await store.start();
   await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: home));
   await tester.pump();
@@ -72,7 +73,12 @@ class _HomeAlone extends StatelessWidget {
   Widget build(BuildContext context) {
     final d = StoreScope.of(context).data;
     if (d == null) return const SizedBox.shrink();
-    return Scaffold(body: ListView(padding: EdgeInsets.zero, children: [HomeV2(recipe: d.home, data: d, now: CompanyTime.now())]));
+    return Scaffold(
+      body: ListView(
+        padding: EdgeInsets.zero,
+        children: [HomeV2(recipe: d.home, data: d, now: CompanyTime.now())],
+      ),
+    );
   }
 }
 

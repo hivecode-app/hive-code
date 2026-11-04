@@ -18,6 +18,16 @@ export interface ShowArgs { path?: string; html?: string; title: string; id?: st
 export interface ShowResult { id: string; version: number; url_in_app: string; url: string; warnings?: string[] }
 const escape = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
+/** App DTO: local paths, operation ids and signing keys never cross this boundary. */
+export function artifactInfo(store: Store, id: string) {
+  const a = store.db.prepare('SELECT id, owner, task_id, title, latest, expires_at, pinned, expired, message_id FROM artifacts WHERE id=?').get(id) as Omit<Artifact, 'thumb'> | undefined;
+  if (!a) return null;
+  const versions = store.db.prepare(`SELECT v.version, v.title, v.note, v.network, o.received_at AS created_at
+    FROM artifact_versions v LEFT JOIN ops o ON o.id=v.op_id WHERE v.artifact=? AND v.ready=1 ORDER BY v.version DESC`).all(id) as { version:number; title:string; note:string; network:number; created_at:number|null }[];
+  return { ...a, pinned: !!a.pinned, expired: !!a.expired || !a.pinned && a.expires_at <= store.now(), versions: versions.map(v => ({...v, network: !!v.network})) };
+}
+export type ArtifactInfo = NonNullable<ReturnType<typeof artifactInfo>>;
+
 export class Artifacts {
   private key: Buffer;
   private store: Store;
@@ -146,6 +156,7 @@ export class Artifacts {
     const v=this.version(id,n);
     if (!v) throw new UploadError(404,'no such artifact version');
     if (!v.ready) throw new UploadError(409,'artifact version not ready');
+    if (!existsSync(join(v.path,'index.html'))) throw new UploadError(410,'artifact content removed');
     return this.link(id,n);
   }
   private link(id:string,n:number): ShowResult {
@@ -170,7 +181,7 @@ export class Artifacts {
     return { 'content-security-policy': `default-src 'self' 'unsafe-inline' data: blob:${network ? ' https:' : ''}; form-action 'none'; base-uri 'none'; frame-ancestors ${app}; sandbox allow-scripts`,
       'access-control-allow-origin': '*', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'x-dns-prefetch-control': 'off', 'cache-control': 'no-store' };
   }
-  keep(id: string, pinned: boolean): void { if (!this.get(id)) throw new UploadError(404,'no such artifact'); this.store.db.prepare('UPDATE artifacts SET pinned = ? WHERE id = ?').run(pinned ? 1 : 0,id); }
+  keep(id: string, pinned: boolean): void { const a=this.get(id); if (!a) throw new UploadError(404,'no such artifact'); if(pinned && (a.expired || !a.pinned && a.expires_at<=this.store.now())) throw new UploadError(410,'artifact expired'); this.store.db.prepare('UPDATE artifacts SET pinned = ? WHERE id = ?').run(pinned ? 1 : 0,id); this.store.emit('artifact.updated','owner',{artifact:artifactInfo(this.store,id)}); }
   sweep(): void {
     const rows = this.store.db.prepare('SELECT * FROM artifacts WHERE pinned=0 AND expired=0 AND expires_at<=?').all(this.store.now()) as Artifact[];
     for (const a of rows) {

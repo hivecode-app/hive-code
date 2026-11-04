@@ -1,8 +1,8 @@
-import 'package:agent_company/l10n/ui_copy.dart';
 // Glue between the Android layer (native_bridge.dart) and the app: routes from notifications,
 // bubbles and the widget; the launcher badge = things waiting for you (APP-SPEC §5.6); and the
 // share target ("שתף אל… ← עובד", chat.md §3); the in-app update (app_update.dart). No-ops on the web.
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,10 +11,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/backend_select.dart';
 import '../data/store.dart';
+import '../l10n/app_localizations.dart';
+import '../ui/media/share_review.dart';
 import '../model/models.dart';
-import '../theme/tokens.dart';
 import '../ui/chat/chat_screen.dart';
-import '../ui/common.dart';
 import '../ui/decisions/decisions_screen.dart' show DecisionStack, openDecisions;
 import '../ui/nav.dart';
 import 'app_update.dart';
@@ -124,7 +124,8 @@ class NativeGlue {
       navigatorKey.currentState!.popUntil((r) => r.isFirst);
       Nav.chat(ctx, parts[1]);
     } else if (parts.length == 2 && parts[0] == 'handoff') {
-      final w = store.data?.waiting.where((w) => '${w.inboxId}' == parts[1] || w.id == parts[1] || (w.kind == WaitKind.login && w.from == parts[1])).firstOrNull ??
+      final w =
+          store.data?.waiting.where((w) => '${w.inboxId}' == parts[1] || w.id == parts[1] || (w.kind == WaitKind.login && w.from == parts[1])).firstOrNull ??
           store.data?.waiting.where((w) => w.kind == WaitKind.login).firstOrNull;
       if (w != null) Nav.handoff(ctx, w);
     } else {
@@ -137,44 +138,38 @@ class NativeGlue {
     final ctx = _ctx;
     final d = store.data;
     if (ctx == null || d == null) return;
-    var to = s.identityId;
-    // Picker: Yoav first, then the recent conversations (chat.md §3 share target).
-    to ??= await showModalBottomSheet<String>(
+    final l = AppLocalizations.of(ctx);
+    final to = await showModalBottomSheet<String>(
       context: ctx,
-      backgroundColor: ctx.p.bg,
-      showDragHandle: true,
-      builder: (c) => SafeArea(
-        child: ListView(shrinkWrap: true, children: [
-          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text(UiCopy.text(963), style: T.name.copyWith(color: c.p.text))),
-          for (final conv in [...d.conversations.where((x) => x.pinned), ...d.conversations.where((x) => !x.pinned)])
-            ListTile(
-              leading: Monogram.of(d, conv.identityId, size: AvSize.sm),
-              title: Text('${d.who(conv.identityId).name} · ${d.who(conv.identityId).title}', style: T.row2.copyWith(color: c.p.text)),
-              onTap: () => Navigator.pop(c, conv.identityId),
-            ),
-        ]),
-      ),
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => ShareReview(payload: s, store: store),
     );
     if (to == null) return;
-    if (s.text != null && s.text!.isNotEmpty) {
-      final chat = d.chats[to];
-      final draft = chat == null || chat.draft.isEmpty ? s.text! : '${chat.draft}\n${s.text}';
-      store.setDraft(to, draft);
+    if (s.text?.isNotEmpty == true) {
+      final current = d.chats[to]?.draft ?? '';
+      store.setDraft(to, current.isEmpty ? s.text! : '$current\n${s.text}');
     }
-    if (s.imagePath != null) {
-      // Into the composer's preview, like an attached one: he adds a line and sends, or removes it.
+    final files = [...s.files, if (s.imagePath != null) SharedFile(path: s.imagePath!, name: s.imagePath!.split('/').last, mime: 'application/octet-stream', bytes: 0)];
+    for (final file in files) {
       try {
-        final f = XFile(s.imagePath!);
-        final bytes = await f.readAsBytes();
-        final mime = imageMime(bytes);
-        if (mime == null) {
-          store.notice(UiCopy.text(964));
+        final f = XFile(file.path), size = await XFile(file.path).length();
+        if (size > maxImageBytes) {
+          store.notice(l.mediaTooLarge(file.name));
           store.touch();
-        } else {
-          store.addImage(to, Attachment(name: f.name, bytes: bytes.length, mime: mime, data: bytes));
+          continue;
         }
+        final prefix = BytesBuilder(copy: false);
+        await for (final part in f.openRead(0, size.clamp(0, 8192))) {
+          prefix.add(part);
+        }
+        await store.addImage(
+          to,
+          Attachment(name: file.name, bytes: size, mime: imageMime(prefix.takeBytes()) ?? file.mime, meta: const {'app_source': 'share', 'app_original': true}),
+          sourcePath: file.path,
+        );
       } catch (_) {
-        store.error = UiCopy.text(965);
+        store.notice(l.mediaReadFailed(file.name));
         store.touch();
       }
     }

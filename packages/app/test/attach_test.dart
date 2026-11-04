@@ -29,7 +29,11 @@ void main() {
   });
 
   testWidgets('an image waits above the field, can be removed, and goes with the message', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 1500), home: const ChatScreen(identityId: 'dana'));
+    final store = await pumpApp(
+      tester,
+      size: const Size(342, 1500),
+      home: const ChatScreen(identityId: 'dana'),
+    );
     await tester.enterText(find.byType(TextField), '');
     await tester.pump();
     expect(find.bySemanticsLabel('הכתבה'), findsOneWidget, reason: 'empty: the round button is the mic');
@@ -39,13 +43,13 @@ void main() {
     // Image decoding is real async work: done outside the fake clock, so the golden shows the thumbnail.
     await tester.runAsync(() => precacheImage(MemoryImage(png), tester.element(find.byType(ChatScreen))));
     await tester.pump();
-    expect(find.byTooltip('הסרה'), findsOneWidget);
+    expect(find.byTooltip('להסיר את צילום.png'), findsOneWidget);
     expect(find.bySemanticsLabel('שליחה'), findsOneWidget, reason: 'an image alone can be sent');
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/chat_attach_preview.png'));
 
-    await tester.tap(find.byTooltip('הסרה'));
+    await tester.tap(find.byTooltip('להסיר את צילום.png'));
     await tester.pump();
-    expect(find.byTooltip('הסרה'), findsNothing);
+    expect(find.byTooltip('להסיר את צילום.png'), findsNothing);
     expect(store.images('dana'), isEmpty);
 
     store.addImage('dana', image('א.png'));
@@ -69,7 +73,14 @@ void main() {
       token: 't',
       client: MockClient((req) async {
         reqs.add(req);
-        if (req.url.path == '/api/uploads') return http.Response(jsonEncode({'upload': {'id': 'u-${++n}'}}), 200);
+        if (req.url.path == '/api/uploads') {
+          return http.Response(
+            jsonEncode({
+              'upload': {'id': 'u-${++n}'},
+            }),
+            200,
+          );
+        }
         return http.Response('{}', 200);
       }),
     );
@@ -113,8 +124,13 @@ void main() {
 
   testWidgets('a worker\'s message shows its images in a grid; a tap opens them full screen, a swipe moves on', (tester) async {
     final msg = TextMsg(id: 'msg:m-mock', ts: DateTime(2026, 10, 20), text: 'המוקאפ', attachments: [for (var i = 1; i <= 7; i++) image('$i.png').uploaded('u-$i')]);
-    await pumpApp(tester, home: Scaffold(body: Center(child: TextBubble(msg: msg))));
-    expect(find.descendant(of: find.byType(TextBubble), matching: find.byType(AttachmentImage)), findsNWidgets(7));
+    await pumpApp(
+      tester,
+      home: Scaffold(
+        body: Center(child: TextBubble(msg: msg)),
+      ),
+    );
+    expect(find.descendant(of: find.byType(TextBubble), matching: find.byType(AttachmentImage)), findsNWidgets(4));
     expect(find.textContaining('המוקאפ', findRichText: true), findsWidgets);
 
     await tester.tap(find.byType(AttachmentImage).at(2));
@@ -127,7 +143,12 @@ void main() {
   });
 
   test('history: a stored message brings its images back, and an image alone is "תמונה" in the list', () {
-    final m = {'body': '', 'attachments': [{'id': 'u-1', 'name': 'a.png', 'mime': 'image/png', 'bytes': 10}]};
+    final m = {
+      'body': '',
+      'attachments': [
+        {'id': 'u-1', 'name': 'a.png', 'mime': 'image/png', 'bytes': 10},
+      ],
+    };
     expect(attachmentsOf(m).single.id, 'u-1');
     expect(lastLineOf(m), 'תמונה');
     expect(lastLineOf({'body': 'שלום\nעוד', 'attachments': null}), 'שלום');

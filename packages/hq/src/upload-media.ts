@@ -1,5 +1,5 @@
 import { runMediaTool } from './media-process.ts';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,8 @@ import type { DictateConfig } from './dictate.ts';
 export interface UploadMeta {
   detected_mime?: string;
   width?: number; height?: number; pages?: number; duration?: number; sheets?: number; slides?: number; files?: number;
+  waveform?: number[];
+  transcript?: boolean;
   sheet_rows?: { name: string; rows: number }[];
   thumb?: string; readable?: string[]; error?: string;
 }
@@ -34,6 +36,14 @@ export async function prepareMedia(u: Upload, dictate?: DictateConfig): Promise<
     } else if (u.mime.startsWith('video/') || u.mime.startsWith('audio/')) {
       const probe = JSON.parse(await run('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', u.path])) as { format?: { duration?: string }; streams?: { codec_type: string; width?: number; height?: number }[] };
       meta.duration = Number(probe.format?.duration);
+      if (u.mime.startsWith('audio/') && meta.duration && meta.duration <= 3600) {
+        const pcm = join(dir,'waveform.pcm');
+        try {
+          await run('ffmpeg',['-nostdin','-y','-protocol_whitelist','file','-i',u.path,'-vn','-ac','1','-ar','1000','-t','3600','-f','s16le',pcm]);
+          const samples=readFileSync(pcm), count=Math.floor(samples.length/2);
+          meta.waveform=Array.from({length:48},(_,bin)=>{let peak=0;for(let n=Math.floor(bin*count/48);n<Math.floor((bin+1)*count/48);n++)peak=Math.max(peak,Math.abs(samples.readInt16LE(n*2)));return Math.round(peak/32768*1000)/1000;});
+        } catch (err) { errors.push(`waveform: ${(err as Error).message.slice(0,200)}`); } finally {rmSync(pcm,{force:true});}
+      }
       const video = probe.streams?.find((s) => s.codec_type === 'video');
       if (video) {
         meta.width = video.width; meta.height = video.height;
@@ -51,6 +61,7 @@ export async function prepareMedia(u: Upload, dictate?: DictateConfig): Promise<
         const result = await response.json() as { text?: string; transcript?: string };
         const text = result.text ?? result.transcript;
         if (!text) throw new Error('transcription returned no text');
+        meta.transcript = true;
         const transcript = join(dir, 'transcript.txt'); writeFileSync(transcript, text, { mode: 0o400 });
         meta.readable = [...(meta.readable ?? []), transcript];
       } else errors.push('transcription is not configured');

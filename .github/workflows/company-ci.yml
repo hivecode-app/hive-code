@@ -34,12 +34,12 @@ jobs:
       - name: media and artifact test tools
         run: |
           missing=0
-          for tool in python3 ffmpeg ffprobe pdfinfo pdftoppm libreoffice caddy; do
+          for tool in python3 ffmpeg ffprobe pdfinfo pdftoppm libreoffice caddy clang; do
             command -v "$tool" >/dev/null || missing=1
           done
           if [ "$missing" -eq 1 ]; then
             sudo -n apt-get update
-            sudo -n apt-get install -y --no-install-recommends python3 ffmpeg poppler-utils libreoffice-writer libreoffice-calc caddy
+            sudo -n apt-get install -y --no-install-recommends python3 ffmpeg poppler-utils libreoffice-writer libreoffice-calc caddy clang
           fi
       - name: test
         run: npm test

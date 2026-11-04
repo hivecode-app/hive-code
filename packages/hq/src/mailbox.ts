@@ -3,6 +3,7 @@
 //   resting/dead → request a shift (resume) and deliver as its first prompt.
 // No `delivered` in 60s → one retry with resurrection → visible failure in the sender's inbox and the owner's.
 // msg_id is the idempotency key end to end (API, host `send`, retries after crash).
+import { artifactInfo, type ArtifactInfo } from './artifacts.ts';
 import { ownerSystemCopy } from './system-copy.ts';
 import { randomUUID } from 'node:crypto';
 import { g, loadNames, OWNER, pre, type CompanyNames, type AskDTO, type InboxItemDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency, type WaitingOn } from '@company/shared';
@@ -47,6 +48,7 @@ export interface MessageRow {
   text_ref: string | null;
   /** Images the owner attached (uploads.ts). Stored as JSON; get() and list() return the array. */
   attachments: AttachmentDTO[] | null;
+  artifact?: ArtifactInfo;
   /** His `now` waits for this running tool (not safe to stop); the bubble says so until the worker reads it. */
   waiting_on: WaitingOn | null;
   /** 1 = for the record only: never wakes the recipient, goes in with its next turn or shift (heldFyi). */
@@ -208,6 +210,8 @@ export class Mailbox {
   }
 
   private currentAttachments(m:MessageRow):MessageRow {
+    const artifact = m.id.startsWith('artifact-') ? artifactInfo(this.store,m.id.slice(9)) : null;
+    if (artifact) m = {...m, artifact};
     if(!m.attachments?.length)return m;
     return {...m,attachments:m.attachments.map(a=>{const u=this.uploads?.get(a.id);return u?toDTO(u):a;})};
   }

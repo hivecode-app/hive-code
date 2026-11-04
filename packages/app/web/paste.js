@@ -1,31 +1,44 @@
-// Pasting an image into the chat (web build). Flutter's text field only knows text, so the page
-// catches the paste itself: when the clipboard holds an image and no plain text, the image goes to
-// the open composer (lib/native/paste_web.dart) and the field gets nothing. Text, or text that comes
-// with a picture of itself (Word, a web page), pastes as text, as before.
-(function () {
-  var handler = null;
+// Paste/drop belongs to the composer that received the event, even if file reading finishes
+// after a chat switch. Await local staging before reading another large original.
+(() => {
+  let handler = null;
   window.companyPaste = {
-    set: function (fn) { handler = fn; },
-    clear: function (fn) { if (handler === fn) handler = null; },
+    set: fn => { handler = fn; },
+    clear: fn => { if (handler === fn) handler = null; },
   };
-  document.addEventListener('paste', function (e) {
-    var data = e.clipboardData;
-    if (!handler || !data) return;
-    if ((data.getData('text/plain') || '').trim()) return;
-    var files = [];
-    for (var i = 0; i < data.items.length; i++) {
-      var it = data.items[i];
-      if (it.kind === 'file' && it.type.indexOf('image/') === 0) {
-        var f = it.getAsFile();
-        if (f) files.push(f);
+  async function deliver(files, fn) {
+    for (const file of files.slice(0, 20)) {
+      if (file.size > 200 * 1024 * 1024) {
+        try { await fn(new Uint8Array(), 'too-large', file.name); } catch { /* The next valid file still belongs to this event. */ }
+        continue;
+      }
+      let path, release = true;
+      try {
+        path = URL.createObjectURL(file);
+        release = await fn(new Uint8Array(), file.type, file.name || '', path, file.size) !== false;
+      } catch (_) {
+        try { await fn(new Uint8Array(), 'read-failed', file.name); } catch { /* A closed composer must not drop the remaining originals. */ }
+      } finally {
+        if (path && release) URL.revokeObjectURL(path);
       }
     }
-    if (!files.length) return;
-    e.preventDefault();
-    e.stopPropagation();
-    var fn = handler;
-    files.forEach(function (f) {
-      f.arrayBuffer().then(function (buf) { fn(new Uint8Array(buf), f.type, f.name || ''); });
-    });
+    if (files.length > 20) { try { await fn(new Uint8Array(), 'too-many', ''); } catch { /* The original composer may have closed. */ } }
+  }
+  document.addEventListener('dragover', event => {
+    if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
+  });
+  document.addEventListener('drop', async event => {
+    if (!event.dataTransfer?.files.length) return;
+    event.preventDefault();
+    if (handler) await deliver(Array.from(event.dataTransfer.files), handler);
+  });
+  document.addEventListener('paste', async event => {
+    const data = event.clipboardData;
+    if (!handler || !data) return;
+    const files = Array.from(data.items).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean);
+    // Word/web selections often contain an image rendition of their text; keep those as text.
+    if (!files.length || (data.getData('text/plain') || '').trim() && files.every(file => file.type.startsWith('image/'))) return;
+    event.preventDefault(); event.stopPropagation();
+    await deliver(files, handler);
   }, true);
 })();

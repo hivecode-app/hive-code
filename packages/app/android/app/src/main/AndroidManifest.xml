@@ -12,6 +12,9 @@
     <!-- Android 12+: once the app installed itself, later updates may skip the confirm dialog. -->
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
     <application
         android:label="החברה"
         android:supportsRtl="true"
@@ -48,7 +51,8 @@
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="image/*" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <data android:mimeType="*/*" />
             </intent-filter>
             <!-- The pairing link (hq's /pair page, packages/hq/src/pairing.ts): agentcompany://pair?url=<link>.
                  A custom scheme: Android can only verify https links for hosts known at build time, and

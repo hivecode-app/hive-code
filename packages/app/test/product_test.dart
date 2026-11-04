@@ -1,4 +1,7 @@
+import 'package:agent_company/data/upload_files.dart';
+
 import 'dart:async';
+
 import 'package:agent_company/theme/icons.dart';
 import 'package:agent_company/data/fake_backend.dart';
 import 'package:agent_company/data/store.dart';
@@ -24,6 +27,7 @@ Future<AppStore> productApp(
   WidgetTester tester, {
   String language = 'en',
   bool dark = false,
+  bool settle = true,
   double scale = 1,
   Size size = const Size(390, 844),
   Widget? home,
@@ -39,11 +43,11 @@ Future<AppStore> productApp(
   tester.platformDispatcher.textScaleFactorTestValue = scale;
   addTearDown(tester.view.reset);
   addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-  final store = AppStore(backend ?? FakeBackend(simulate: false, now: kDemoNow));
+  final store = AppStore(backend ?? FakeBackend(simulate: false, now: kDemoNow), uploadFiles: MemoryUploadFiles());
   await store.start();
   prepare?.call(store);
   await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: home));
-  await tester.pumpAndSettle();
+  if (settle) await tester.pumpAndSettle();
   addTearDown(() async {
     await tester.pumpWidget(const SizedBox.shrink());
     store.dispose();
@@ -73,13 +77,18 @@ class OfflineBackend extends FakeBackend {
 class SlowBackend extends FakeBackend {
   SlowBackend(this.ready) : super(simulate: false, now: kDemoNow);
   final Completer<void> ready;
-  @override Future<void> start() async { await ready.future; await super.start(); }
+  @override
+  Future<void> start() async {
+    await ready.future;
+    await super.start();
+  }
 }
 
 class FailedStartupBackend extends FakeBackend {
   FailedStartupBackend() : super(simulate: false, now: kDemoNow);
   int starts = 0;
-  @override Future<void> start() async {
+  @override
+  Future<void> start() async {
     if (starts++ == 0) throw StateError('startup unavailable');
     await super.start();
   }
@@ -321,7 +330,8 @@ void main() {
     await tester.pump();
     expect(find.byType(ProductShell), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    ready.complete(); await tester.pumpAndSettle();
+    ready.complete();
+    await tester.pumpAndSettle();
     expect(find.byType(ConversationsScreen), findsOneWidget);
     expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).locale, const Locale('he'));
     await tester.pumpWidget(const SizedBox.shrink());
@@ -344,20 +354,24 @@ void main() {
   });
   testWidgets('advanced overview opens the manager recipe from the new interface', (tester) async {
     final store = await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
-    await store.preferences.setAdvanced(true); await tester.pump();
+    await store.preferences.setAdvanced(true);
+    await tester.pump();
     await tester.scrollUntilVisible(find.text('Company overview'), 200);
-    await tester.tap(find.text('Company overview')); await tester.pumpAndSettle();
+    await tester.tap(find.text('Company overview'));
+    await tester.pumpAndSettle();
     expect(find.byType(HomeV2), findsOneWidget);
   });
   testWidgets('back arrows follow the locale and pending answers keep their language key', (tester) async {
     final store = await productApp(tester, home: const ChatScreen(identityId: 'dana'));
     var context = tester.element(find.byType(ChatScreen));
     expect(backIcon(context), 'arrow_back');
-    final item = releaseItem(); store.data!.waiting.add(item);
+    final item = releaseItem();
+    store.data!.waiting.add(item);
     store.answerWait(item, const AskOption(id: 'go', label: 'Approve'));
     final pending = store.decision(item.askId, item.id)!;
     expect(pending.line, 'Approved');
-    await store.preferences.setLanguage('he'); await tester.pump();
+    await store.preferences.setLanguage('he');
+    await tester.pump();
     context = tester.element(find.byType(ChatScreen));
     expect(backIcon(context), 'arrow_forward');
     expect(pending.line, 'אישרת');

@@ -14,7 +14,13 @@ extension type _Api(JSObject _) implements JSObject {
 void Function() listenPastedImages(PastedImage onImage) {
   final api = _api;
   if (api == null) return () {};
-  final fn = ((JSUint8Array bytes, JSString mime, JSString name) => onImage(bytes.toDart, mime.toDart, name.toDart)).toJS;
+  final fn = ((JSUint8Array bytes, JSString mime, JSString name, JSString? path, JSNumber? size) => onImage(
+    bytes.toDart,
+    mime.toDart,
+    name.toDart,
+    path: path?.toDart,
+    size: size?.toDartInt,
+  ).then<JSAny?>((release) => release.toJS).toJS).toJS;
   api.set(fn);
   return () => api.clear(fn);
 }

@@ -4,6 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 names=(
+  web screenshot movie audio_file table_chart folder_zip play_circle videocam download zoom_in zoom_out pause
   search do_not_disturb_on more_vert warning home chat view_kanban account_tree local_shipping smart_toy directions_car build
   graphic_eq explore shield folder_shared radio_button_unchecked front_hand progress_activity block autorenew
   bedtime play_arrow check check_circle expand_more history edit_square arrow_forward done_all schedule error description edit

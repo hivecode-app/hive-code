@@ -1126,7 +1126,7 @@
   "ui889": "קיבלה",
   "ui890": "קיבל",
   "ui891": "נסגר · {p0} {p1} הודעה",
-  "ui892": "התמונה לא עלתה לשרת, ולכן ההודעה לא נשלחה. אפשר לנסות שוב.",
+  "ui892": "הקבצים לא עלו לשרת, ולכן ההודעה לא נשלחה. אפשר לנסות שוב.",
   "ui893": "השרת עוד לא תומך במשיכת הודעה, ולכן היא תימסר כרגיל.",
   "ui894": "אין לעובד עבודה פעילה, ולכן אין מה לעצור.",
   "ui895": "השרת עוד לא תומך בהערת צוות מהאפליקציה.",
@@ -1168,7 +1168,7 @@
   "ui932": "האישור נשלח",
   "ui933": "ענית: {p0} · {p1} ממשיך",
   "ui934": "ייסגר בעוד {p0} שנ'",
-  "ui935": "אפשר לצרף עד {p0} תמונות להודעה אחת.",
+  "ui935": "אפשר לצרף עד {p0} קבצים להודעה אחת.",
   "ui936": "ענית: {p0}",
   "ui937": "לפריט הזה אין שאלה לענות עליה.",
   "ui938": "ההודעה כבר בדרך לשרת, ולכן אי אפשר למשוך אותה.",
@@ -1320,5 +1320,249 @@
   "progressStagePending": "טרם התחיל",
   "progressTeamUpdating": "הצוות מתעדכן…",
   "progressTeamStale": "עדכון הצוות נכשל. מוצג מידע שמור.",
-  "progressTeamRetry": "הצוות לא התעדכן · נסה שוב"
+  "progressTeamRetry": "הצוות לא התעדכן · נסה שוב",
+  "mediaFiles": "קבצים",
+  "mediaGallery": "גלריה",
+  "mediaCamera": "מצלמה",
+  "mediaVideo": "צילום סרטון",
+  "mediaOriginal": "מקור",
+  "mediaOriginalHint": "שליחת תמונות בגודל מלא",
+  "mediaScreenshot": "צילום המסך האחרון",
+  "mediaRemove": "להסיר את {name}",
+  "@mediaRemove": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaReady": "מוכן",
+  "mediaUploading": "עולה {percent}%",
+  "@mediaUploading": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaFailed": "לא עלה",
+  "mediaRetry": "לנסות שוב",
+  "mediaLimit": "אפשר לצרף עד 20 קבצים. הקבצים האחרים והטקסט נשמרו.",
+  "mediaTooLarge": "{name} גדול מ־200MB. הקבצים האחרים והטקסט נשמרו.",
+  "@mediaTooLarge": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaReadFailed": "לא ניתן לקרוא את {name}. הטיוטה נשמרה.",
+  "@mediaReadFailed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaWithout": "לשלוח בלי {name}?",
+  "@mediaWithout": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaWithoutAction": "לשלוח בלי הקובץ",
+  "mediaWaiting": "ממתינה להעלאת הקבצים",
+  "mediaCancel": "ביטול השליחה",
+  "mediaSave": "שמירת המקור",
+  "mediaShare": "שיתוף המקור",
+  "mediaSaved": "המקור נשמר",
+  "mediaShared": "השיתוף הושלם",
+  "mediaCancelled": "הפעולה בוטלה",
+  "mediaActionFailed": "הפעולה לא הושלמה. אפשר לנסות שוב.",
+  "mediaLoading": "טעינת קובץ…",
+  "mediaUnavailable": "הקובץ אינו במכשיר. יש להתחבר כדי להוריד את המקור.",
+  "mediaPreviewFailed": "אין תצוגה מקדימה. אפשר לשמור את המקור.",
+  "mediaInChat": "בשיחה",
+  "mediaPrevious": "הקודם",
+  "mediaNext": "הבא",
+  "mediaZoomIn": "הגדלה",
+  "mediaZoomOut": "הקטנה",
+  "mediaPage": "עמוד {page} מתוך {total}",
+  "@mediaPage": {
+    "placeholders": {
+      "page": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaCount": "{index} מתוך {total}",
+  "@mediaCount": {
+    "placeholders": {
+      "index": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaPages": "{count} עמודים",
+  "@mediaPages": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaSheets": "{count} גיליונות",
+  "@mediaSheets": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaSlides": "{count} שקפים",
+  "@mediaSlides": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaEntries": "{count} קבצים",
+  "@mediaEntries": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaSearch": "חיפוש במסמך",
+  "mediaSearchEmpty": "לא נמצאו התאמות בטקסט. למסמך סרוק נדרשת גרסת טקסט.",
+  "mediaImages": "תמונות וסרטונים",
+  "mediaDocuments": "מסמכים",
+  "mediaApps": "אפליקציות",
+  "mediaAudio": "אודיו",
+  "mediaOther": "קבצים נוספים",
+  "mediaEmpty": "עדיין אין קבצים בשיחה הזאת.",
+  "mediaFilteredEmpty": "אין קבצים שמתאימים למסנן הזה.",
+  "mediaFilesFailed": "הקבצים לא נטענו. אפשר לנסות שוב.",
+  "mediaReset": "איפוס המסנן",
+  "mediaPlay": "ניגון",
+  "mediaPause": "השהיה",
+  "mediaReply": "להגיב על הקובץ",
+  "mediaForward": "העברה לעובד אחר",
+  "mediaCopy": "העתקת שם הקובץ",
+  "mediaSharedTo": "שליחה אל {name}",
+  "@mediaSharedTo": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaShareReview": "בדיקת הקבצים לשיתוף",
+  "mediaAddToDraft": "הוספה לטיוטה הזאת",
+  "mediaVersion": "גרסה {version}",
+  "@mediaVersion": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaPrivate": "רק אצלך",
+  "mediaNetwork": "פונה לרשת",
+  "mediaNoNetwork": "בלי רשת",
+  "mediaExpires": "נשמר עד {date}",
+  "@mediaExpires": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaExpired": "תוקף התוכן פג. הכרטיס נשאר בשיחה.",
+  "mediaAskAgain": "לבקש מחדש",
+  "mediaKeep": "לשמור",
+  "mediaKept": "נשמר ללא תוקף",
+  "mediaNewVersion": "יש גרסה חדשה יותר",
+  "mediaOpenWindow": "פתיחה בחלון נפרד",
+  "mediaCompare": "השוואת גרסאות",
+  "mediaBlockedNavigation": "העמוד ניסה לצאת מהאפליקציה.",
+  "mediaRefreshAccess": "חידוש הגישה",
+  "mediaArtifactReply": "לגבי {id}, גרסה {version}: ",
+  "@mediaArtifactReply": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      },
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaAskCopy": "נא להעלות שוב את {id}, גרסה {version}.",
+  "@mediaAskCopy": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      },
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaOpen": "פתיחת קובץ",
+  "mediaMore": "פעולות בקובץ",
+  "mediaTranscript": "תמליל",
+  "mediaTask": "משימה {id}",
+  "mediaReduced": "תמונה מוקטנת",
+  "mediaSender": "מאת",
+  "mediaDate": "תאריך",
+  "@mediaTask": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaCancelAction": "ביטול",
+  "mediaForwardedDraft": "נוסף לטיוטה של {name}",
+  "@mediaForwardedDraft": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaAllFiles": "כל הקבצים",
+  "mediaYou": "אני",
+  "mediaCancelMessage": "ביטול ההודעה ושמירה כטיוטה",
+  "mediaPermissionDenied": "צריך לאפשר גישה ל{source} בהגדרות המכשיר, ואז לנסות שוב. הטיוטה נשמרה.",
+  "@mediaPermissionDenied": {
+    "placeholders": {
+      "source": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaPhotoAccess": "לאפשר גישה לתמונות",
+  "mediaScreenshotAccessHint": "כדי למצוא את צילום המסך האחרון",
+  "mediaNoRecentScreenshot": "לא נמצא צילום מסך מעשר הדקות האחרונות.",
+  "mediaPercent": "{percent}%",
+  "@mediaPercent": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaUploadFailedShort": "לא עלה"
 }

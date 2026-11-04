@@ -1,6 +1,8 @@
 import '../model/task_progress.dart';
 import 'package:agent_company/l10n/ui_copy.dart';
+
 import 'search.dart';
+
 // The one interface between the UI and a company backend.
 // FakeBackend (mockup content) and HqBackend (packages/hq HTTP+WS) both implement it;
 // lib/data/backend_select.dart picks one, and that is the only line that changes.
@@ -54,6 +56,7 @@ class CompanyData {
   final Map<String, Team> teams;
   final Map<String, Identity> identities;
   final Map<String, Presence> presence;
+
   /// What is blocked on him and only on him (task 986): a question, a GO, a sign-in. The rest is the manager's.
   final List<WaitItem> waiting;
 
@@ -100,7 +103,10 @@ class CompanyData {
   List<OpenTask>? _openTasks;
 
   /// The open tasks [identityId] opened: what its row in the conversations shows ("מה פתוח אצלי").
-  List<OpenTask> openedBy(String identityId) => [for (final t in openTasks) if (t.openedBy == identityId) t];
+  List<OpenTask> openedBy(String identityId) => [
+    for (final t in openTasks)
+      if (t.openedBy == identityId) t,
+  ];
 
   /// The head of the conversations screen (GET /api/home); null from an hq without it (the screen draws hq's default shape itself).
   HomeRecipe? home;
@@ -208,6 +214,7 @@ abstract class Backend extends ChangeNotifier {
   String get label;
 
   Future<void> start();
+
   /// Reformat client-derived labels from retained input, without changing worker content.
   void relocalize() {}
 
@@ -224,9 +231,11 @@ abstract class Backend extends ChangeNotifier {
   Future<List<SearchHit>> search(String query) async => searchLocal(data, query);
 
   Future<CommandResult> answerAsk(String askId, AskOption option, {String? from});
+
   /// Free text (and images, [UserMsg.attachments] style) as the answer to a question.
   Future<CommandResult> freeAnswer(String askId, String text, {List<Attachment> attachments = const []});
   Future<CommandResult> go(WaitItem item);
+
   /// "לא עכשיו": the item stays open, below the rest, on every device and after a refresh.
   Future<CommandResult> notNow(WaitItem item);
 
@@ -239,7 +248,12 @@ abstract class Backend extends ChangeNotifier {
     item.state = WaitState.answered;
     final d = data;
     final task = int.tryParse(item.ref?.replaceFirst('task-', '') ?? '');
-    if (d != null && task != null) d.awaiting = [for (final x in d.awaiting) if (x.id != task) x];
+    if (d != null && task != null) {
+      d.awaiting = [
+        for (final x in d.awaiting)
+          if (x.id != task) x,
+      ];
+    }
     notifyListeners();
     return const CommandResult.ok();
   }
@@ -253,6 +267,26 @@ abstract class Backend extends ChangeNotifier {
 
   /// The bytes of an attached image the server holds (`GET /api/uploads/:id`); null when it can't.
   Future<Uint8List?> attachmentData(String id) async => null;
+  final artifactRevision = ValueNotifier<int>(0);
+  Future<Map<String, dynamic>?> artifact(String id) async => null;
+  Future<Map<String, dynamic>> openArtifact(String id, int version) async => throw StateError('artifact unavailable');
+  Future<bool> keepArtifact(String id) async => false;
+  Future<Uint8List?> artifactThumb(String id) async => null;
+  @override
+  void dispose() {
+    artifactRevision.dispose();
+    super.dispose();
+  }
+
+  ({Uri url, Map<String, String> headers})? mediaSource(String id) => null;
+  Future<String?> attachmentTranscript(String id) async => null;
+  Future<Uint8List?> attachmentPreview(String id) async => null;
+  Future<List<String>> archiveEntries(String id) async => [];
+  Future<Uint8List?> archiveEntry(String id, String name) async => null;
+  Future<Uint8List?> attachmentThumb(String id) => attachmentData(id);
+  Future<Attachment?> uploadAttachment(Attachment a, {Future<void> Function()? changed}) async => a.uploaded('demo-${a.name}');
+  Future<List<Map<String, dynamic>>> files({String? chat, int? task, String? kind}) async => [];
+
   Future<CommandResult> retract(String identityId, String msgId);
   Future<CommandResult> stop(String identityId);
   Future<CommandResult> setAutomation(String key, bool enabled);
@@ -264,7 +298,7 @@ abstract class Backend extends ChangeNotifier {
   Future<AccountsView?> accounts() async => null;
 
   /// "כולם ל-X": new shifts go to [name], live ones move at their next turn boundary. null = automatic.
-  Future<CommandResult> pinAccount(String? name) async =>  CommandResult.localized(784);
+  Future<CommandResult> pinAccount(String? name) async => CommandResult.localized(784);
 
   /// Called when a conversation opens (hq: replay events for that identity).
   Future<void> openConversation(String identityId) async {}
@@ -291,7 +325,10 @@ abstract class Backend extends ChangeNotifier {
   Future<CommandResult> checked(AwaitingTask t) async {
     final d = data;
     if (d != null) {
-      d.awaiting = [for (final x in d.awaiting) if (x.id != t.id) x];
+      d.awaiting = [
+        for (final x in d.awaiting)
+          if (x.id != t.id) x,
+      ];
       notifyListeners();
     }
     return const CommandResult.ok();
@@ -307,5 +344,11 @@ abstract class Backend extends ChangeNotifier {
   Future<MapBody?> companyMessage(String id) async => null;
 
   /// "השתקה" for 8 hours, a week or always, or its undo; kept on the server, the same on every device.
-  Future<CommandResult> mute(String identityId, MuteFor duration) async =>  CommandResult.localized(785);
+  Future<CommandResult> mute(String identityId, MuteFor duration) async => CommandResult.localized(785);
+}
+
+class UploadFailure implements Exception {
+  UploadFailure(this.status);
+  final int status;
+  bool get transient => status == 408 || status == 429 || status >= 502 && status <= 504;
 }

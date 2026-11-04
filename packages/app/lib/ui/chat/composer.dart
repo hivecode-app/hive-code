@@ -1,19 +1,26 @@
 import 'package:agent_company/l10n/ui_copy.dart';
+
 // Composer (chat.md §3), WhatsApp layout: rounded field with attach + camera inside, one round
 // button beside it: mic when empty, send when there is text or an image. Tap on send while the
 // worker is busy = "after the current step"; long press opens "when to deliver?". Stop is NOT here
 // (top bar). Images (attach, camera, paste) wait above the field as a removable preview, and go
 // with the next message. On Android the text field itself is native (composer_field.dart).
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+
+import '../../l10n/app_localizations.dart';
+import '../media/upload_strip.dart';
 
 import '../../data/dictation.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../native/paste.dart';
+import '../../native/native_bridge.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import 'composer_field.dart';
@@ -40,6 +47,9 @@ class _ComposerState extends State<Composer> {
   void _closeMenu() {
     if (_portal.isShowing) _portal.hide();
   }
+
+  bool _original = false;
+  bool _sending = false;
   bool recording = false;
   bool _starting = false;
   int recSeconds = 0;
@@ -57,12 +67,47 @@ class _ComposerState extends State<Composer> {
   static const maxRecSeconds = 13 * 60;
 
   void Function()? _stopPaste;
+  String? _pasteChat;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (ModalRoute.isCurrentOf(context) == false) {
+      _stopPaste?.call();
+      _stopPaste = null;
+      _pasteChat = null;
+    } else {
+      _bindPaste();
+    }
+  }
+
+  void _bindPaste() {
+    final id = widget.identityId, store = StoreScope.read(context), labels = AppLocalizations.of(context);
+    if (_pasteChat == id && _stopPaste != null) return;
+    _stopPaste?.call();
+    _pasteChat = id;
+    _stopPaste = listenPastedImages((bytes, mime, name, {String? path, int? size}) async {
+      if (store.isDisposed) return true;
+      if (path != null) {
+        await _stagePicked(
+          store,
+          id,
+          XFile(path, name: name, mimeType: mime, length: size),
+          mime: mime,
+          source: 'paste',
+          labels: labels,
+        );
+        return !store.retainsMediaSource(path);
+      } else {
+        await _addFile(store, id, bytes, name, mime: mime, source: 'paste', labels: labels);
+        return true;
+      }
+    });
+  }
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_changed);
-    _stopPaste = listenPastedImages((bytes, mime, name) => _addImage(bytes, name, mime: mime));
     _jobs.addListener(_jobsChanged);
     _jobs.load();
     WidgetsBinding.instance.addPostFrameCallback((_) => _jobsChanged());
@@ -73,6 +118,7 @@ class _ComposerState extends State<Composer> {
     super.didUpdateWidget(old);
     // The desktop keeps this composer when he picks another chat: that chat's text, its own clock.
     if (old.identityId != widget.identityId) {
+      _bindPaste();
       _tick?.cancel();
       _tick = null;
       WidgetsBinding.instance.addPostFrameCallback((_) => _jobsChanged());
@@ -111,18 +157,61 @@ class _ComposerState extends State<Composer> {
   }
 
   Future<void> _send(Priority p) async {
-    final text = widget.controller.text.trim();
+    if (_sending) return;
+    final id = widget.identityId, quote = widget.quote;
+    final draft = widget.controller.text;
+    final text = draft.trim();
     _closeMenu();
-    final store = StoreScope.read(context);
-    final images = [...store.images(widget.identityId)];
-    if (text.isEmpty && images.isEmpty) return;
-    widget.controller.clear();
-    for (final a in images) {
-      store.removeImage(widget.identityId, a);
+    final store = StoreScope.read(context), l = AppLocalizations.of(context);
+    final files = [...store.images(id)];
+    if (files.length > AppStore.maxImages) {
+      store.notice(l.mediaLimit);
+      store.touch();
+      return;
     }
-    await store.send(widget.identityId, text, p, quote: widget.quote, attachments: images);
-    widget.onClearQuote?.call();
-    widget.onSent?.call();
+    if (files.any(store.staging)) {
+      store.notice(l.mediaLoading);
+      store.touch();
+      return;
+    }
+    if (text.isEmpty && files.isEmpty) return;
+    _sending = true;
+    try {
+      for (final a in files.where(store.uploadFailed).toList()) {
+        final without = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(l.mediaWithout(a.name)),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(l.mediaRetry)),
+              TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(l.mediaWithoutAction)),
+            ],
+          ),
+        );
+        if (without != true) {
+          store.retryUpload(id, a);
+          return;
+        }
+        files.remove(a);
+        store.removeImage(id, a);
+      }
+      if (text.isEmpty && files.isEmpty) return;
+      if (!mounted || widget.identityId != id || store.isDisposed) return;
+      // Register ownership before removing draft references, so pruning cannot lose a source.
+      final delivery = store.send(id, text, p, quote: quote, attachments: files, clearDraft: false);
+      if (widget.controller.text == draft) widget.controller.clear();
+      for (final a in [...store.images(id)]) {
+        if (files.any((sent) => identical(sent, a) || sent.transfer != null && sent.transfer!.key == a.transfer?.key || sent.id != null && sent.id == a.id)) {
+          store.removeImage(id, a);
+        }
+      }
+      if (identical(widget.quote, quote)) widget.onClearQuote?.call();
+      widget.onSent?.call();
+      _sending = false;
+      unawaited(delivery);
+    } finally {
+      _sending = false;
+    }
   }
 
   /// [fault]: sent to hq as well (error_report.dart); his own to fix (a permission, too short) only shown.
@@ -172,7 +261,9 @@ class _ComposerState extends State<Composer> {
     final PendingDictation job;
     try {
       final pcm = await dict.recorder.stop();
-      if (pcm.length < kDictateRate * 2 ~/ 4) throw  DictationError(UiCopy.text(192), fault: false);
+      if (pcm.length < kDictateRate * 2 ~/ 4) {
+        throw DictationError(UiCopy.text(192), fault: false);
+      }
       job = await _jobs.add(id, pcm);
     } on DictationError catch (e) {
       return _failOn(store, e.message, fault: e.fault);
@@ -208,11 +299,23 @@ class _ComposerState extends State<Composer> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: p.surface,
-        title: Text(UiCopy.text(193), style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w700)),
+        title: Text(
+          UiCopy.text(193),
+          style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w700),
+        ),
         content: Text(UiCopy.text(194), style: T.body.copyWith(color: p.text2)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(UiCopy.text(18), style: T.secondary.copyWith(color: p.accent))),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(UiCopy.text(195), style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(UiCopy.text(18), style: T.secondary.copyWith(color: p.accent)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              UiCopy.text(195),
+              style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700),
+            ),
+          ),
         ],
       ),
     );
@@ -241,58 +344,228 @@ class _ComposerState extends State<Composer> {
     widget.focus.requestFocus();
   }
 
-  /// An image from any source: checked here, so a wrong file says so at once and not after send.
   void _addImage(Uint8List bytes, String name, {String? mime}) {
     if (!mounted) return;
-    final kind = imageMime(bytes);
-    if (kind == null) return _fail(UiCopy.text(196));
-    if (bytes.length > maxImageBytes) return _fail(UiCopy.text(197));
-    StoreScope.read(context).addImage(widget.identityId, Attachment(name: name.isEmpty ? 'image' : name, bytes: bytes.length, mime: kind, data: bytes));
+    _addFile(StoreScope.read(context), widget.identityId, bytes, name, mime: mime);
     widget.focus.requestFocus();
   }
 
-  /// Phone photos are big; past this size they say nothing more to a worker and only slow the upload.
-  static const _maxSide = 2048.0;
+  Future<void> _addFile(AppStore store, String id, Uint8List bytes, String name, {String? mime, String? source, bool original = true, AppLocalizations? labels}) async {
+    final l = labels ?? AppLocalizations.of(context);
+    if (mime == 'too-many') {
+      store.notice(l.mediaLimit);
+      store.touch();
+      return;
+    }
+    if (mime == 'too-large' || bytes.length > maxImageBytes) {
+      store.notice(l.mediaTooLarge(name));
+      store.touch();
+      return;
+    }
+    if (bytes.isEmpty) {
+      store.notice(l.mediaReadFailed(name));
+      store.touch();
+      return;
+    }
+    if (store.images(id).length >= AppStore.maxImages) {
+      store.notice(l.mediaLimit);
+      store.touch();
+      return;
+    }
+    final kind = imageMime(bytes) ?? (mime?.isNotEmpty == true ? mime! : 'application/octet-stream');
+    await store.addImage(id, Attachment(name: name.isEmpty ? 'file' : name, bytes: bytes.length, mime: kind, data: bytes, meta: {'app_source': ?source, 'app_original': original}));
+  }
 
-  Future<void> _pick(ImageSource source) async {
-    final picker = ImagePicker();
+  Future<void> _stagePicked(AppStore store, String id, XFile file, {String? mime, String? source, bool original = true, AppLocalizations? labels}) async {
+    final l = labels ?? AppLocalizations.of(context), size = await file.length();
+    if (store.isDisposed) return;
+    if (size <= 0 || size > maxImageBytes) {
+      store.notice(l.mediaTooLarge(file.name));
+      store.touch();
+      return;
+    }
+    if (store.images(id).length >= AppStore.maxImages) {
+      store.notice(l.mediaLimit);
+      store.touch();
+      return;
+    }
+    final prefix = BytesBuilder(copy: false);
+    await for (final bytes in file.openRead(0, size.clamp(0, 8192))) {
+      prefix.add(bytes);
+    }
+    if (store.isDisposed) return;
+    final kind = imageMime(prefix.takeBytes()) ?? mime ?? 'application/octet-stream';
+    await store.addImage(
+      id,
+      Attachment(name: file.name, bytes: size, mime: kind, meta: {'app_source': ?source, 'app_original': original}),
+      sourcePath: file.path,
+    );
+  }
+
+  static const _maxSide = 2048.0;
+  Future<void> _pick(ImageSource source, {bool video = false}) async {
+    final store = StoreScope.read(context), id = widget.identityId, l = AppLocalizations.of(context);
+    final original = _original;
     try {
-      final files = source == ImageSource.gallery
-          ? await picker.pickMultiImage(maxWidth: _maxSide, maxHeight: _maxSide, imageQuality: 85, limit: AppStore.maxImages)
-          : [?await picker.pickImage(source: source, maxWidth: _maxSide, maxHeight: _maxSide, imageQuality: 85)];
+      final picker = ImagePicker();
+      final files = video
+          ? [?await picker.pickVideo(source: source)]
+          : source == ImageSource.gallery
+          ? await picker.pickMultiImage(maxWidth: original ? null : _maxSide, maxHeight: original ? null : _maxSide, imageQuality: original ? null : 85, limit: AppStore.maxImages)
+          : [?await picker.pickImage(source: source, maxWidth: original ? null : _maxSide, maxHeight: original ? null : _maxSide, imageQuality: original ? null : 85)];
       for (final f in files) {
-        _addImage(await f.readAsBytes(), f.name);
+        if (!mounted) return;
+        try {
+          if (await f.length() > maxImageBytes) {
+            store.notice(l.mediaTooLarge(f.name));
+            store.touch();
+            continue;
+          }
+          await _stagePicked(store, id, f, mime: f.mimeType, source: source == ImageSource.gallery ? 'gallery' : 'camera', original: original);
+        } catch (_) {
+          store.notice(l.mediaReadFailed(f.name));
+          store.touch();
+        }
       }
     } on PlatformException catch (e) {
-      if (!mounted) return;
-      if (e.code.contains('camera')) {
-        _fail(UiCopy.text(198), fault: false);
-      } else {
-        _fail(UiCopy.text(199));
-      }
+      final name = source == ImageSource.camera
+          ? l.mediaCamera
+          : video
+          ? l.mediaVideo
+          : l.mediaGallery;
+      store.notice(RegExp('permission|denied|access', caseSensitive: false).hasMatch(e.code) ? l.mediaPermissionDenied(name) : l.mediaReadFailed(name));
+      store.touch();
     } catch (_) {
-      if (mounted) _fail(UiCopy.text(199));
+      store.notice(
+        l.mediaReadFailed(
+          source == ImageSource.camera
+              ? l.mediaCamera
+              : video
+              ? l.mediaVideo
+              : l.mediaGallery,
+        ),
+      );
+      store.touch();
     }
   }
 
-  void _attach() {
-    final p = context.p;
-    showModalBottomSheet(
+  Future<void> _files() async {
+    final store = StoreScope.read(context), id = widget.identityId, l = AppLocalizations.of(context);
+    try {
+      final result = await FilePicker.pickFiles();
+      for (final file in result) {
+        if (!mounted) return;
+        if (store.images(id).length >= AppStore.maxImages) {
+          store.notice(l.mediaLimit);
+          store.touch();
+          break;
+        }
+        try {
+          if ((await file.length() ?? 0) > maxImageBytes) {
+            store.notice(l.mediaTooLarge(file.name));
+            store.touch();
+            continue;
+          }
+          await _stagePicked(store, id, file.xFile, source: 'files');
+        } catch (_) {
+          store.notice(l.mediaReadFailed(file.name));
+          store.touch();
+        }
+      }
+    } catch (_) {
+      store.notice(l.mediaReadFailed(l.mediaFiles));
+      store.touch();
+    }
+  }
+
+  Future<void> _requestScreenshotAccess() async {
+    final store = StoreScope.read(context), id = widget.identityId, labels = AppLocalizations.of(context);
+    try {
+      final file = await NativeBridge.instance.recentScreenshot(requestPermission: true);
+      if (store.isDisposed) return;
+      if (file == null) {
+        store.notice(await NativeBridge.instance.imageAccessGranted() ? labels.mediaNoRecentScreenshot : labels.mediaPermissionDenied(labels.mediaGallery));
+        store.touch();
+        return;
+      }
+      await _stagePicked(
+        store,
+        id,
+        XFile(file.path, name: file.name, mimeType: file.mime, length: file.bytes),
+        mime: file.mime,
+        source: 'screenshot',
+        labels: labels,
+      );
+    } catch (_) {
+      if (!store.isDisposed) {
+        store.notice(labels.mediaReadFailed(labels.mediaScreenshot));
+        store.touch();
+      }
+    }
+  }
+
+  Future<void> _attach() async {
+    final screenshot = await NativeBridge.instance.recentScreenshot(requestPermission: false);
+    final access = screenshot != null || await NativeBridge.instance.imageAccessGranted();
+    if (!mounted) return;
+    final l = AppLocalizations.of(context), p = context.p;
+    showModalBottomSheet<void>(
       context: context,
       backgroundColor: p.surface,
       showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          for (final (icon, label, source) in [('photo_camera', UiCopy.text(200), ImageSource.camera), ('image', UiCopy.text(201), ImageSource.gallery)])
-            ListTile(
-              leading: Ic(icon, color: p.text2),
-              title: Text(label, style: T.body.copyWith(color: p.text)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pick(source);
-              },
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, change) => SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * .82),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(title: Text(l.mediaOriginal), subtitle: Text(l.mediaOriginalHint), value: _original, onChanged: (v) => change(() => _original = v)),
+                  for (final (icon, label, action) in <(String, String, VoidCallback)>[
+                    ('photo_camera', l.mediaCamera, () => _pick(ImageSource.camera)),
+                    ('image', l.mediaGallery, () => _pick(ImageSource.gallery)),
+                    ('videocam', l.mediaVideo, () => _pick(ImageSource.camera, video: true)),
+                    ('folder', l.mediaFiles, _files),
+                    if (screenshot != null)
+                      (
+                        'screenshot',
+                        l.mediaScreenshot,
+                        () async {
+                          final store = StoreScope.read(context), id = widget.identityId;
+                          try {
+                            await _stagePicked(store, id, XFile(screenshot.path), mime: screenshot.mime, source: 'screenshot');
+                          } catch (_) {
+                            store.notice(l.mediaReadFailed(screenshot.name));
+                            store.touch();
+                          }
+                        },
+                      ),
+                  ])
+                    ListTile(
+                      leading: Ic(icon, color: p.text2),
+                      title: Text(label),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        action();
+                      },
+                    ),
+                  if (screenshot == null && NativeBridge.instance.supported && !access)
+                    ListTile(
+                      leading: Ic('image', color: p.text2),
+                      title: Text(l.mediaPhotoAccess),
+                      subtitle: Text(l.mediaScreenshotAccessHint),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _requestScreenshotAccess();
+                      },
+                    ),
+                ],
+              ),
             ),
-        ]),
+          ),
+        ),
       ),
     );
   }
@@ -314,6 +587,7 @@ class _ComposerState extends State<Composer> {
     final busy = d.chats[widget.identityId]?.live.busy ?? false;
     final images = store.images(widget.identityId);
     final hasText = widget.controller.text.trim().isNotEmpty || images.isNotEmpty;
+    final staging = images.any(store.staging);
     final f = who.gender == Gender.f;
 
     final field = Container(
@@ -325,66 +599,82 @@ class _ComposerState extends State<Composer> {
           : recording
           ? SizedBox(
               height: 46,
-              child: Row(children: [
-                const SizedBox(width: 12),
-                Ic('mic', size: 20, fill: true, color: p.urgent),
-                const SizedBox(width: 8),
-                Text(_clock(recSeconds), style: T.body.copyWith(color: p.text, fontFeatures: const [FontFeature.tabularFigures()])),
-                const Spacer(),
-                TextButton(
-                  onPressed: _cancelRecording,
-                  child: Text(UiCopy.text(18), style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
-                ),
-              ]),
+              child: Row(
+                children: [
+                  const SizedBox(width: 12),
+                  Ic('mic', size: 20, fill: true, color: p.urgent),
+                  const SizedBox(width: 8),
+                  Text(
+                    _clock(recSeconds),
+                    style: T.body.copyWith(color: p.text, fontFeatures: const [FontFeature.tabularFigures()]),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: _cancelRecording,
+                    child: Text(
+                      UiCopy.text(18),
+                      style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
             )
-          : Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Expanded(
-                child: NativeComposerField.available
-                    ? NativeComposerField(
-                        controller: widget.controller,
-                        focus: widget.focus,
-                        hint: UiCopy.text(203, [who.name]),
-                        style: T.body.copyWith(color: p.text, height: 1.45),
-                        hintColor: p.text3,
-                        accent: p.accent,
-                        onImage: (bytes, name, mime) => _addImage(bytes, name, mime: mime),
-                        onImageFailed: () => _fail(UiCopy.text(204)),
-                      )
-                    : CallbackShortcuts(
-                        bindings: {
-                          const SingleActivator(LogicalKeyboardKey.enter): () => _send(Priority.now),
-                          const SingleActivator(LogicalKeyboardKey.enter, control: true): () => _send(Priority.now),
-                        },
-                        // Web and desktop: one direction for the whole field, from its first line.
-                        child: TextField(
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: NativeComposerField.available
+                      ? NativeComposerField(
+                          key: ValueKey(widget.identityId),
                           controller: widget.controller,
-                          focusNode: widget.focus,
-                          minLines: 1,
-                          maxLines: 6,
-                          keyboardType: TextInputType.multiline,
-                          textInputAction: TextInputAction.newline,
-                          textDirection: firstStrongDirection(widget.controller.text),
+                          focus: widget.focus,
+                          hint: UiCopy.text(203, [who.name]),
                           style: T.body.copyWith(color: p.text, height: 1.45),
-                          cursorColor: p.accent,
-                          contentInsertionConfiguration: ContentInsertionConfiguration(onContentInserted: _inserted, allowedMimeTypes: kImageMimes),
-                          decoration: InputDecoration(
-                            isCollapsed: true,
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.fromLTRB(4, 12, 4, 12),
-                            hintText: UiCopy.text(203, [who.name]),
-                            hintStyle: T.body.copyWith(color: p.text3),
+                          hintColor: p.text3,
+                          accent: p.accent,
+                          onImage: (bytes, name, mime) => _addImage(bytes, name, mime: mime),
+                          onImageFailed: () => _fail(UiCopy.text(204)),
+                        )
+                      : CallbackShortcuts(
+                          bindings: {
+                            const SingleActivator(LogicalKeyboardKey.enter): () => _send(Priority.now),
+                            const SingleActivator(LogicalKeyboardKey.enter, control: true): () => _send(Priority.now),
+                          },
+                          // Web and desktop: one direction for the whole field, from its first line.
+                          child: TextField(
+                            controller: widget.controller,
+                            focusNode: widget.focus,
+                            minLines: 1,
+                            maxLines: 6,
+                            keyboardType: TextInputType.multiline,
+                            textInputAction: TextInputAction.newline,
+                            textDirection: firstStrongDirection(widget.controller.text),
+                            style: T.body.copyWith(color: p.text, height: 1.45),
+                            cursorColor: p.accent,
+                            contentInsertionConfiguration: ContentInsertionConfiguration(onContentInserted: _inserted, allowedMimeTypes: kImageMimes),
+                            decoration: InputDecoration(
+                              isCollapsed: true,
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.fromLTRB(4, 12, 4, 12),
+                              hintText: UiCopy.text(203, [who.name]),
+                              hintStyle: T.body.copyWith(color: p.text3),
+                            ),
                           ),
                         ),
-                      ),
-              ),
-              _FieldBtn(icon: 'attach_file', tip: UiCopy.text(205), onTap: _attach),
-              if (MediaQuery.sizeOf(context).width < 800) _FieldBtn(icon: 'photo_camera', tip: UiCopy.text(200), onTap: () => _pick(ImageSource.camera)),
-            ]),
+                ),
+                _FieldBtn(icon: 'attach_file', tip: UiCopy.text(205), onTap: _attach),
+                if (MediaQuery.sizeOf(context).width < 800) _FieldBtn(icon: 'photo_camera', tip: UiCopy.text(200), onTap: () => _pick(ImageSource.camera)),
+              ],
+            ),
     );
 
     final round = Semantics(
       button: true,
-      label: hasText ? UiCopy.text(206) : (recording ? UiCopy.text(207) : (transcribing ? UiCopy.text(208) : UiCopy.text(209))),
+      label: staging
+          ? AppLocalizations.of(context).mediaLoading
+          : hasText
+          ? UiCopy.text(206)
+          : (recording ? UiCopy.text(207) : (transcribing ? UiCopy.text(208) : UiCopy.text(209))),
       child: GestureDetector(
         onLongPress: hasText && busy ? _openMenu : null,
         child: Material(
@@ -392,12 +682,18 @@ class _ComposerState extends State<Composer> {
           shape: const CircleBorder(),
           child: InkWell(
             customBorder: const CircleBorder(),
-            onTap: hasText ? () => _send(Priority.now) : _toggleRecording,
+            onTap: staging
+                ? null
+                : hasText
+                ? () => _send(Priority.now)
+                : _toggleRecording,
             child: SizedBox(
               width: 46,
               height: 46,
               child: Center(
-                child: hasText
+                child: staging
+                    ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: p.onAccent))
+                    : hasText
                     ? Transform.flip(flipX: true, child: Ic('send', fill: true, color: p.onAccent))
                     : Ic(recording ? 'stop_circle' : 'mic', color: p.onAccent, fill: recording),
               ),
@@ -410,57 +706,66 @@ class _ComposerState extends State<Composer> {
     return Container(
       color: p.chatBg,
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
-      child: Stack(clipBehavior: Clip.none, children: [
-        Column(mainAxisSize: MainAxisSize.min, children: [
-          if (images.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: _ImagePreview(images: images, onRemove: (a) => store.removeImage(widget.identityId, a)),
-            ),
-          for (final job in _pending.where((j) => !j.running && !j.done))
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: _KeptRecording(job: job, onRetry: transcribing ? null : () => _transcribeOn(StoreScope.read(context), job), onDiscard: () => _discard(job)),
-            ),
-          if (widget.quote != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Container(
-                decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(12)),
-                padding: const EdgeInsets.fromLTRB(8, 2, 2, 2),
-                child: QuoteStrip(quote: widget.quote!, onClose: widget.onClearQuote),
-              ),
-            ),
-          Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Expanded(child: field),
-            const SizedBox(width: 6),
-            // The menu floats above the send button in the overlay, so it can leave the composer's box.
-            CompositedTransformTarget(
-              link: _link,
-              child: OverlayPortal(
-                controller: _portal,
-                overlayChildBuilder: (_) => CompositedTransformFollower(
-                  link: _link,
-                  targetAnchor: AlignmentDirectional.topEnd.resolve(Directionality.of(context)),
-                  followerAnchor: AlignmentDirectional.bottomEnd.resolve(Directionality.of(context)),
-                  offset: const Offset(0, -16),
-                  child: Align(
-                    alignment: AlignmentDirectional.bottomEnd.resolve(Directionality.of(context)),
-                    child: TapRegion(
-                      onTapOutside: (_) => _closeMenu(),
-                      child: Directionality(
-                        textDirection: Directionality.of(context),
-                        child: _PriorityMenu(name: who.name, female: f, onPick: _send),
-                      ),
-                    ),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (images.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: UploadStrip(files: images, onRemove: (a) => store.removeImage(widget.identityId, a)),
+                ),
+              for (final job in _pending.where((j) => !j.running && !j.done))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: _KeptRecording(job: job, onRetry: transcribing ? null : () => _transcribeOn(StoreScope.read(context), job), onDiscard: () => _discard(job)),
+                ),
+              if (widget.quote != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Container(
+                    decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.fromLTRB(8, 2, 2, 2),
+                    child: QuoteStrip(quote: widget.quote!, onClose: widget.onClearQuote),
                   ),
                 ),
-                child: round,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(child: field),
+                  const SizedBox(width: 6),
+                  // The menu floats above the send button in the overlay, so it can leave the composer's box.
+                  CompositedTransformTarget(
+                    link: _link,
+                    child: OverlayPortal(
+                      controller: _portal,
+                      overlayChildBuilder: (_) => CompositedTransformFollower(
+                        link: _link,
+                        targetAnchor: AlignmentDirectional.topEnd.resolve(Directionality.of(context)),
+                        followerAnchor: AlignmentDirectional.bottomEnd.resolve(Directionality.of(context)),
+                        offset: const Offset(0, -16),
+                        child: Align(
+                          alignment: AlignmentDirectional.bottomEnd.resolve(Directionality.of(context)),
+                          child: TapRegion(
+                            onTapOutside: (_) => _closeMenu(),
+                            child: Directionality(
+                              textDirection: Directionality.of(context),
+                              child: _PriorityMenu(name: who.name, female: f, onPick: _send),
+                            ),
+                          ),
+                        ),
+                      ),
+                      child: round,
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ]),
-        ]),
-      ]),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -483,14 +788,29 @@ class _Transcribing extends StatelessWidget {
     final share = ((done + job.sent * 0.9) / job.pieces).clamp(0.0, 1.0);
     return SizedBox(
       height: 46,
-      child: Row(children: [
-        const SizedBox(width: 12),
-        SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, value: share, color: p.accent, backgroundColor: p.line)),
-        const SizedBox(width: 10),
-        Expanded(child: Text('$piece$step', style: T.body.copyWith(color: p.text2, fontFeatures: const [FontFeature.tabularFigures()]), overflow: TextOverflow.ellipsis)),
-        Text(_clock(elapsed), style: T.secondary.copyWith(color: p.text3, fontFeatures: const [FontFeature.tabularFigures()])),
-        const SizedBox(width: 12),
-      ]),
+      child: Row(
+        children: [
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2, value: share, color: p.accent, backgroundColor: p.line),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '$piece$step',
+              style: T.body.copyWith(color: p.text2, fontFeatures: const [FontFeature.tabularFigures()]),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Text(
+            _clock(elapsed),
+            style: T.secondary.copyWith(color: p.text3, fontFeatures: const [FontFeature.tabularFigures()]),
+          ),
+          const SizedBox(width: 12),
+        ],
+      ),
     );
   }
 }
@@ -514,95 +834,83 @@ class _KeptRecording extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(12), boxShadow: p.hairShadow),
       padding: const EdgeInsetsDirectional.fromSTEB(12, 10, 12, 2),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Padding(padding: const EdgeInsets.only(top: 2), child: Ic('mic', size: 20, color: p.text2)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(UiCopy.text(215, [at, _clock(job.seconds)]), style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w500).merge(tab)),
-              Text(UiCopy.text(216, [kept]), style: T.secondary.copyWith(color: p.text2)),
-            ]),
-          ),
-        ]),
-        Align(
-          alignment: AlignmentDirectional.centerEnd,
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            TextButton(
-              onPressed: onDiscard,
-              style: TextButton.styleFrom(foregroundColor: p.text2, textStyle: T.secondary),
-              child:  Text(UiCopy.text(195)),
-            ),
-            TextButton(
-              onPressed: onRetry,
-              style: TextButton.styleFrom(foregroundColor: p.accent, disabledForegroundColor: p.text3, textStyle: T.secondary.copyWith(fontWeight: FontWeight.w700)),
-              child:  Text(UiCopy.text(217)),
-            ),
-          ]),
-        ),
-      ]),
-    );
-  }
-}
-
-/// What waits to go with the next message: a thumbnail each, with an × to take it out (WhatsApp).
-class _ImagePreview extends StatelessWidget {
-  const _ImagePreview({required this.images, required this.onRemove});
-  final List<Attachment> images;
-  final void Function(Attachment) onRemove;
-  @override
-  Widget build(BuildContext context) {
-    UiCopy.watch(context);
-    final p = context.p;
-    return Container(
-      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(12), boxShadow: p.hairShadow),
-      padding: const EdgeInsets.all(6),
-      height: 88,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: images.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 6),
-        itemBuilder: (context, i) {
-          final a = images[i];
-          return Semantics(
-            label: UiCopy.text(218, [i + 1]),
-            child: Stack(children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.memory(a.data!, width: 76, height: 76, fit: BoxFit.cover, gaplessPlayback: true),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Ic('mic', size: 20, color: p.text2),
               ),
-              PositionedDirectional(
-                top: 2,
-                end: 2,
-                child: Tooltip(
-                  message: UiCopy.text(219),
-                  child: InkWell(
-                    customBorder: const CircleBorder(),
-                    onTap: () => onRemove(a),
-                    child: Container(
-                      width: 26,
-                      height: 26,
-                      decoration: const BoxDecoration(color: Color(0x99000000), shape: BoxShape.circle),
-                      child:  Center(child: Ic('close', size: 16, color: Colors.white, semantic: UiCopy.text(220))),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      UiCopy.text(215, [at, _clock(job.seconds)]),
+                      style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w500).merge(tab),
                     ),
-                  ),
+                    Text(UiCopy.text(216, [kept]), style: T.secondary.copyWith(color: p.text2)),
+                  ],
                 ),
               ),
-            ]),
-          );
-        },
+            ],
+          ),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                  onPressed: onDiscard,
+                  style: TextButton.styleFrom(foregroundColor: p.text2, textStyle: T.secondary),
+                  child: Text(UiCopy.text(195)),
+                ),
+                TextButton(
+                  onPressed: onRetry,
+                  style: TextButton.styleFrom(
+                    foregroundColor: p.accent,
+                    disabledForegroundColor: p.text3,
+                    textStyle: T.secondary.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  child: Text(UiCopy.text(217)),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
+/// What waits to go with the next message: a thumbnail each, with an × to take it out (WhatsApp).
 class _FieldBtn extends StatelessWidget {
   const _FieldBtn({required this.icon, required this.tip, required this.onTap});
   final String icon;
   final String tip;
   final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) { UiCopy.watch(context); return Tooltip(message: tip, child: InkWell(customBorder: const CircleBorder(), onTap: onTap, child: SizedBox(width: 40, height: 46, child: Center(child: Ic(icon, color: context.p.text2, semantic: tip))))); }
+  Widget build(BuildContext context) {
+    UiCopy.watch(context);
+    return Tooltip(
+      message: tip,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: SizedBox(
+          width: 40,
+          height: 46,
+          child: Center(
+            child: Ic(icon, color: context.p.text2, semantic: tip),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// `.pmenu`: when to deliver to a busy worker.
@@ -616,21 +924,30 @@ class _PriorityMenu extends StatelessWidget {
     UiCopy.watch(context);
     final p = context.p;
     Widget opt(Priority pr, String t, String s, {bool sel = false}) => Material(
-          color: sel ? p.surface2 : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: () => onPick(pr),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(t, style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.4, fontWeight: FontWeight.w700, color: p.text)),
-                Text(s, style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, color: p.text2)),
-              ]),
-            ),
+      color: sel ? p.surface2 : Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => onPick(pr),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                t,
+                style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.4, fontWeight: FontWeight.w700, color: p.text),
+              ),
+              Text(
+                s,
+                style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, color: p.text2),
+              ),
+            ],
           ),
-        );
+        ),
+      ),
+    );
     return Container(
       width: 254,
       padding: const EdgeInsets.all(6),
@@ -640,15 +957,22 @@ class _PriorityMenu extends StatelessWidget {
         border: Border.all(color: p.line),
         boxShadow: const [BoxShadow(color: Color(0x29000000), blurRadius: 28, offset: Offset(0, 8))],
       ),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
-          child: Text(UiCopy.text(221, [name]), style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: p.text2)),
-        ),
-        opt(Priority.now, UiCopy.text(107), UiCopy.text(224, [female ? UiCopy.text(222) : UiCopy.text(223)]), sel: true),
-        opt(Priority.next, UiCopy.text(225), UiCopy.text(229, [female ? UiCopy.text(226) : UiCopy.text(227), female ? UiCopy.text(228) : ''])),
-        opt(Priority.later, UiCopy.text(230), UiCopy.text(233, [female ? UiCopy.text(231) : UiCopy.text(232)])),
-      ]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+            child: Text(
+              UiCopy.text(221, [name]),
+              style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: p.text2),
+            ),
+          ),
+          opt(Priority.now, UiCopy.text(107), UiCopy.text(224, [female ? UiCopy.text(222) : UiCopy.text(223)]), sel: true),
+          opt(Priority.next, UiCopy.text(225), UiCopy.text(229, [female ? UiCopy.text(226) : UiCopy.text(227), female ? UiCopy.text(228) : ''])),
+          opt(Priority.later, UiCopy.text(230), UiCopy.text(233, [female ? UiCopy.text(231) : UiCopy.text(232)])),
+        ],
+      ),
     );
   }
 }

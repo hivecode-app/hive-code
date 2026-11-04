@@ -10,15 +10,17 @@ import 'package:flutter/services.dart';
 /// directly in the Android share sheet (Direct Share); otherwise the UI shows a worker picker.
 @immutable
 class SharedPayload {
-  const SharedPayload({this.text, this.imagePath, this.identityId});
+  const SharedPayload({this.text, this.imagePath, this.identityId, this.files = const [], this.errors = const []});
 
   final String? text;
 
   /// A copy in the app cache (the sharing app's grant does not outlive the intent).
   final String? imagePath;
   final String? identityId;
+  final List<SharedFile> files;
+  final List<String> errors;
 
-  bool get isEmpty => (text == null || text!.isEmpty) && imagePath == null;
+  bool get isEmpty => (text == null || text!.isEmpty) && imagePath == null && files.isEmpty && errors.isEmpty;
 
   static SharedPayload? fromMap(Object? raw) {
     if (raw is! Map) return null;
@@ -26,19 +28,35 @@ class SharedPayload {
       text: raw['text'] as String?,
       imagePath: raw['imagePath'] as String?,
       identityId: raw['identityId'] as String?,
+      files: [
+        for (final m in raw['files'] as List? ?? const [])
+          SharedFile(path: m['path'] as String, name: m['name'] as String, mime: m['mime'] as String? ?? 'application/octet-stream', bytes: (m['bytes'] as num?)?.toInt() ?? 0),
+      ],
+      errors: (raw['errors'] as List? ?? const []).cast<String>(),
     );
     return p.isEmpty ? null : p;
   }
 
   @override
   bool operator ==(Object other) =>
-      other is SharedPayload && other.text == text && other.imagePath == imagePath && other.identityId == identityId;
+      other is SharedPayload &&
+      other.text == text &&
+      other.imagePath == imagePath &&
+      other.identityId == identityId &&
+      listEquals(other.files, files) &&
+      listEquals(other.errors, errors);
 
   @override
-  int get hashCode => Object.hash(text, imagePath, identityId);
+  int get hashCode => Object.hash(text, imagePath, identityId, Object.hashAll(files), Object.hashAll(errors));
 
   @override
   String toString() => 'SharedPayload(text: $text, imagePath: $imagePath, identityId: $identityId)';
+}
+
+class SharedFile {
+  const SharedFile({required this.path, required this.name, required this.mime, required this.bytes});
+  final String path, name, mime;
+  final int bytes;
 }
 
 /// Routes the native side can ask the app to open (from a notification, shortcut or bubble):
@@ -112,6 +130,14 @@ class NativeBridge {
     return _update.stream;
   }
 
+  Future<bool> imageAccessGranted() async => await _call<bool>('imageAccessGranted') ?? false;
+
+  Future<SharedFile?> recentScreenshot({bool requestPermission = false}) async {
+    final m = await _call<Map>('recentScreenshot', {'requestPermission': requestPermission});
+    if (m == null) return null;
+    return SharedFile(path: m['path'], name: m['name'], mime: m['mime'], bytes: (m['bytes'] as num).toInt());
+  }
+
   Future<T?> _call<T>(String method, [Map<String, Object?>? args]) async {
     if (!supported) return null;
     _listen();
@@ -124,8 +150,7 @@ class NativeBridge {
 
   /// Stores the hq base URL (e.g. `https://app.hq.example.com/hq`) and token in native
   /// storage and (re)starts the background link, so notifications work without the app open.
-  Future<void> configure({required String baseUrl, required String token}) =>
-      _call<void>('configure', {'baseUrl': baseUrl, 'token': token});
+  Future<void> configure({required String baseUrl, required String token}) => _call<void>('configure', {'baseUrl': baseUrl, 'token': token});
 
   /// What the native side is configured with, or null when it is not configured.
   Future<({String baseUrl, String token})?> getConfig() async {

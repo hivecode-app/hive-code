@@ -18,6 +18,7 @@ import '../convs/conversations_screen.dart';
 import 'chat_scroll.dart';
 import 'composer.dart';
 import 'items.dart';
+import '../media/files_screen.dart';
 import 'markdown.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -838,7 +839,8 @@ class _ChatBar extends StatelessWidget {
             ProductContentText(d.roleLine(who.id), style: T.meta.copyWith(color: p.text2)),
             status,
           ]))),
-          IBtn('search', tip: l.searchChat, onTap: onSearch),
+          IBtn('folder', tip: l.mediaFiles, onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => FilesScreen(chat: who.id)))),
+            IBtn('search', tip: l.searchChat, onTap: onSearch),
           IBtn('info', tip: l.role, onTap: () => _workerSheet(context, d)),
           PopupMenuButton<String>(tooltip: l.more, onSelected: onMenu, icon: Ic('more_vert', color: p.text2), itemBuilder: (_) => [
             PopupMenuItem(value: 'stop', child: Text(l.stop)),

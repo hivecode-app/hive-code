@@ -4,6 +4,18 @@ import 'package:flutter/widgets.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 const Map<String, IconData> kIcons = {
+  'web': Symbols.web_rounded,
+  'screenshot': Symbols.screenshot_rounded,
+  'movie': Symbols.movie_rounded,
+  'audio_file': Symbols.audio_file_rounded,
+  'table_chart': Symbols.table_chart_rounded,
+  'folder_zip': Symbols.folder_zip_rounded,
+  'play_circle': Symbols.play_circle_rounded,
+  'videocam': Symbols.videocam_rounded,
+  'download': Symbols.download_rounded,
+  'zoom_in': Symbols.zoom_in_rounded,
+  'zoom_out': Symbols.zoom_out_rounded,
+  'pause': Symbols.pause_rounded,
   'search': Symbols.search_rounded,
   'do_not_disturb_on': Symbols.do_not_disturb_on_rounded,
   'more_vert': Symbols.more_vert_rounded,

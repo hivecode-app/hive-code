@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 import 'paste_io.dart' if (dart.library.js_interop) 'paste_web.dart' as impl;
 
-typedef PastedImage = void Function(Uint8List bytes, String mime, String name);
+typedef PastedImage = Future<bool> Function(Uint8List bytes, String mime, String name, {String? path, int? size});
 
 /// The open composer listens; the returned function stops it. The last one to listen gets them.
 void Function() listenPastedImages(PastedImage onImage) => impl.listenPastedImages(onImage);

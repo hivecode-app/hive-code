@@ -13,6 +13,9 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.provider.OpenableColumns
+import android.provider.MediaStore
+import android.content.ContentUris
 import android.webkit.MimeTypeMap
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
@@ -43,6 +46,7 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
     private var initialRoute: String? = null
     private var initialShare: Intent? = null
     private var initialPair: String? = null
+    private var imagePermissionResult: MethodChannel.Result? = null
     private var permissionResult: MethodChannel.Result? = null
     private val passkeys by lazy { Passkeys(activity) }
 
@@ -82,6 +86,20 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
                 app.hivecode.hq.ServerWatch.configure(ctx)
                 HqLinkService.start(ctx, reconnect = true)
                 result.success(null)
+            }
+            "imageAccessGranted" -> {
+                val permission = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
+                result.success(ContextCompat.checkSelfPermission(ctx, permission) == PackageManager.PERMISSION_GRANTED)
+            }
+            "recentScreenshot" -> {
+                val permission = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
+                if (ContextCompat.checkSelfPermission(ctx, permission) == PackageManager.PERMISSION_GRANTED) {
+                    loadScreenshot(result)
+                } else if (call.argument<Boolean>("requestPermission") == true) {
+                    imagePermissionResult?.success(null)
+                    imagePermissionResult = result
+                    ActivityCompat.requestPermissions(activity, arrayOf(permission), REQ_IMAGES)
+                } else result.success(null)
             }
             "getConfig" -> {
                 val p = Prefs(ctx)
@@ -186,12 +204,36 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
     }
 
     fun onPermissionResult(requestCode: Int, grantResults: IntArray) {
+        if (requestCode == REQ_IMAGES) {
+            val pending = imagePermissionResult
+            imagePermissionResult = null
+            if (pending != null) {
+                if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) loadScreenshot(pending) else pending.success(null)
+            }
+            return
+        }
         if (requestCode != REQ_NOTIFICATIONS) return
         val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
         permissionResult?.success(granted)
         permissionResult = null
         // Whatever was waiting while notifications were off can show now.
         if (granted) HqSync.refresh(activity.applicationContext, fetch = false)
+    }
+
+    private fun loadScreenshot(result: MethodChannel.Result) {
+        thread(name = "company-screenshot") {
+            val payload = runCatching {
+                val ctx = activity.applicationContext
+                val cols = arrayOf(MediaStore.Images.Media._ID)
+                val cutoff = System.currentTimeMillis() / 1000 - 600
+                ctx.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cols,
+                    "${MediaStore.Images.Media.DATE_ADDED} >= ? AND (${MediaStore.Images.Media.BUCKET_DISPLAY_NAME} LIKE ? OR ${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?)",
+                    arrayOf(cutoff.toString(), "%Screenshots%", "%Screenshot%"), "${MediaStore.Images.Media.DATE_ADDED} DESC")?.use { cursor ->
+                    if (cursor.moveToFirst()) copySharedFile(ctx, ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0))) else null
+                }
+            }.getOrNull()
+            main.post { result.success(payload) }
+        }
     }
 
     /** True if already exempt. Otherwise opens the system dialog and returns false. */
@@ -229,8 +271,9 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
     companion object {
         const val CHANNEL = "company/native"
         private const val REQ_NOTIFICATIONS = 7301
+        private const val REQ_IMAGES = 7302
 
-        fun isShare(intent: Intent) = intent.action == Intent.ACTION_SEND
+        fun isShare(intent: Intent) = intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE
 
         /**
          * `agentcompany://pair?url=<https://host/pair?code=…>`, from hq's pairing page (pairing.ts). Any app
@@ -252,12 +295,46 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
                 intent.getStringExtra(Intent.EXTRA_SUBJECT)?.takeIf { it.isNotBlank() },
                 intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() },
             ).distinct().joinToString("\n").ifBlank { null }
-            val uri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-            // Only another app's content:// URI: never file://, never our own provider (that would copy our private files).
-            val foreign = uri != null && uri.scheme == "content" && uri.authority?.startsWith(context.packageName) == false
-            val image = if (foreign && intent.type?.startsWith("image/") == true) copyToCache(context, uri) else null
+            val uris = if (intent.action == Intent.ACTION_SEND_MULTIPLE)
+                IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+            else listOfNotNull(IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java))
+            val errors = mutableListOf<String>()
+            val files = uris.take(20).mapNotNull { uri ->
+                val foreign = uri.scheme == "content" && uri.authority?.startsWith(context.packageName) == false
+                val copied = if (foreign) copySharedFile(context, uri) else null
+                if (copied == null) errors.add(displayName(context, uri))
+                copied
+            }
+            if (uris.size > 20) errors.addAll(uris.drop(20).map { displayName(context, it) })
             val identity = intent.getStringExtra(ShortcutManagerCompat.EXTRA_SHORTCUT_ID)?.removePrefix("worker-")
-            return mapOf("text" to text, "imagePath" to image, "identityId" to identity)
+            return mapOf("text" to text, "files" to files, "errors" to errors, "identityId" to identity)
+        }
+
+        private fun displayName(context: Context, uri: Uri): String = try {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            } ?: "file"
+        } catch (_: Exception) { "file" }
+
+        private fun copySharedFile(context: Context, uri: Uri): Map<String, Any?>? {
+            val name = displayName(context, uri)
+            val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+            val out = File.createTempFile("shared-", ".bin", dir)
+            return try {
+                context.contentResolver.openInputStream(uri)?.use { input -> out.outputStream().use { target ->
+                    val buffer = ByteArray(64 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        require(total <= 200L * 1024 * 1024) { "file too large" }
+                        target.write(buffer, 0, count)
+                    }
+                } } ?: throw IllegalStateException("no stream")
+                require(out.length() > 0)
+                mapOf("path" to out.absolutePath, "name" to name, "mime" to (context.contentResolver.getType(uri) ?: "application/octet-stream"), "bytes" to out.length())
+            } catch (_: Exception) { out.delete(); null }
         }
 
         /** {bytes, mime, name} of an image, or null when it can't be read or is too big to send. */

@@ -1,6 +1,8 @@
 import { onboardingRoutes } from './onboarding.ts';
 import { TaskCatalog, orgTree } from './task-product.ts';
 import { search } from './search.ts';
+import { artifactInfo, ARTIFACT_LINK_TTL } from './artifacts.ts';
+import { listFiles } from './files.ts';
 import { productPreferences } from './i18n.ts';
 // HTTP + WebSocket API on 127.0.0.1 (B.8). Token auth on everything except GET /health (heartbeat), the
 // pairing page GET /pair and GET /.well-known/assetlinks.json (pairing.ts), and
@@ -11,8 +13,8 @@ import { productPreferences } from './i18n.ts';
 import { ETA_KINDS } from './estimates.ts';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { timingSafeEqual, randomBytes } from 'node:crypto';
-import { createReadStream, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { createReadStream, statSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join, resolve, sep, basename } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Hq } from './hq.ts';
 import type { AwaitingOutcome } from './awaiting.ts';
@@ -655,11 +657,16 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
         res.writeHead(200,{'content-type':'image/jpeg','cache-control':'private, max-age=60'});
         const stream = createReadStream(path); stream.on('error',()=>res.destroy()); stream.pipe(res); return;
       }
+      const artifactDetails = req.method === 'GET' ? /^\/api\/artifacts\/([^/]+)$/.exec(url.pathname) : null;
+      if (artifactDetails) {
+        const artifact = artifactInfo(hq.store, artifactDetails[1]!);
+        return json(res, artifact ? 200 : 404, {artifact});
+      }
       const artifactOpen = req.method === 'POST' ? /^\/api\/artifacts\/([^/]+)\/open$/.exec(url.pathname) : null;
       if (artifactOpen) {
         const body = await readBody(req);
         if (body.version != null && (!Number.isInteger(body.version) || Number(body.version) < 1)) throw new UploadError(400, 'invalid version');
-        return json(res,200,hq.artifacts.open(artifactOpen[1]!, body.version as number | undefined));
+        return json(res,200,{...hq.artifacts.open(artifactOpen[1]!, body.version as number | undefined), access_expires_at: hq.store.now()+ARTIFACT_LINK_TTL});
       }
       const artifactKeep = req.method === 'POST' ? /^\/api\/artifacts\/([^/]+)\/keep$/.exec(url.pathname) : null;
       if (artifactKeep) { const body = await readBody(req); hq.artifacts.keep(artifactKeep[1]!, body.keep !== false); return json(res,200,{ok:true}); }
@@ -687,6 +694,39 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
       }
       const status = req.method === 'GET' ? /^\/api\/uploads\/([^/]+)\/status$/.exec(url.pathname) : null;
       if (status) return json(res, 200, { upload: hq.uploads.status(status[1]!) });
+      if (req.method === 'GET' && url.pathname === '/api/files') {
+        const task = url.searchParams.get('task'), kind = url.searchParams.get('kind'), offset = Number(url.searchParams.get('offset') ?? 0);
+        if (task != null && !/^[1-9]\d*$/.test(task)) return json(res, 400, { error: 'invalid task' });
+        if (kind && !['images', 'documents', 'audio', 'apps', 'other'].includes(kind)) return json(res, 400, { error: 'invalid file kind' });
+        if (!Number.isSafeInteger(offset) || offset < 0) return json(res, 400, { error: 'invalid offset' });
+        return json(res, 200, listFiles(hq.store, hq.uploads, { chat: url.searchParams.get('chat') ?? undefined, task: task == null ? undefined : Number(task), kind: kind ?? undefined, offset }));
+      }
+      const derived = req.method === 'GET' ? /^\/api\/uploads\/([^/]+)\/(preview|entries|entry|transcript)$/.exec(url.pathname) : null;
+      if (derived) {
+        const upload = hq.uploads.get(decodeURIComponent(derived[1]!));
+        if (!upload) return json(res, 404, { error: 'no such upload' });
+        await hq.uploads.prepare(upload.id);
+        const meta = hq.uploads.get(upload.id)?.meta;
+        if (derived[2] === 'entries') {
+          const manifest = meta?.readable?.find(p => p.endsWith('/manifest.txt'));
+          if (!manifest || !existsSync(manifest)) return json(res, 404, { error: 'no archive preview' });
+          return json(res, 200, { entries: readFileSync(manifest, 'utf8').split('\n').filter(Boolean) });
+        }
+        let path: string | undefined;
+        if (derived[2] === 'preview') path = meta?.readable?.find(p => p.endsWith('.pdf'));
+        else if (derived[2] === 'transcript') path = meta?.readable?.find(p => p.endsWith('/transcript.txt'));
+        else {
+          const name = url.searchParams.get('name') ?? '';
+          const manifest = meta?.readable?.find(p => p.endsWith('/manifest.txt'));
+          if (!manifest || !existsSync(manifest) || !readFileSync(manifest, 'utf8').split('\n').includes(name)) return json(res, 404, { error: 'no archive entry' });
+          const root = resolve(`${upload.path}.d`, 'files');
+          const candidate = resolve(root, name);
+          if (candidate.startsWith(root + sep)) path = candidate;
+        }
+        if (!path || !existsSync(path)) return json(res, 404, { error: 'preview unavailable' });
+        res.writeHead(200, { 'content-type': derived[2] === 'preview' ? 'application/pdf' : derived[2] === 'transcript' ? 'text/plain; charset=utf-8' : 'application/octet-stream', 'x-content-type-options': 'nosniff', 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(basename(path))}`, 'cache-control': 'private, max-age=31536000, immutable' });
+        const stream = createReadStream(path); stream.on('error', () => res.destroy()); stream.pipe(res); return;
+      }
       const up = req.method === 'GET' ? /^\/api\/uploads\/([^/]+)(\/thumb)?$/.exec(url.pathname) : null;
       if (up) {
         const upload = hq.uploads.get(decodeURIComponent(up[1]!));
@@ -695,9 +735,18 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
         const path = up[2] ? hq.uploads.get(upload.id)?.meta?.thumb : upload.path;
         if (!path || !existsSync(path)) return json(res, 404, { error: 'no thumbnail' });
         const mime = up[2] ? 'image/jpeg' : upload.mime;
-        res.writeHead(200, { 'content-type': mime, 'cache-control': 'private, max-age=31536000, immutable',
+        const size=statSync(path).size, range=!up[2] ? req.headers.range : undefined;
+        let start=0,end=size-1;
+        if(range){
+          const parsed=/^bytes=(\d*)-(\d*)$/.exec(range);
+          if(!parsed||!parsed[1]&&!parsed[2]){res.writeHead(416,{'content-range':`bytes */${size}`});res.end();return;}
+          if(!parsed[1]){const count=Number(parsed[2]);start=size-count;start=Math.max(0,start);}
+          else{start=Number(parsed[1]);if(parsed[2])end=Math.min(Number(parsed[2]),size-1);}
+          if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||start>=size||end<start){res.writeHead(416,{'content-range':`bytes */${size}`});res.end();return;}
+        }
+        res.writeHead(range?206:200, { 'content-type': mime, 'cache-control': 'private, max-age=31536000, immutable', 'accept-ranges':'bytes','content-length':range?end-start+1:size,...(range?{'content-range':`bytes ${start}-${end}/${size}`}:{ }),
           'x-content-type-options': 'nosniff', ...(url.searchParams.has('download') || !mime.startsWith('image/') ? { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(upload.name)}` } : {}) });
-        const stream = createReadStream(path); stream.on('error', () => res.destroy()); stream.pipe(res); return;
+        const stream = createReadStream(path,range?{start,end}:{}); stream.on('error', () => res.destroy()); stream.pipe(res); return;
       }
       const apk = req.method === 'GET' ? /^\/api\/app\/apk\/(\d+)$/.exec(url.pathname) : null;
       if (apk) {

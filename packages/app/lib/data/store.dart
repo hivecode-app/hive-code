@@ -1,5 +1,6 @@
 import '../l10n/ui_copy.dart';
 import 'app_preferences.dart';
+
 // App state on top of a Backend: the 3-second undo on every one-tap answer (APP-SPEC §4.2),
 // drafts that survive restarts, the durable outbox (§10.1), and the desktop selection.
 import 'dart:async';
@@ -12,6 +13,8 @@ import '../model/company_time.dart' as company_time;
 import '../model/models.dart';
 import 'backend.dart';
 import 'error_report.dart';
+import 'uploads.dart';
+import 'upload_files.dart';
 
 /// One answer waiting out its 3 seconds. The UI renders [label] in place of the buttons.
 class PendingAnswer {
@@ -33,14 +36,21 @@ class PendingAnswer {
   /// Its own line instead of "יישלח ל…" (closing a card: "ייסגר בעוד 3 שנ'").
   final String Function(int secondsLeft)? text;
 
-  String get label => text != null ? text!(secondsLeft) : isGo ? UiCopy.text(930, [toName(to), secondsLeft]) : UiCopy.text(931, [toName(to), secondsLeft]);
+  String get label => text != null
+      ? text!(secondsLeft)
+      : isGo
+      ? UiCopy.text(930, [toName(to), secondsLeft])
+      : UiCopy.text(931, [toName(to), secondsLeft]);
 }
 
 /// How the conversation list is ordered. [recent] is the data's order (newest message first).
 enum ConvSort { recent, working, waiting, name }
 
 class AppStore extends ChangeNotifier {
-  AppStore(this.backend, {this.undoSeconds = 3, this.decisionUndoSeconds = 5, SharedPreferences? prefs}) : _prefs = prefs { // ignore: prefer_initializing_formals
+  AppStore(this.backend, {this.undoSeconds = 3, this.decisionUndoSeconds = 5, this._prefs, UploadFiles? uploadFiles}) {
+    // ignore: prefer_initializing_formals
+    uploads = MediaUploads(backend, files: uploadFiles);
+    uploads.addListener(_mediaChanged);
     backend.addListener(_onBackend);
     preferences.addListener(_languageChanged);
   }
@@ -57,6 +67,7 @@ class AppStore extends ChangeNotifier {
   }
 
   bool _wasOnline = false;
+  bool _restoring = true;
 
   /// Redraw, and when the link comes back, send what waited for it (§10.1). Without this the
   /// outbox was never flushed and a message stayed "ממתינה לחיבור" for good (#55).
@@ -64,13 +75,52 @@ class AppStore extends ChangeNotifier {
     if (_disposed) return;
     preferences.defaults(data?.ownerLanguage ?? 'en', data?.advancedMode ?? false);
     final on = _online;
-    if (on && !_wasOnline) unawaited(flushOutbox());
+    if (on && !_wasOnline && !_restoring) unawaited(flushOutbox());
     _wasOnline = on;
     notifyListeners();
   }
 
   bool get _online => status.state == LinkState.online || status.state == LinkState.demo || status.state == LinkState.reconnected;
 
+  late final MediaUploads uploads;
+  final _staging = <Attachment, Future<Attachment>>{};
+  final _sourcePaths = <Attachment, String>{};
+  bool retainsMediaSource(String path) => _sourcePaths.containsValue(path);
+  bool staging(Attachment a) => _staging.containsKey(a);
+  bool uploadFailed(Attachment a) => a.id == null && (a.transfer?.failed == true || a.transfer == null && !staging(a));
+  Future<void> retryUpload(String identityId, Attachment a) async {
+    if (staging(a)) return;
+    if (a.transfer != null) {
+      await uploads.run(a);
+    } else {
+      await _stageImage(identityId, a);
+    }
+  }
+
+  Set<String> _mediaReferences() => {
+    for (final list in _images.values)
+      for (final a in list)
+        if (a.transfer != null) a.transfer!.key,
+    for (final chat in data?.chats.values ?? <Conversation>[])
+      for (final m in chat.items.whereType<UserMsg>())
+        if (m.delivery == Delivery.pendingConnection || m.delivery == Delivery.failed || _inFlight.contains(m.id) || m.delivery == Delivery.queued && m.replyTo?.askId != null)
+          for (final a in m.attachments)
+            if (a.transfer != null) a.transfer!.key,
+  };
+  void _mediaChanged() {
+    if (_disposed) return;
+    for (final entry in _images.entries) {
+      for (var i = 0; i < entry.value.length; i++) {
+        entry.value[i] = uploads.current(entry.value[i]);
+      }
+      _prefs?.setString(_storageKey('media-draft:${entry.key}'), jsonEncode(entry.value.map((a) => a.toJson()).toList()));
+    }
+    if (data != null) _rewriteOutbox(data!);
+    unawaited(uploads.prune(_mediaReferences()));
+    notifyListeners();
+  }
+
+  bool get isDisposed => _disposed;
   final Backend backend;
   final preferences = AppPreferences();
   final int undoSeconds;
@@ -100,8 +150,7 @@ class AppStore extends ChangeNotifier {
   /// The default sticks once data is in: opening it reads it, and the selection must not then jump to the next unread one.
   String get currentConversation {
     final convs = data?.conversations ?? const [];
-    final pick = selectedConversation ??
-        (convs.where((c) => c.unread > 0 && !c.muted).firstOrNull ?? convs.where((c) => c.pinned).firstOrNull ?? convs.firstOrNull)?.identityId;
+    final pick = selectedConversation ?? (convs.where((c) => c.unread > 0 && !c.muted).firstOrNull ?? convs.where((c) => c.pinned).firstOrNull ?? convs.firstOrNull)?.identityId;
     if (pick != null && data != null) selectedConversation = pick;
     return pick ?? data?.managerId ?? '';
   }
@@ -143,6 +192,7 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> start() async {
+    _restoring = true;
     try {
       _prefs ??= await SharedPreferences.getInstance();
     } catch (_) {
@@ -151,7 +201,8 @@ class AppStore extends ChangeNotifier {
     final scope = backend.storageScope;
     final p = _prefs;
     if (scope != null && p != null && p.getString('hq.url') == scope) {
-      for (final key in p.getKeys().where((k) => k.startsWith('draft:') || k == 'outbox').toList()) {
+      for (final key
+          in p.getKeys().where((k) => k.startsWith('draft:') || k == 'outbox' || k == 'media-uploads' || k.startsWith('media-draft:') || k.startsWith('media-answer:')).toList()) {
         final text = p.getString(key);
         if (text != null && !p.containsKey(_storageKey(key))) await p.setString(_storageKey(key), text);
         await p.remove(key);
@@ -166,13 +217,30 @@ class AppStore extends ChangeNotifier {
     UiCopy.configure(preferences.newInterface ? preferences.language : 'he', preferences.newInterface);
     await backend.start();
     preferences.defaults(data?.ownerLanguage ?? 'en', data?.advancedMode ?? false);
+    await uploads.load(_prefs);
+    for (final key in _prefs?.getKeys().where((k) => k.startsWith(_storageKey('media-draft:'))) ?? <String>{}) {
+      _images[key.substring(_storageKey('media-draft:').length)] = [
+        for (final raw in jsonDecode(_prefs!.getString(key)!) as List) uploads.restore((raw as Map).cast<String, dynamic>()),
+      ];
+    }
     _restoreDrafts();
+    await uploads.prune(_mediaReferences());
+    _restoring = false;
+    for (final list in _images.values) {
+      for (final a in list) {
+        unawaited(uploads.run(a));
+      }
+    }
     if (_online) unawaited(flushOutbox()); // came up online: what waited from last time goes now
   }
 
   @override
   void dispose() {
     _disposed = true;
+    for (final source in _sourcePaths.values) {
+      unawaited(uploads.files.releaseSource(source));
+    }
+    _sourcePaths.clear();
     _retryTimer?.cancel();
     for (final p in _pending.values) {
       p.timer?.cancel();
@@ -180,17 +248,37 @@ class AppStore extends ChangeNotifier {
     backend.removeListener(_onBackend);
     preferences.removeListener(_languageChanged);
     preferences.dispose();
+    uploads.removeListener(_mediaChanged);
+    uploads.dispose();
     super.dispose();
   }
 
   // ── 3s undo ──────────────────────────────────────────────────────────────
 
-  void startUndo(String key, String to, Future<CommandResult> Function() action, {bool isGo = false, String Function(int)? text, String? line, String Function()? lineBuilder, String? answerId, int? seconds}) {
+  void startUndo(
+    String key,
+    String to,
+    Future<CommandResult> Function() action, {
+    bool isGo = false,
+    String Function(int)? text,
+    String? line,
+    String Function()? lineBuilder,
+    String? answerId,
+    int? seconds,
+  }) {
     cancelUndo(key, notify: false);
-    final p = PendingAnswer(key, to, isGo, seconds ?? undoSeconds, () async {
-      final r = await action();
-      if (!r.ok) _failed(r);
-    }, text, line);
+    final p = PendingAnswer(
+      key,
+      to,
+      isGo,
+      seconds ?? undoSeconds,
+      () async {
+        final r = await action();
+        if (!r.ok) _failed(r);
+      },
+      text,
+      line,
+    );
     p.lineBuilder = lineBuilder;
     p.answerId = answerId;
     _pending[key] = p;
@@ -230,27 +318,47 @@ class AppStore extends ChangeNotifier {
     final at = company_time.CompanyTime.now();
     if (item.kind == WaitKind.awaiting) {
       // A finished task (#219): "עובד", "לא עובד" or "לא רלוונטי" (#297) folds like any decision, with the same 5 seconds.
-      startUndo(key, to, () async {
-        item.failed = option.id == 'failed';
-        item.outcome = option.id;
-        final r = await backend.awaitingOutcome(item, option.id);
-        item.answerLineBuilder = () => kAwaitingOptions.firstWhere((o) => o.id == option.id).label;
-        return r;
-      }, lineBuilder: () => kAwaitingOptions.firstWhere((o) => o.id == option.id).label, answerId: option.id, seconds: decisionUndoSeconds);
+      startUndo(
+        key,
+        to,
+        () async {
+          item.failed = option.id == 'failed';
+          item.outcome = option.id;
+          final r = await backend.awaitingOutcome(item, option.id);
+          item.answerLineBuilder = () => kAwaitingOptions.firstWhere((o) => o.id == option.id).label;
+          return r;
+        },
+        lineBuilder: () => kAwaitingOptions.firstWhere((o) => o.id == option.id).label,
+        answerId: option.id,
+        seconds: decisionUndoSeconds,
+      );
     } else if (option.id == 'go') {
-      startUndo(key, to, () async {
-        final r = await backend.go(item);
-        item.answerLineBuilder = () => UiCopy.legacy ? item.doneLine ?? UiCopy.text(932) : UiCopy.text(932);
-        _closeCard(card, 'GO', at);
-        return r;
-      }, isGo: true, lineBuilder: () => decidedLine(option), seconds: decisionUndoSeconds);
+      startUndo(
+        key,
+        to,
+        () async {
+          final r = await backend.go(item);
+          item.answerLineBuilder = () => UiCopy.legacy ? item.doneLine ?? UiCopy.text(932) : UiCopy.text(932);
+          _closeCard(card, 'GO', at);
+          return r;
+        },
+        isGo: true,
+        lineBuilder: () => decidedLine(option),
+        seconds: decisionUndoSeconds,
+      );
     } else {
-      startUndo(key, to, () async {
-        final r = await backend.answerAsk(item.askId ?? item.id, option, from: item.from);
-        item.answerLineBuilder = () => UiCopy.text(933, [option.label, to]);
-        _closeCard(card, option.label, at);
-        return r;
-      }, lineBuilder: () => decidedLine(option), seconds: decisionUndoSeconds);
+      startUndo(
+        key,
+        to,
+        () async {
+          final r = await backend.answerAsk(item.askId ?? item.id, option, from: item.from);
+          item.answerLineBuilder = () => UiCopy.text(933, [option.label, to]);
+          _closeCard(card, option.label, at);
+          return r;
+        },
+        lineBuilder: () => decidedLine(option),
+        seconds: decisionUndoSeconds,
+      );
     }
   }
 
@@ -262,28 +370,47 @@ class AppStore extends ChangeNotifier {
       // A task to check (task 986): its outcome, through the same call as on the task's item.
       final w = data?.checks.where((w) => checkAskId(w) == card.askId).firstOrNull;
       if (w == null) return;
-      startUndo(key, to, () async {
-        final r = await backend.awaitingOutcome(w, option.id);
-        _closeCard(card, option.label, at);
-        return r;
-      }, lineBuilder: () => kAwaitingOptions.firstWhere((o) => o.id == option.id).label, answerId: option.id, seconds: decisionUndoSeconds);
+      startUndo(
+        key,
+        to,
+        () async {
+          final r = await backend.awaitingOutcome(w, option.id);
+          _closeCard(card, option.label, at);
+          return r;
+        },
+        lineBuilder: () => kAwaitingOptions.firstWhere((o) => o.id == option.id).label,
+        answerId: option.id,
+        seconds: decisionUndoSeconds,
+      );
     } else if (option.id == 'go') {
-      startUndo(key, to, () async {
-        final w = data?.waiting.where((w) => w.askId == card.askId).firstOrNull;
-        _closeCard(card, 'GO', at);
-        if (w != null) return backend.go(w);
-        return backend.answerAsk(card.askId ?? card.id, option);
-      }, isGo: true, lineBuilder: () => decidedLine(option), seconds: decisionUndoSeconds);
+      startUndo(
+        key,
+        to,
+        () async {
+          final w = data?.waiting.where((w) => w.askId == card.askId).firstOrNull;
+          _closeCard(card, 'GO', at);
+          if (w != null) return backend.go(w);
+          return backend.answerAsk(card.askId ?? card.id, option);
+        },
+        isGo: true,
+        lineBuilder: () => decidedLine(option),
+        seconds: decisionUndoSeconds,
+      );
     } else {
-      startUndo(key, to, () async {
-        _closeCard(card, option.label, at);
-        return backend.answerAsk(card.askId ?? card.id, option, from: card.from);
-      }, lineBuilder: () => decidedLine(option), seconds: decisionUndoSeconds);
+      startUndo(
+        key,
+        to,
+        () async {
+          _closeCard(card, option.label, at);
+          return backend.answerAsk(card.askId ?? card.id, option, from: card.from);
+        },
+        lineBuilder: () => decidedLine(option),
+        seconds: decisionUndoSeconds,
+      );
     }
   }
 
-  AskCard? _cardOf(String from, String? askId) =>
-      askId == null ? null : data?.chats[from]?.items.whereType<AskCard>().where((c) => c.askId == askId).lastOrNull;
+  AskCard? _cardOf(String from, String? askId) => askId == null ? null : data?.chats[from]?.items.whereType<AskCard>().where((c) => c.askId == askId).lastOrNull;
 
   static void _closeCard(AskCard? card, String answer, DateTime at) {
     if (card == null) return;
@@ -305,9 +432,9 @@ class AppStore extends ChangeNotifier {
   /// "בדקתי" on "מה לבדוק" (#108): off the list now; back, with the error, when the server didn't take it.
   Future<void> checked(AwaitingTask t) async => _check(await backend.checked(t));
   Future<void> resume(WaitItem item) async => _check(await backend.resume(item));
+
   /// Closing is for good and wakes the worker: it waits the same 3 seconds as any one-tap answer.
-  void dismiss(WaitItem item) =>
-      startUndo(item.id, nameOf(item.from), () => backend.dismiss(item), text: (s) => UiCopy.text(934, [s]));
+  void dismiss(WaitItem item) => startUndo(item.id, nameOf(item.from), () => backend.dismiss(item), text: (s) => UiCopy.text(934, [s]));
 
   Future<void> _check(CommandResult r) async {
     if (!r.ok) {
@@ -337,27 +464,63 @@ class AppStore extends ChangeNotifier {
   // ── images waiting in the composer (WhatsApp: a preview, removable, sent with the next message) ──
 
   /// At most this many per message, like hq (mailbox.ts).
-  static const maxImages = 10;
+  static const maxImages = 20;
 
   final Map<String, List<Attachment>> _images = {};
   List<Attachment> images(String identityId) => _images[identityId] ?? const [];
 
-  void addImage(String identityId, Attachment a) {
+  Future<bool> addImage(String identityId, Attachment a, {String? sourcePath}) async {
+    if (_disposed) return false;
+    if (a.bytes <= 0 || a.bytes > maxImageBytes) {
+      notice(UiCopy.copy.mediaTooLarge(a.name));
+      notifyListeners();
+      return false;
+    }
     final list = _images.putIfAbsent(identityId, () => []);
     if (list.length >= maxImages) {
       notice(UiCopy.text(935, [maxImages]));
-    } else {
-      list.add(a);
+      notifyListeners();
+      return false;
     }
+    list.add(a);
     notifyListeners();
+    if (sourcePath != null) _sourcePaths[a] = sourcePath;
+    return _stageImage(identityId, a);
+  }
+
+  Future<bool> _stageImage(String identityId, Attachment a) async {
+    final list = _images.putIfAbsent(identityId, () => []);
+    final future = uploads.keep(a, sourcePath: _sourcePaths[a]);
+    _staging[a] = future;
+    try {
+      final kept = await future;
+      final at = list.indexOf(a);
+      if (at >= 0) list[at] = kept;
+      _mediaChanged();
+      final source = _sourcePaths.remove(a);
+      if (source != null) unawaited(uploads.files.releaseSource(source));
+      if (!_disposed && at >= 0) unawaited(uploads.run(kept));
+      return !_disposed && at >= 0;
+    } catch (_) {
+      if (!_disposed && list.contains(a)) {
+        notice(UiCopy.copy.mediaReadFailed(a.name));
+        notifyListeners();
+      }
+      return false;
+    } finally {
+      _staging.remove(a);
+      _mediaChanged();
+    }
   }
 
   void removeImage(String identityId, Attachment a) {
     _images[identityId]?.remove(a);
-    notifyListeners();
+    final source = _sourcePaths.remove(a);
+    if (source != null) unawaited(uploads.files.releaseSource(source));
+    _mediaChanged();
   }
 
-  Future<UserMsg> send(String identityId, String text, Priority priority, {Quote? quote, List<Attachment> attachments = const []}) async {
+  Future<UserMsg> send(String identityId, String text, Priority priority, {Quote? quote, List<Attachment> attachments = const [], bool clearDraft = true}) async {
     final msg = UserMsg(
       id: 'm-${company_time.CompanyTime.now().millisecondsSinceEpoch}-${_n++}',
       ts: company_time.CompanyTime.now(),
@@ -367,7 +530,22 @@ class AppStore extends ChangeNotifier {
       delivery: Delivery.queued,
       attachments: [...attachments],
     );
-    setDraft(identityId, '');
+    if (clearDraft) setDraft(identityId, '');
+    // Capture recipient, text and quote before awaiting any local or network operation.
+    for (var i = 0; i < msg.attachments.length; i++) {
+      final a = msg.attachments[i];
+      if (a.id != null || a.transfer != null) continue;
+      try {
+        msg.attachments[i] = await (_staging[a] ?? uploads.keep(a));
+      } catch (_) {
+        msg.delivery = Delivery.failed;
+        data?.chats[identityId]?.items.add(msg);
+        if (data != null) _rewriteOutbox(data!);
+        notifyListeners();
+        return msg;
+      }
+    }
+    if (quote?.askId == null && msg.attachments.any((a) => a.id == null)) _wait(identityId, msg);
     if (quote?.askId != null) return _answer(identityId, msg, quote!.askId!);
     return _deliver(identityId, msg);
   }
@@ -375,6 +553,9 @@ class AppStore extends ChangeNotifier {
   /// "ניסיון נוסף" on a message that was not delivered: the same message, with the same id, so hq
   /// takes it once even if the first try did get there.
   Future<UserMsg> resend(String identityId, UserMsg msg) async {
+    if (_inFlight.contains(msg.id)) return msg;
+    msg.delivery = Delivery.queued;
+    if (msg.replyTo?.askId == null && msg.attachments.any((a) => a.id == null)) _wait(identityId, msg);
     if (msg.replyTo?.askId != null) return _answer(identityId, msg, msg.replyTo!.askId!);
     return _deliver(identityId, msg);
   }
@@ -385,6 +566,23 @@ class AppStore extends ChangeNotifier {
   Future<CommandResult> _try(String identityId, UserMsg msg) async {
     _inFlight.add(msg.id);
     try {
+      for (var i = 0; i < msg.attachments.length; i++) {
+        final a = msg.attachments[i];
+        if (a.id != null) {
+          msg.attachments[i] = uploads.current(a);
+          continue;
+        }
+        final up = await uploads.run(a);
+        if (msg.cancelled || _disposed) return const CommandResult.ok();
+        if (up == null) return CommandResult.localized(892, transient: a.transfer?.retryable ?? false);
+        msg.attachments[i] = up;
+      }
+      if (msg.cancelled || _disposed) return const CommandResult.ok();
+      if (msg.attachments.isNotEmpty) {
+        msg.submitted = true;
+        if (data != null) _rewriteOutbox(data!);
+      }
+      if (msg.replyTo?.askId != null) return await backend.freeAnswer(msg.replyTo!.askId!, msg.text, attachments: msg.attachments);
       return await backend.send(identityId, msg);
     } finally {
       _inFlight.remove(msg.id);
@@ -393,7 +591,8 @@ class AppStore extends ChangeNotifier {
 
   Future<UserMsg> _deliver(String identityId, UserMsg msg) async {
     // Behind one that waits or is on its way, a new message waits its turn.
-    final waiting = data?.chats[identityId]?.items.any((i) => i is UserMsg && (i.delivery == Delivery.pendingConnection || _inFlight.contains(i.id))) ?? false;
+    final waiting =
+        data?.chats[identityId]?.items.any((i) => i is UserMsg && !identical(i, msg) && (i.delivery == Delivery.pendingConnection || _inFlight.contains(i.id))) ?? false;
     if (!_online || waiting) {
       // Durable outbox: shown with a clock and "ממתינה לחיבור" until the link is back. Behind a
       // message that waits it waits too, so it does not arrive first.
@@ -403,6 +602,8 @@ class AppStore extends ChangeNotifier {
       return msg;
     }
     final r = await _try(identityId, msg);
+    if (_disposed) return msg;
+    if (data != null) _rewriteOutbox(data!);
     if (!r.ok && r.transient) {
       // It did not reach hq (the link fell, hq restarting): it waits and goes again by itself. The
       // id goes with it, so a try that did get there is not taken twice.
@@ -417,7 +618,12 @@ class AppStore extends ChangeNotifier {
         unawaited(flushOutbox());
       }
     }
-    notifyListeners();
+    if (!(data?.chats.values.any((c) => c.items.any((i) => i is UserMsg && i.delivery == Delivery.pendingConnection)) ?? false)) {
+      _retryTimer?.cancel();
+      _retryTimer = null;
+      _retryStep = 0;
+    }
+    _mediaChanged();
     return msg;
   }
 
@@ -429,16 +635,21 @@ class AppStore extends ChangeNotifier {
     final d = data;
     if (d != null) _rewriteOutbox(d);
     _scheduleRetry();
+    notifyListeners();
   }
 
   /// A reply that quotes a question answers it. Never queued: an answer to a question that may be
   /// gone by then needs a yes or no now, and a refusal says why (#55).
   Future<UserMsg> _answer(String identityId, UserMsg msg, String askId) async {
     final chat = data?.chats[identityId];
-    if (chat != null && !chat.items.contains(msg)) chat.items.add(msg); // "ניסיון נוסף" is the same bubble
+    if (chat != null && !chat.items.contains(msg)) chat.items.add(msg);
     notifyListeners();
-    final r = await backend.freeAnswer(askId, msg.text, attachments: msg.attachments);
+    if (msg.attachments.isNotEmpty) await _prefs?.setString(_storageKey('media-answer:${msg.id}'), jsonEncode(_outboxEntry(identityId, msg)));
+    if (_disposed) return msg;
+    final r = await _try(identityId, msg);
+    if (msg.cancelled || _disposed) return msg;
     if (r.ok) {
+      _prefs?.remove(_storageKey('media-answer:${msg.id}'));
       msg.delivery = Delivery.delivered;
       final said = msg.text.isEmpty && msg.attachments.isNotEmpty ? UiCopy.text(247) : msg.text;
       for (final c in chat?.items.whereType<AskCard>() ?? const <AskCard>[]) {
@@ -455,14 +666,33 @@ class AppStore extends ChangeNotifier {
       msg.delivery = Delivery.failed;
       _failed(r);
     }
-    notifyListeners();
+    if (!(data?.chats.values.any((c) => c.items.any((i) => i is UserMsg && i.delivery == Delivery.pendingConnection)) ?? false)) {
+      _retryTimer?.cancel();
+      _retryTimer = null;
+    }
+    _mediaChanged();
     return msg;
+  }
+
+  Future<void> omitFailedFile(UserMsg msg, Attachment file) async {
+    if (_inFlight.contains(msg.id) || msg.delivery != Delivery.failed && msg.delivery != Delivery.pendingConnection) return;
+    final chat = data?.chats.entries.where((e) => e.value.items.contains(msg)).firstOrNull;
+    if (chat == null) return;
+    msg.attachments.remove(file);
+    if (msg.text.trim().isEmpty && msg.attachments.isEmpty) {
+      msg.cancelled = true;
+      chat.value.items.remove(msg);
+      if (msg.replyTo?.askId != null) await _prefs?.remove(_storageKey('media-answer:${msg.id}'));
+      _mediaChanged();
+      return;
+    }
+    await resend(chat.key, msg);
   }
 
   /// Free text typed as the answer to [item] (home row, or a question without options).
   Future<CommandResult> answerText(WaitItem item, String text) async {
     final askId = item.askId;
-    if (askId == null) return  CommandResult.localized(937);
+    if (askId == null) return CommandResult.localized(937);
     final r = await backend.freeAnswer(askId, text);
     if (r.ok) {
       item.state = WaitState.answered;
@@ -475,21 +705,57 @@ class AppStore extends ChangeNotifier {
   }
 
   /// "משיכה חזרה": the text goes back to the composer (chat.md §2.1).
+  String _restoreMediaDraft(String identityId, UserMsg msg) {
+    if (msg.replyTo?.askId != null) _prefs?.remove(_storageKey('media-answer:${msg.id}'));
+    final current = data?.chats[identityId]?.draft ?? '';
+    final text = current.isEmpty || current == msg.text
+        ? msg.text
+        : msg.text.isEmpty
+        ? current
+        : '$current\n${msg.text}';
+    final list = _images.putIfAbsent(identityId, () => []);
+    for (final a in msg.attachments) {
+      if (!list.any((b) => identical(a, b) || a.id != null && a.id == b.id || a.transfer != null && a.transfer!.key == b.transfer?.key)) list.add(a);
+    }
+    setDraft(identityId, text);
+    _mediaChanged();
+    return text;
+  }
+
   Future<String?> retract(String identityId, UserMsg msg) async {
+    if (msg.attachments.isNotEmpty && msg.submitted && msg.delivery == Delivery.pendingConnection) {
+      notice(UiCopy.text(938));
+      notifyListeners();
+      return null;
+    }
+    if (_inFlight.contains(msg.id) && msg.attachments.any((a) => a.id == null)) {
+      msg.cancelled = true;
+      data?.chats[identityId]?.items.remove(msg);
+      final restored = _restoreMediaDraft(identityId, msg);
+      if (data != null) _rewriteOutbox(data!);
+      notifyListeners();
+      return restored;
+    }
     if (_inFlight.contains(msg.id)) {
       // Already on its way: hq may have it, so it is not taken off here as if it never went.
       notice(UiCopy.text(938));
       notifyListeners();
       return null;
     }
+    if (msg.delivery == Delivery.failed && (msg.replyTo?.askId != null || msg.attachments.any((a) => a.id == null))) {
+      data?.chats[identityId]?.items.remove(msg);
+      msg.cancelled = true;
+      return _restoreMediaDraft(identityId, msg);
+    }
     if (msg.delivery == Delivery.pendingConnection) {
       // Still on this device: it comes out of the outbox, and hq never hears of it.
       data?.chats[identityId]?.items.remove(msg);
       final d = data;
       if (d != null) _rewriteOutbox(d);
-      setDraft(identityId, msg.text);
+      msg.cancelled = true;
+      final restored = _restoreMediaDraft(identityId, msg);
       notifyListeners();
-      return msg.text;
+      return restored;
     }
     final r = await backend.retract(identityId, msg.id);
     if (!r.ok) {
@@ -601,35 +867,61 @@ class AppStore extends ChangeNotifier {
     final raw = p.getString(_storageKey('outbox'));
     if (raw != null) {
       for (final e in (jsonDecode(raw) as List).cast<Map<String, dynamic>>()) {
-        final c = d.chats[e['to']];
-        if (c == null || c.items.any((i) => i.id == e['id'])) continue;
-        c.items.add(UserMsg(
+        final to = e['to'] as String;
+        final c = d.chats.putIfAbsent(to, () => Conversation(identityId: to, items: [], draft: p.getString(_storageKey('draft:$to')) ?? ''));
+        if (e['quote'] is Map && e['quote']['askId'] != null) p.setString(_storageKey('media-answer:${e['id']}'), jsonEncode(e));
+        if (c.items.any((i) => i.id == e['id'])) continue;
+        c.items.add(
+          UserMsg(
+            id: e['id'],
+            ts: DateTime.fromMillisecondsSinceEpoch(e['ts']),
+            text: e['text'],
+            priority: Priority.values.asNameMap()[e['priority']] ?? Priority.next,
+            submitted: e['submitted'] == true,
+            delivery: e['failed'] == true || e['quote'] is Map && e['quote']['askId'] != null ? Delivery.failed : Delivery.pendingConnection,
+            replyTo: e['quote'] is Map
+                ? Quote(author: e['quote']['author'], text: e['quote']['text'], itemId: e['quote']['itemId'], askId: e['quote']['askId'], go: e['quote']['go'] == true)
+                : null,
+            attachments: [for (final a in (e['attachments'] as List? ?? const []).cast<Map<String, dynamic>>()) uploads.restore(a)],
+          ),
+        );
+      }
+    }
+    for (final key in p.getKeys().where((key) => key.startsWith(_storageKey('media-answer:')))) {
+      final e = (jsonDecode(p.getString(key)!) as Map).cast<String, dynamic>();
+      final to = e['to'] as String;
+      final chat = d.chats.putIfAbsent(to, () => Conversation(identityId: to, items: []));
+      if (chat.items.any((m) => m.id == e['id'])) continue;
+      final q = e['quote'] as Map;
+      chat.items.add(
+        UserMsg(
           id: e['id'],
           ts: DateTime.fromMillisecondsSinceEpoch(e['ts']),
           text: e['text'],
           priority: Priority.values.asNameMap()[e['priority']] ?? Priority.next,
-          delivery: Delivery.pendingConnection,
-          attachments: [
-            for (final a in (e['attachments'] as List? ?? const []).cast<Map<String, dynamic>>())
-              Attachment(name: a['name'], bytes: a['bytes'], mime: a['mime'], id: a['id']),
-          ],
-        ));
-      }
+          delivery: Delivery.failed,
+          replyTo: Quote(author: q['author'], text: q['text'], itemId: q['itemId'], askId: q['askId'], go: q['go'] == true),
+          attachments: [for (final a in e['attachments'] as List? ?? const []) uploads.restore((a as Map).cast<String, dynamic>())],
+        ),
+      );
     }
+    _rewriteOutbox(d);
     notifyListeners();
   }
 
   /// A waiting message as the device keeps it. Images go with their upload ids; one that is not up
   /// yet has only its bytes, which are not kept, so that message waits in memory only (null).
   static Map<String, dynamic>? _outboxEntry(String to, UserMsg m) {
-    if (m.attachments.any((a) => a.id == null)) return null;
     return {
       'to': to,
       'id': m.id,
       'ts': m.ts.millisecondsSinceEpoch,
       'text': m.text,
       'priority': m.priority.name,
-      if (m.attachments.isNotEmpty) 'attachments': [for (final a in m.attachments) {'id': a.id, 'name': a.name, 'bytes': a.bytes, 'mime': a.mime}],
+      if (m.delivery == Delivery.failed) 'failed': true,
+      if (m.submitted) 'submitted': true,
+      if (m.replyTo != null) 'quote': {'author': m.replyTo!.author, 'text': m.replyTo!.text, 'itemId': m.replyTo!.itemId, 'askId': m.replyTo!.askId, 'go': m.replyTo!.go},
+      if (m.attachments.isNotEmpty) 'attachments': [for (final a in m.attachments) a.toJson()],
     };
   }
 
@@ -657,7 +949,9 @@ class AppStore extends ChangeNotifier {
     final kept = (jsonDecode(p.getString(_storageKey('outbox')) ?? '[]') as List).cast<Map<String, dynamic>>().where((e) => !d.chats.containsKey(e['to']));
     final waiting = [
       for (final c in d.chats.values)
-        for (final m in c.items.whereType<UserMsg>().where((m) => m.delivery == Delivery.pendingConnection))
+        for (final m in c.items.whereType<UserMsg>().where(
+          (m) => m.replyTo?.askId == null && (m.delivery == Delivery.pendingConnection || m.delivery == Delivery.failed && m.attachments.isNotEmpty),
+        ))
           ?_outboxEntry(c.identityId, m),
     ];
     final all = [...kept, ...waiting];
@@ -700,8 +994,7 @@ class AppStore extends ChangeNotifier {
       _flushing = false;
     }
     // A conversation with a send still on its way is left to that send: its answer carries on.
-    final more = d.chats.values.any((c) =>
-        !c.items.any((i) => _inFlight.contains(i.id)) && c.items.any((i) => i is UserMsg && i.delivery == Delivery.pendingConnection));
+    final more = d.chats.values.any((c) => !c.items.any((i) => _inFlight.contains(i.id)) && c.items.any((i) => i is UserMsg && i.delivery == Delivery.pendingConnection));
     if (waiting) {
       _scheduleRetry();
     } else if (more && !_disposed) {

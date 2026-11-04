@@ -1,7 +1,9 @@
 import '../model/task_progress.dart';
 import 'package:agent_company/l10n/input_copy.dart';
 import 'package:agent_company/l10n/ui_copy.dart';
+
 import 'search.dart';
+
 // Backend against packages/hq (HTTP + one WebSocket, token auth, B.8). Endpoints as on the hq
 // lane's branch (packages/hq/src/api.ts):
 //   GET  /api/org /api/board /api/inbox /api/asks /api/toggles /api/messages?identity= /api/events?identity=&after=[&tail=1]
@@ -84,12 +86,25 @@ class HqBackend extends Backend {
     if (s == null || previous == null) return;
     final board = Map<String, dynamic>.from(s['board'] as Map);
     companyNames = CompanyNames.fromJson(board['names']);
-    _data = mapSnapshot(board: _list(board, 'identities'), inbox: inboxOf(Map<String, dynamic>.from(s['inbox'] as Map)),
-      asks: _list(Map<String, dynamic>.from(s['asks'] as Map), 'asks'), toggles: _list(Map<String, dynamic>.from(s['toggles'] as Map), 'toggles'),
-      tasks: _list(board, 'tasks'), projects: _list(board, 'projects'), awaiting: _list(board, 'awaiting'), asked: _list(board, 'asked'),
-      openTasks: board['open_tasks'] is List ? _list(board, 'open_tasks') : null, manager: board['manager'] as String? ?? '',
-      ownerLanguage: board['owner_language'] == 'he' ? 'he' : 'en', advancedMode: board['advanced_mode'] == true, previous: previous);
-    _data!..home = previous.home..recent = previous.recent..estimates = previous.estimates;
+    _data = mapSnapshot(
+      board: _list(board, 'identities'),
+      inbox: inboxOf(Map<String, dynamic>.from(s['inbox'] as Map)),
+      asks: _list(Map<String, dynamic>.from(s['asks'] as Map), 'asks'),
+      toggles: _list(Map<String, dynamic>.from(s['toggles'] as Map), 'toggles'),
+      tasks: _list(board, 'tasks'),
+      projects: _list(board, 'projects'),
+      awaiting: _list(board, 'awaiting'),
+      asked: _list(board, 'asked'),
+      openTasks: board['open_tasks'] is List ? _list(board, 'open_tasks') : null,
+      manager: board['manager'] as String? ?? '',
+      ownerLanguage: board['owner_language'] == 'he' ? 'he' : 'en',
+      advancedMode: board['advanced_mode'] == true,
+      previous: previous,
+    );
+    _data!
+      ..home = previous.home
+      ..recent = previous.recent
+      ..estimates = previous.estimates;
     if (_lastLines != null) _applyLastLines(_data!, _lastLines!);
     notifyListeners();
   }
@@ -118,6 +133,7 @@ class HqBackend extends Backend {
   /// Between connecting and hq's {type:'live'}: replayed events change data but don't redraw the
   /// screen one by one; one redraw comes with 'live'.
   bool _replaying = false;
+
   /// Redraws held back during a replay. The 4s guard releases these, while [_replaying] (which
   /// keeps the first replay out of chats and unread counts) lasts until hq says live.
   bool _holdRedraws = false;
@@ -134,10 +150,12 @@ class HqBackend extends Backend {
   Duration silence = kSilence;
   Timer? _silence;
   bool _hqPings = false;
+
   /// The next 'live' reloads the snapshot and the open conversation, as after a drop: set when the
   /// link is replaced without having been seen down (back from the background, a silent socket).
   bool _resync = false;
   DateTime? _hiddenAt;
+
   /// Every socket opened is a new generation; a retry from an older one does nothing.
   int _linkGen = 0;
   DateTime? _linkAt;
@@ -147,6 +165,7 @@ class HqBackend extends Backend {
     if (_holdRedraws || _disposed) return;
     super.notifyListeners();
   }
+
   final _boardShift = <String, String>{}; // identity -> live shift id
   final _askToInbox = <String, int>{};
 
@@ -211,17 +230,16 @@ class HqBackend extends Backend {
       }
       if (r.statusCode == 401) {
         _refused();
-        return  CommandResult.localized(879);
+        return CommandResult.localized(879);
       }
-      if (r.statusCode == 404 || r.statusCode == 409) return  CommandResult.localized(880, gone: true);
+      if (r.statusCode == 404 || r.statusCode == 409) return CommandResult.localized(880, gone: true);
       // 502-504: the proxy is up and hq is not (a restart). The request never reached it.
       if (r.statusCode >= 502 && r.statusCode <= 504) return CommandResult.localized(882, transient: true);
-      return  CommandResult.localized(881);
+      return CommandResult.localized(881);
     } catch (_) {
       return CommandResult.localized(882, transient: true);
     }
   }
-
 
   /// What he was shown goes to hq (error_report.dart); 0 when it did not get there.
   Future<int> _postError(Map<String, dynamic> body) async {
@@ -277,7 +295,11 @@ class HqBackend extends Backend {
     final t = _downSince!;
     final hm = company_time.hm(t);
     // Cached data can be days old: "אתמול 22:10" or "18/10 22:10", never a bare time that reads as today.
-    final since = switch (company_time.daysAgo(t, company_time.CompanyTime.now())) { 0 => hm, 1 => UiCopy.text(391, [hm]), _ => '${company_time.dm(t)} $hm' };
+    final since = switch (company_time.daysAgo(t, company_time.CompanyTime.now())) {
+      0 => hm,
+      1 => UiCopy.text(391, [hm]),
+      _ => '${company_time.dm(t)} $hm',
+    };
     _status = SystemStatus(LinkState.offline, since: since);
   }
 
@@ -323,7 +345,21 @@ class HqBackend extends Backend {
     company_time.CompanyTime.apply(results[0]['timezone']);
     final prev = _data;
     if (results[0] is Map && (results[0] as Map).containsKey('names')) companyNames = CompanyNames.fromJson(results[0]['names']);
-    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), awaiting: _list(results[0], 'awaiting'), asked: _list(results[0], 'asked'), openTasks: results[0]['open_tasks'] is List ? _list(results[0], 'open_tasks') : null, manager: (results[0]['manager'] as String?) ?? '', ownerLanguage: results[0]['owner_language'] == 'he' ? 'he' : 'en', advancedMode: results[0]['advanced_mode'] == true, previous: prev);
+    _data = mapSnapshot(
+      board: board,
+      inbox: inbox,
+      asks: asks,
+      toggles: toggles,
+      tasks: _list(results[0], 'tasks'),
+      projects: _list(results[0], 'projects'),
+      awaiting: _list(results[0], 'awaiting'),
+      asked: _list(results[0], 'asked'),
+      openTasks: results[0]['open_tasks'] is List ? _list(results[0], 'open_tasks') : null,
+      manager: (results[0]['manager'] as String?) ?? '',
+      ownerLanguage: results[0]['owner_language'] == 'he' ? 'he' : 'en',
+      advancedMode: results[0]['advanced_mode'] == true,
+      previous: prev,
+    );
     // Order and last lines from the last messages fetch, right away: without them the list showed
     // board order, then jumped into recency order when the messages came back (on every event).
     final lines = _lastLines;
@@ -335,7 +371,12 @@ class HqBackend extends Backend {
       }
     }
     // "בדקתי" still on its way: a board fetched before hq took it must not bring the row back for a moment.
-    if (_checking.isNotEmpty) _data!.awaiting = [for (final x in _data!.awaiting) if (!_checking.contains(x.id)) x];
+    if (_checking.isNotEmpty) {
+      _data!.awaiting = [
+        for (final x in _data!.awaiting)
+          if (!_checking.contains(x.id)) x,
+      ];
+    }
     _snapshotRaw = {'board': results[0], 'inbox': results[1], 'asks': results[2], 'toggles': results[3]};
     // The head keeps the recipe it had until the fresh one is in: no flash of the default on every reload.
     _data!.home = prev?.home;
@@ -448,12 +489,19 @@ class HqBackend extends Backend {
   /// on every snapshot reload and once a minute while the app is in front (a recipe goes stale after 30 minutes).
   Map<String, dynamic>? _homeRaw;
   Timer? _homeTick;
+
   /// [opened]: he is looking at the app now (it started, or came to the front). hq counts a new visit from it
   /// ("מאז שהיית פה"), so a reload in the background must not say it. [looking]: the minute's reload while he is
   /// in front, which keeps the visit going; a reload on an event says neither (the app may be open behind).
   Future<void> _loadHome({bool opened = false, bool looking = false}) async {
     try {
-      final j = (await _get(opened ? '/api/home?opened=1' : looking ? '/api/home?looking=1' : '/api/home')) as Map<String, dynamic>;
+      final j = (await _get(
+        opened
+            ? '/api/home?opened=1'
+            : looking
+            ? '/api/home?looking=1'
+            : '/api/home',
+      )) as Map<String, dynamic>;
       final d = _data;
       if (d == null) return;
       d.home = HomeRecipe.fromJson(j);
@@ -537,8 +585,8 @@ class HqBackend extends Backend {
         unread: openIdentity == other && _visible
             ? 0
             : st != null
-                ? st['unread'] as int? ?? 0
-                : (m['to_identity'] == 'owner' && m['state'] != 'handled' ? 1 : 0),
+            ? st['unread'] as int? ?? 0
+            : (m['to_identity'] == 'owner' && m['state'] != 'handled' ? 1 : 0),
         pinned: other == d.managerId,
         muted: st?['muted_until'] != null,
       );
@@ -551,7 +599,12 @@ class HqBackend extends Backend {
     d.recent = [
       for (final m in (res['messages'] as List).cast<Map<String, dynamic>>())
         if ((m['from_identity'] == 'owner' ? m['to_identity'] : m['from_identity']) case final String id when id != kSystemId)
-          (id: id, text: m['from_identity'] == 'owner' ? ownLine(m).text : lastLineOf(m), at: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int), mine: m['from_identity'] == 'owner' && !ownLine(m).tapped),
+          (
+            id: id,
+            text: m['from_identity'] == 'owner' ? ownLine(m).text : lastLineOf(m),
+            at: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int),
+            mine: m['from_identity'] == 'owner' && !ownLine(m).tapped,
+          ),
     ];
     // Recent first, then the rest; Yoav stays pinned in the list widget.
     final order = [for (final m in (res['messages'] as List)) (m['from_identity'] == 'owner' ? m['to_identity'] : m['from_identity']) as String];
@@ -559,6 +612,7 @@ class HqBackend extends Backend {
       final r = order.indexOf(c.identityId);
       return r < 0 ? 1 << 20 : r;
     }
+
     d.conversations.sort((a, b) => rank(a).compareTo(rank(b)));
   }
 
@@ -575,10 +629,20 @@ class HqBackend extends Backend {
       List<Map<String, dynamic>> list(String k, String f) => ((c[k] as Map)[f] as List).cast<Map<String, dynamic>>();
       company_time.CompanyTime.apply((c['board'] as Map)['timezone']);
       if (c['board'] is Map && (c['board'] as Map).containsKey('names')) companyNames = CompanyNames.fromJson(c['board']['names']);
-      _data = mapSnapshot(board: list('board', 'identities'), inbox: inboxOf(c['inbox']), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'),
-          tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'), awaiting: _list(c['board'], 'awaiting'), asked: _list(c['board'], 'asked'),
-          openTasks: (c['board'] as Map)['open_tasks'] is List ? _list(c['board'], 'open_tasks') : null,
-          manager: ((c['board'] as Map)['manager'] as String?) ?? '', ownerLanguage: (c['board'] as Map)['owner_language'] == 'he' ? 'he' : 'en', advancedMode: (c['board'] as Map)['advanced_mode'] == true);
+      _data = mapSnapshot(
+        board: list('board', 'identities'),
+        inbox: inboxOf(c['inbox']),
+        asks: list('asks', 'asks'),
+        toggles: list('toggles', 'toggles'),
+        tasks: _list(c['board'], 'tasks'),
+        projects: _list(c['board'], 'projects'),
+        awaiting: _list(c['board'], 'awaiting'),
+        asked: _list(c['board'], 'asked'),
+        openTasks: (c['board'] as Map)['open_tasks'] is List ? _list(c['board'], 'open_tasks') : null,
+        manager: ((c['board'] as Map)['manager'] as String?) ?? '',
+        ownerLanguage: (c['board'] as Map)['owner_language'] == 'he' ? 'he' : 'en',
+        advancedMode: (c['board'] as Map)['advanced_mode'] == true,
+      );
       if (c['home'] is Map) {
         try {
           _data!.home = HomeRecipe.fromJson((c['home'] as Map).cast<String, dynamic>());
@@ -615,7 +679,16 @@ class HqBackend extends Backend {
     try {
       final prefs = await SharedPreferences.getInstance();
       try {
-        await prefs.setString(kCacheKey, jsonEncode({'url': baseUrl, 'saved': company_time.CompanyTime.now().millisecondsSinceEpoch, ...snap, if (_lastLines != null) 'messages': _lastLines, if (_homeRaw != null) 'home': _homeRaw}));
+        await prefs.setString(
+          kCacheKey,
+          jsonEncode({
+            'url': baseUrl,
+            'saved': company_time.CompanyTime.now().millisecondsSinceEpoch,
+            ...snap,
+            if (_lastLines != null) 'messages': _lastLines,
+            if (_homeRaw != null) 'home': _homeRaw,
+          }),
+        );
       } catch (_) {
         await prefs.remove(kCacheKey); // a cache that can't be written must not go on aging
       }
@@ -795,10 +868,59 @@ class HqBackend extends Backend {
     if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'task.pr' || type == 'tasks.progress' || type == 'task.new' || type == 'task.state' || type == 'toggle.changed' || type.startsWith('watchdog.')
         || type == 'home.composed' || type == 'task.awaiting' || type == 'deploy.recorded' || type == 'asked.changed'
         // A new quota read (every 10 minutes): the home's "המכסה" card.
-        || type == 'accounts.quota' || type == 'codex.quota'
+        ||
+        type == 'accounts.quota' ||
+        type == 'codex.quota'
         // A turn that ended: the header's "עובד"/"פנוי" comes from the board.
-        || type == 'engine.result') {
+        ||
+        type == 'engine.result') {
       _refreshSoon();
+    }
+    if (type == 'upload.ready' && e['data'] is Map) {
+      final raw = (e['data'] as Map)['upload'];
+      if (raw is Map) {
+        final ready = Attachment.fromJson(raw.cast<String, dynamic>());
+        for (final chat in d.chats.values) {
+          for (final message in chat.items) {
+            final attachments = switch (message) {
+              UserMsg m => m.attachments,
+              TextMsg m => m.attachments,
+              _ => <Attachment>[],
+            };
+            for (var i = 0; i < attachments.length; i++) {
+              final old = attachments[i];
+              if (old.id == ready.id) {
+                attachments[i] = Attachment(name: ready.name, bytes: ready.bytes, mime: ready.mime, id: ready.id, meta: ready.meta, data: old.data, transfer: old.transfer);
+              }
+            }
+          }
+        }
+        notifyListeners();
+      }
+    }
+    if (type == 'message.updated' && e['data'] is Map) {
+      final raw = (e['data'] as Map).cast<String, dynamic>();
+      final chat = d.chats[raw['from_identity']];
+      final message = chat?.items.whereType<TextMsg>().where((m) => m.id == 'msg:${raw['id']}').firstOrNull;
+      if (message != null) {
+        message.text = raw['body'] as String;
+        message.artifact = (raw['artifact'] as Map?)?.cast<String, dynamic>();
+      }
+      artifactRevision.value++;
+      notifyListeners();
+    }
+    if (type == 'artifact.expired' || type == 'artifact.updated') {
+      final payload = e['data'] as Map;
+      for (final chat in d.chats.values) {
+        for (final message in chat.items.whereType<TextMsg>()) {
+          if (type == 'artifact.expired' && message.artifact?['id'] == payload['id']) message.artifact = {...message.artifact!, 'expired': true};
+          if (type == 'artifact.updated' && payload['artifact'] is Map && message.artifact?['id'] == payload['artifact']['id']) {
+            message.artifact = (payload['artifact'] as Map).cast<String, dynamic>();
+          }
+        }
+      }
+      artifactRevision.value++;
+      notifyListeners();
     }
     if (type == 'conv.read' || type == 'conv.muted') _refreshConvs();
     // "ביקשת": hq says asked.changed itself; an answer coming in or a read of an answered one also reloads,
@@ -853,7 +975,15 @@ class HqBackend extends Backend {
         if (!chat.items.any((i) => i.id == 'msg:${m['id']}')) {
           final streamed = streamedAs(chat.items, m);
           if (streamed == null) {
-            chat.items.add(TextMsg(id: 'msg:${m['id']}', ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int), text: m['body'] as String, attachments: attachmentsOf(m)));
+            chat.items.add(
+              TextMsg(
+                id: 'msg:${m['id']}',
+                ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int),
+                text: m['body'] as String,
+                artifact: (m['artifact'] as Map?)?.cast<String, dynamic>(),
+                attachments: attachmentsOf(m),
+              ),
+            );
           } else if (streamed.attachments.isEmpty) {
             streamed.attachments = attachmentsOf(m);
           }
@@ -877,8 +1007,7 @@ class HqBackend extends Backend {
         final chat = d.chats[chatId];
         if (chat == null) return;
         if (m['id'] is String && m['body'] is String && m['created_at'] is int) {
-          chat.refs[m['id'] as String] = RefMessage(
-              from: from, to: to, body: m['body'] as String, ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int));
+          chat.refs[m['id'] as String] = RefMessage(from: from, to: to, body: m['body'] as String, ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int));
         }
         final item = _messageItem(m, d, chat.items);
         if (item != null && !chat.items.any((i) => i.id == item.id)) {
@@ -912,7 +1041,9 @@ class HqBackend extends Backend {
     if (m['to_identity'] == 'owner') {
       if (m['kind'] == 'system') return EventLine(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String);
       final streamed = streamedAs(existing, m);
-      if (streamed == null) return TextMsg(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String, attachments: attachmentsOf(m));
+      if (streamed == null) {
+        return TextMsg(id: 'msg:${m['id']}', ts: ts, text: m['body'] as String, artifact: (m['artifact'] as Map?)?.cast<String, dynamic>(), attachments: attachmentsOf(m));
+      }
       // The text already streamed in; the images exist only in the stored copy.
       if (streamed.attachments.isEmpty) streamed.attachments = attachmentsOf(m);
       return null;
@@ -937,10 +1068,8 @@ class HqBackend extends Backend {
     return true;
   }
 
-  EngineModel _engineFor(String identity, Conversation chat) => _engines.putIfAbsent(
-        identity,
-        () => EngineModel(items: chat.items, gender: _data!.who(identity).gender, onLive: (l) => chat.live = l),
-      );
+  EngineModel _engineFor(String identity, Conversation chat) =>
+      _engines.putIfAbsent(identity, () => EngineModel(items: chat.items, gender: _data!.who(identity).gender, onLive: (l) => chat.live = l));
 
   /// The conversation on screen (read = handled for what arrives while it is open).
   String? get openIdentity => _shown.lastOrNull;
@@ -1046,7 +1175,15 @@ class HqBackend extends Backend {
     if (prev?.at != null && prev!.at!.millisecondsSinceEpoch > ts) return;
     final own = ownLine(m), line = own.text;
     // So a reload (or the cache at the next start) doesn't put back the line before his.
-    _keepLast(id, {'id': m['id'], 'from_identity': 'owner', 'to_identity': id, 'body': (m['body'] as String).split('\n').take(2).join('\n'), 'attachments': m['attachments'], 'created_at': ts, 'state': m['state']});
+    _keepLast(id, {
+      'id': m['id'],
+      'from_identity': 'owner',
+      'to_identity': id,
+      'body': (m['body'] as String).split('\n').take(2).join('\n'),
+      'attachments': m['attachments'],
+      'created_at': ts,
+      'state': m['state'],
+    });
     final c = ConversationSummary(
       identityId: id,
       lastLine: own.tapped ? line : UiCopy.text(884, [line]),
@@ -1088,7 +1225,13 @@ class HqBackend extends Backend {
       // So the next reload doesn't put back the older line.
       final list = [...(kept['messages'] as List).cast<Map<String, dynamic>>()]
         ..removeWhere((m) => (m['from_identity'] == 'owner' ? m['to_identity'] : m['from_identity']) == id)
-        ..insert(0, {'from_identity': id, 'to_identity': 'owner', 'body': line.split('\n').first, 'created_at': ts, 'state': openIdentity == id || (_skipEngineReplay && _replaying) ? 'handled' : 'delivered'});
+        ..insert(0, {
+          'from_identity': id,
+          'to_identity': 'owner',
+          'body': line.split('\n').first,
+          'created_at': ts,
+          'state': openIdentity == id || (_skipEngineReplay && _replaying) ? 'handled' : 'delivered',
+        });
       _lastLines = {'messages': list};
     }
     final i = d.conversations.indexWhere((c) => c.identityId == id);
@@ -1145,11 +1288,18 @@ class HqBackend extends Backend {
       // Questions and GO requests stay in the conversation after they are answered, like any message.
       chat.items.addAll(historyCards(events, identityId));
       // Answers typed on this device are merged back below: seen here, the server's copy of one is not shown twice.
-      final typed = [for (final m in (old?.items ?? const <ChatItem>[]).whereType<UserMsg>()) if (m.replyTo?.askId != null) m];
+      final typed = [
+        for (final m in (old?.items ?? const <ChatItem>[]).whereType<UserMsg>())
+          if (m.replyTo?.askId != null) m,
+      ];
       for (final m in (res[0]['messages'] as List).cast<Map<String, dynamic>>().reversed) {
         if (m['id'] is String && m['body'] is String && m['created_at'] is int) {
           chat.refs[m['id'] as String] = RefMessage(
-              from: m['from_identity'] as String? ?? '', to: m['to_identity'] as String? ?? '', body: m['body'] as String, ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int));
+            from: m['from_identity'] as String? ?? '',
+            to: m['to_identity'] as String? ?? '',
+            body: m['body'] as String,
+            ts: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int),
+          );
         }
         final item = _messageItem(m, d, chat.items, typed: typed);
         if (item != null) chat.items.add(item);
@@ -1177,7 +1327,10 @@ class HqBackend extends Backend {
       _openFailed.remove(identityId);
       // What arrived while this loaded, applied to the new copy (the engine skips seqs it has). Deltas are
       // live-only (no seq): those of a text the history already has in full would open it a second time (#68).
-      final done = {for (final t in chat.items.whereType<TextMsg>()) if (!t.streaming) t.id};
+      final done = {
+        for (final t in chat.items.whereType<TextMsg>())
+          if (!t.streaming) t.id,
+      };
       final waiting = _midFetch.remove(identityId) ?? const [];
       for (final e in waiting) {
         if (e['type'] == 'engine.delta' && done.contains('t:${(e['data'] as Map?)?['messageId']}')) continue;
@@ -1217,7 +1370,7 @@ class HqBackend extends Backend {
     try {
       await _fresh.future.timeout(const Duration(seconds: 10));
     } catch (_) {
-      return  CommandResult.localized(882);
+      return CommandResult.localized(882);
     }
     final d = _data;
     final open = d != null && d.waiting.any((w) => (askId != null && w.askId == askId) || (inboxId != null && w.inboxId == inboxId));
@@ -1227,8 +1380,7 @@ class HqBackend extends Backend {
 
   @override
   Future<CommandResult> answerAsk(String askId, AskOption option, {String? from}) async =>
-      await _stale(askId, null) ??
-      await _send('POST', '/api/asks/${Uri.encodeComponent(askId)}/answer', {'answer': option.label, 'by': 'owner'}).then(_after);
+      await _stale(askId, null) ?? await _send('POST', '/api/asks/${Uri.encodeComponent(askId)}/answer', {'answer': option.label, 'by': 'owner'}).then(_after);
 
   @override
   Future<CommandResult> freeAnswer(String askId, String text, {List<Attachment> attachments = const []}) async {
@@ -1237,9 +1389,7 @@ class HqBackend extends Backend {
     final (up, _) = await _uploadAll(attachments);
     if (up == null) return CommandResult.localized(892);
     // A GO is an inbox item: his words close it, and the worker gets them as they are.
-    final path = askId.startsWith('inbox:')
-        ? '/api/inbox/${askId.substring(6)}/answer'
-        : '/api/asks/${Uri.encodeComponent(askId)}/answer';
+    final path = askId.startsWith('inbox:') ? '/api/inbox/${askId.substring(6)}/answer' : '/api/asks/${Uri.encodeComponent(askId)}/answer';
     return _send('POST', path, {
       'answer': text,
       'by': 'owner',
@@ -1273,10 +1423,13 @@ class HqBackend extends Backend {
   @override
   Future<CommandResult> checked(AwaitingTask t) async {
     final d = _data;
-    if (d == null) return  CommandResult.localized(887);
+    if (d == null) return CommandResult.localized(887);
     final orig = d.awaiting.where((x) => x.id == t.id).firstOrNull ?? t;
     _checking.add(t.id);
-    d.awaiting = [for (final x in d.awaiting) if (x.id != t.id) x];
+    d.awaiting = [
+      for (final x in d.awaiting)
+        if (x.id != t.id) x,
+    ];
     notifyListeners();
     final r = await _send('POST', '/api/tasks/${t.id}/checked', {});
     _checking.remove(t.id);
@@ -1313,7 +1466,7 @@ class HqBackend extends Backend {
 
   @override
   Future<CommandResult> dismiss(WaitItem item) async {
-    if (item.inboxId == null) return  CommandResult.localized(888);
+    if (item.inboxId == null) return CommandResult.localized(888);
     final stale = await _stale(null, item.inboxId, answer: false);
     if (stale != null) return stale;
     var told = false;
@@ -1383,6 +1536,7 @@ class HqBackend extends Backend {
       return CommandResult.localized(892, transient: transient);
     }
     msg.attachments = up;
+    if (msg.cancelled) return const CommandResult.ok();
     final r = await _send('POST', '/api/messages/tell', {
       'msg_id': msg.id,
       'from': 'owner',
@@ -1400,67 +1554,223 @@ class HqBackend extends Backend {
     return r;
   }
 
-
   /// Every image that is not up yet goes up; the list with their ids, or null when one did not get
   /// there, and whether that was the link (worth sending again) rather than hq refusing it.
   Future<(List<Attachment>?, bool)> _uploadAll(List<Attachment> list) async {
     final up = <Attachment>[];
-    for (final a in list) {
+    for (var i = 0; i < list.length; i++) {
+      final a = list[i];
       if (a.id != null) {
         up.add(a);
         continue;
       }
-      final (id, transient) = await _upload(a);
-      if (id == null) return (null, transient);
-      up.add(a.uploaded(id));
+      try {
+        final done = await uploadAttachment(a);
+        if (done == null) return (null, false);
+        list[i] = done;
+        up.add(done);
+      } on UploadFailure catch (e) {
+        return (null, e.transient);
+      } catch (_) {
+        return (null, true);
+      }
     }
     return (up, false);
   }
 
-  /// One image to hq; its upload id, or null when it did not get there (and whether that was the link).
-  Future<(String?, bool)> _upload(Attachment a) async {
-    final data = a.data;
-    if (data == null) return (null, false);
-    try {
-      final r = await _http.post(Uri.parse('$baseUrl/api/uploads'),
-          headers: {'authorization': 'Bearer $token', 'content-type': a.mime, 'x-file-name': Uri.encodeComponent(a.name)}, body: data)
+  @override
+  Future<Attachment?> uploadAttachment(Attachment a, {Future<void> Function()? changed}) async {
+    if (a.id != null) return a;
+    final t = a.transfer;
+    Future<Uint8List?> read(int start, int end) async {
+      if (a.data != null) return Uint8List.sublistView(a.data!, start, end);
+      return await t?.readRange?.call(start, end);
+    }
+
+    Future<Map<String, dynamic>> call(String method, String path, {Object? body, bool raw = false}) async {
+      final request = http.Request(method, Uri.parse('$baseUrl$path'));
+      request.headers.addAll({'authorization': 'Bearer $token', 'content-type': raw ? 'application/octet-stream' : 'application/json'});
+      if (body != null) {
+        if (raw) {
+          request.bodyBytes = body as List<int>;
+        } else {
+          request.body = jsonEncode(body);
+        }
+      }
+      final r = await (() async => await http.Response.fromStream(await _http.send(request)))().timeout(const Duration(seconds: 90));
+      if (r.statusCode == 401) _refused();
+      if (r.statusCode != 200) throw UploadFailure(r.statusCode);
+      return (jsonDecode(utf8.decode(r.bodyBytes)) as Map).cast<String, dynamic>();
+    }
+
+    // Small files retain the single-request API. Large ones persist the session before sending bytes.
+    if (a.bytes <= 8 * 1024 * 1024) {
+      final data = await read(0, a.bytes);
+      if (data == null || data.length != a.bytes) throw UploadFailure(400);
+      final r = await _http
+          .post(Uri.parse('$baseUrl/api/uploads'), headers: {'authorization': 'Bearer $token', 'content-type': a.mime, 'x-file-name': Uri.encodeComponent(a.name)}, body: data)
           .timeout(const Duration(seconds: 90));
       if (r.statusCode == 401) _refused();
-      if (r.statusCode != 200) return (null, r.statusCode >= 502 && r.statusCode <= 504);
-      final id = ((jsonDecode(utf8.decode(r.bodyBytes)) as Map)['upload'] as Map)['id'] as String;
-      _images[id] = data;
-      return (id, false);
-    } catch (_) {
-      return (null, true);
+      if (r.statusCode != 200) throw UploadFailure(r.statusCode);
+      final m = (jsonDecode(utf8.decode(r.bodyBytes)) as Map)['upload'] as Map;
+      if (a.isImage) _rememberAttachment(m['id'] as String, data);
+      return Attachment.fromJson({...a.toJson(), ...m.cast<String, dynamic>()}, data: a.data, transfer: t);
     }
+    var session = t?.session;
+    Map<String, dynamic>? state;
+    if (session != null) {
+      try {
+        state = (await call('GET', '/api/uploads/$session/status'))['upload'] as Map<String, dynamic>;
+      } on UploadFailure catch (e) {
+        if (e.status != 404) rethrow;
+        t?.session = null;
+      } // Only an expired session starts afresh.
+    }
+    if (state == null) {
+      state = (await call('POST', '/api/uploads', body: {'name': a.name, 'bytes': a.bytes}))['upload'] as Map<String, dynamic>;
+      session = state['id'] as String;
+      if (t != null) t.session = session;
+      await changed?.call();
+    }
+    if (state['upload'] != null) return Attachment.fromJson((state['upload'] as Map).cast<String, dynamic>(), data: a.data, transfer: t);
+    final partBytes = state['part_bytes'] as int;
+    final parts = (state['parts'] as List).cast<int>().toSet();
+    final count = (a.bytes / partBytes).ceil();
+    for (var n = 0; n < count; n++) {
+      if (!parts.contains(n)) {
+        final start = n * partBytes, end = ((n + 1) * partBytes).clamp(0, a.bytes);
+        final bytes = await read(start, end);
+        if (bytes == null || bytes.length != end - start) throw UploadFailure(400);
+        await call('PUT', '/api/uploads/$session/parts/$n', body: bytes, raw: true);
+      }
+      if (t != null) t.progress = (n + 1) / count;
+      await changed?.call();
+    }
+    final done = (await call('POST', '/api/uploads/$session/complete', body: {}))['upload'] as Map;
+    return Attachment.fromJson(done.cast<String, dynamic>(), data: a.data, transfer: t);
   }
 
-  /// Images already on this device, by upload id: sent from here, or fetched once.
-  final _images = <String, Uint8List>{};
+  @override
+  Future<Map<String, dynamic>?> artifact(String id) async {
+    final r = await _http.get(Uri.parse('$baseUrl/api/artifacts/${Uri.encodeComponent(id)}'), headers: {'authorization': 'Bearer $token'}).timeout(const Duration(seconds: 30));
+    if (r.statusCode == 404) return null;
+    if (r.statusCode != 200) throw StateError('artifact metadata');
+    return ((jsonDecode(utf8.decode(r.bodyBytes)) as Map)['artifact'] as Map?)?.cast<String, dynamic>();
+  }
 
   @override
-  Future<Uint8List?> attachmentData(String id) async {
-    final hit = _images[id];
-    if (hit != null) return hit;
+  Future<Map<String, dynamic>> openArtifact(String id, int version) async {
+    final r = await _http
+        .post(
+          Uri.parse('$baseUrl/api/artifacts/${Uri.encodeComponent(id)}/open'),
+          headers: {'authorization': 'Bearer $token', 'content-type': 'application/json'},
+          body: jsonEncode({'version': version}),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (r.statusCode != 200) throw ArtifactAccessFailure(r.statusCode);
+    return (jsonDecode(utf8.decode(r.bodyBytes)) as Map).cast<String, dynamic>();
+  }
+
+  @override
+  Future<bool> keepArtifact(String id) async => (await _send('POST', '/api/artifacts/${Uri.encodeComponent(id)}/keep', {'keep': true})).ok;
+  @override
+  Future<Uint8List?> artifactThumb(String id) async {
+    final r = await _http
+        .get(Uri.parse('$baseUrl/api/artifacts/${Uri.encodeComponent(id)}/thumb?revision=${artifactRevision.value}'), headers: {'authorization': 'Bearer $token'})
+        .timeout(const Duration(seconds: 30));
+    return r.statusCode == 200 ? r.bodyBytes : null;
+  }
+
+  Future<Uint8List?> _mediaBytes(String id, String suffix) async {
+    final r = await _http
+        .get(Uri.parse('$baseUrl/api/uploads/${Uri.encodeComponent(id)}/$suffix'), headers: {'authorization': 'Bearer $token'})
+        .timeout(const Duration(seconds: 90));
+    return r.statusCode == 200 ? r.bodyBytes : null;
+  }
+
+  @override
+  ({Uri url, Map<String, String> headers})? mediaSource(String id) =>
+      (url: Uri.parse('$baseUrl/api/uploads/${Uri.encodeComponent(id)}'), headers: {'authorization': 'Bearer $token'});
+  @override
+  Future<String?> attachmentTranscript(String id) async {
+    final bytes = await _mediaBytes(id, 'transcript');
+    return bytes == null ? null : utf8.decode(bytes);
+  }
+
+  @override
+  Future<Uint8List?> attachmentPreview(String id) => _mediaBytes(id, 'preview');
+  @override
+  Future<List<String>> archiveEntries(String id) async {
+    final bytes = await _mediaBytes(id, 'entries');
+    if (bytes == null) throw StateError('archive');
+    return ((jsonDecode(utf8.decode(bytes)) as Map)['entries'] as List).cast<String>();
+  }
+
+  @override
+  Future<Uint8List?> archiveEntry(String id, String name) => _mediaBytes(id, 'entry?name=${Uri.encodeComponent(name)}');
+  @override
+  Future<Uint8List?> attachmentThumb(String id) async {
     try {
-      final r = await _http.get(Uri.parse('$baseUrl/api/uploads/${Uri.encodeComponent(id)}'), headers: {'authorization': 'Bearer $token'})
+      final r = await _http
+          .get(Uri.parse('$baseUrl/api/uploads/${Uri.encodeComponent(id)}/thumb'), headers: {'authorization': 'Bearer $token'})
           .timeout(const Duration(seconds: 30));
-      if (r.statusCode == 401) _refused();
-      if (r.statusCode != 200) return null;
-      return _images[id] = r.bodyBytes;
+      return r.statusCode == 200 ? r.bodyBytes : null;
     } catch (_) {
       return null;
     }
   }
 
   @override
-  Future<CommandResult> retract(String identityId, String msgId) async =>
-       CommandResult.localized(893);
+  Future<List<Map<String, dynamic>>> files({String? chat, int? task, String? kind}) async {
+    final result = <Map<String, dynamic>>[];
+    int? offset = 0;
+    while (offset != null) {
+      final uri = Uri.parse('$baseUrl/api/files')
+          .replace(queryParameters: {'offset': '$offset', 'chat': ?chat, 'task': task == null ? null : '$task', 'kind': ?kind}..removeWhere((key, value) => value == null));
+      final r = await _http.get(uri, headers: {'authorization': 'Bearer $token'}).timeout(const Duration(seconds: 30));
+      if (r.statusCode != 200) throw StateError('files');
+      final body = jsonDecode(utf8.decode(r.bodyBytes)) as Map;
+      result.addAll((body['files'] as List).cast<Map<String, dynamic>>());
+      final next = body['next'] as int?;
+      if (next != null && next <= offset) throw StateError('invalid file cursor');
+      offset = next;
+    }
+    return result;
+  }
+
+  /// Images already on this device, by upload id: sent from here, or fetched once.
+  final _images = <String, Uint8List>{};
+  void _rememberAttachment(String id, Uint8List bytes) {
+    if (bytes.length > 8 * 1024 * 1024) return;
+    _images.remove(id);
+    while (_images.isNotEmpty && _images.values.fold<int>(bytes.length, (sum, b) => sum + b.length) > 32 * 1024 * 1024) {
+      _images.remove(_images.keys.first);
+    }
+    _images[id] = bytes;
+  }
+
+  @override
+  Future<Uint8List?> attachmentData(String id) async {
+    final hit = _images[id];
+    if (hit != null) return hit;
+    try {
+      final r = await _http.get(Uri.parse('$baseUrl/api/uploads/${Uri.encodeComponent(id)}'), headers: {'authorization': 'Bearer $token'}).timeout(const Duration(seconds: 30));
+      if (r.statusCode == 401) _refused();
+      if (r.statusCode != 200) return null;
+      _rememberAttachment(id, r.bodyBytes);
+      return r.bodyBytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<CommandResult> retract(String identityId, String msgId) async => CommandResult.localized(893);
 
   @override
   Future<CommandResult> stop(String identityId) async {
     final shift = _boardShift[identityId];
-    if (shift == null) return  CommandResult.localized(894);
+    if (shift == null) return CommandResult.localized(894);
     return _send('POST', '/api/shifts/${Uri.encodeComponent(shift)}/interrupt');
   }
 
@@ -1476,7 +1786,7 @@ class HqBackend extends Backend {
   }
 
   @override
-  Future<CommandResult> wake(String teamId) async =>  CommandResult.localized(895);
+  Future<CommandResult> wake(String teamId) async => CommandResult.localized(895);
 }
 
 class HqError implements Exception {
@@ -1488,13 +1798,13 @@ class HqError implements Exception {
 }
 
 Delivery mapDelivery(String? s) => switch (s) {
-      'queued' => Delivery.queued,
-      'delivered' => Delivery.delivered,
-      'seen' => Delivery.read,
-      'handled' => Delivery.handled,
-      'failed' => Delivery.failed,
-      _ => Delivery.queued,
-    };
+  'queued' => Delivery.queued,
+  'delivered' => Delivery.delivered,
+  'seen' => Delivery.read,
+  'handled' => Delivery.handled,
+  'failed' => Delivery.failed,
+  _ => Delivery.queued,
+};
 
 /// A reply hq stored from the worker's own text (chat.md §2.3א) is the bubble that already streamed in:
 /// `text_ref` is that text's engine messageId. One item, never two.
@@ -1510,36 +1820,39 @@ TextMsg? streamedAs(List<ChatItem> items, Map<String, dynamic> m) {
 }
 
 WorkerStatus mapStatus(String? s) => switch (s) {
-      'working' => WorkerStatus.working,
-      'waiting_for_you' => WorkerStatus.waiting,
-      'blocked' => WorkerStatus.blocked,
-      'stuck' => WorkerStatus.stuck,
-      'restarting' => WorkerStatus.restarting,
-      'free' => WorkerStatus.free,
-      'resting' => WorkerStatus.resting,
-      'done' => WorkerStatus.done,
-      _ => WorkerStatus.free,
-    };
+  'working' => WorkerStatus.working,
+  'waiting_for_you' => WorkerStatus.waiting,
+  'blocked' => WorkerStatus.blocked,
+  'stuck' => WorkerStatus.stuck,
+  'restarting' => WorkerStatus.restarting,
+  'free' => WorkerStatus.free,
+  'resting' => WorkerStatus.resting,
+  'done' => WorkerStatus.done,
+  _ => WorkerStatus.free,
+};
 
 String _hm(int ms) => company_time.hm(DateTime.fromMillisecondsSinceEpoch(ms));
 
 /// hq DTOs -> the app's model. Pure, unit-tested (test/hq_mapping_test.dart).
 /// `/api/inbox`: what is his (`items`) and the tasks to check (`checks`, task 986). An older hq sends all of it in `items`.
 List<Map<String, dynamic>> inboxOf(dynamic r) => [
-      if (r is Map && r['items'] is List) ...(r['items'] as List).cast<Map<String, dynamic>>(),
-      if (r is Map && r['checks'] is List) ...(r['checks'] as List).cast<Map<String, dynamic>>(),
-    ];
+  if (r is Map && r['items'] is List) ...(r['items'] as List).cast<Map<String, dynamic>>(),
+  if (r is Map && r['checks'] is List) ...(r['checks'] as List).cast<Map<String, dynamic>>(),
+];
 
 /// Blocked on him and only on him (hq's inbox.ts forOwner): a question, a GO, a sign-in, not a fault the system caught;
 /// and a fault the manager can't take ([manager]'s own fall, every account full), which would otherwise reach nobody.
 bool isHis(WaitItem w, {String manager = ''}) => switch (w.kind) {
-      WaitKind.go || WaitKind.login => true,
-      WaitKind.blockingAsk || WaitKind.softAsk => !isCaughtFault(w.from, w.askId),
-      // A failed delivery or shift (by its kicker, kickerFor below); "the manager decided" (escalation_note) is not one.
-      WaitKind.urgentProd || WaitKind.failure =>
-        w.ref == 'accounts-all-full' || (manager.isNotEmpty && w.from == manager && (const {'delivery_failure', 'shift_failure'}.contains(w.sourceKind) || (w.sourceKind == null && const {InputCopy.v20, InputCopy.v21}.contains(w.kicker)))),
-      _ => false,
-    };
+  WaitKind.go || WaitKind.login => true,
+  WaitKind.blockingAsk || WaitKind.softAsk => !isCaughtFault(w.from, w.askId),
+  // A failed delivery or shift (by its kicker, kickerFor below); "the manager decided" (escalation_note) is not one.
+  WaitKind.urgentProd || WaitKind.failure =>
+    w.ref == 'accounts-all-full' ||
+        (manager.isNotEmpty &&
+            w.from == manager &&
+            (const {'delivery_failure', 'shift_failure'}.contains(w.sourceKind) || (w.sourceKind == null && const {InputCopy.v20, InputCopy.v21}.contains(w.kicker)))),
+  _ => false,
+};
 
 CompanyData mapSnapshot({
   required List<Map<String, dynamic>> board,
@@ -1559,7 +1872,20 @@ CompanyData mapSnapshot({
   CompanyData? previous,
   DateTime? now,
 }) {
-  final teamNamesBuiltIn = {'mgmt': UiCopy.text(896), 'management': UiCopy.text(896), 'monitor': UiCopy.text(897), 'monitoring': UiCopy.text(897), 'personal': UiCopy.text(898), 'improve': UiCopy.text(360), 'improvement': UiCopy.text(360), 'design': UiCopy.text(899), 'lumo': UiCopy.text(900), 'tikibot': UiCopy.text(901), 'voice': 'voice-bot', 'agent-company': UiCopy.text(3)};
+  final teamNamesBuiltIn = {
+    'mgmt': UiCopy.text(896),
+    'management': UiCopy.text(896),
+    'monitor': UiCopy.text(897),
+    'monitoring': UiCopy.text(897),
+    'personal': UiCopy.text(898),
+    'improve': UiCopy.text(360),
+    'improvement': UiCopy.text(360),
+    'design': UiCopy.text(899),
+    'lumo': UiCopy.text(900),
+    'tikibot': UiCopy.text(901),
+    'voice': 'voice-bot',
+    'agent-company': UiCopy.text(3),
+  };
   // A project and its team show the owner's name for the project (org.yaml `projects[].name`, from hq).
   // An older hq sends no name: the built-in names, then the id.
   final projectNames = <String, String>{
@@ -1575,9 +1901,21 @@ CompanyData mapSnapshot({
   // then a member's own symbol if the app has that icon; never an icon it doesn't have (that drew
   // "?" on the whole personal team, QA-LOG item 3).
   const teamSymbols = {
-    'management': 'explore', 'mgmt': 'explore', 'monitoring': 'shield', 'monitor': 'shield', 'personal': 'folder_shared',
-    'improvement': 'build', 'improve': 'build', 'design': 'palette', 'agent-company': 'architecture', 'lumo': 'local_shipping',
-    'tikibot': 'smart_toy', 'tiki-bot-go': 'directions_car', 'lumo-bot': 'smart_toy', 'voice': 'graphic_eq', 'voice-bot': 'graphic_eq',
+    'management': 'explore',
+    'mgmt': 'explore',
+    'monitoring': 'shield',
+    'monitor': 'shield',
+    'personal': 'folder_shared',
+    'improvement': 'build',
+    'improve': 'build',
+    'design': 'palette',
+    'agent-company': 'architecture',
+    'lumo': 'local_shipping',
+    'tikibot': 'smart_toy',
+    'tiki-bot-go': 'directions_car',
+    'lumo-bot': 'smart_toy',
+    'voice': 'graphic_eq',
+    'voice-bot': 'graphic_eq',
   };
   final teams = <String, Team>{};
   final ids = <String, Identity>{};
@@ -1688,36 +2026,40 @@ CompanyData mapSnapshot({
       if (kind == WaitKind.awaiting) ...kAwaitingOptions,
       // The system's card for a fault (error-watch.ts): its first answer ("לטפל") is the main one.
       if (ask != null)
-        for (final (n, o) in (ask['options'] as List).cast<String>().indexed) AskOption(id: o, label: o, primary: n == 0 && isCaughtFault(i['from_identity'] as String?, i['ref'] as String?)),
+        for (final (n, o) in (ask['options'] as List).cast<String>().indexed)
+          AskOption(id: o, label: o, primary: n == 0 && isCaughtFault(i['from_identity'] as String?, i['ref'] as String?)),
     ];
     final headline = ((i['headline'] as String?) ?? (ask?['headline'] as String?))?.trim();
-    waiting.add(WaitItem(
-      id: 'inbox:${i['id']}',
-      action: i['action'] as String?,
-      inboxId: i['id'] as int,
-      sourceKind: i['kind'] as String,
-      // A GO has no ask behind it: it is answered through its inbox item, in the conversation too.
-      askId: ask != null ? ask['id'] as String : (kind == WaitKind.go ? 'inbox:${i['id']}' : null),
-      headline: headline == null || headline.isEmpty ? null : headline,
-      ref: i['ref'] as String?,
-      managerNote: noteOf(ask),
-      managerNoteBy: noteOf(ask) == null ? null : manager,
-      kind: kind,
-      from: (i['from_identity'] as String?) ?? manager,
-      time: _hm(i['created_at'] as int),
-      createdAt: DateTime.fromMillisecondsSinceEpoch(i['created_at'] as int),
-      kicker: kickerFor(i),
-      body: (ask?['question'] as String?) ?? ((i['body'] as String?)?.isNotEmpty == true ? i['body'] as String : i['title'] as String),
-      options: options,
-      domain: kind == WaitKind.login ? (i['title'] as String?) : null,
-      link: i['link'] as String?,
-      links: [
-        for (final l in (i['links'] as List? ?? const []).whereType<Map>())
-          if (WaitLinkKind.values.asNameMap()[l['kind']] case final kind? when l['url'] is String && (l['url'] as String).startsWith('https://')) WaitLink(kind, l['url'] as String),
-      ],
-      // "לא עכשיו" lives in hq (#74): it stays put across refreshes and devices.
-      state: i['snoozed_at'] != null ? WaitState.notNow : WaitState.open,
-    ));
+    waiting.add(
+      WaitItem(
+        id: 'inbox:${i['id']}',
+        action: i['action'] as String?,
+        inboxId: i['id'] as int,
+        sourceKind: i['kind'] as String,
+        // A GO has no ask behind it: it is answered through its inbox item, in the conversation too.
+        askId: ask != null ? ask['id'] as String : (kind == WaitKind.go ? 'inbox:${i['id']}' : null),
+        headline: headline == null || headline.isEmpty ? null : headline,
+        ref: i['ref'] as String?,
+        managerNote: noteOf(ask),
+        managerNoteBy: noteOf(ask) == null ? null : manager,
+        kind: kind,
+        from: (i['from_identity'] as String?) ?? manager,
+        time: _hm(i['created_at'] as int),
+        createdAt: DateTime.fromMillisecondsSinceEpoch(i['created_at'] as int),
+        kicker: kickerFor(i),
+        body: (ask?['question'] as String?) ?? ((i['body'] as String?)?.isNotEmpty == true ? i['body'] as String : i['title'] as String),
+        options: options,
+        domain: kind == WaitKind.login ? (i['title'] as String?) : null,
+        link: i['link'] as String?,
+        links: [
+          for (final l in (i['links'] as List? ?? const []).whereType<Map>())
+            if (WaitLinkKind.values.asNameMap()[l['kind']] case final kind? when l['url'] is String && (l['url'] as String).startsWith('https://'))
+              WaitLink(kind, l['url'] as String),
+        ],
+        // "לא עכשיו" lives in hq (#74): it stays put across refreshes and devices.
+        state: i['snoozed_at'] != null ? WaitState.notNow : WaitState.open,
+      ),
+    );
   }
 
   final automations = [
@@ -1773,22 +2115,24 @@ CompanyData mapSnapshot({
     };
     final project = t['project'] as String? ?? '';
     final started = t['started_at'] as int?;
-    tickets.add(Ticket(
-      number: 't${t['id']}',
-      title: title,
-      project: project,
-      projectName: projectNames[project] ?? project,
-      group: group,
-      assignee: who?.name ?? '',
-      sub: who == null || who.title.isEmpty ? null : who.title,
-      status: status,
-      endLine: state == 'done' ? UiCopy.text(629, [_hm(updated)]) : (started != null ? UiCopy.text(913, [_hm(started)]) : null),
-      assigneeId: idn,
-      startedAt: started == null ? null : DateTime.fromMillisecondsSinceEpoch(started),
-      doneAt: state == 'done' ? DateTime.fromMillisecondsSinceEpoch(updated) : null,
-      summary: t['summary'] as String?,
-      openedBy: _openedBy(t['labels']),
-    ));
+    tickets.add(
+      Ticket(
+        number: 't${t['id']}',
+        title: title,
+        project: project,
+        projectName: projectNames[project] ?? project,
+        group: group,
+        assignee: who?.name ?? '',
+        sub: who == null || who.title.isEmpty ? null : who.title,
+        status: status,
+        endLine: state == 'done' ? UiCopy.text(629, [_hm(updated)]) : (started != null ? UiCopy.text(913, [_hm(started)]) : null),
+        assigneeId: idn,
+        startedAt: started == null ? null : DateTime.fromMillisecondsSinceEpoch(started),
+        doneAt: state == 'done' ? DateTime.fromMillisecondsSinceEpoch(updated) : null,
+        summary: t['summary'] as String?,
+        openedBy: _openedBy(t['labels']),
+      ),
+    );
   }
 
   final projectList = [
@@ -1818,31 +2162,38 @@ CompanyData mapSnapshot({
       ];
       final people = (lead != null ? 1 : 0) + standing.length + workers.length;
       final openCount = tickets.where((k) => k.project == project && k.group != TicketGroup.doneToday).length;
-      orgTeams.add(OrgTeam(
-        teamId: t.id,
-        line: [
-          if (lead != null) lead.name,
-          people == 1 ? UiCopy.text(633) : UiCopy.text(634, [people]),
-          openCount == 0 ? UiCopy.text(142) : (openCount == 1 ? UiCopy.text(626) : UiCopy.text(627, [openCount])),
-        ].join(' · '),
-        statusIcon: '',
-        statusWord: '',
-        members: [
-          if (lead != null) OrgMember(identityId: lead.id, line: lead.title),
-          for (final s in standing) OrgMember(identityId: s, line: ids[s]!.title),
-          for (final w in workers) OrgMember(identityId: w, line: taskOf[w]!),
-        ],
-      ));
+      orgTeams.add(
+        OrgTeam(
+          teamId: t.id,
+          line: [
+            if (lead != null) lead.name,
+            people == 1 ? UiCopy.text(633) : UiCopy.text(634, [people]),
+            openCount == 0 ? UiCopy.text(142) : (openCount == 1 ? UiCopy.text(626) : UiCopy.text(627, [openCount])),
+          ].join(' · '),
+          statusIcon: '',
+          statusWord: '',
+          members: [
+            if (lead != null) OrgMember(identityId: lead.id, line: lead.title),
+            for (final s in standing) OrgMember(identityId: s, line: ids[s]!.title),
+            for (final w in workers) OrgMember(identityId: w, line: taskOf[w]!),
+          ],
+        ),
+      );
       continue;
     }
     final members = ids.values.where((i) => i.teamId == t.id).toList();
-    orgTeams.add(OrgTeam(
-      teamId: t.id,
-      line: [if (lead != null) lead.name, members.length == 1 ? UiCopy.text(633) : UiCopy.text(634, [members.length])].join(' · '),
-      statusIcon: '',
-      statusWord: '',
-      members: [for (final i in members) OrgMember(identityId: i.id, line: i.title)],
-    ));
+    orgTeams.add(
+      OrgTeam(
+        teamId: t.id,
+        line: [
+          if (lead != null) lead.name,
+          members.length == 1 ? UiCopy.text(633) : UiCopy.text(634, [members.length]),
+        ].join(' · '),
+        statusIcon: '',
+        statusWord: '',
+        members: [for (final i in members) OrgMember(identityId: i.id, line: i.title)],
+      ),
+    );
   }
   // Permanent teams first, management on top (the order of company.md); project teams after them.
   const permanentOrder = ['management', 'mgmt', 'monitoring', 'monitor', 'personal', 'improvement', 'improve', 'design'];
@@ -1851,6 +2202,7 @@ CompanyData mapSnapshot({
     final i = permanentOrder.indexOf(t.teamId);
     return i < 0 ? 100 : i;
   }
+
   orgTeams.sort((a, b) => rank(a) - rank(b));
 
   // Counted over the workers that exist now: a closed task's worker is neither active nor resting.
@@ -1868,8 +2220,14 @@ CompanyData mapSnapshot({
     identities: ids,
     presence: presence,
     // task 986: only what is blocked on him waits for him. A fault of the system is the manager's (an older hq still sends it).
-    waiting: [for (final w in waiting) if (isHis(w, manager: manager)) w],
-    checks: [for (final w in waiting) if (w.kind == WaitKind.awaiting) w],
+    waiting: [
+      for (final w in waiting)
+        if (isHis(w, manager: manager)) w,
+    ],
+    checks: [
+      for (final w in waiting)
+        if (w.kind == WaitKind.awaiting) w,
+    ],
     decisions: const [],
     digest: const [],
     digestSince: '',
@@ -1878,7 +2236,11 @@ CompanyData mapSnapshot({
     chats: previous?.chats ?? {},
     tickets: tickets,
     ticketDetails: const {},
-    boardSubtitle: [UiCopy.text(914), open == 1 ? UiCopy.text(626) : UiCopy.text(627, [open]), if (doneToday > 0) (doneToday == 1 ? UiCopy.text(915) : UiCopy.text(916, [doneToday]))].join(' · '),
+    boardSubtitle: [
+      UiCopy.text(914),
+      open == 1 ? UiCopy.text(626) : UiCopy.text(627, [open]),
+      if (doneToday > 0) (doneToday == 1 ? UiCopy.text(915) : UiCopy.text(916, [doneToday])),
+    ].join(' · '),
     orgTeams: orgTeams,
     orgSubtitle: UiCopy.text(917, [active, live.length - active]),
     projects: projectList,
@@ -1895,31 +2257,26 @@ CompanyData mapSnapshot({
 /// Internal message ids mean nothing to the owner: "(מזהה agent-company-t5-2:mvfww7y1-010ec676ca)"
 /// and bare ids of that shape are dropped from the one-line view of messages between workers.
 /// The images a stored message carries (hq: `attachments`, [{id,name,mime,bytes}] or null).
-List<Attachment> attachmentsOf(Map<String, dynamic> m) => [
-      for (final a in ((m['attachments'] as List?) ?? const []).cast<Map<String, dynamic>>())
-        Attachment(id: a['id'] as String, name: (a['name'] as String?) ?? '', mime: (a['mime'] as String?) ?? 'image/png', bytes: (a['bytes'] as num?)?.toInt() ?? 0),
-    ];
+List<Attachment> attachmentsOf(Map<String, dynamic> m) => [for (final a in ((m['attachments'] as List?) ?? const []).cast<Map<String, dynamic>>()) Attachment.fromJson(a)];
 
 /// A conversation's last line: the first line of the text, or "תמונה" for an image sent alone.
 String lastLineOf(Map<String, dynamic> m) {
   final first = (m['body'] as String).split('\n').first;
   if (first.isNotEmpty) return first;
-  final n = ((m['attachments'] as List?) ?? const []).length;
+  final files = attachmentsOf(m);
+  if (files.any((a) => !a.isImage)) return files.length == 1 ? files.single.name : UiCopy.copy.mediaEntries('${files.length}');
+  final n = files.length;
   return n > 1 ? UiCopy.text(919, [n]) : (n == 1 ? UiCopy.text(247) : '');
 }
 
-String withoutIds(String s) => s
-    .replaceAll(RegExp(InputCopy.v22), '')
-    .replaceAll(RegExp(r'\b[\w.-]+-\d+:[a-z0-9]{6,}-[a-z0-9]{6,}\b'), '')
-    .replaceAll(RegExp(r' {2,}'), ' ')
-    .trim();
+String withoutIds(String s) =>
+    s.replaceAll(RegExp(InputCopy.v22), '').replaceAll(RegExp(r'\b[\w.-]+-\d+:[a-z0-9]{6,}-[a-z0-9]{6,}\b'), '').replaceAll(RegExp(r' {2,}'), ' ').trim();
 
 /// The further of two delivery states of the same message (a late copy never moves a tick back).
 Delivery furtherDelivery(Delivery a, Delivery b) {
   if (a == Delivery.failed || b == Delivery.failed) return a == Delivery.failed ? b : a;
   return a.index >= b.index ? a : b;
 }
-
 
 /// The question and GO cards of a conversation, from its events (`inbox.new`, `ask.new`): what was asked,
 /// in the order it was asked. Whether each is still open comes from the inbox (`syncAskCards`).
@@ -1940,27 +2297,30 @@ List<AskCard> historyCards(List<Map<String, dynamic>> events, String identityId)
     final h = headline == null || headline.isEmpty ? null : headline;
     final body = (i['body'] as String?)?.isNotEmpty == true ? i['body'] as String : i['title'] as String;
     if (i['kind'] == 'go') {
-      out.add(GoCard(action: i['action'] as String?, id: 'go:${i['id']}', ts: ts, askId: 'inbox:${i['id']}', ref: i['ref'] as String?, from: identityId, headline: h, details: body));
+      out.add(
+        GoCard(action: i['action'] as String?, id: 'go:${i['id']}', ts: ts, askId: 'inbox:${i['id']}', ref: i['ref'] as String?, from: identityId, headline: h, details: body),
+      );
     } else if (i['kind'] == 'ask' && i['ref'] != null) {
       final ref = i['ref'] as String;
-      out.add(AskCard(
-        id: 'ask:$ref',
-        ts: ts,
-        askId: ref,
-        from: identityId,
-        headline: h,
-        question: body,
-        blocking: i['blocking'] == true,
-        options: [for (final o in options[ref] ?? const <String>[]) AskOption(id: o, label: o)],
-      ));
+      out.add(
+        AskCard(
+          id: 'ask:$ref',
+          ts: ts,
+          askId: ref,
+          from: identityId,
+          headline: h,
+          question: body,
+          blocking: i['blocking'] == true,
+          options: [for (final o in options[ref] ?? const <String>[]) AskOption(id: o, label: o)],
+        ),
+      );
     }
   }
   return out;
 }
 
 /// The card his answer message points at (its ref), if it is in this conversation.
-AskCard? cardFor(List<ChatItem> items, String? ref) =>
-    ref == null ? null : items.whereType<AskCard>().where((c) => c.ref == ref).lastOrNull;
+AskCard? cardFor(List<ChatItem> items, String? ref) => ref == null ? null : items.whereType<AskCard>().where((c) => c.ref == ref).lastOrNull;
 
 /// What he answered, without what hq wraps around it for the worker (mailbox.ts answer/reply/complete).
 /// `tapped`: a button or a closing action, not words he typed (no bubble of his own).
@@ -1971,7 +2331,9 @@ AskCard? cardFor(List<ChatItem> items, String? ref) =>
   }
   // Closed without doing it (dismiss) or done without a note: the card's line says so.
   final n = companyNames, owner = n.owner;
-  if (body.startsWith('$owner ${n.o(InputCopy.v23, InputCopy.v24)}: ') || body.startsWith(InputCopy.closedWithoutAnswer(owner, n.o(InputCopy.v25, InputCopy.v26)))) return (UiCopy.text(279), true);
+  if (body.startsWith('$owner ${n.o(InputCopy.v23, InputCopy.v24)}: ') || body.startsWith(InputCopy.closedWithoutAnswer(owner, n.o(InputCopy.v25, InputCopy.v26)))) {
+    return (UiCopy.text(279), true);
+  }
   if (body.startsWith('$owner ${n.o(InputCopy.v27, InputCopy.v28)}: ')) return (UiCopy.text(298), true);
   return (body, false);
 }
@@ -1984,7 +2346,11 @@ AskCard? cardFor(List<ChatItem> items, String? ref) =>
   // hq's "סיים: / דחה: / סגר" is always a closing tap (mailbox.complete): its note is a button's word ("GO",
   // "retry", "done"), never his own; what he types goes through reply, wrapped differently.
   final n = companyNames, first = body.split('\n').first;
-  for (final (he, you) in [(n.o(InputCopy.completed[0], InputCopy.completed[1]), UiCopy.text(923)), (n.o(InputCopy.deferred[0], InputCopy.deferred[1]), UiCopy.text(576)), (n.o(InputCopy.closed[0], InputCopy.closed[1]), UiCopy.text(928))]) {
+  for (final (he, you) in [
+    (n.o(InputCopy.completed[0], InputCopy.completed[1]), UiCopy.text(923)),
+    (n.o(InputCopy.deferred[0], InputCopy.deferred[1]), UiCopy.text(576)),
+    (n.o(InputCopy.closed[0], InputCopy.closed[1]), UiCopy.text(928)),
+  ]) {
     if (first.startsWith('${n.owner} $he')) return (text: '$you${first.substring('${n.owner} $he'.length)}', tapped: true);
   }
   final (said, _) = answerText(body);
@@ -2077,4 +2443,9 @@ void syncAskCards(Conversation chat, String identityId, CompanyData d) {
     added = true;
   }
   if (added) chat.items.sort((a, b) => a.ts.compareTo(b.ts));
+}
+
+class ArtifactAccessFailure implements Exception {
+  ArtifactAccessFailure(this.status);
+  final int status;
 }
