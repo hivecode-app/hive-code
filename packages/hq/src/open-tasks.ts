@@ -45,7 +45,7 @@ export function openedBy(t: Pick<TaskRow, 'labels'>): string | null {
 
 /** Running first (oldest start first), then what waits for him, then the queue in its order, then the blocked. */
 export function openTasks(store: Store, scheduler: Scheduler, board: BoardEntry[], busy?: () => { reason: 'memory' | 'load'; waiting_for: string | null; eta_min: number | null }): OpenTask[] {
-  const tasks = store.db.prepare(`SELECT * FROM tasks WHERE state NOT IN ('done','closed') ORDER BY created_at, id`).all() as TaskRow[];
+  const tasks = store.db.prepare(`SELECT * FROM tasks WHERE state NOT IN ('done','closed','proposal') ORDER BY created_at, id`).all() as TaskRow[];
   if (!tasks.length) return [];
   const queue = scheduler.queue().map((t) => t.id);
   const slots = scheduler.slots();

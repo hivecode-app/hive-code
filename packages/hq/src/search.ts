@@ -1,9 +1,10 @@
+import { sourceTask } from './task-product.ts';
 import type { Hq } from './hq.ts';
 import { OWNER } from '@company/shared';
 
 export interface SearchHit {
   kind: 'person' | 'project' | 'task' | 'message';
-  id: string; title: string; subtitle: string; identity?: string; project?: string; reports_to?: string | null; body?: string; state?: string;
+  id: string; title: string; subtitle: string; identity?: string; project?: string; reports_to?: string | null; task?: number | null; body?: string; state?: string;
 }
 
 /** Literal, case-insensitive search. Each category is bounded independently and only owner-visible
@@ -11,7 +12,7 @@ export interface SearchHit {
 export function search(hq: Hq, raw: string): { results: SearchHit[] } {
   const q = raw.trim().slice(0, 160).toLocaleLowerCase();
   if (!q) return { results: [] };
-  const people = hq.board();
+  const people = hq.store.db.prepare('SELECT id, name, title, project, reports_to FROM identities ORDER BY active DESC, name').all() as { id: string; name: string; title: string; project: string | null; reports_to: string | null }[];
   const projects = hq.projects();
   const names = new Map(people.map((p) => [p.id, p.name]));
   const results: SearchHit[] = [];
@@ -27,14 +28,19 @@ export function search(hq: Hq, raw: string): { results: SearchHit[] } {
     { id: number; title: string; body: string; state: string; project: string | null; identity: string | null }[];
   for (const t of tasks) results.push({ kind: 'task', id: String(t.id), title: t.title, subtitle: t.project ?? '', body: t.body.slice(0, 8000), state: t.state,
     ...(t.project ? { project: t.project } : {}), ...(t.identity ? { identity: t.identity } : {}) });
-  const messages = hq.store.db.prepare(`SELECT id, body, from_identity, to_identity FROM messages
-    WHERE (from_identity = ? OR to_identity = ?) AND kind != 'system' AND instr(lower(body), ?) > 0
-    ORDER BY created_at DESC, rowid DESC LIMIT 20`).all(OWNER, OWNER, q) as
-    { id: string; body: string; from_identity: string; to_identity: string }[];
+  const messages = hq.store.db.prepare(`SELECT id, body, from_identity, to_identity, created_at, ref, shift_id FROM messages
+    WHERE (from_identity = ? OR to_identity = ?) AND kind != 'system' AND (instr(lower(body), ?) > 0 OR EXISTS (SELECT 1 FROM json_each(COALESCE(attachments, '[]')) f WHERE instr(lower(json_extract(f.value, '$.name')), ?) > 0))
+    ORDER BY created_at DESC, rowid DESC LIMIT 20`).all(OWNER, OWNER, q, q) as
+    { id: string; body: string; from_identity: string; to_identity: string; created_at: number; ref: string | null; shift_id: string | null }[];
   for (const m of messages) {
     const identity = m.from_identity === OWNER ? m.to_identity : m.from_identity;
     if (!names.has(identity)) continue;
-    results.push({ kind: 'message', id: m.id, title: m.body.slice(0, 240), subtitle: names.get(identity)!, identity });
+    const task = sourceTask(hq, identity, m.created_at, m.ref, m.shift_id);
+    if (task != null && !results.some((r) => r.kind === 'task' && r.id === String(task))) {
+      const t = hq.scheduler.task(task)!;
+      results.push({ kind: 'task', id: String(t.id), title: t.title, subtitle: t.project ?? '', identity, body: t.body, state: t.state });
+    }
+    results.push({ task, kind: 'message', id: m.id, title: m.body.slice(0, 240), subtitle: names.get(identity)!, identity });
   }
   return { results };
 }

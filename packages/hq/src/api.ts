@@ -1,3 +1,4 @@
+import { TaskCatalog, orgTree } from './task-product.ts';
 import { search } from './search.ts';
 import { productPreferences } from './i18n.ts';
 // HTTP + WebSocket API on 127.0.0.1 (B.8). Token auth on everything except GET /health (heartbeat), the
@@ -118,10 +119,12 @@ export function health(hq: Hq) {
 
 export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   const r: [string, RegExp, Handler][] = [];
+  const catalog = new TaskCatalog(hq);
   const route = (method: string, path: string, h: Handler) => r.push([method, new RegExp(`^${path.replace(/:\w+/g, '([^/]+)')}$`), h]);
 
   // timezone: org.yaml's (#121), so the app shows his hours wherever the phone thinks it is.
   route('GET', '/api/search', ({ url }) => search(hq, url.searchParams.get('q') ?? ''));
+  route('GET', '/api/org/tree', () => orgTree(hq));
   route('GET', '/api/org', () => ({ identities: hq.board(), teams: hq.teams(), timezone: hq.clock() }));
   // awaiting: "מה לבדוק" (#108), finished tasks that wait for a deploy or for him to check (awaiting.ts).
   // asked: "ביקשת" (#118), his requests to workers still waiting for an answer, and answers he hasn't read (asked.ts).
@@ -242,6 +245,16 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     const identity = str(url.searchParams.get('identity'), 'identity')!;
     const before = url.searchParams.get('before');
     return { messages: hq.mailbox.list(identity, Number(url.searchParams.get('limit') ?? 200), before ? Number(before) : undefined) };
+  });
+  route('GET', '/api/messages/:id/source', ({ params }) => {
+    const id = decodeURIComponent(params[0]!);
+    const m = hq.mailbox.get(id);
+    if (!m || (m.from_identity !== OWNER && m.to_identity !== OWNER) || m.kind === 'system') throw new HttpError(404, 'message not found');
+    const identity = m.from_identity === OWNER ? m.to_identity : m.from_identity;
+    const rows = hq.store.db.prepare(`SELECT id FROM messages WHERE ((from_identity = ? AND to_identity = ?) OR (to_identity = ? AND from_identity = ?))
+      AND kind != 'system' AND created_at <= ? ORDER BY created_at DESC, rowid DESC LIMIT 100`).all(identity, OWNER, identity, OWNER, m.created_at) as { id: string }[];
+    const ids = new Set([m.id, ...rows.map((r) => r.id)]);
+    return { identity, target: id, messages: [...ids].map((i) => { const m = hq.mailbox.get(i)!; return { id: m.id, from_identity: m.from_identity, to_identity: m.to_identity, kind: m.kind, body: m.body, state: m.state, priority: m.priority, ref: m.ref, text_ref: m.text_ref, attachments: m.attachments, created_at: m.created_at }; }) };
   });
   route('POST', '/api/messages/tell', async ({ body }) => {
     const b = await body();
@@ -378,11 +391,32 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
       project: str(b.project, 'project', false) ?? null, by: str(b.by, 'by', false) ?? null }) };
   });
 
-  route('GET', '/api/tasks', () => ({ tasks: forApp(hq.scheduler.tasks()), queue: hq.scheduler.queue().map((t) => ({ id: t.id, bucket: t.bucket })) }));
+  route('GET', '/api/tasks', async () => ({ tasks: forApp(hq.scheduler.tasks()), queue: hq.scheduler.queue().map((t) => ({ id: t.id, bucket: t.bucket })), ...await catalog.list() }));
+  const taskFor = (id: string | undefined) => {
+    const t = /^\d+$/.test(id ?? '') ? hq.scheduler.task(Number(id)) : undefined;
+    if (!t) throw new HttpError(404, 'task not found');
+    return t;
+  };
+  route('GET', '/api/tasks/:id', async ({ params }) => ({ task: await catalog.item(taskFor(params[0])) }));
+  route('GET', '/api/tasks/:id/activity', ({ params }) => catalog.activity(taskFor(params[0])));
+  route('POST', '/api/tasks/:id/start', ({ params }) => {
+    const t = taskFor(params[0]);
+    if (['done','closed'].includes(t.state)) throw new HttpError(409, 'task cannot be started');
+    // Compare-and-set: repeated clicks, another device and retries all enqueue the same task once.
+    if (t.state === 'proposal') {
+      const changed = hq.store.db.prepare(`UPDATE tasks SET state = 'queued', updated_at = ? WHERE id = ? AND state = 'proposal'`).run(hq.store.now(), t.id).changes;
+      if (changed) {
+        hq.store.emit('task.state', t.identity, { id: t.id, state: 'queued' });
+        queueMicrotask(() => hq.store.bg(hq.scheduler.fill(), 'scheduler.fill'));
+      }
+    }
+    return { task: hq.scheduler.task(t.id) };
+  });
   route('POST', '/api/tasks', async ({ body }) => {
     const b = await body();
     return { task: hq.scheduler.addTask({
-      title: str(b.title, 'title')!, ref: str(b.ref, 'ref', false), project: str(b.project, 'project', false), body: str(b.body, 'body', false),
+      state: b.proposal === true ? 'proposal' : undefined,
+      title: str(b.title, 'title')!, ref: str(b.ref, 'ref', b.proposal === true), project: str(b.project, 'project', false), body: str(b.body, 'body', false),
       labels: Array.isArray(b.labels) ? b.labels.map(String) : undefined, priority: typeof b.priority === 'number' ? b.priority : undefined,
       worktree: str(b.worktree, 'worktree', false), identity: str(b.identity, 'identity', false),
     }) };

@@ -142,7 +142,7 @@ const MIGRATIONS: string[] = [
     title TEXT NOT NULL,
     body TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL DEFAULT 'store',    -- store | github
-    state TEXT NOT NULL DEFAULT 'queued',    -- queued | open | interrupted | running | parked | needs_decision | done
+    state TEXT NOT NULL DEFAULT 'queued',    -- proposal | queued | open | interrupted | running | parked | needs_decision | done
     labels TEXT NOT NULL DEFAULT '[]',
     priority INTEGER NOT NULL DEFAULT 2,     -- p0..p3
     night_weight REAL NOT NULL DEFAULT 1,
@@ -628,6 +628,12 @@ const MIGRATIONS: string[] = [
   // v39: artifact cards survive content expiration; links are signed per version.
   `CREATE TABLE artifacts (id TEXT PRIMARY KEY, owner TEXT NOT NULL, task_id INTEGER, title TEXT NOT NULL, latest INTEGER NOT NULL, expires_at INTEGER NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, expired INTEGER NOT NULL DEFAULT 0, message_id TEXT NOT NULL, thumb TEXT);
    CREATE TABLE artifact_versions (artifact TEXT NOT NULL REFERENCES artifacts(id), version INTEGER NOT NULL, path TEXT NOT NULL, title TEXT NOT NULL, note TEXT NOT NULL, network INTEGER NOT NULL DEFAULT 0, op_id TEXT NOT NULL UNIQUE, ready INTEGER NOT NULL DEFAULT 0, warnings TEXT NOT NULL DEFAULT '[]', PRIMARY KEY(artifact,version));`,
+
+  // v40: indexed task provenance and bounded task activity, without scanning the event log on polling.
+  `CREATE INDEX IF NOT EXISTS tasks_identity_start ON tasks(identity, started_at);
+   CREATE INDEX IF NOT EXISTS events_task_activity ON events(json_extract(data, '$.id'), seq)
+     WHERE type IN ('task.new','task.state','task.awaiting','task.labels','task.priority');`,
+
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */
