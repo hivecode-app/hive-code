@@ -99,7 +99,7 @@ fi
 for x in "$WWW"/* "$WWW"/.well-known; do
   [[ -e "$x" ]] || continue
   n="$(basename "$x")"
-  case "$n" in current | releases | qa) ;; *) d "שארית ב-$WWW: $n" "נשארו בשרת קבצים ישנים של האפליקציה" ;; esac
+  case "$n" in current | releases | qa | qa-app) ;; *) d "שארית ב-$WWW: $n" "נשארו בשרת קבצים ישנים של האפליקציה" ;; esac
 done
 if [[ -e "$STATE/app-path" ]]; then d "שארית: $STATE/app-path (הנתיב הסודי הישן)" "נשארה בשרת שארית של הנתיב הסודי הישן"; fi
 

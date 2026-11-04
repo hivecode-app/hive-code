@@ -32,12 +32,23 @@ app.hq.example.com {
 	}
 
 	# A QA copy of the web build (packages/app/tool/qa/publish_qa.sh), with its own way to hq.
-	handle_path /qa/hq/* {
+	handle_path /qa-app/hq/* {
 		reverse_proxy 127.0.0.1:7420 {
 			flush_interval -1
 		}
 	}
+	handle /qa-app/* {
+		root * /var/www/hq-app
+		header Cache-Control "no-cache"
+		header X-Robots-Tag "noindex, nofollow"
+		file_server
+	}
+
+	# Reports are opaque-origin documents; only the QA app above may use app storage.
 	handle /qa/* {
+		header Content-Security-Policy "sandbox allow-scripts allow-popups"
+		header Access-Control-Allow-Origin "*"
+		header Referrer-Policy "no-referrer"
 		root * /var/www/hq-app
 		header Cache-Control "no-cache"
 		header X-Robots-Tag "noindex, nofollow"

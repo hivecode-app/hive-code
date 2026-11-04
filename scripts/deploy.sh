@@ -421,13 +421,13 @@ if [[ "$target" == caddy || "$target" == all ]]; then echo "$sha" >"$DSTATE/cadd
 if out="$(node scripts/deploy-report.mjs "$target" "$sha" 2>&1)"; then say "$out"; else say "$out (הפריסה עצמה הצליחה. לשלוח שוב: node scripts/deploy-report.mjs $target $sha)"; fi
 
 # ── leftovers, only once production is verified ──────────────────────────────
-# /var/www/hq-app holds exactly current, releases/ and qa/; hand-made Caddyfile backups of our sites
+# /var/www/hq-app holds exactly current, releases/, qa/ and qa-app/; hand-made Caddyfile backups of our sites
 # are superseded by deploy/caddy-prev. Only our own backup names (CADDY_BAKS): other projects' backups
 # in /etc/caddy (OpenClaw, dictate...) are not ours to touch.
 if [[ "$target" == caddy || "$target" == all ]]; then
   for x in "$WWW"/* "$WWW"/.well-known; do
     [[ -e "$x" ]] || continue
-    case "$(basename "$x")" in current | releases | qa) ;; *) sudo -n rm -rf -- "$x" && say "נמחקה שארית: $x" ;; esac
+    case "$(basename "$x")" in current | releases | qa | qa-app) ;; *) sudo -n rm -rf -- "$x" && say "נמחקה שארית: $x" ;; esac
   done
   for f in "${CADDY_BAKS[@]}"; do
     sudo -n rm -f -- "$f" && say "נמחק גיבוי ידני: $f"
