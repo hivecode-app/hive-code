@@ -1,3 +1,5 @@
+import 'package:agent_company/native/native_bridge.dart';
+import 'package:agent_company/ui/tasks/organization.dart';
 import 'package:agent_company/ui/tasks/task_timeline.dart';
 import 'package:agent_company/ui/common.dart';
 
@@ -26,7 +28,9 @@ class TaskBackend extends FakeBackend {
       failedTree = false,
       failedList = false,
       unknown = false;
-  int starts = 0, reveals = 0;
+  int starts = 0, reveals = 0, treeLoads = 0;
+  Completer<List<OrgPerson>>? treeReply;
+  List<OrgPerson>? customPeople;
   Completer<CommandResult>? startReply;
   List<Map<String, dynamic>> eventLog = [];
   bool accepted = false;
@@ -145,7 +149,10 @@ class TaskBackend extends FakeBackend {
 
   @override
   Future<List<OrgPerson>> organization() async {
+    treeLoads++;
+    if (treeReply != null) return treeReply!.future;
     if (failedTree) throw StateError('unavailable');
+    if (customPeople != null) return customPeople!;
     return [
       const OrgPerson(
         id: 'dana',
@@ -232,6 +239,25 @@ class RacingTaskDetails extends TaskBackend {
     replies.add(c);
     return c.future;
   }
+}
+
+Future<void> openByKeyboard(WidgetTester tester, Key key) async {
+  for (var i = 0; i < 100; i++) {
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    final context = FocusManager.instance.primaryFocus?.context;
+    var reached = context?.widget.key == key;
+    context?.visitAncestorElements((element) {
+      if (element.widget.key == key) reached = true;
+      return !reached;
+    });
+    if (reached) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      return;
+    }
+  }
+  fail('Keyboard focus did not reach $key');
 }
 
 void main() {
@@ -594,6 +620,416 @@ void main() {
     expect((request.trailing as Ic).name, 'chevron_left');
   });
 
+  testWidgets(
+    'long team and completed worker are reachable in two taps; back restores the team anchor',
+    (tester) async {
+      await productApp(
+        tester,
+        backend: TaskBackend(),
+        home: const ChatScreen(identityId: 'dana'),
+      );
+      await tester.tap(find.byKey(const Key('conversation-team')));
+      await tester.pumpAndSettle();
+      final member = find.byKey(const ValueKey('org-person-member-34'));
+      await tester.scrollUntilVisible(
+        member,
+        600,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(member);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<ChatScreen>(find.byType(ChatScreen).last).identityId,
+        'member-34',
+      );
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(member.hitTestable(), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'a completed worker opens in two taps and a failed tree leaves the conversation usable',
+    (tester) async {
+      final backend = TaskBackend();
+      await productApp(
+        tester,
+        backend: backend,
+        home: const ChatScreen(identityId: 'dana'),
+      );
+      await tester.tap(find.byKey(const Key('conversation-team')));
+      await tester.pumpAndSettle();
+      final finished = find.byKey(const ValueKey('org-person-shira'));
+      await tester.ensureVisible(finished);
+      await tester.tap(finished);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<ChatScreen>(find.byType(ChatScreen).last).identityId,
+        'shira',
+      );
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(finished.hitTestable(), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'a phone worker opens the manager tree with siblings in one tap',
+    (tester) async {
+      await productApp(
+        tester,
+        backend: TaskBackend(),
+        home: const ChatScreen(identityId: 'ido'),
+      );
+      await tester.tap(find.byKey(const Key('conversation-team')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('org-person-dana')), findsOneWidget);
+      expect(find.byKey(const Key('org-person-shira')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('org-person-shira')));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<ChatScreen>(find.byType(ChatScreen).last).identityId,
+        'shira',
+      );
+    },
+  );
+
+  testWidgets(
+    'the hierarchy reserves its phone height and periodic refresh never moves the conversation',
+    (tester) async {
+      final backend = TaskBackend();
+      final people = await backend.organization();
+      backend.treeLoads = 0;
+      backend.treeReply = Completer<List<OrgPerson>>();
+      await productApp(
+        tester,
+        backend: backend,
+        home: const ChatScreen(identityId: 'dana'),
+      );
+      final hierarchy = find.byType(ConversationHierarchy);
+      final height = tester.getSize(hierarchy).height;
+      backend.treeReply!.complete(people);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(hierarchy).height, height);
+      backend.treeReply = Completer<List<OrgPerson>>();
+      await tester.pump(const Duration(seconds: 30));
+      expect(backend.treeLoads, 2);
+      expect(tester.getSize(hierarchy).height, height);
+      expect(find.text('Updating team'), findsNothing);
+      backend.treeReply!.complete(people);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(hierarchy).height, height);
+      backend.treeReply = null;
+      backend.failedTree = true;
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(hierarchy).height, height);
+      expect(find.byKey(const Key('conversation-team')), findsOneWidget);
+      expect(
+        find.byTooltip('Team refresh failed. Showing saved information.'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('an unknown sidebar never shows unrelated top-level managers', (
+    tester,
+  ) async {
+    final backend = TaskBackend()
+      ..customPeople = [
+        const OrgPerson(id: 'other', name: 'Other manager', title: 'Lead'),
+      ];
+    await productApp(
+      tester,
+      backend: backend,
+      home: const Scaffold(
+        body: ConversationHierarchy(identity: 'missing', sidebar: true),
+      ),
+    );
+    expect(find.byKey(const Key('org-person-other')), findsNothing);
+    expect(find.text('No team members to show.'), findsOneWidget);
+  });
+  testWidgets(
+    'a known conversation without a team has no empty hierarchy strip',
+    (tester) async {
+      final backend = TaskBackend()
+        ..customPeople = [
+          const OrgPerson(id: 'ido', name: 'Ido', title: 'Developer'),
+        ];
+      await productApp(
+        tester,
+        backend: backend,
+        home: const ChatScreen(identityId: 'ido'),
+      );
+      expect(tester.getSize(find.byType(ConversationHierarchy)).height, 0);
+      backend.failedTree = true;
+      backend.customPeople = null;
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byType(ConversationHierarchy)).height, 0);
+    },
+  );
+  testWidgets(
+    'a long team label stays inside its reserved strip at 200 percent',
+    (tester) async {
+      final backend = TaskBackend()
+        ..customPeople = [
+          OrgPerson(
+            id: 'dana',
+            name: 'Long team lead name ' * 10,
+            title: 'Lead',
+          ),
+          const OrgPerson(
+            id: 'ido',
+            name: 'Ido',
+            title: 'Developer',
+            manager: 'dana',
+          ),
+        ];
+      await productApp(
+        tester,
+        backend: backend,
+        scale: 2,
+        home: const ChatScreen(identityId: 'dana'),
+      );
+      final label = find.descendant(
+        of: find.byKey(const Key('conversation-team')),
+        matching: find.byType(Text),
+      );
+      expect(tester.widget<Text>(label).maxLines, 1);
+      expect(
+        tester.getRect(label).height,
+        lessThanOrEqualTo(
+          tester.getRect(find.byType(ConversationHierarchy)).height,
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('a failed hierarchy does not block a chat; retry recovers', (
+    tester,
+  ) async {
+    final backend = TaskBackend()..failedTree = true;
+    await productApp(
+      tester,
+      backend: backend,
+      home: const ChatScreen(identityId: 'dana'),
+    );
+    expect(find.byType(ChatScreen), findsOneWidget);
+    expect(find.byType(TextField), findsWidgets);
+    final error = find.byTooltip(
+      'The team could not be loaded. The conversation is still available.',
+    );
+    expect(error, findsOneWidget);
+    backend.failedTree = false;
+    await tester.tap(error);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('conversation-team')), findsOneWidget);
+  });
+
+  testWidgets(
+    'wide chat shows the tree once, and at 200 percent uses a full-width team entry',
+    (tester) async {
+      final store = await productApp(
+        tester,
+        backend: TaskBackend(),
+        size: const Size(1280, 900),
+        prepare: (s) => s.selectedConversation = 'dana',
+      );
+      expect(find.byType(ConversationHierarchy), findsOneWidget);
+      expect(
+        tester
+            .widget<ConversationHierarchy>(find.byType(ConversationHierarchy))
+            .sidebar,
+        true,
+      );
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      store.touch();
+      await tester.pumpAndSettle();
+      expect(find.byType(ConversationHierarchy), findsOneWidget);
+      expect(
+        tester
+            .widget<ConversationHierarchy>(find.byType(ConversationHierarchy))
+            .sidebar,
+        false,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'keyboard and semantics expose activity and the completed worker at 200 percent',
+    (tester) async {
+      final store = await productApp(
+        tester,
+        backend: TaskBackend(),
+        scale: 2,
+        home: const ProductTaskScreen(id: 3),
+      );
+      final semantics = tester.ensureSemantics();
+      await openByKeyboard(tester, const Key('choose-stage-activity'));
+      expect(
+        tester.getSemantics(find.byKey(const Key('stage-proposal'))).label,
+        contains('Stage complete'),
+      );
+      await openByKeyboard(tester, const Key('stage-proposal'));
+      expect(store.taskActivityStages[3], 'proposal');
+      expect(tester.takeException(), isNull);
+      semantics.dispose();
+    },
+  );
+
+  testWidgets(
+    'keyboard reaches a completed colleague and back restores the team at 200 percent',
+    (tester) async {
+      await productApp(
+        tester,
+        backend: TaskBackend(),
+        scale: 2,
+        home: const ChatScreen(identityId: 'dana'),
+      );
+      final semantics = tester.ensureSemantics();
+      await openByKeyboard(tester, const Key('conversation-team'));
+      final worker = find.byKey(const Key('org-person-shira'));
+      await tester.ensureVisible(worker);
+      expect(tester.getSemantics(worker).label, contains('Shira'));
+      expect(tester.getSemantics(worker).label, contains('Completed'));
+      await openByKeyboard(tester, const Key('org-person-shira'));
+      expect(
+        tester.widget<ChatScreen>(find.byType(ChatScreen).last).identityId,
+        'shira',
+      );
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(worker.hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      semantics.dispose();
+    },
+  );
+
+  testWidgets(
+    'hierarchy indents each generation and aligns opposite-language rows to the interface',
+    (tester) async {
+      await productApp(
+        tester,
+        backend: TaskBackend(he: true),
+        language: 'he',
+        home: const ChatScreen(identityId: 'dana'),
+      );
+      await tester.tap(find.byKey(const Key('conversation-team')));
+      await tester.pumpAndSettle();
+      final parent = find.byKey(const Key('org-person-dana'));
+      final worker = find.byKey(const Key('org-person-ido'));
+      final task = find.byKey(const Key('org-task-2'));
+      expect(parent, findsOneWidget);
+      expect(
+        tester.getRect(worker).right,
+        lessThan(tester.getRect(parent).right),
+      );
+      expect(
+        tester.getRect(task).right,
+        lessThan(tester.getRect(worker).right),
+      );
+      final title = tester
+          .widgetList<Text>(
+            find.descendant(of: worker, matching: find.byType(Text)),
+          )
+          .firstWhere((w) => w.data?.contains('Ido') == true);
+      expect(title.textDirection, TextDirection.ltr);
+      expect(title.textAlign, TextAlign.right);
+      final completed = find.byKey(const Key('org-person-shira'));
+      expect(
+        find.descendant(
+          of: completed,
+          matching: find.byWidgetPredicate(
+            (w) => w is StatusWord && w.icon == 'check_circle',
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('the PR action opens the exact recorded URL', (tester) async {
+    NativeBridge.debugSupportedOverride = true;
+    String? opened;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(NativeBridge.channel, (call) async {
+      if (call.method == 'openUrl') {
+        opened = (call.arguments as Map)['url'] as String;
+        return true;
+      }
+      return null;
+    });
+    addTearDown(() {
+      NativeBridge.debugSupportedOverride = null;
+      messenger.setMockMethodCallHandler(NativeBridge.channel, null);
+    });
+    await productApp(
+      tester,
+      backend: TaskBackend(),
+      home: const ProductTaskScreen(id: 3),
+    );
+    await tester.tap(find.text('Pull requests'));
+    await tester.pumpAndSettle();
+    expect(opened, 'https://github.com/example/project/pull/12');
+  });
+
+  testWidgets(
+    'past stages have a visible non-color mark and an explicit screen-reader status',
+    (tester) async {
+      await productApp(
+        tester,
+        backend: TaskBackend(),
+        home: const ProductTaskScreen(id: 3),
+      );
+      final semantics = tester.ensureSemantics();
+      final proposal = find.byKey(const Key('stage-proposal'));
+      expect(tester.getSemantics(proposal).value, 'Stage complete');
+      expect(
+        find.descendant(
+          of: proposal,
+          matching: find.byWidgetPredicate((w) => w is Ic && w.name == 'check'),
+        ),
+        findsOneWidget,
+      );
+      semantics.dispose();
+    },
+  );
+
+  testWidgets(
+    'a failed team refresh keeps saved people visible and marks the information as stale',
+    (tester) async {
+      final backend = TaskBackend();
+      await productApp(
+        tester,
+        backend: backend,
+        home: const Scaffold(
+          body: ConversationHierarchy(identity: 'dana', sidebar: true),
+        ),
+      );
+      expect(find.byKey(const Key('org-person-ido')), findsOneWidget);
+      backend.failedTree = true;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Team refresh failed. Showing saved information.'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('org-person-ido')), findsOneWidget);
+    },
+  );
+
   for (final language in ['he', 'en']) {
     for (final dark in [false, true]) {
       for (final scale in [1.0, 1.3, 2.0]) {
@@ -636,6 +1072,59 @@ void main() {
         await expectLater(
           find.byType(MaterialApp),
           matchesGoldenFile('golden/tasks/board-$language-$dark.png'),
+        );
+      });
+      testWidgets('hierarchy desktop with tasks $language $dark', (
+        tester,
+      ) async {
+        await productApp(
+          tester,
+          backend: TaskBackend(he: language == 'he'),
+          language: language,
+          dark: dark,
+          size: const Size(1280, 900),
+          home: const ChatScreen(identityId: 'dana'),
+        );
+        expect(find.byKey(const Key('org-task-2')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await expectLater(
+          find.byType(MaterialApp),
+          matchesGoldenFile(
+            'golden/tasks/hierarchy-desktop-$language-$dark.png',
+          ),
+        );
+      });
+      testWidgets('hierarchy golden $language $dark', (tester) async {
+        await productApp(
+          tester,
+          backend: TaskBackend(he: language == 'he'),
+          language: language,
+          dark: dark,
+          home: const Scaffold(
+            body: ConversationHierarchy(identity: 'dana', sidebar: true),
+          ),
+        );
+        expect(tester.takeException(), isNull);
+        await expectLater(
+          find.byType(MaterialApp),
+          matchesGoldenFile('golden/tasks/hierarchy-$language-$dark.png'),
+        );
+      });
+      testWidgets('hierarchy large golden $language $dark', (tester) async {
+        await productApp(
+          tester,
+          backend: TaskBackend(he: language == 'he'),
+          language: language,
+          dark: dark,
+          scale: 2,
+          home: const Scaffold(
+            body: ConversationHierarchy(identity: 'dana', sidebar: true),
+          ),
+        );
+        expect(tester.takeException(), isNull);
+        await expectLater(
+          find.byType(MaterialApp),
+          matchesGoldenFile('golden/tasks/hierarchy-$language-$dark-2.0.png'),
         );
       });
     }

@@ -54,11 +54,9 @@ class HqBackend extends Backend {
   @override
   Future<List<OrgPerson>> organization() async {
     final people = taskRows((await _get('/api/org/tree'))['people']).map(OrgPerson.fromJson).toList();
-    final d = _data;
-    if (d != null) { for (final p in people) {
-      d.identities.putIfAbsent(p.id, () => Identity(id: p.id, name: p.name, title: p.title, teamId: p.project ?? '', temp: p.tasks.isNotEmpty));
-    }
-    }
+    _orgPeople = people;
+    _orgBoundData = null;
+    _includeOrgPeople();
     return people;
   }
   @override
@@ -104,6 +102,8 @@ class HqBackend extends Backend {
   final http.Client _http;
 
   CompanyData? _data;
+  CompanyData? _orgBoundData;
+  List<OrgPerson> _orgPeople = [];
   SystemStatus _status = const SystemStatus(LinkState.connecting);
   WebSocketChannel? _ws;
   StreamSubscription? _wsSub;
@@ -165,7 +165,21 @@ class HqBackend extends Backend {
   }
 
   @override
-  CompanyData? get data => _data;
+  CompanyData? get data { _includeOrgPeople(); return _data; }
+  // Snapshot refresh and language changes must not erase people absent from the live board.
+  void _includeOrgPeople() {
+    final d = _data;
+    if (d == null || identical(_orgBoundData, d)) return;
+    for (final p in _orgPeople) {
+      if (!p.active || !d.identities.containsKey(p.id)) {
+        d.identities[p.id] = Identity(id: p.id, name: p.name, title: p.title, teamId: p.project ?? '', temp: p.tasks.isNotEmpty);
+      }
+      if (p.tasks.isNotEmpty && p.tasks.every((t) => t.state == 'done')) {
+        d.presence.putIfAbsent(p.id, () => const Presence(status: WorkerStatus.done));
+      }
+    }
+    _orgBoundData = d;
+  }
   @override
   SystemStatus get status => _status;
   @override
@@ -778,7 +792,7 @@ class HqBackend extends Backend {
     final d = _data;
     if (d == null) return;
 
-    if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'tasks.progress' || type == 'task.new' || type == 'task.state' || type == 'toggle.changed' || type.startsWith('watchdog.')
+    if (type.startsWith('inbox.') || type.startsWith('ask.') || type == 'shift.state' || type == 'task.pr' || type == 'tasks.progress' || type == 'task.new' || type == 'task.state' || type == 'toggle.changed' || type.startsWith('watchdog.')
         || type == 'home.composed' || type == 'task.awaiting' || type == 'deploy.recorded' || type == 'asked.changed'
         // A new quota read (every 10 minutes): the home's "המכסה" card.
         || type == 'accounts.quota' || type == 'codex.quota'

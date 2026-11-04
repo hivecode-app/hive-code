@@ -13,6 +13,7 @@ import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
 import { getIdentity, isStandingWorker, type IdentityRow } from './org.ts';
 import { buildSystemPrompt, writeSystemPrompt } from './system-prompt.ts';
+import { createdPrFrom, createsPr, recordTaskPr } from './task-prs.ts';
 import { prMergedFrom, recordPrMerged } from './merged.ts';
 import { noWorkers, readCharter, Workspaces } from './workspace.ts';
 import { contextTokens, restRotationDue } from './rotation.ts';
@@ -570,6 +571,28 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     }
     if (f.t === 'event') {
       const ev = f.ev;
+      const prKey = `${id}:${ev.kind === 'tool_use' || ev.kind === 'tool_result' ? ev.toolUseId : ''}`;
+      if (ev.kind === 'tool_use' && ev.name === 'Bash') {
+        const command = (ev.input as { command?: unknown } | null)?.command;
+        if (typeof command === 'string' && createsPr(command)) this.prCreates.set(prKey, command);
+      } else if (ev.kind === 'tool_result') {
+        let command = this.prCreates.get(prKey);
+        this.prCreates.delete(prKey);
+        // An hq restart can occur between the tool call and its result. Recover only PR-shaped results.
+        if (!command && !ev.isError && /https:\/\/github\.com\/[^\s]+\/pull\/\d+/.test(ev.preview)) {
+          const prior = this.store.db.prepare(`SELECT data FROM events WHERE identity = ? AND type = 'engine.tool_use'
+            AND json_extract(data, '$.shift') = ? AND json_extract(data, '$.ev.toolUseId') = ? ORDER BY seq DESC LIMIT 1`)
+            .get(row.identity, id, ev.toolUseId) as { data: string } | undefined;
+          const use = prior ? JSON.parse(prior.data).ev : null;
+          if (use?.name === 'Bash') command = use.input?.command;
+        }
+        if (command && !ev.isError) {
+          const url = createdPrFrom({ tool_name: 'Bash', tool_input: { command }, tool_response: ev.preview });
+          if (url) recordTaskPr(this.store, row.task_id, row.identity, url, id, this.cfg.companyDir);
+        }
+      } else if (ev.kind === 'result') {
+        for (const key of this.prCreates.keys()) if (key.startsWith(`${id}:`)) this.prCreates.delete(key);
+      }
       // A tool call in flight is not "stuck" (B.5): long builds and subagents legitimately stay quiet.
       if (ev.kind === 'tool_use') { fields.in_turn = 1; fields.long_tool = 1; }
       else if (ev.kind === 'tool_result') fields.long_tool = 0;
@@ -793,9 +816,12 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
     }
   }
 
+  private prCreates = new Map<string, string>();
   /** A worker's `gh pr merge` that merged: the company map's `pr.merged`, with the project its task belongs to. */
   private noteMerge(row: ShiftRow, payload: unknown): void {
     try {
+      const created = createdPrFrom(payload);
+      if (created) recordTaskPr(this.store, row.task_id, row.identity, created, row.id, this.cfg.companyDir);
       const m = prMergedFrom(payload);
       if (!m) return;
       const task = row.task_id == null ? undefined : this.store.db.prepare('SELECT project FROM tasks WHERE id = ?').get(row.task_id) as { project: string | null } | undefined;

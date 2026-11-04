@@ -1,3 +1,4 @@
+import '../tasks/organization.dart';
 import '../../l10n/app_localizations.dart';
 import '../product/product_theme.dart';
 import 'package:agent_company/l10n/ui_copy.dart';
@@ -487,8 +488,9 @@ class _ChatScreenState extends State<ChatScreen> {
       return KeyedSubtree(key: ValueKey(e.key), child: w);
     }
 
-    final body = Column(children: [
+    Widget body({bool teamLink = true}) => Column(children: [
       header,
+      if (store.preferences.newInterface && teamLink) ConversationHierarchy(key: ValueKey('team-${widget.identityId}'), identity: widget.identityId),
       if (_sourceMissing) Semantics(liveRegion: true, child: Padding(padding: const EdgeInsets.all(12), child: Text(AppLocalizations.of(context).progressSourceMissing))),
       if (open.isNotEmpty && selectedItem == null) _PinBar(open: open, onTap: () => _toAsk(open.first)),
       Expanded(
@@ -553,8 +555,12 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     ]);
 
-    if (widget.embedded) return body;
-    return Scaffold(backgroundColor: p.surface, body: SafeArea(child: body));
+    Widget layout() => LayoutBuilder(builder: (context, c) {
+      if (!store.preferences.newInterface || c.maxWidth < 650 || (c.maxHeight < 560 && c.maxWidth < 1100) || MediaQuery.textScalerOf(context).scale(1) >= 1.5) return body();
+      return Row(children: [Expanded(child: body(teamLink: false)), SizedBox(width: 230, child: ConversationHierarchy(key: ValueKey('sidebar-${widget.identityId}'), identity: widget.identityId, sidebar: true))]);
+    });
+    if (widget.embedded) return layout();
+    return Scaffold(backgroundColor: p.surface, body: SafeArea(child: layout()));
   }
 
   // Day separators, items, then the live line at the bottom. Cheap: no widgets, and recomputed only

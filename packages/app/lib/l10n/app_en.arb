@@ -2976,17 +2976,44 @@
   "progressDraft": "Task description: ",
   "progressRefresh": "Refresh",
   "progressRequestedBy": "Requested by {name}",
-  "@progressRequestedBy": {"placeholders": {"name": {"type": "String"}}},
+  "@progressRequestedBy": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "progressTeamOf": "{name}’s team",
-  "@progressTeamOf": {"placeholders": {"name": {"type": "String"}}},
+  "@progressTeamOf": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "progressStageActivity": "Activity: {stage}",
-  "@progressStageActivity": {"placeholders": {"stage": {"type": "String"}}},
+  "@progressStageActivity": {
+    "placeholders": {
+      "stage": {
+        "type": "String"
+      }
+    }
+  },
   "progressUnknown": "Progress is being verified",
   "progressLeadMissing": "This project has no team lead yet. Choose another project.",
   "progressWorkCompleted": "Work completed",
   "progressViewActivity": "View activity",
   "progressStageCount": "Stage {current} of {total}",
-  "@progressStageCount": {"placeholders": {"current": {"type": "int"}, "total": {"type": "int"}}},
+  "@progressStageCount": {
+    "placeholders": {
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
   "progressTaskCreated": "Task created",
   "progressWorkStarted": "Work started",
   "progressQueued": "Added to the queue",
@@ -3052,5 +3079,11 @@
   "setupEnableNotifications": "Enable notifications",
   "setupTokenAccess": "Use your Claude subscription. Token usage is higher than usual, and your plan limit may run out sooner",
   "workDecreaseParallel": "Fewer workers in parallel",
-  "workIncreaseParallel": "More workers in parallel"
+  "workIncreaseParallel": "More workers in parallel",
+  "progressStageDone": "Stage complete",
+  "progressStageCurrent": "Current stage",
+  "progressStagePending": "Not reached yet",
+  "progressTeamUpdating": "Updating team…",
+  "progressTeamStale": "Team refresh failed. Showing saved information.",
+  "progressTeamRetry": "Team unavailable. Retry"
 }

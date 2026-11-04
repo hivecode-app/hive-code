@@ -19,6 +19,13 @@ class TaskTimeline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context), p = context.p;
+    String status(TaskStage s) => current == null
+        ? l.progressUnknown
+        : s.index < current!.index
+        ? l.progressStageDone
+        : s == current
+        ? l.progressStageCurrent
+        : l.progressStagePending;
     if (MediaQuery.textScalerOf(context).scale(1) >= 1.5) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -52,6 +59,7 @@ class TaskTimeline extends StatelessWidget {
                         key: ValueKey('stage-${s.name}'),
                         leading: Ic(stageIcon(s)),
                         title: Text(stageLabel(l, s)),
+                        subtitle: Text(status(s), style: T.meta),
                         onTap: () {
                           Navigator.pop(sheet);
                           onSelect(s);
@@ -76,6 +84,7 @@ class TaskTimeline extends StatelessWidget {
               ),
               child: Semantics(
                 selected: s == selected,
+                value: status(s),
                 label: l.progressStageActivity(stageLabel(l, s)),
                 child: InkWell(
                   key: ValueKey('stage-${s.name}'),
@@ -91,7 +100,17 @@ class TaskTimeline extends StatelessWidget {
                               : p.line,
                         ),
                         const SizedBox(height: 12),
-                        Ic(stageIcon(s), size: 20),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Ic(stageIcon(s), size: 20),
+                            if (current != null &&
+                                s.index < current!.index) ...[
+                              const SizedBox(width: 4),
+                              const Ic('check', size: 12),
+                            ],
+                          ],
+                        ),
                         const SizedBox(height: 6),
                         Text(
                           stageLabel(l, s),

@@ -82,7 +82,9 @@ void main() {
                 'title': 'Reviewer',
                 'active': 0,
                 'reports_to': 'yoav',
-                'tasks': [],
+                'tasks': [
+                  {'id': 9, 'title': 'Earlier work', 'state': 'done'},
+                ],
               },
             ],
           },
@@ -122,6 +124,14 @@ void main() {
     expect((await backend.startTask(1)).ok, true);
     expect((await backend.organization()).single.active, false);
     expect(backend.data!.identities['finished']!.name, 'Completed worker');
+    expect(backend.data!.presence['finished']!.status, WorkerStatus.done);
+    backend.relocalize();
+    expect(
+      backend.data!.identities['finished']!.name,
+      'Completed worker',
+      reason:
+          'a language change retains people who are absent from the live board',
+    );
     await backend.openConversation('yoav');
     expect(
       backend.data!.chats['yoav']!.items.whereType<TextMsg>().any(

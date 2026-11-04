@@ -6,6 +6,7 @@ import type { Hq } from './hq.ts';
 import type { TaskRow } from './scheduler.ts';
 import { projectLead } from './org.ts';
 import { openedBy } from './open-tasks.ts';
+import { recordedTaskPrs } from './task-prs.ts';
 import { readCharter } from './workspace.ts';
 
 export const TASK_STAGES = ['proposal', 'development', 'review', 'approval', 'released'] as const;
@@ -30,8 +31,9 @@ export function sourceTask(hq: Hq, identity: string | null, at: number, ref?: st
   if (!identity) return null;
   const runtime = (hq.store.db.prepare('SELECT source FROM identities WHERE id = ?').get(identity) as { source: string } | undefined)?.source === 'runtime';
   const t = hq.store.db.prepare(`SELECT id FROM tasks WHERE identity = ? AND COALESCE(started_at, created_at) <= ?
+    AND (? OR started_at IS NOT NULL OR state IN ('running','resting','done','closed'))
     AND (? OR state NOT IN ('done','closed') OR updated_at >= ?) ORDER BY COALESCE(started_at, created_at) DESC, id DESC LIMIT 1`)
-    .get(identity, at, runtime ? 1 : 0, at) as { id: number } | undefined;
+    .get(identity, at, runtime ? 1 : 0, runtime ? 1 : 0, at) as { id: number } | undefined;
   return t?.id ?? null;
 }
 
@@ -43,27 +45,30 @@ export function taskRequests(hq: Hq): TaskRequest[] {
 }
 
 export function taskMessages(hq: Hq, task: TaskRow): Message[] {
-  if (!task.identity) return [];
-  const messages = hq.store.db.prepare(`SELECT id, body, from_identity, to_identity, ref, shift_id, created_at, attachments FROM messages
-    WHERE ((from_identity = ? AND to_identity = ?) OR (to_identity = ? AND from_identity = ?))
-    AND kind != 'system' ORDER BY created_at, rowid`).all(task.identity, OWNER, task.identity, OWNER) as Message[];
+  const columns = 'id, body, from_identity, to_identity, ref, shift_id, created_at, attachments';
+  const messages = hq.store.db.prepare(`SELECT ${columns} FROM messages
+    WHERE ((from_identity = ? AND to_identity = ?) OR (to_identity = ? AND from_identity = ?)) AND kind != 'system'
+    UNION SELECT ${columns} FROM messages WHERE (from_identity = ? OR to_identity = ?) AND ref IN (?, ?) AND kind != 'system'
+    ORDER BY created_at, id`).all(task.identity, OWNER, task.identity, OWNER, OWNER, OWNER, `task-${task.id}`, `task:${task.id}`) as Message[];
   const tasks = hq.store.db.prepare('SELECT * FROM tasks WHERE identity = ? ORDER BY COALESCE(started_at, created_at) DESC, id DESC').all(task.identity) as TaskRow[];
   const shifts = new Map((hq.store.db.prepare('SELECT id, task_id FROM shifts WHERE identity = ?').all(task.identity) as { id: string; task_id: number | null }[]).map((r) => [r.id, r.task_id]));
   const runtime = (hq.store.db.prepare('SELECT source FROM identities WHERE id = ?').get(task.identity) as { source: string } | undefined)?.source === 'runtime';
   return messages.filter((m) => {
     const explicit = /^task[-:](\d+)$/.exec(m.ref ?? '');
     const found = explicit ? Number(explicit[1]) : (m.shift_id ? shifts.get(m.shift_id) : null) ?? tasks.find((t) =>
-      (t.started_at ?? t.created_at) <= m.created_at && (runtime || !['done','closed'].includes(t.state) || t.updated_at >= m.created_at))?.id;
+      (t.started_at ?? t.created_at) <= m.created_at && (runtime || t.started_at != null || ['running','resting','done','closed'].includes(t.state)) && (runtime || !['done','closed'].includes(t.state) || t.updated_at >= m.created_at))?.id;
     return found === task.id;
   });
 }
 
-/** Only the recorded PR field is evidence. Links discussed in notes can refer to other work. */
+/** Only explicitly recorded PR provenance is evidence. Links discussed in notes can refer to other work. */
 export function taskPrUrls(hq: Hq, task: TaskRow, repo?: string | null): string[] {
-  const urls = new Set<string>();
+  const urls = new Set<string>(recordedTaskPrs(hq.store, task.id));
   for (const m of (task.pr ?? '').matchAll(/https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\b/g)) urls.add(`https://github.com/${m[1]}/pull/${m[2]}`);
-  if (/^#?\d+$/.test(task.pr ?? '') && task.project) {
-    repo ??= readCharter(hq.cfg.companyDir, task.project)?.checkouts[0]?.repo;
+  if (/^#?\d+$/.test(task.pr ?? '') && task.project && ![...urls].some((u) => u.endsWith(`/pull/${task.pr!.replace('#', '')}`))) {
+    const checkouts = readCharter(hq.cfg.companyDir, task.project)?.checkouts;
+    const selected = (JSON.parse(task.labels) as string[]).find((l) => l.startsWith('repo:'))?.slice(5);
+    repo ??= (selected ? checkouts?.find((c) => c.name === selected) : checkouts?.[0])?.repo;
     if (repo) urls.add(`https://github.com/${repo}/pull/${task.pr!.replace('#', '')}`);
   }
   return [...urls];
@@ -78,8 +83,10 @@ export function taskStage(task: TaskRow, prs: PrEvidence[], requests: TaskReques
   if (released) return 'released';
   if (task.awaiting === 'deploy' || task.awaiting === 'verify' || requests.some((r) => r.task === task.id && r.kind === 'go')) return 'approval';
   if (prs.some((p) => p.checked_at === 0 || p.error)) return null;
-  if (prs.some((p) => p.merged || (p.review === 'approved' && p.ci === 'passed'))) return 'approval';
-  if (prs.some((p) => !p.draft && p.state === 'OPEN' && p.review !== 'changes')) return 'review';
+  const open = prs.filter((p) => p.state === 'OPEN');
+  if (open.some((p) => p.draft || p.review === 'changes')) return 'development';
+  if (open.length) return open.every((p) => p.review === 'approved' && p.ci === 'passed') ? 'approval' : 'review';
+  if (prs.some((p) => p.merged)) return 'approval';
   return task.state === 'proposal' ? 'proposal' : 'development';
 }
 
@@ -146,7 +153,9 @@ export class TaskCatalog {
   }
   async item(task: TaskRow, context = this.context([task]), refresh = true, urls?: string[]) {
     const info = task.project ? context.charters.get(task.project) : undefined;
-    urls ??= taskPrUrls(this.hq, task, info?.charter?.checkouts[0]?.repo ?? '');
+    const selected = (JSON.parse(task.labels) as string[]).find((l) => l.startsWith('repo:'))?.slice(5);
+    const checkout = selected ? info?.charter?.checkouts.find((c) => c.name === selected) : info?.charter?.checkouts[0];
+    urls ??= taskPrUrls(this.hq, task, checkout?.repo ?? '');
     const check = info?.charter?.ciCheck ?? null;
     const prs = await Promise.all(urls.map((url) => refresh ? this.pr(url, check) : this.known(url, check) ?? { url, head: '', state: '', draft: false, merged: false, review: 'pending' as const, ci: 'unknown' as const, quote: null, checked_at: 0 }));
     const released = context.deployed.has(task.id);
@@ -162,7 +171,11 @@ export class TaskCatalog {
     if (this.listCache && this.hq.store.now() - this.listCache.at < 3000 && this.listCache.version === version) return this.listCache.result;
     const tasks = this.hq.store.db.prepare(`SELECT * FROM tasks WHERE state NOT IN ('done','closed') OR id IN (SELECT id FROM tasks WHERE state IN ('done','closed') ORDER BY updated_at DESC LIMIT 100) ORDER BY updated_at DESC, id DESC`).all() as TaskRow[];
     const context = this.context(tasks);
-    const entries = tasks.map((task) => ({ task, urls: taskPrUrls(this.hq, task, context.charters.get(task.project ?? '')?.charter?.checkouts[0]?.repo ?? '') }));
+    const entries = tasks.map((task) => {
+      const checkouts = context.charters.get(task.project ?? '')?.charter?.checkouts;
+      const selected = (JSON.parse(task.labels) as string[]).find((l) => l.startsWith('repo:'))?.slice(5);
+      return { task, urls: taskPrUrls(this.hq, task, (selected ? checkouts?.find((c) => c.name === selected) : checkouts?.[0])?.repo ?? '') };
+    });
     const out = await Promise.all(entries.map(({ task, urls }) => this.item(task, context, false, urls)));
     if (!this.refreshing) {
       const stale = entries.filter(({ task, urls }) => (task.state !== 'done' || task.awaiting) && urls.some((u) => {
@@ -187,10 +200,10 @@ export class TaskCatalog {
     const messages = taskMessages(this.hq, task);
     const files = new Map<string, { id: string; name: string; mime: string; bytes: number; message: string; identity: string | null }>();
     for (const m of messages) for (const f of JSON.parse(m.attachments ?? '[]')) {
-      files.set(f.id, { id: f.id, name: f.name, mime: f.mime, bytes: f.bytes, message: m.id, identity: task.identity });
+      files.set(f.id, { id: f.id, name: f.name, mime: f.mime, bytes: f.bytes, message: m.id, identity: m.from_identity === OWNER ? m.to_identity : m.from_identity });
     }
     const events = this.hq.store.db.prepare(`SELECT seq, ts, type, data FROM events WHERE type IN ('task.new','task.state','task.awaiting','task.labels','task.priority') AND json_extract(data, '$.id') = ? ORDER BY seq DESC LIMIT 500`).all(task.id).reverse();
-    return { messages: messages.map((m) => ({ id: m.id, body: m.body, identity: task.identity, mine: m.from_identity === OWNER, created_at: m.created_at })), files: [...files.values()], events };
+    return { messages: messages.map((m) => ({ id: m.id, body: m.body, identity: m.from_identity === OWNER ? m.to_identity : m.from_identity, mine: m.from_identity === OWNER, created_at: m.created_at })), files: [...files.values()], events };
   }
 }
 

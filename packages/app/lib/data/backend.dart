@@ -217,9 +217,9 @@ abstract class Backend extends ChangeNotifier {
   Future<TaskProgress?> taskDetail(int id) async => (await taskProgress()).where((t) => t.id == id).firstOrNull;
   Future<TaskActivity> taskActivity(int id) async => const TaskActivity();
   Future<List<OrgPerson>> organization() async => [for (final p in data?.identities.values ?? <Identity>[]) OrgPerson(
-    id: p.id, name: p.name, title: p.title, manager: data?.teamOf(p.id)?.leadId == p.id ? data?.managerId : data?.teamOf(p.id)?.leadId)];
+    id: p.id, name: p.name, title: p.title, manager: data?.teamOf(p.id)?.leadId == p.id ? (data?.managerId.isNotEmpty == true ? data?.managerId : null) : data?.teamOf(p.id)?.leadId)];
   Future<CommandResult> startTask(int id) async => const CommandResult.fail(null);
-  Future<bool> revealMessage(String identity, String message) async => data?.chats[identity]?.items.any((m) => m.id == message) ?? false;
+  Future<bool> revealMessage(String identity, String message) async => data?.chats[identity]?.items.any((m) => m.id == message || m.id == 'msg:$message') ?? false;
 
   Future<List<SearchHit>> search(String query) async => searchLocal(data, query);
 

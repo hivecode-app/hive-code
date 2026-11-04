@@ -24,7 +24,8 @@ export function search(hq: Hq, raw: string): { results: SearchHit[] } {
   }
   // instr binds literal text, so %, _ and quotes have no special meaning.
   const tasks = hq.store.db.prepare(`SELECT id, title, body, state, project, identity FROM tasks
-    WHERE instr(lower(title || ' ' || body), ?) > 0 ORDER BY updated_at DESC, id DESC LIMIT 20`).all(q) as
+    WHERE instr(lower(title || ' ' || body || ' ' || COALESCE(pr, '')), ?) > 0
+      OR EXISTS (SELECT 1 FROM meta m, json_each(m.value) link WHERE m.key = 'task-pr-links:' || tasks.id AND instr(lower(link.value), ?) > 0) ORDER BY updated_at DESC, id DESC LIMIT 20`).all(q, q) as
     { id: number; title: string; body: string; state: string; project: string | null; identity: string | null }[];
   for (const t of tasks) results.push({ kind: 'task', id: String(t.id), title: t.title, subtitle: t.project ?? '', body: t.body.slice(0, 8000), state: t.state,
     ...(t.project ? { project: t.project } : {}), ...(t.identity ? { identity: t.identity } : {}) });

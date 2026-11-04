@@ -29,7 +29,7 @@ function target(command: string): { repo: string | null; ref: string | null } | 
 }
 
 /** The text of a tool's answer, whichever shape the hook payload carries it in. */
-function outputOf(resp: unknown): string {
+export function outputOf(resp: unknown): string {
   if (typeof resp === 'string') return resp;
   if (!resp || typeof resp !== 'object') return '';
   const r = resp as { stdout?: unknown; output?: unknown; content?: unknown };

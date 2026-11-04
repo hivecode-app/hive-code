@@ -1314,5 +1314,11 @@
   "setupEnableNotifications": "הפעלת התראות",
   "setupTokenAccess": "שימוש במנוי Claude שלך. צריכת הטוקנים גבוהה מהרגיל, והמכסה עלולה להיגמר מהר יותר",
   "workDecreaseParallel": "הפחתת מספר העובדים במקביל",
-  "workIncreaseParallel": "הגדלת מספר העובדים במקביל"
+  "workIncreaseParallel": "הגדלת מספר העובדים במקביל",
+  "progressStageDone": "השלב הסתיים",
+  "progressStageCurrent": "השלב הנוכחי",
+  "progressStagePending": "טרם התחיל",
+  "progressTeamUpdating": "הצוות מתעדכן…",
+  "progressTeamStale": "עדכון הצוות נכשל. מוצג מידע שמור.",
+  "progressTeamRetry": "הצוות לא התעדכן · נסה שוב"
 }
