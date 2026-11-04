@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // Sign-in (#23): fingerprint with a passkey, or a pairing code from a device that is already in
 // (settings → devices, or a link with ?pair=). Every device gets its own token, revocable there.
 // The app has no server built in (docs/generic/PLAN.md §2): with [askServer] the screen starts with
@@ -68,8 +69,8 @@ class _SignInScreenState extends State<SignInScreen> {
     final t = parseServer(server.text);
     if (t == null) {
       throw AuthFailure(server.text.trim().isEmpty
-          ? 'צריך את הכתובת של השרת, מה-QR או מהקישור שקיבלת.'
-          : 'הכתובת לא נראית כמו כתובת של שרת. למשל app.example.com.');
+          ? UiCopy.text(0)
+          : UiCopy.text(1));
     }
     if (t.code != null && code.text.trim().isEmpty) code.text = t.code!;
     widget.client.baseUrl = t.hqUrl;
@@ -101,7 +102,7 @@ class _SignInScreenState extends State<SignInScreen> {
 
   Future<void> _pair() => _run(() async {
         final c = code.text.trim();
-        if (c.isEmpty) throw const AuthFailure('צריך קוד צימוד ממסך המכשירים שבהגדרות, במכשיר שכבר מחובר.');
+        if (c.isEmpty) throw  AuthFailure(UiCopy.text(2));
         final name = defaultDeviceName();
         if (!widget.client.passkeysSupported) return widget.client.pair(c, name);
         try {
@@ -119,6 +120,7 @@ class _SignInScreenState extends State<SignInScreen> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final hasPasskeys = widget.client.passkeysSupported;
     return Scaffold(
@@ -130,7 +132,7 @@ class _SignInScreenState extends State<SignInScreen> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                BigTitle('החברה', sub: widget.current != null ? 'החלפת שרת' : 'כניסה במכשיר הזה'),
+                BigTitle(UiCopy.text(3), sub: widget.current != null ? UiCopy.text(4) : UiCopy.text(5)),
                 if (widget.note != null)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -139,16 +141,16 @@ class _SignInScreenState extends State<SignInScreen> {
                 if (widget.current != null)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: Text('המכשיר מחובר עכשיו ל-${widget.current}, ונשאר מחובר אליו עד שהכניסה לשרת החדש מצליחה.',
+                    child: Text(UiCopy.text(6, [widget.current]),
                         style: T.secondary.copyWith(color: p.text)),
                   ),
                 if (widget.askServer) ...[
-                  const Section('שרת', top: 8),
+                   Section(UiCopy.text(7), top: 8),
                   ListBlock(inset: 16, children: [
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                        Text('הכתובת מה-QR או מהקישור שקיבלת. אפשר גם להדביק כאן את הקישור כולו.', style: T.small.copyWith(color: p.text2)),
+                        Text(UiCopy.text(8), style: T.small.copyWith(color: p.text2)),
                         const SizedBox(height: 8),
                         TextField(
                           key: const Key('server-address'),
@@ -177,19 +179,19 @@ class _SignInScreenState extends State<SignInScreen> {
                 if (hasPasskeys) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Btn(busy ? 'רגע…' : 'כניסה עם טביעת אצבע', kind: BtnKind.primary, icon: 'fingerprint', height: 44, onTap: busy ? null : _login),
+                    child: Btn(busy ? UiCopy.text(9) : UiCopy.text(10), kind: BtnKind.primary, icon: 'fingerprint', height: 44, onTap: busy ? null : _login),
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    child: Text('עם passkey שכבר שמור אצלך, גם אם נוצר במכשיר אחר.', style: T.small.copyWith(color: p.text2)),
+                    child: Text(UiCopy.text(11), style: T.small.copyWith(color: p.text2)),
                   ),
                 ],
-                Section('מכשיר חדש', top: hasPasskeys ? 24 : 8),
+                Section(UiCopy.text(12), top: hasPasskeys ? 24 : 8),
                 ListBlock(inset: 16, children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                      Text('קוד צימוד ממסך המכשירים שבהגדרות, במכשיר שכבר מחובר.', style: T.small.copyWith(color: p.text2)),
+                      Text(UiCopy.text(13), style: T.small.copyWith(color: p.text2)),
                       const SizedBox(height: 8),
                       TextField(
                         key: const Key('pair-code'),
@@ -210,17 +212,17 @@ class _SignInScreenState extends State<SignInScreen> {
                       ),
                       const SizedBox(height: 12),
                       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                        Btn(hasPasskeys ? 'צימוד ויצירת passkey' : 'צימוד', icon: 'link', onTap: busy ? null : _pair),
-                        if (offerCodeOnly) Btn('צימוד בלי טביעת אצבע', onTap: busy ? null : _codeOnly),
+                        Btn(hasPasskeys ? UiCopy.text(14) : UiCopy.text(15), icon: 'link', onTap: busy ? null : _pair),
+                        if (offerCodeOnly) Btn(UiCopy.text(16), onTap: busy ? null : _codeOnly),
                       ]),
                     ]),
                   ),
                 ]),
-                if (error != null) ShownError(error!, screen: 'כניסה', padding: const EdgeInsets.fromLTRB(16, 12, 16, 0), report: errorFault),
+                if (error != null) ShownError(error!, screen: UiCopy.text(17), padding: const EdgeInsets.fromLTRB(16, 12, 16, 0), report: errorFault),
                 if (widget.onCancel != null)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
-                    child: Align(alignment: AlignmentDirectional.centerStart, child: Btn('ביטול', onTap: busy ? null : widget.onCancel)),
+                    child: Align(alignment: AlignmentDirectional.centerStart, child: Btn(UiCopy.text(18), onTap: busy ? null : widget.onCancel)),
                   ),
               ]),
             ),

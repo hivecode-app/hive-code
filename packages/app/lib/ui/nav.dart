@@ -1,3 +1,4 @@
+import 'product/settings.dart';
 // Navigation in one place: phone pushes full screens; desktop (≥800px) swaps the main column.
 import 'package:flutter/material.dart';
 
@@ -69,6 +70,8 @@ class Nav {
       ChatScreen.pendingFlash.add(identityId);
     }
     if (nav.wide) {
+      // A task or advanced page may have opened over the desktop shell. Reveal its main column.
+      navigator.popUntil((route) => route.isFirst);
       store.selectedConversation = identityId;
       store.homeOpen = false;
       nav.go(AppTab.chats);
@@ -99,5 +102,5 @@ class Nav {
 
   static void team(BuildContext context, String teamId) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProjectScreen(teamId: teamId)));
 
-  static void settings(BuildContext context) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+  static void settings(BuildContext context) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => StoreScope.read(context).preferences.newInterface ? const ProductSettings() : const SettingsScreen()));
 }

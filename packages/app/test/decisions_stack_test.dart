@@ -190,7 +190,7 @@ void main() {
       ..clear()
       ..addAll(items);
     resetQueue();
-    await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: const DecisionStack()));
+    await tester.pumpWidget(CompanyApp(store: legacyStore(store), themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: const DecisionStack()));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     return store;

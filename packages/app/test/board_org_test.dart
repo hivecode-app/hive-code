@@ -214,13 +214,13 @@ void main() {
     testWidgets('the project screen shows the team with what each one does, then the open tasks', (tester) async {
       await loadFonts();
       Motion.frozen = true;
-      SharedPreferences.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
       tester.view.physicalSize = const Size(342, 1400) * 2;
       tester.view.devicePixelRatio = 2;
       addTearDown(tester.view.reset);
       final store = AppStore(SnapshotBackend(voice));
       await store.start();
-      await tester.pumpWidget(CompanyApp(store: store, themeMode: ThemeMode.light, home: const ProjectScreen(projectId: 'voice-bot')));
+      await tester.pumpWidget(CompanyApp(store: legacyStore(store), themeMode: ThemeMode.light, home: const ProjectScreen(projectId: 'voice-bot')));
       await tester.pump();
       expect(find.text('הבוט הקולי'), findsOneWidget);
       expect(find.text('voice-bot'), findsNothing);

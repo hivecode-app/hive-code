@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // "משאבים" (resources-design.md §2), opened from "סטטוס": a card for each machine with its memory, CPU and disk in a number
 // and a word, who holds it by project ("לא מזוהה" is always there), who waits for room, and, on a tap, the leases that are
 // open on it. What could not be read says "לא נמדד"; it is never shown as fine. The state is a word and an icon, not a colour.
@@ -17,7 +18,7 @@ const kResourcesRefresh = Duration(seconds: 20);
 class ResourcesPage extends StatelessWidget {
   const ResourcesPage({super.key});
   @override
-  Widget build(BuildContext context) => ResourcesScreen(load: StoreScope.read(context).backend.resources, refresh: kResourcesRefresh);
+  Widget build(BuildContext context) { UiCopy.watch(context); return ResourcesScreen(load: StoreScope.read(context).backend.resources, refresh: kResourcesRefresh); }
 }
 
 class ResourcesScreen extends StatefulWidget {
@@ -75,6 +76,7 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final v = view;
     return Scaffold(
@@ -83,8 +85,8 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
         child: Column(
           children: [
             TopBar(
-              title: 'משאבים',
-              leading: IBtn('arrow_forward', tip: 'חזרה', onTap: () => Navigator.of(context).maybePop()),
+              title: UiCopy.text(636),
+              leading: IBtn(backIcon(context), tip: UiCopy.text(161), onTap: () => Navigator.of(context).maybePop()),
             ),
             Expanded(
               child: v == null
@@ -92,8 +94,8 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
                   : ListView(
                       padding: const EdgeInsets.only(bottom: 24),
                       children: [
-                        if (_stale) const _Line(icon: 'help', text: 'לא הצלחתי לרענן. מה שמוצג הוא מהקריאה הקודמת.'),
-                        if (v.machines.isEmpty) const _Line(icon: 'radio_button_unchecked', text: 'אין מכונות ברשימה'),
+                        if (_stale)  _Line(icon: 'help', text: UiCopy.text(637)),
+                        if (v.machines.isEmpty)  _Line(icon: 'radio_button_unchecked', text: UiCopy.text(638)),
                         for (final m in v.machines)
                           _MachineCard(
                             key: ValueKey('machine-${m.name}'),
@@ -120,19 +122,20 @@ class _Waiting extends StatelessWidget {
   final Future<void> Function({bool quiet}) onRetry;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Center(
       child: failed
           ? Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('לא הצלחתי לטעון את המשאבים.', style: T.row2.copyWith(color: p.text)),
+                Text(UiCopy.text(639), style: T.row2.copyWith(color: p.text)),
                 const SizedBox(height: 4),
                 InkWell(
                   onTap: () => onRetry(),
                   child: Padding(
                     padding: const EdgeInsets.all(8),
-                    child: Text('לנסות שוב', style: T.row2.copyWith(color: p.accent)),
+                    child: Text(UiCopy.text(217), style: T.row2.copyWith(color: p.accent)),
                   ),
                 ),
               ],
@@ -142,7 +145,7 @@ class _Waiting extends StatelessWidget {
               children: [
                 Spin(child: Ic('progress_activity', size: 20, color: p.text2)),
                 const SizedBox(width: 8),
-                Text('מתעדכן', style: T.secondary.copyWith(color: p.text2)),
+                Text(UiCopy.text(640), style: T.secondary.copyWith(color: p.text2)),
               ],
             ),
     );
@@ -166,6 +169,7 @@ class _MachineCardState extends State<_MachineCard> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final m = widget.m;
     final miss = m.unmeasuredWords;
@@ -184,37 +188,37 @@ class _MachineCardState extends State<_MachineCard> {
               Expanded(
                 child: Rich(m.label, style: T.section.copyWith(color: p.text2)),
               ),
-              if (!m.measured) Text('לא נמדד', style: T.secondary.copyWith(color: p.text3)),
+              if (!m.measured) Text(UiCopy.text(641), style: T.secondary.copyWith(color: p.text3)),
             ],
           ),
         ),
         ListBlock(
           inset: 16,
           children: [
-            if (!m.measured) _Line(icon: 'help', text: 'אין קריאה עדכנית: ${m.errorWords}'),
+            if (!m.measured) _Line(icon: 'help', text: UiCopy.text(642, [m.errorWords])),
             // An old reading is not a measurement of now: its numbers are not shown as if they were.
             _Meter(
-              label: 'זיכרון',
+              label: UiCopy.text(643),
               value: !m.measured || m.memUsedMb == null || m.memTotalMb == null
                   ? null
-                  : '${(m.memUsedMb! / 1024).toStringAsFixed(1)} מתוך ${gb(m.memTotalMb!)}',
+                  : UiCopy.text(187, [(m.memUsedMb! / 1024).toStringAsFixed(1), gb(m.memTotalMb!)]),
               reading: m.measured ? m.memory : null,
             ),
             _Meter(
-              label: 'מעבד',
-              value: !m.measured || m.load1 == null || m.cpus == null ? null : 'עומס ${m.load1!.toStringAsFixed(1)} על ${m.cpus} ליבות',
+              label: UiCopy.text(644),
+              value: !m.measured || m.load1 == null || m.cpus == null ? null : UiCopy.text(645, [m.load1!.toStringAsFixed(1), m.cpus]),
               reading: m.measured ? m.cpu : null,
             ),
             _Meter(
-              label: 'דיסק',
-              value: !m.measured || m.diskPct == null || m.diskFreeMb == null ? null : '${m.diskPct}% מלא, פנוי ${gb(m.diskFreeMb!)}',
+              label: UiCopy.text(646),
+              value: !m.measured || m.diskPct == null || m.diskFreeMb == null ? null : UiCopy.text(647, [m.diskPct, gb(m.diskFreeMb!)]),
               reading: m.measured ? m.disk : null,
             ),
-            if (m.measured && miss.isNotEmpty) _Line(icon: 'help', text: 'לא נמדד: ${miss.join(', ')}'),
+            if (m.measured && miss.isNotEmpty) _Line(icon: 'help', text: UiCopy.text(648, [miss.join(', ')])),
           ],
         ),
         if (m.measured) ...[
-          Section('מי צורך', top: 12),
+          Section(UiCopy.text(649), top: 12),
           ListBlock(
             inset: 16,
             children: [
@@ -223,8 +227,8 @@ class _MachineCardState extends State<_MachineCard> {
               // read it does not say "אין": it says it was not measured.
               _HolderRow(
                 key: const ValueKey('unidentified'),
-                name: 'לא מזוהה',
-                mem: m.unidentifiedMb > 0 ? gb(m.unidentifiedMb) : (m.unmeasured.contains('cgroups') ? 'לא נמדד' : 'אין'),
+                name: UiCopy.text(650),
+                mem: m.unidentifiedMb > 0 ? gb(m.unidentifiedMb) : (m.unmeasured.contains('cgroups') ? UiCopy.text(641) : UiCopy.text(651)),
                 detail: [for (final u in m.unidentified.take(3)) '${u.readable} ${gb(u.memMb)}'].join(' · '),
                 raw: [
                   for (final u in m.unidentified.take(3))
@@ -235,7 +239,7 @@ class _MachineCardState extends State<_MachineCard> {
           ),
         ],
         if (widget.waiting.isNotEmpty || queued > 0) ...[
-          Section('מחכים למקום', count: '${widget.waiting.length + queued}', top: 12),
+          Section(UiCopy.text(652), count: '${widget.waiting.length + queued}', top: 12),
           ListBlock(
             inset: 16,
             children: [
@@ -246,8 +250,8 @@ class _MachineCardState extends State<_MachineCard> {
         ],
         MoreRow(
           icon: open ? 'expand_less' : 'expand_more',
-          bold: granted == 0 ? 'אין הזמנות פעילות' : (granted == 1 ? 'הזמנה פעילה אחת' : '$granted הזמנות פעילות'),
-          rest: open ? '' : 'לפירוט',
+          bold: granted == 0 ? UiCopy.text(653) : (granted == 1 ? UiCopy.text(654) : UiCopy.text(655, [granted])),
+          rest: open ? '' : UiCopy.text(656),
           top: false,
           onTap: () => setState(() => open = !open),
         ),
@@ -257,7 +261,7 @@ class _MachineCardState extends State<_MachineCard> {
             top: false,
             children: [
               if (granted == 0)
-                const _Line(icon: 'radio_button_unchecked', text: 'כרגע אף אחד לא מחזיק הזמנה במכונה הזאת')
+                 _Line(icon: 'radio_button_unchecked', text: UiCopy.text(657))
               else
                 for (final l in widget.leases.where((l) => l.granted)) _LeaseRow(l: l),
             ],
@@ -266,7 +270,7 @@ class _MachineCardState extends State<_MachineCard> {
     );
   }
 
-  static String _holderDetail(Holder h) => [if (h.count > 1) '${h.count} תהליכים', if (h.cpuPct != null) 'מעבד ${h.cpuPct!.round()}%'].join(' · ');
+  static String _holderDetail(Holder h) => [if (h.count > 1) UiCopy.text(658, [h.count]), if (h.cpuPct != null) UiCopy.text(659, [h.cpuPct!.round()])].join(' · ');
 }
 
 /// One number with its word: "זיכרון · 14.2 מתוך 23.0GB · עמוס". The warning icon only in front of a threshold.
@@ -277,11 +281,12 @@ class _Meter extends StatelessWidget {
   final Reading? reading;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final r = reading;
     return Semantics(
       container: true,
-      label: [label, value ?? 'לא נמדד', ?r?.word].join(', '),
+      label: [label, value ?? UiCopy.text(641), ?r?.word].join(', '),
       excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
@@ -292,7 +297,7 @@ class _Meter extends StatelessWidget {
               child: Text(label, style: T.row2.copyWith(color: p.text2)),
             ),
             Expanded(
-              child: Rich(value ?? 'לא נמדד', style: T.row2.copyWith(color: value == null ? p.text2 : p.text)),
+              child: Rich(value ?? UiCopy.text(641), style: T.row2.copyWith(color: value == null ? p.text2 : p.text)),
             ),
             if (r != null) ...[
               const SizedBox(width: 8),
@@ -317,6 +322,7 @@ class _HolderRow extends StatelessWidget {
   final String raw;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -354,6 +360,7 @@ class _Item extends StatelessWidget {
   final bool auto;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -399,7 +406,7 @@ class _Item extends StatelessWidget {
   }
 }
 
-String _eta(int? min) => min == null ? '' : (min <= 1 ? 'כדקה' : 'כ-$min דקות');
+String _eta(int? min) => min == null ? '' : (min <= 1 ? UiCopy.text(660) : UiCopy.text(661, [min]));
 
 /// A task held back for room: how long it waits, and a sentence: who holds the machine and when it frees. Without an honest
 /// estimate it says there is none.
@@ -408,9 +415,10 @@ class _WaitRow extends StatelessWidget {
   final WaitingRes w;
   @override
   Widget build(BuildContext context) {
-    final holder = w.waitingFor ?? 'השרת עמוס';
-    final sentence = w.etaMin != null ? '$holder, ומתפנה בעוד ${_eta(w.etaMin)}.' : '$holder. אין הערכה למתי יתפנה.';
-    return _Item(icon: 'schedule', title: w.title, meta: "מחכה ${w.waitingMin} דק'", sentence: sentence, auto: true);
+    UiCopy.watch(context);
+    final holder = w.waitingFor ?? UiCopy.text(662);
+    final sentence = w.etaMin != null ? UiCopy.text(663, [holder, _eta(w.etaMin)]) : UiCopy.text(664, [holder]);
+    return _Item(icon: 'schedule', title: w.title, meta: UiCopy.text(665, [w.waitingMin]), sentence: sentence, auto: true);
   }
 }
 
@@ -420,21 +428,22 @@ class _LeaseRow extends StatelessWidget {
   final LeaseRes l;
   @override
   Widget build(BuildContext context) {
-    final of = [l.cls, if (l.project != null) 'של ${l.project}', if (l.task != null) '(משימה ${l.task})'].join(' ');
+    UiCopy.watch(context);
+    final of = [l.cls, if (l.project != null) UiCopy.text(666, [l.project]), if (l.task != null) UiCopy.text(667, [l.task])].join(' ');
     if (l.granted) {
       return _Item(
         icon: 'play_arrow',
         title: of,
-        meta: "רץ ${l.ageMin} דק'",
-        sentence: [gb(l.memMb), if (l.etaMin != null) 'נשאר ${_eta(l.etaMin)}', ?l.note].join(' · '),
+        meta: UiCopy.text(668, [l.ageMin]),
+        sentence: [gb(l.memMb), if (l.etaMin != null) UiCopy.text(669, [_eta(l.etaMin)]), ?l.note].join(' · '),
       );
     }
-    final who = l.waitingFor == null ? 'יש תור לפניה' : 'ה-${l.waitingFor} מחזיק אותם';
+    final who = l.waitingFor == null ? UiCopy.text(670) : UiCopy.text(671, [l.waitingFor]);
     return _Item(
       icon: 'schedule',
       title: of,
-      meta: "מחכה ${l.ageMin} דק'",
-      sentence: 'צריך ${gb(l.memMb)}. $who${l.etaMin != null ? ', ומסתיים בעוד ${_eta(l.etaMin)}' : ''}.',
+      meta: UiCopy.text(665, [l.ageMin]),
+      sentence: UiCopy.text(673, [gb(l.memMb), who, l.etaMin != null ? UiCopy.text(672, [_eta(l.etaMin)]) : '']),
     );
   }
 }
@@ -444,6 +453,7 @@ class _Line extends StatelessWidget {
   final String icon, text;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

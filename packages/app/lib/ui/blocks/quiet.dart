@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // The projects nothing moved in today, folded into one line at the end of the home: "שקט גם ב: טיקי בוט,
 // לומו". No card, text2 on the screen. Each name (with its symbol) opens the project: lines of 32 to the eye,
 // a 48dp target each that reaches into the gap around it, as chips do.
@@ -19,6 +20,7 @@ class QuietBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final style = T.row2.copyWith(color: p.text2);
     // Names from the board; an hq that sent no projects gets them from the tickets, as everywhere.
@@ -36,12 +38,12 @@ class QuietBlock extends StatelessWidget {
           children: [
             Padding(
               padding: const EdgeInsetsDirectional.only(start: 4, end: 4),
-              child: Text('שקט גם ב:', style: style),
+              child: Text(UiCopy.text(120), style: style),
             ),
             for (final (i, id) in projects.indexed)
               Semantics(
                 button: true,
-                label: 'פתיחת ${known[id]?.name ?? id}',
+                label: UiCopy.text(106, [known[id]?.name ?? id]),
                 excludeSemantics: true,
                 child: InkWell(
                   onTap: () => Nav.project(context, id),

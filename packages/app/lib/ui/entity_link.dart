@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // What a worker did or does leads to a conversation (docs/app/links.md): a task to the worker on it, or, once a
 // task worker finished it, to whoever opened it, the one who owns the effort. One rule, one widget, every screen.
 import 'package:flutter/material.dart';
@@ -51,6 +52,7 @@ class EntityLink extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final id = identity;
     if (id == null) return label == null ? child : Semantics(label: label, excludeSemantics: true, child: child);
     final d = StoreScope.of(context).data;
@@ -58,7 +60,7 @@ class EntityLink extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
-      hint: 'שיחה עם $name',
+      hint: UiCopy.text(395, [name]),
       excludeSemantics: label != null,
       child: InkWell(
         borderRadius: borderRadius,

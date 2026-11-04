@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // "פסי היום": a lane per project on one time axis, Tufte-style: ink on paper, no color as a sign.
 // The project is the row, the people are the faces, the tasks are the marks:
 // · a running task: a thick bar from its start to now on a track of its own under the dots, the face of whoever
@@ -50,6 +51,7 @@ class _LanesBlockState extends State<LanesBlock> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final data = widget.data;
     // Not `.clamp(1, 1 << 52)`: on the web `<<` is 32-bit, `1 << 52` is 0, and clamp throws (#148).
     final span = math.max(1, data.now.difference(data.from).inMilliseconds);
@@ -57,7 +59,7 @@ class _LanesBlockState extends State<LanesBlock> {
     final nameStyle = T.meta.copyWith(fontWeight: FontWeight.w500);
     return Semantics(
       container: true,
-      label: 'פסי היום, ${hm(data.from)} עד ${hm(data.now)}',
+      label: UiCopy.text(83, [hm(data.from), hm(data.now)]),
       explicitChildNodes: true,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -65,7 +67,7 @@ class _LanesBlockState extends State<LanesBlock> {
           // The names column fits the longest name, up to 40% of the width.
           var longest = 0.0;
           for (final l in data.lanes) {
-            final tp = TextPainter(text: TextSpan(text: l.name, style: nameStyle), textDirection: TextDirection.rtl, textScaler: scaler, maxLines: 1)..layout();
+            final tp = TextPainter(text: TextSpan(text: l.name, style: nameStyle), textDirection: paragraphDirection(l.name), textScaler: scaler, maxLines: 1)..layout();
             longest = math.max(longest, tp.width);
           }
           final label = math.min(math.max(longest + 16 + 6 + 10, 64.0), c.maxWidth * 0.4);
@@ -112,6 +114,7 @@ class _Detail extends StatelessWidget {
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final story = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Rich(pick.text, auto: true, maxLines: 4, style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w500)),
@@ -124,14 +127,14 @@ class _Detail extends StatelessWidget {
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(child: EntityLink(identity: pick.to, label: [pick.text, pick.meta].where((s) => s.isNotEmpty).join('. '), borderRadius: BorderRadius.circular(8), child: story)),
           const SizedBox(width: 4),
-          IBtn('close', tip: 'סגירה', onTap: onTap),
+          IBtn('close', tip: UiCopy.text(84), onTap: onTap),
         ]),
       );
     }
     return Semantics(
       liveRegion: true,
       button: true,
-      hint: 'סגירה',
+      hint: UiCopy.text(84),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
@@ -223,10 +226,11 @@ class _LaneRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data;
     String name(String? id) => id == null || d == null ? '' : d.who(id).name;
-    String works(String? id) => id != null && d?.who(id).gender == Gender.f ? 'עובדת' : 'עובד';
+    String works(String? id) => id != null && d?.who(id).gender == Gender.f ? UiCopy.text(85) : UiCopy.text(86);
     // A date when it is not today (an incident from yesterday sits at the axis' edge).
     String when(DateTime t) => daysAgo(t, data.now) == 0 ? hm(t) : '${dm(t)} ${hm(t)}';
     final runs = lane.running.length;
@@ -247,7 +251,7 @@ class _LaneRow extends StatelessWidget {
     for (final (i, r) in lane.running.indexed) {
       final top = _kRow - _kBarGap + i * (_kBar + _kBarGap);
       final len = math.max(x(r.from) - nowX, _kBar + 8);
-      final story = [name(r.who), 'מ-${hm(r.from)}'].where((s) => s.isNotEmpty).join(' · ');
+      final story = [name(r.who), UiCopy.text(36, [hm(r.from)])].where((s) => s.isNotEmpty).join(' · ');
       final pick = target(nowX, nowX + len, top, top + _kBar, nowX + _kBar / 2, top + _kBar / 2, r.text, story, d == null ? null : chatTargetOf(d, worker: r.who));
       marks.add(Positioned(
         left: nowX,
@@ -255,7 +259,7 @@ class _LaneRow extends StatelessWidget {
         width: len,
         height: _kBar,
         child: _Mark(
-          spoken: '${name(r.who).isEmpty ? 'רצה' : '${name(r.who)} ${works(r.who)} על זה'} מ-${hm(r.from)}',
+          spoken: UiCopy.text(89, [name(r.who).isEmpty ? UiCopy.text(87) : UiCopy.text(88, [name(r.who), works(r.who)]), hm(r.from)]),
           text: r.text,
           onTap: pick,
           child: DecoratedBox(
@@ -278,10 +282,10 @@ class _LaneRow extends StatelessWidget {
       final at = x(c.first.at);
       final n = c.items.length;
       final newest = c.items.last;
-      final text = n == 1 ? newest.text : [for (final x in c.items.reversed.take(3)) x.text, if (n > 3) 'ועוד ${n - 3}'].join('\n');
+      final text = n == 1 ? newest.text : [for (final x in c.items.reversed.take(3)) x.text, if (n > 3) UiCopy.text(90, [n - 3])].join('\n');
       final meta = n == 1
           ? [name(newest.who), hm(newest.at)].where((s) => s.isNotEmpty).join(' · ')
-          : '$n הסתיימו · מ-${hm(c.items.first.at)} עד ${hm(newest.at)}';
+          : UiCopy.text(91, [n, hm(c.items.first.at), hm(newest.at)]);
       final size = n == 1 ? 7.0 : 15.0;
       final pick = target(at - size / 2, at + size / 2, mid - 8, mid + 8, at, mid, text, meta,
           n == 1 && d != null ? chatTargetOf(d, worker: newest.who, openedBy: newest.opener, done: true) : null);
@@ -291,7 +295,7 @@ class _LaneRow extends StatelessWidget {
         width: size,
         height: size,
         child: _Mark(
-          spoken: n == 1 ? 'הסתיימה ב-${hm(newest.at)}' : '$n הסתיימו, ${hm(c.items.first.at)} עד ${hm(newest.at)}',
+          spoken: n == 1 ? UiCopy.text(92, [hm(newest.at)]) : UiCopy.text(93, [n, hm(c.items.first.at), hm(newest.at)]),
           text: text,
           onTap: pick,
           child: Container(
@@ -312,11 +316,11 @@ class _LaneRow extends StatelessWidget {
         top: mid - 9,
         width: 18,
         height: 18,
-        child: _Mark(spoken: 'תקלה ב-${when(al.at)}', text: al.text, onTap: pick, child: Center(child: Ic('warning', size: 16, fill: true, color: p.text))),
+        child: _Mark(spoken: UiCopy.text(94, [when(al.at)]), text: al.text, onTap: pick, child: Center(child: Ic('warning', size: 16, fill: true, color: p.text))),
       ));
     }
     if (lane.waiting > 0) {
-      final text = lane.waiting == 1 ? 'דבר אחד מחכה לך' : '${lane.waiting} דברים מחכים לך';
+      final text = lane.waiting == 1 ? UiCopy.text(95) : UiCopy.text(96, [lane.waiting]);
       final pick = target(2, 18, mid - 8, mid + 8, 10, mid, text, '');
       marks.add(Positioned(
         left: 2,
@@ -324,7 +328,7 @@ class _LaneRow extends StatelessWidget {
         width: 16,
         height: 16,
         child: _Mark(
-          spoken: 'מחכה לך',
+          spoken: UiCopy.text(97),
           text: text,
           onTap: pick,
           child: Container(
@@ -338,8 +342,8 @@ class _LaneRow extends StatelessWidget {
     if (lane.queued.isNotEmpty) {
       final n = lane.queued.length;
       final top = _kRow - _kBarGap + runs * (_kBar + _kBarGap) + (_kBar - 16) / 2;
-      final text = [for (final q in lane.queued.take(3)) q, if (n > 3) 'ועוד ${n - 3}'].join('\n');
-      final meta = n == 1 ? 'בתור' : '$n בתור';
+      final text = [for (final q in lane.queued.take(3)) q, if (n > 3) UiCopy.text(90, [n - 3])].join('\n');
+      final meta = n == 1 ? UiCopy.text(98) : UiCopy.text(99, [n]);
       final pick = target(2, 18, top, top + 16, 10, top + 8, text, meta);
       marks.add(Positioned(
         left: 2,
@@ -347,7 +351,7 @@ class _LaneRow extends StatelessWidget {
         width: 16,
         height: 16,
         child: _Mark(
-          spoken: n == 1 ? 'משימה אחת בתור' : '$n משימות בתור',
+          spoken: n == 1 ? UiCopy.text(100) : UiCopy.text(101, [n]),
           text: text,
           onTap: pick,
           child: Container(
@@ -369,11 +373,11 @@ class _LaneRow extends StatelessWidget {
     }
     final spoken = [
       lane.name,
-      if (runs > 0) runs == 1 ? 'משימה אחת רצה' : '$runs רצות',
-      '${lane.done.length} הסתיימו היום',
-      if (lane.waiting > 0) lane.waiting == 1 ? 'דבר אחד מחכה לך' : '${lane.waiting} דברים מחכים לך',
-      if (lane.queued.isNotEmpty) lane.queued.length == 1 ? 'משימה אחת בתור' : '${lane.queued.length} משימות בתור',
-      if (lane.alerts.isNotEmpty) 'תקלה',
+      if (runs > 0) runs == 1 ? UiCopy.text(102) : UiCopy.text(103, [runs]),
+      UiCopy.text(104, [lane.done.length]),
+      if (lane.waiting > 0) lane.waiting == 1 ? UiCopy.text(95) : UiCopy.text(96, [lane.waiting]),
+      if (lane.queued.isNotEmpty) lane.queued.length == 1 ? UiCopy.text(100) : UiCopy.text(101, [lane.queued.length]),
+      if (lane.alerts.isNotEmpty) UiCopy.text(105),
     ].join(', ');
     return Semantics(
       label: spoken,
@@ -383,7 +387,7 @@ class _LaneRow extends StatelessWidget {
           // The name opens the project.
           Semantics(
             button: true,
-            label: 'פתיחת ${lane.name}',
+            label: UiCopy.text(106, [lane.name]),
             excludeSemantics: true,
             child: InkWell(
               onTap: () => Nav.project(context, lane.id),
@@ -442,7 +446,7 @@ class _Mark extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => Semantics(button: true, label: '$spoken. $text', onTap: onTap, excludeSemantics: true, child: IgnorePointer(child: child));
+  Widget build(BuildContext context) { UiCopy.watch(context); return Semantics(button: true, label: '$spoken. $text', onTap: onTap, excludeSemantics: true, child: IgnorePointer(child: child)); }
 }
 
 /// The face inside a running bar's now end: the worker's initial, ink on paper.
@@ -452,6 +456,7 @@ class _Face extends StatelessWidget {
   final double size;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data;
     final letter = id == null ? '' : (d?.who(id!).initial ?? id!.characters.first);
@@ -499,7 +504,7 @@ class _BreathingState extends State<_Breathing> with SingleTickerProviderStateMi
   }
 
   @override
-  Widget build(BuildContext context) => FadeTransition(opacity: _opacity, child: widget.child);
+  Widget build(BuildContext context) { UiCopy.watch(context); return FadeTransition(opacity: _opacity, child: widget.child); }
 }
 
 /// The hours under the lanes, small and evenly spaced, and "עכשיו" at its line.
@@ -512,6 +517,7 @@ class _Axis extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final style = T.meta.copyWith(fontSize: 10.5, color: p.text3, fontFeatures: kTabular);
     final every = _every(data, width);
@@ -525,7 +531,7 @@ class _Axis extends StatelessWidget {
       }
       h = h.add(const Duration(hours: 1));
     }
-    labels.add(Positioned(left: nowX - 22, width: 44, top: 0, child: Text('עכשיו', textAlign: TextAlign.center, style: style.copyWith(color: p.text2), textScaler: TextScaler.noScaling)));
+    labels.add(Positioned(left: nowX - 22, width: 44, top: 0, child: Text(UiCopy.text(107), textAlign: TextAlign.center, style: style.copyWith(color: p.text2), textScaler: TextScaler.noScaling)));
     return ExcludeSemantics(
       child: Row(children: [
         SizedBox(width: label),
@@ -540,13 +546,14 @@ class _Legend extends StatelessWidget {
   const _Legend();
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final style = T.meta.copyWith(fontSize: 11.5, color: p.text2);
     Widget item(Widget mark, String text) => Row(mainAxisSize: MainAxisSize.min, children: [mark, const SizedBox(width: 5), Text(text, style: style)]);
     return ExcludeSemantics(
       child: Wrap(spacing: 14, runSpacing: 6, children: [
-        item(Container(width: 18, height: 9, decoration: BoxDecoration(color: p.text, borderRadius: BorderRadius.circular(4.5))), 'רצה'),
-        item(Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: p.text)), 'הסתיימה'),
+        item(Container(width: 18, height: 9, decoration: BoxDecoration(color: p.text, borderRadius: BorderRadius.circular(4.5))), UiCopy.text(87)),
+        item(Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: p.text)), UiCopy.text(108)),
         item(
           Container(
             width: 13,
@@ -555,7 +562,7 @@ class _Legend extends StatelessWidget {
             decoration: BoxDecoration(shape: BoxShape.circle, color: p.text),
             child: Text('3', textScaler: TextScaler.noScaling, style: TextStyle(fontFamily: kFont, fontSize: 8, height: 1, fontWeight: FontWeight.w700, color: p.surface)),
           ),
-          'כמה יחד',
+          UiCopy.text(109),
         ),
         item(
           Container(
@@ -565,7 +572,7 @@ class _Legend extends StatelessWidget {
             decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: p.text, width: 1.5)),
             child: Ic('front_hand', size: 9, color: p.text),
           ),
-          'מחכה לך',
+          UiCopy.text(97),
         ),
         item(
           Container(
@@ -575,9 +582,9 @@ class _Legend extends StatelessWidget {
             decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: p.text, width: 1.5)),
             child: Ic('schedule', size: 9, color: p.text),
           ),
-          'בתור',
+          UiCopy.text(98),
         ),
-        item(Ic('warning', size: 13, fill: true, color: p.text), 'תקלה'),
+        item(Ic('warning', size: 13, fill: true, color: p.text), UiCopy.text(105)),
       ]),
     );
   }

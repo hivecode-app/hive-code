@@ -25,14 +25,14 @@ class _LinkBackend extends FakeBackend {
 void main() {
   testWidgets('connecting shows next to the title and nothing below it moves', (tester) async {
     await loadFonts();
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
     tester.view.physicalSize = kPhone * 2;
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
     final backend = _LinkBackend();
     final store = AppStore(backend);
     await store.start();
-    await tester.pumpWidget(CompanyApp(store: store, themeMode: ThemeMode.light, home: const Scaffold(body: StatusScreen())));
+    await tester.pumpWidget(CompanyApp(store: legacyStore(store), themeMode: ThemeMode.light, home: const Scaffold(body: StatusScreen())));
     await tester.pump();
 
     final first = find.text('מחכה לך').first;

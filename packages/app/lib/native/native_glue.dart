@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // Glue between the Android layer (native_bridge.dart) and the app: routes from notifications,
 // bubbles and the widget; the launcher badge = things waiting for you (APP-SPEC §5.6); and the
 // share target ("שתף אל… ← עובד", chat.md §3); the in-app update (app_update.dart). No-ops on the web.
@@ -144,7 +145,7 @@ class NativeGlue {
       showDragHandle: true,
       builder: (c) => SafeArea(
         child: ListView(shrinkWrap: true, children: [
-          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text('שליחה אל', style: T.name.copyWith(color: c.p.text))),
+          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text(UiCopy.text(963), style: T.name.copyWith(color: c.p.text))),
           for (final conv in [...d.conversations.where((x) => x.pinned), ...d.conversations.where((x) => !x.pinned)])
             ListTile(
               leading: Monogram.of(d, conv.identityId, size: AvSize.sm),
@@ -167,13 +168,13 @@ class NativeGlue {
         final bytes = await f.readAsBytes();
         final mime = imageMime(bytes);
         if (mime == null) {
-          store.notice('אפשר לשלוח תמונות מסוג PNG, ‏JPEG, ‏GIF או WebP.');
+          store.notice(UiCopy.text(964));
           store.touch();
         } else {
           store.addImage(to, Attachment(name: f.name, bytes: bytes.length, mime: mime, data: bytes));
         }
       } catch (_) {
-        store.error = 'לא הצלחתי לקרוא את התמונה ששיתפת. אפשר לצרף אותה מהגלריה.';
+        store.error = UiCopy.text(965);
         store.touch();
       }
     }

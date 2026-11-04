@@ -1,3 +1,7 @@
+import 'package:shared_preferences/shared_preferences.dart';
+import 'l10n/ui_copy.dart';
+import 'l10n/app_localizations.dart';
+import 'ui/product/shell.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -28,7 +32,14 @@ Future<void> main() async {
   unawaited(NativeBridge.instance.appVersionCode().then((v) {
     if (v != null) ErrorReports.instance.appVersion = 'android $v';
   }, onError: (_) {}));
-  runApp(AuthGate(initial: await selectBackend(), hqUrl: await initialServer(), pairLink: await NativeBridge.instance.getPairLink()));
+  var locale = const Locale('en');
+  var newInterface = true;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    locale = Locale(prefs.getString('language') == 'he' ? 'he' : 'en');
+    newInterface = prefs.getBool('new_interface') ?? true;
+  } catch (_) { /* A first start can continue with English defaults. */ }
+  runApp(AuthGate(locale: newInterface ? locale : const Locale('he'), newInterface: newInterface, initial: await selectBackend(), hqUrl: await initialServer(), pairLink: await NativeBridge.instance.getPairLink()));
 }
 
 /// Sign-in or the app (#23). A device without a token signs in; a device whose token hq refuses
@@ -36,10 +47,12 @@ Future<void> main() async {
 /// pairing link for another server) shows the sign-in screen while the current session stays, and
 /// drops that session only once the new server let this device in.
 class AuthGate extends StatefulWidget {
-  const AuthGate({super.key, required this.initial, required this.hqUrl, this.client, this.pairLink, this.askServer = !kIsWeb});
+  const AuthGate({super.key, required this.initial, required this.hqUrl, this.client, this.pairLink, this.askServer = !kIsWeb, this.locale = const Locale('en'), this.newInterface = true});
 
   /// null: sign in first.
   final Backend? initial;
+  final Locale locale;
+  final bool newInterface;
 
   /// The server sign-in starts with ('' = none yet: the app asks for it).
   final String hqUrl;
@@ -60,10 +73,14 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   late final client = widget.client ?? AuthClient(widget.hqUrl);
   AppStore? store;
+  late String _language = widget.locale.languageCode;
+  late bool _newInterface = widget.newInterface;
   String? note;
 
   /// Shown instead of the app while switching servers; the session of [store] stays meanwhile.
   bool switching = false;
+  bool starting = false;
+  bool startupFailed = false;
 
   /// What the sign-in screen starts with: a server and maybe a code, from a link. [_screen] renews it.
   late ServerTarget? target = widget.pairLink == null ? null : parseServer(widget.pairLink!);
@@ -107,8 +124,20 @@ class _AuthGateState extends State<AuthGate> {
   void _open(Backend b) {
     final s = AppStore(b);
     b.addListener(_watch);
-    s.start();
     store = s;
+    _startStore(s);
+  }
+
+  void _startStore(AppStore s) {
+    starting = true;
+    startupFailed = false;
+    unawaited(s.start().catchError((Object error) {
+      if (mounted && identical(store, s)) startupFailed = true;
+    }).whenComplete(() {
+      if (mounted && identical(store, s)) {
+        setState(() { starting = false; _language = s.preferences.language; _newInterface = s.preferences.newInterface; });
+      }
+    }));
   }
 
   void _watch() {
@@ -125,12 +154,14 @@ class _AuthGateState extends State<AuthGate> {
     });
   }
 
-  Future<void> _signOut([String note = 'המכשיר הזה נותק מהחברה. אפשר להיכנס שוב.']) async {
+  Future<void> _signOut([String? note]) async {
     final s = store!;
+    _language = s.preferences.newInterface ? s.preferences.language : 'he';
+    _newInterface = s.preferences.newInterface;
     setState(() {
       store = null;
       switching = false;
-      this.note = note;
+      this.note = note ?? lookupAppLocalizations(Locale(_language)).deviceRevoked;
     });
     _close(s);
     await clearSession();
@@ -193,8 +224,18 @@ class _AuthGateState extends State<AuthGate> {
   @override
   Widget build(BuildContext context) {
     final s = store;
-    if (s != null && !switching) return CompanyApp(key: ObjectKey(s), store: s);
+    if (s != null && !switching && startupFailed) {
+      return _Frame(locale: Locale(s.preferences.newInterface ? s.preferences.language : 'he'), newInterface: s.preferences.newInterface,
+        home: Scaffold(body: Center(child: Builder(builder: (context) => Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(padding: const EdgeInsets.all(24), child: Text(UiCopy.text(882))),
+          FilledButton(onPressed: () => setState(() => _startStore(s)), child: Text(AppLocalizations.of(context).retry)),
+        ])))));
+    }
+    if (s != null && !switching && !starting) return CompanyApp(key: ObjectKey(s), store: s);
+    if (s != null && !switching && starting) return _Frame(locale: Locale(_language), newInterface: _newInterface, home: const Scaffold(body: Center(child: CircularProgressIndicator())));
     return _Frame(
+      locale: Locale(s?.preferences.language ?? _language),
+      newInterface: s?.preferences.newInterface ?? _newInterface,
       home: SignInScreen(
         key: ValueKey(_screen),
         client: client,
@@ -212,21 +253,25 @@ class _AuthGateState extends State<AuthGate> {
 
 /// MaterialApp with the app's theme and locale, for the sign-in screen.
 class _Frame extends StatelessWidget {
-  const _Frame({required this.home});
+  const _Frame({required this.home, this.locale = const Locale('en'), this.newInterface = true});
+  final Locale locale;
+  final bool newInterface;
   final Widget home;
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'החברה',
+        onGenerateTitle: (context) => AppLocalizations.of(context).company,
         debugShowCheckedModeBanner: false,
-        theme: buildTheme(Palette.of(Brightness.light)),
-        darkTheme: buildTheme(Palette.of(Brightness.dark)),
-        locale: const Locale('he'),
-        supportedLocales: const [Locale('he')],
+        theme: buildTheme(newInterface ? productPalette(Brightness.light) : Palette.of(Brightness.light), product: newInterface),
+        darkTheme: buildTheme(newInterface ? productPalette(Brightness.dark) : Palette.of(Brightness.dark), product: newInterface),
+        locale: locale,
+        supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: const [
+          AppLocalizations.delegate,
           GlobalMaterialLocalizations.delegate,
           GlobalWidgetsLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,
         ],
+        builder: (context, child) { UiCopy.configure(locale.languageCode, newInterface); return child!; },
         home: home,
       );
 }
@@ -265,7 +310,7 @@ class _CompanyAppState extends State<CompanyApp> {
       if (!nav.wide) return kDests.firstWhere((d) => d.tab == nav.tab).label;
       final id = widget.store.selectedConversation;
       final name = id == null ? null : widget.store.data?.identities[id]?.name;
-      return widget.store.homeOpen || name == null ? 'הבית' : 'שיחה עם $name';
+      return widget.store.homeOpen || name == null ? UiCopy.text(486) : UiCopy.text(395, [name]);
     };
     // An open conversation is read, and doesn't alert, only while the app is in front and has focus: a desktop
     // window left open behind another one (inactive) must not read his messages or keep them from alerting.
@@ -310,30 +355,32 @@ class _CompanyAppState extends State<CompanyApp> {
       store: widget.store,
       child: NavScope(
         nav: nav,
-        child: MaterialApp(
+        child: ListenableBuilder(listenable: widget.store.preferences, builder: (context, _) => MaterialApp(
           navigatorKey: navigatorKey,
-          title: 'החברה',
+          onGenerateTitle: (context) => AppLocalizations.of(context).company,
           debugShowCheckedModeBanner: false,
-          theme: buildTheme(Palette.of(Brightness.light)),
-          darkTheme: buildTheme(Palette.of(Brightness.dark)),
-          themeMode: widget.themeMode,
-          locale: const Locale('he'),
-          supportedLocales: const [Locale('he')],
+          theme: buildTheme(widget.store.preferences.newInterface ? productPalette(Brightness.light) : Palette.of(Brightness.light), product: widget.store.preferences.newInterface),
+          darkTheme: buildTheme(widget.store.preferences.newInterface ? productPalette(Brightness.dark) : Palette.of(Brightness.dark), product: widget.store.preferences.newInterface),
+          themeMode: widget.themeMode == ThemeMode.system ? widget.store.preferences.themeMode : widget.themeMode,
+          locale: Locale(widget.store.preferences.newInterface ? widget.store.preferences.language : 'he'),
+          supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: const [
+          AppLocalizations.delegate,
             GlobalMaterialLocalizations.delegate,
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
           builder: (context, child) {
             // Android font size is honoured up to 130% (APP-SPEC §7.3).
+            UiCopy.configure(widget.store.preferences.newInterface ? widget.store.preferences.language : 'he', widget.store.preferences.newInterface);
             final mq = MediaQuery.of(context);
-            final scale = mq.textScaler.clamp(maxScaleFactor: 1.3);
+            final scale = widget.store.preferences.newInterface ? mq.textScaler : mq.textScaler.clamp(maxScaleFactor: 1.3);
             final app = MediaQuery(data: mq.copyWith(textScaler: scale), child: child!);
             // v2: the background a screen fades through between two screens (lib/theme/motion.dart).
             return kDesignV2 ? ColoredBox(color: Theme.of(context).scaffoldBackgroundColor, child: app) : app;
           },
-          home: widget.home ?? const StoreGate(child: Shell()),
-        ),
+          home: widget.home ?? StoreGate(child: widget.store.preferences.newInterface ? const ProductShell() : const Shell()),
+        )),
       ),
     );
   }

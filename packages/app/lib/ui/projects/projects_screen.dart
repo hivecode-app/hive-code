@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // Projects (#53), in place of "לוח" and "ארגון": every project by his name for it, its team lead and
 // how many tasks are open; then the standing teams. A project opens its own screen.
 import 'package:flutter/material.dart';
@@ -18,18 +19,19 @@ class ProjectsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final d = StoreScope.of(context).data;
     if (d == null) return const SizedBox.shrink();
     final projectTeams = {for (final x in d.projects) x.teamId};
     final standing = [for (final t in d.teams.values) if (t.permanent && !projectTeams.contains(t.id)) t];
     return Column(children: [
-      const TopBar(title: 'פרויקטים', showLink: true),
+       TopBar(title: UiCopy.text(631), showLink: true),
       const SystemBar(),
       Expanded(
         child: ListView(padding: EdgeInsets.zero, children: [
           ListBlock(top: false, children: [for (final x in d.projects) ProjectRow(project: x)]),
           if (standing.isNotEmpty) ...[
-            const Section('צוותים קבועים'),
+             Section(UiCopy.text(632)),
             ListBlock(children: [for (final t in standing) TeamRow(team: t)]),
           ],
           const SizedBox(height: 24),
@@ -47,7 +49,7 @@ class TeamMark extends StatelessWidget {
   /// The team's identity tone (v2).
   final String? tone;
   @override
-  Widget build(BuildContext context) => Monogram(letter: '', symbol: symbol, tone: tone, toned: true);
+  Widget build(BuildContext context) { UiCopy.watch(context); return Monogram(letter: '', symbol: symbol, tone: tone, toned: true); }
 }
 
 class ProjectRow extends StatelessWidget {
@@ -55,6 +57,7 @@ class ProjectRow extends StatelessWidget {
   final ProjectInfo project;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final d = StoreScope.of(context).data!;
     final p = context.p;
     final team = d.teams[project.teamId];
@@ -78,6 +81,7 @@ class TeamRow extends StatelessWidget {
   final Team team;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final d = StoreScope.of(context).data!;
     final n = d.identities.values.where((i) => i.teamId == team.id).length;
     return _Row(
@@ -85,7 +89,7 @@ class TeamRow extends StatelessWidget {
       title: team.name,
       // A team without a lead (management: Yoav is resident) shows its first member.
       leadId: team.leadId ?? d.identities.values.where((i) => i.teamId == team.id).firstOrNull?.id,
-      line: n == 1 ? 'עובד אחד' : '$n עובדים',
+      line: n == 1 ? UiCopy.text(633) : UiCopy.text(634, [n]),
       onTap: () => Nav.team(context, team.id),
       d: d,
       p: context.p,
@@ -105,6 +109,7 @@ class _Row extends StatelessWidget {
   final Palette p;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final lead = leadId == null ? null : d.who(leadId!);
     final pr = leadId == null ? null : d.presence[leadId];
     return Material(
@@ -131,7 +136,7 @@ class _Row extends StatelessWidget {
                       const SizedBox(width: 6),
                       Text(lead.name, style: T.secondary.copyWith(color: p.text)),
                       const SizedBox(width: 4),
-                      Text(d.teams[d.who(leadId!).teamId]?.leadId == leadId ? 'ראש צוות' : lead.title, style: T.secondary.copyWith(color: p.text2)),
+                      Text(d.teams[d.who(leadId!).teamId]?.leadId == leadId ? UiCopy.text(635) : lead.title, style: T.secondary.copyWith(color: p.text2)),
                       const SizedBox(width: 8),
                       if (pr != null) Flexible(child: StatusWord.of(pr, lead.gender)),
                     ]),

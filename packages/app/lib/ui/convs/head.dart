@@ -1,3 +1,5 @@
+import 'package:agent_company/l10n/input_copy.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 // What needs him, as rows for the home (home_v2.dart): "בוער" (a production failure, a message that did not get
 // through, a stuck worker; first, and heavier) and "מחכה לך" (a face per item, its headline, who and what kind;
 // a tap opens the card in the chat (#79), a swipe is "לא עכשיו" (#74), a decision is taken right on the row).
@@ -63,7 +65,7 @@ class HeadData {
       key: w.id,
       from: w.from,
       text: (w.headline ?? w.body).split('\n').first.trim(),
-      word: h && (w.kind == WaitKind.urgentProd || kicker.contains('פרודקשן')) ? 'תקלה בפרודקשן' : kicker,
+      word: h && (w.kind == WaitKind.urgentProd || w.sourceKind == 'incident' || (w.sourceKind == null && kicker.contains(InputCopy.v6))) ? UiCopy.text(498) : kicker,
       at: w.createdAt,
       item: w,
       hot: h,
@@ -97,27 +99,27 @@ class HeadData {
   static String ago(DateTime? at, DateTime now) {
     if (at == null) return '';
     final m = now.difference(at).inMinutes;
-    if (m < 1) return 'עכשיו';
-    if (m < 60) return "$m דק'";
+    if (m < 1) return UiCopy.text(107);
+    if (m < 60) return UiCopy.text(460, [m]);
     final h = m ~/ 60;
-    if (h == 1) return 'שעה';
-    if (h == 2) return 'שעתיים';
-    if (h < 24) return "$h שע'";
-    return h < 48 ? 'יום' : '${h ~/ 24} ימים';
+    if (h == 1) return UiCopy.text(72);
+    if (h == 2) return UiCopy.text(73);
+    if (h < 24) return UiCopy.text(461, [h]);
+    return h < 48 ? UiCopy.text(499) : UiCopy.text(500, [h ~/ 24]);
   }
 
   /// The same, read aloud: "לפני 4 דקות".
   static String agoSpoken(DateTime? at, DateTime now) {
     if (at == null) return '';
     final m = now.difference(at).inMinutes;
-    if (m < 1) return 'עכשיו';
-    if (m == 1) return 'לפני דקה';
-    if (m < 60) return 'לפני $m דקות';
+    if (m < 1) return UiCopy.text(107);
+    if (m == 1) return UiCopy.text(501);
+    if (m < 60) return UiCopy.text(502, [m]);
     final h = m ~/ 60;
-    if (h == 1) return 'לפני שעה';
-    if (h == 2) return 'לפני שעתיים';
-    if (h < 24) return 'לפני $h שעות';
-    return h < 48 ? 'אתמול' : 'לפני ${h ~/ 24} ימים';
+    if (h == 1) return UiCopy.text(503);
+    if (h == 2) return UiCopy.text(504);
+    if (h < 24) return UiCopy.text(505, [h]);
+    return h < 48 ? UiCopy.text(34) : UiCopy.text(506, [h ~/ 24]);
   }
 }
 
@@ -137,6 +139,7 @@ class AlertBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final d = StoreScope.of(context).data;
     final lines = [
       for (final w in items)
@@ -155,13 +158,7 @@ class WaitingBlock extends StatelessWidget {
   final DateTime? now;
 
   @override
-  Widget build(BuildContext context) => _Lines(
-        lines: [
-          for (final w in items)
-            if ((w.state == WaitState.open || w.state == WaitState.pending) && !(StoreScope.of(context).data?.superseded(w) ?? false)) HeadData.lineOf(w),
-        ],
-        now: now ?? CompanyTime.now(),
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return _Lines(lines: [for (final w in items) if ((w.state == WaitState.open || w.state == WaitState.pending) && !(StoreScope.of(context).data?.superseded(w) ?? false)) HeadData.lineOf(w)], now: now ?? CompanyTime.now()); }
 }
 
 class _Lines extends StatefulWidget {
@@ -175,10 +172,7 @@ class _Lines extends StatefulWidget {
 class _LinesState extends State<_Lines> {
   final _swiped = <String>{};
   @override
-  Widget build(BuildContext context) => _Animated(
-        rows: [for (final l in widget.lines) (l.key, _LineRow(l: l, now: widget.now, onSwiped: () => _swiped.add(l.key)))],
-        skip: _swiped,
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return _Animated(rows: [for (final l in widget.lines) (l.key, _LineRow(l: l, now: widget.now, onSwiped: () => _swiped.add(l.key)))], skip: _swiped); }
 }
 
 /// A column whose rows come in with a short fade and leave by folding up, by key.
@@ -268,17 +262,7 @@ class _AnimatedState extends State<_Animated> with TickerProviderStateMixin {
   }
 
   @override
-  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        for (final e in _entries)
-          KeyedSubtree(
-            key: ValueKey(e.key),
-            child: SizeTransition(
-              sizeFactor: e.curve,
-              alignment: AlignmentDirectional.topCenter,
-              child: FadeTransition(opacity: e.c, child: ExcludeSemantics(excluding: e.leaving, child: e.child)),
-            ),
-          ),
-      ]);
+  Widget build(BuildContext context) { UiCopy.watch(context); return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [for (final e in _entries) KeyedSubtree(key: ValueKey(e.key), child: SizeTransition(sizeFactor: e.curve, alignment: AlignmentDirectional.topCenter, child: FadeTransition(opacity: e.c, child: ExcludeSemantics(excluding: e.leaving, child: e.child))))]); }
 }
 
 /// A face: the worker's monogram, and on it a small badge with the kind of thing.
@@ -290,6 +274,7 @@ class _Face extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data!;
     final who = d.who(id);
@@ -338,6 +323,7 @@ class _LineRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final store = StoreScope.of(context);
     final d = store.data!;
@@ -350,7 +336,7 @@ class _LineRow extends StatelessWidget {
       Nav.chat(context, l.from);
     }
 
-    final spoken = [l.hot ? 'בוער' : 'מחכה לך', l.word, name, HeadData.agoSpoken(l.at, now)].where((s) => s.isNotEmpty).join(', ');
+    final spoken = [l.hot ? UiCopy.text(507) : UiCopy.text(97), l.word, name, HeadData.agoSpoken(l.at, now)].where((s) => s.isNotEmpty).join(', ');
     final item = l.item;
     final pending = item == null ? null : store.decision(item.askId, item.id);
     final keys = item == null || pending != null ? null : decisionKeysOf(context, item);
@@ -358,9 +344,9 @@ class _LineRow extends StatelessWidget {
     Widget row = Semantics(
       button: true,
       label: '$spoken. ${l.text}',
-      hint: 'פתיחה',
+      hint: UiCopy.text(126),
       excludeSemantics: true,
-      customSemanticsActions: canSnooze ? {const CustomSemanticsAction(label: 'לא עכשיו'): () => store.notNow(item)} : null,
+      customSemanticsActions: canSnooze ? { CustomSemanticsAction(label: UiCopy.text(508)): () => store.notNow(item)} : null,
       child: InkWell(
         onTap: open,
         child: ConstrainedBox(
@@ -427,6 +413,7 @@ class _SwipeLabel extends StatelessWidget {
   final bool start;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Container(
       color: p.surface2,
@@ -435,7 +422,7 @@ class _SwipeLabel extends StatelessWidget {
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Ic('schedule', size: 18, color: p.text),
         const SizedBox(width: 6),
-        Text('לא עכשיו', style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w500)),
+        Text(UiCopy.text(508), style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w500)),
       ]),
     );
   }

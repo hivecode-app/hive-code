@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // "מה לבדוק" (#108) as a block of its own (the home recipe's `awaiting {tasks[]}`): a row per finished task that
 // still waits on him. `deploy` = merged, waits for a GO or a deploy; `check` = live, he has to check something
 // himself. A tap opens the conversation with whoever did it; "בדקתי" ("נפרס" on a deploy) takes it off, on
@@ -75,6 +76,7 @@ class AwaitingBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final store = StoreScope.of(context);
     // What he already checked leaves at once, also when the recipe still lists it.
     final live = {for (final t in store.data?.awaiting ?? const <AwaitingTask>[]) t.id};
@@ -105,18 +107,19 @@ class _Row extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final store = StoreScope.of(context);
     final d = store.data;
     final deploy = x.kind == AwaitingKind.deploy;
-    final word = deploy ? 'מחכה לפריסה' : 'לבדוק';
-    final action = deploy ? 'נפרס' : 'בדקתי';
+    final word = deploy ? UiCopy.text(30) : UiCopy.text(31);
+    final action = deploy ? UiCopy.text(32) : UiCopy.text(33);
     final who = x.who == null || d == null ? null : d.who(x.who!).name;
     final ago = daysAgo(x.at, now);
     final when = ago <= 0
         ? hm(x.at)
         : ago == 1
-            ? 'אתמול'
+            ? UiCopy.text(34)
             : dm(x.at);
     final second = T.small.copyWith(color: p.text2);
     final to = d == null ? null : awaitingTarget(d, x);
@@ -124,8 +127,8 @@ class _Row extends StatelessWidget {
     void done() => store.checked(x.task);
     return Semantics(
       button: canOpen,
-      label: [word, x.text, ?x.note, ?who, when == 'אתמול' ? 'מאתמול' : 'מ-$when'].join('. '),
-      hint: canOpen ? 'פתיחת השיחה' : null,
+      label: [word, x.text, ?x.note, ?who, ago == 1 ? UiCopy.text(35) : UiCopy.text(36, [when])].join('. '),
+      hint: canOpen ? UiCopy.text(28) : null,
       excludeSemantics: true,
       customSemanticsActions: {CustomSemanticsAction(label: action): done},
       child: InkWell(

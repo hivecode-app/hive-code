@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // "המכסה" on the home (task 482): every Claude account the company runs on, its 5-hour and weekly use and when
 // each resets, from hq's last read (accounts.ts, every 10 minutes). On 23/10 both accounts hit 100% weekly and the
 // company stood for 36 hours with nothing on the screen to say so. A full account is the word "חסום" and its icon,
@@ -10,13 +11,13 @@ import '../../theme/tokens.dart';
 import '../blocks/blocks.dart';
 import '../common.dart';
 
-const _days = ['שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת', 'ראשון'];
+List<String> get _days => [UiCopy.text(411), UiCopy.text(412), UiCopy.text(413), UiCopy.text(414), UiCopy.text(415), UiCopy.text(416), UiCopy.text(417)];
 
 /// A time ahead on his clock: "14:00", "מחר 06:59", "שבת 31/10 06:00".
 String aheadAt(DateTime t, DateTime now) {
   final days = -daysAgo(t, now);
   if (days <= 0) return hm(t);
-  if (days == 1) return 'מחר ${hm(t)}';
+  if (days == 1) return UiCopy.text(509, [hm(t)]);
   return '${_days[wall(t).weekday - 1]} ${dm(t)} ${hm(t)}';
 }
 
@@ -25,18 +26,18 @@ String _pct(num? v) => v == null ? '?' : '$kLRI${v.round()}%$kPDI';
 
 /// "5 שעות 17%, מתאפס 14:00": a window's line; no reset time when hq has none, or it already passed.
 String windowLine(String name, num? pct, DateTime? resets, DateTime now) =>
-    [ '$name ${_pct(pct)}', if (resets != null && resets.isAfter(now)) 'מתאפס ${aheadAt(resets, now)}' ].join(', ');
+    [ '$name ${_pct(pct)}', if (resets != null && resets.isAfter(now)) UiCopy.text(510, [aheadAt(resets, now)]) ].join(', ');
 
 /// Everything the card says of one account, in reading order (also its screen reader label).
 List<String> quotaLines(QuotaLine q, DateTime now) {
   final old = q.measuredAt != null && now.difference(q.measuredAt!) > const Duration(minutes: 30);
   return [
-    if (!q.usable) 'לא מחובר'
-    else if (q.full) q.reopensAt != null ? 'חסום עד ${aheadAt(q.reopensAt!, now)}' : 'חסום',
+    if (!q.usable) UiCopy.text(511)
+    else if (q.full) q.reopensAt != null ? UiCopy.text(512, [aheadAt(q.reopensAt!, now)]) : UiCopy.text(399),
     // Codex has one window, the week: no "5 שעות ?" line for a window it does not have.
-    if (q.usable) ...[if (!q.isCodex) windowLine('5 שעות', q.fiveHour, q.fiveHourResets, now), windowLine('שבועי', q.sevenDay, q.sevenDayResets, now)],
+    if (q.usable) ...[if (!q.isCodex) windowLine(UiCopy.text(513), q.fiveHour, q.fiveHourResets, now), windowLine(UiCopy.text(514), q.sevenDay, q.sevenDayResets, now)],
     if (q.note != null) q.note!,
-    if (q.usable && old) 'נמדד ${daysAgo(q.measuredAt!, now) == 0 ? hm(q.measuredAt!) : '${dm(q.measuredAt!)} ${hm(q.measuredAt!)}'}',
+    if (q.usable && old) UiCopy.text(515, [daysAgo(q.measuredAt!, now) == 0 ? hm(q.measuredAt!) : '${dm(q.measuredAt!)} ${hm(q.measuredAt!)}']),
   ];
 }
 
@@ -47,6 +48,7 @@ class QuotaCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -67,6 +69,7 @@ class _Row extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final lines = quotaLines(q, now);
     final second = T.small.copyWith(color: p.text2, height: 19 / 13, fontFeatures: kTabular);

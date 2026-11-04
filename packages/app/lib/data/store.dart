@@ -1,3 +1,5 @@
+import '../l10n/ui_copy.dart';
+import 'app_preferences.dart';
 // App state on top of a Backend: the 3-second undo on every one-tap answer (APP-SPEC §4.2),
 // drafts that survive restarts, the durable outbox (§10.1), and the desktop selection.
 import 'dart:async';
@@ -13,11 +15,14 @@ import 'error_report.dart';
 
 /// One answer waiting out its 3 seconds. The UI renders [label] in place of the buttons.
 class PendingAnswer {
-  PendingAnswer(this.key, this.to, this.isGo, this.secondsLeft, this.fire, [this.text, this.line]) : at = company_time.CompanyTime.now();
+  PendingAnswer(this.key, this.to, this.isGo, this.secondsLeft, this.fire, [this.text, String? line]) : _line = line, at = company_time.CompanyTime.now();
   final String key;
 
   /// A decision's folded line while it can still be taken back ("אישרת"), and when he tapped (#258).
-  final String? line;
+  final String? _line;
+  String Function()? lineBuilder;
+  String? answerId;
+  String? get line => lineBuilder?.call() ?? _line;
   final DateTime at;
   final String to;
   final bool isGo;
@@ -28,7 +33,7 @@ class PendingAnswer {
   /// Its own line instead of "יישלח ל…" (closing a card: "ייסגר בעוד 3 שנ'").
   final String Function(int secondsLeft)? text;
 
-  String get label => text != null ? text!(secondsLeft) : isGo ? "GO יישלח ${toName(to)} בעוד $secondsLeft שנ'" : "יישלח ${toName(to)} בעוד $secondsLeft שנ'";
+  String get label => text != null ? text!(secondsLeft) : isGo ? UiCopy.text(930, [toName(to), secondsLeft]) : UiCopy.text(931, [toName(to), secondsLeft]);
 }
 
 /// How the conversation list is ordered. [recent] is the data's order (newest message first).
@@ -37,6 +42,18 @@ enum ConvSort { recent, working, waiting, name }
 class AppStore extends ChangeNotifier {
   AppStore(this.backend, {this.undoSeconds = 3, this.decisionUndoSeconds = 5, SharedPreferences? prefs}) : _prefs = prefs { // ignore: prefer_initializing_formals
     backend.addListener(_onBackend);
+    preferences.addListener(_languageChanged);
+  }
+
+  (String, bool)? _lastLanguage;
+  void _languageChanged() {
+    final current = (preferences.newInterface ? preferences.language : 'he', preferences.newInterface);
+    if (_lastLanguage != current) {
+      _lastLanguage = current;
+      UiCopy.configure(current.$1, current.$2);
+      backend.relocalize();
+    }
+    notifyListeners();
   }
 
   bool _wasOnline = false;
@@ -45,6 +62,7 @@ class AppStore extends ChangeNotifier {
   /// outbox was never flushed and a message stayed "ממתינה לחיבור" for good (#55).
   void _onBackend() {
     if (_disposed) return;
+    preferences.defaults(data?.ownerLanguage ?? 'en', data?.advancedMode ?? false);
     final on = _online;
     if (on && !_wasOnline) unawaited(flushOutbox());
     _wasOnline = on;
@@ -54,6 +72,7 @@ class AppStore extends ChangeNotifier {
   bool get _online => status.state == LinkState.online || status.state == LinkState.demo || status.state == LinkState.reconnected;
 
   final Backend backend;
+  final preferences = AppPreferences();
   final int undoSeconds;
 
   /// A GO or a question decided in one tap: the card folds at once, with "ביטול" this long (#258).
@@ -84,10 +103,12 @@ class AppStore extends ChangeNotifier {
 
   /// Last error to show as a dismissable bar ("הבנתי"), never a self-hiding snackbar (design-taste E16).
   /// Every one set here is shown, and so goes to hq by itself (error_report.dart).
-  String? get error => _error;
+  String? Function()? _errorBuilder;
+  String? get error => _errorBuilder?.call() ?? _error;
   String? _error;
   set error(String? e) {
     _error = e;
+    _errorBuilder = null;
     errorReported = e != null;
     if (e != null) reportShown('bar', e);
   }
@@ -106,11 +127,13 @@ class AppStore extends ChangeNotifier {
     } else {
       error = r.error;
     }
+    _errorBuilder = () => r.error;
   }
 
   /// The same bar for something that is not a fault (a limit he reached, a recording too short): not sent.
   void notice(String text) {
     _error = text;
+    _errorBuilder = null;
     errorReported = false;
   }
 
@@ -125,7 +148,10 @@ class AppStore extends ChangeNotifier {
     statusSeenAt ??= seen == null ? null : DateTime.fromMillisecondsSinceEpoch(seen);
     final chats = _prefs?.getInt(kChatsSeenKey);
     _chatsSeenLocal ??= chats == null ? null : DateTime.fromMillisecondsSinceEpoch(chats);
+    await preferences.load(_prefs);
+    UiCopy.configure(preferences.newInterface ? preferences.language : 'he', preferences.newInterface);
     await backend.start();
+    preferences.defaults(data?.ownerLanguage ?? 'en', data?.advancedMode ?? false);
     _restoreDrafts();
     if (_online) unawaited(flushOutbox()); // came up online: what waited from last time goes now
   }
@@ -138,17 +164,21 @@ class AppStore extends ChangeNotifier {
       p.timer?.cancel();
     }
     backend.removeListener(_onBackend);
+    preferences.removeListener(_languageChanged);
+    preferences.dispose();
     super.dispose();
   }
 
   // ── 3s undo ──────────────────────────────────────────────────────────────
 
-  void startUndo(String key, String to, Future<CommandResult> Function() action, {bool isGo = false, String Function(int)? text, String? line, int? seconds}) {
+  void startUndo(String key, String to, Future<CommandResult> Function() action, {bool isGo = false, String Function(int)? text, String? line, String Function()? lineBuilder, String? answerId, int? seconds}) {
     cancelUndo(key, notify: false);
     final p = PendingAnswer(key, to, isGo, seconds ?? undoSeconds, () async {
       final r = await action();
       if (!r.ok) _failed(r);
     }, text, line);
+    p.lineBuilder = lineBuilder;
+    p.answerId = answerId;
     _pending[key] = p;
     p.timer = Timer.periodic(const Duration(seconds: 1), (t) {
       p.secondsLeft--;
@@ -177,7 +207,7 @@ class AppStore extends ChangeNotifier {
   PendingAnswer? decision(String? askId, String id) => _pending[decisionKey(askId, id)];
 
   /// The folded line of a decision: "אישרת" for a GO, "ענית: X" for an answer.
-  static String decidedLine(AskOption option) => option.id == 'go' ? 'אישרת' : 'ענית: ${option.label}';
+  static String decidedLine(AskOption option) => option.id == 'go' ? UiCopy.text(566, ['']) : UiCopy.text(568, ['', option.label]);
 
   void answerWait(WaitItem item, AskOption option) {
     final to = nameOf(item.from);
@@ -190,23 +220,23 @@ class AppStore extends ChangeNotifier {
         item.failed = option.id == 'failed';
         item.outcome = option.id;
         final r = await backend.awaitingOutcome(item, option.id);
-        item.answerLine = option.label;
+        item.answerLineBuilder = () => kAwaitingOptions.firstWhere((o) => o.id == option.id).label;
         return r;
-      }, line: option.label, seconds: decisionUndoSeconds);
+      }, lineBuilder: () => kAwaitingOptions.firstWhere((o) => o.id == option.id).label, answerId: option.id, seconds: decisionUndoSeconds);
     } else if (option.id == 'go') {
       startUndo(key, to, () async {
         final r = await backend.go(item);
-        item.answerLine = item.doneLine ?? 'GO נשלח';
+        item.answerLineBuilder = () => UiCopy.legacy ? item.doneLine ?? UiCopy.text(932) : UiCopy.text(932);
         _closeCard(card, 'GO', at);
         return r;
-      }, isGo: true, line: decidedLine(option), seconds: decisionUndoSeconds);
+      }, isGo: true, lineBuilder: () => decidedLine(option), seconds: decisionUndoSeconds);
     } else {
       startUndo(key, to, () async {
         final r = await backend.answerAsk(item.askId ?? item.id, option, from: item.from);
-        item.answerLine = 'ענית: ${option.label} · $to ממשיך';
+        item.answerLineBuilder = () => UiCopy.text(933, [option.label, to]);
         _closeCard(card, option.label, at);
         return r;
-      }, line: decidedLine(option), seconds: decisionUndoSeconds);
+      }, lineBuilder: () => decidedLine(option), seconds: decisionUndoSeconds);
     }
   }
 
@@ -222,19 +252,19 @@ class AppStore extends ChangeNotifier {
         final r = await backend.awaitingOutcome(w, option.id);
         _closeCard(card, option.label, at);
         return r;
-      }, line: option.label, seconds: decisionUndoSeconds);
+      }, lineBuilder: () => kAwaitingOptions.firstWhere((o) => o.id == option.id).label, answerId: option.id, seconds: decisionUndoSeconds);
     } else if (option.id == 'go') {
       startUndo(key, to, () async {
         final w = data?.waiting.where((w) => w.askId == card.askId).firstOrNull;
         _closeCard(card, 'GO', at);
         if (w != null) return backend.go(w);
         return backend.answerAsk(card.askId ?? card.id, option);
-      }, isGo: true, line: decidedLine(option), seconds: decisionUndoSeconds);
+      }, isGo: true, lineBuilder: () => decidedLine(option), seconds: decisionUndoSeconds);
     } else {
       startUndo(key, to, () async {
         _closeCard(card, option.label, at);
         return backend.answerAsk(card.askId ?? card.id, option, from: card.from);
-      }, line: decidedLine(option), seconds: decisionUndoSeconds);
+      }, lineBuilder: () => decidedLine(option), seconds: decisionUndoSeconds);
     }
   }
 
@@ -263,7 +293,7 @@ class AppStore extends ChangeNotifier {
   Future<void> resume(WaitItem item) async => _check(await backend.resume(item));
   /// Closing is for good and wakes the worker: it waits the same 3 seconds as any one-tap answer.
   void dismiss(WaitItem item) =>
-      startUndo(item.id, nameOf(item.from), () => backend.dismiss(item), text: (s) => "ייסגר בעוד $s שנ'");
+      startUndo(item.id, nameOf(item.from), () => backend.dismiss(item), text: (s) => UiCopy.text(934, [s]));
 
   Future<void> _check(CommandResult r) async {
     if (!r.ok) {
@@ -281,6 +311,7 @@ class AppStore extends ChangeNotifier {
   bool _disposed = false;
 
   void clearError() {
+    _errorBuilder = null;
     error = null;
     notifyListeners();
   }
@@ -300,7 +331,7 @@ class AppStore extends ChangeNotifier {
   void addImage(String identityId, Attachment a) {
     final list = _images.putIfAbsent(identityId, () => []);
     if (list.length >= maxImages) {
-      notice('אפשר לצרף עד $maxImages תמונות להודעה אחת.');
+      notice(UiCopy.text(935, [maxImages]));
     } else {
       list.add(a);
     }
@@ -395,7 +426,7 @@ class AppStore extends ChangeNotifier {
     final r = await backend.freeAnswer(askId, msg.text, attachments: msg.attachments);
     if (r.ok) {
       msg.delivery = Delivery.delivered;
-      final said = msg.text.isEmpty && msg.attachments.isNotEmpty ? 'תמונה' : msg.text;
+      final said = msg.text.isEmpty && msg.attachments.isNotEmpty ? UiCopy.text(247) : msg.text;
       for (final c in chat?.items.whereType<AskCard>() ?? const <AskCard>[]) {
         if (c.askId == askId) {
           c.state = AskState.answered;
@@ -404,7 +435,7 @@ class AppStore extends ChangeNotifier {
       }
       for (final w in data?.waiting.where((w) => w.askId == askId) ?? const <WaitItem>[]) {
         w.state = WaitState.answered;
-        w.answerLine = 'ענית: $said';
+        w.answerLineBuilder = () => UiCopy.text(936, [msg.text.isEmpty && msg.attachments.isNotEmpty ? UiCopy.text(247) : msg.text]);
       }
     } else {
       msg.delivery = Delivery.failed;
@@ -417,11 +448,11 @@ class AppStore extends ChangeNotifier {
   /// Free text typed as the answer to [item] (home row, or a question without options).
   Future<CommandResult> answerText(WaitItem item, String text) async {
     final askId = item.askId;
-    if (askId == null) return const CommandResult.fail('לפריט הזה אין שאלה לענות עליה.');
+    if (askId == null) return  CommandResult.localized(937);
     final r = await backend.freeAnswer(askId, text);
     if (r.ok) {
       item.state = WaitState.answered;
-      item.answerLine = 'ענית: $text';
+      item.answerLineBuilder = () => UiCopy.text(936, [text]);
     } else {
       _failed(r);
     }
@@ -433,7 +464,7 @@ class AppStore extends ChangeNotifier {
   Future<String?> retract(String identityId, UserMsg msg) async {
     if (_inFlight.contains(msg.id)) {
       // Already on its way: hq may have it, so it is not taken off here as if it never went.
-      notice('ההודעה כבר בדרך לשרת, ולכן אי אפשר למשוך אותה.');
+      notice(UiCopy.text(938));
       notifyListeners();
       return null;
     }
@@ -468,9 +499,9 @@ class AppStore extends ChangeNotifier {
     final hm = company_time.hm(company_time.CompanyTime.now());
     if (!on) {
       a.prevMeta = a.meta;
-      a.meta = 'כובתה ידנית · $hm';
+      a.meta = UiCopy.text(910, [hm]);
     } else {
-      a.meta = a.prevMeta ?? 'הודלקה · $hm';
+      a.meta = a.prevMeta ?? UiCopy.text(939, [hm]);
     }
     a.enabled = on;
     notifyListeners();

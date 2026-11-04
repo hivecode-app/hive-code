@@ -62,7 +62,7 @@ void _threeDecisions(AppStore store) {
 }
 
 Future<void> pumpScreen(WidgetTester tester, AppStore store, Widget home, {bool dark = false}) async {
-  await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: home));
+  await tester.pumpWidget(CompanyApp(store: legacyStore(store), themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: home));
   await tester.pumpAndSettle();
   expect(tester.takeException(), isNull);
 }

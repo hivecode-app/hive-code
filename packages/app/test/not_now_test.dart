@@ -66,7 +66,7 @@ void main() {
   setUpAll(() => companyNames = const CompanyNames(ownerId: 'ran', owner: 'רן', ownerGender: Gender.m, managerId: 'yoav', manager: 'יואב', managerGender: Gender.m));
 
   test('"לא עכשיו", its undo and closing survive a full reload from hq', () async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
     final hq = _Hq();
     await hq.start();
     addTearDown(() => hq.server.close(force: true));

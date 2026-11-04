@@ -1,3 +1,6 @@
+import '../../l10n/app_localizations.dart';
+import '../product/product_theme.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 // The conversation screen (chat.md, mockup screens 3 and 4). One conversation per worker;
 // shifts are a divider, not a new chat.
 import 'package:flutter/material.dart';
@@ -292,10 +295,10 @@ class _ChatScreenState extends State<ChatScreen> {
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: p.surface,
-          content: Rich('לעצור באמצע `$cmd`?', style: T.body.copyWith(color: p.text)),
+          content: Rich(UiCopy.text(143, [cmd]), style: T.body.copyWith(color: p.text)),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('המשך', style: T.button.copyWith(color: p.text2))),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('עצירה', style: T.button.copyWith(color: p.urgent, fontWeight: FontWeight.w700))),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(UiCopy.text(144), style: T.button.copyWith(color: p.text2))),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(UiCopy.text(145), style: T.button.copyWith(color: p.urgent, fontWeight: FontWeight.w700))),
           ],
         ),
       );
@@ -306,7 +309,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _quoteItem(ChatItem it, CompanyData d) {
     final (author, text) = switch (it) {
-      UserMsg() => ('את/ה', it.text),
+      UserMsg() => (UiCopy.text(146), it.text),
       TextMsg() => (d.who(widget.identityId).name, it.text),
       AskCard() => (d.who(it.from).name, it.question),
       _ => (d.who(widget.identityId).name, ''),
@@ -347,6 +350,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final store = StoreScope.of(context);
     final d = store.data;
     final p = context.p;
@@ -391,7 +395,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _cardLooks = looks;
     final split = _split(rows);
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateJump());
-    _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, openAllTools, _targetId]);
+    _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, openAllTools, _targetId, Localizations.localeOf(context)]);
     final selectedItem = selected == null ? null : chat.items.where((i) => i.id == selected).firstOrNull;
 
     final header = selectedItem != null
@@ -404,7 +408,7 @@ class _ChatScreenState extends State<ChatScreen> {
             },
             onWhy: () {
               _quoteItem(selectedItem, d);
-              controller.text = 'למה?';
+              controller.text = UiCopy.text(147);
             },
             onSelectText: widget.embedded ? null : () => _selectText(selectedItem),
           )
@@ -545,7 +549,7 @@ class _ChatScreenState extends State<ChatScreen> {
   List<_Entry> _entries(Conversation chat) {
     final items = chat.items;
     // The zone too: day separators follow org.yaml's `timezone` once hq sends it (#121).
-    final sig = (items.length, items.firstOrNull?.id, items.lastOrNull?.id, CompanyTime.offset);
+    final sig = (items.length, items.firstOrNull?.id, items.lastOrNull?.id, CompanyTime.offset, StoreScope.read(context).preferences.newInterface);
     if (identical(items, _entryItems) && _entrySig == sig && _entryCache != null) return _entryCache!;
     final out = <_Entry>[];
     // Row keys of our own start with \u0000, so they can never equal an item id.
@@ -557,6 +561,12 @@ class _ChatScreenState extends State<ChatScreen> {
         day = dd;
         // Unique even when items arrive out of order and a day shows up twice.
         out.add(_Entry('\u0000day:${dd.millisecondsSinceEpoch}:${it.id}', day: dd));
+      }
+      if (StoreScope.read(context).preferences.newInterface && (it is ShiftMarker || it is EventLine && !it.strong)) {
+        final run = out.lastOrNull;
+        if (run?.system != null) { run!.system!.add(it); continue; }
+        out.add(_Entry('\u0000system:${it.id}', system: [it]));
+        continue;
       }
       if (it is InternalMsg) {
         // A run of them folds into one line; a single one stays a line of its own.
@@ -576,6 +586,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _groupOf = {
       for (final e in out)
         if (e.group != null) for (final m in e.group!) m.id: e.key,
+      for (final e in out)
+        if (e.system != null) for (final m in e.system!) m.id: e.key,
     };
     out.add(const _Entry(_kLive));
     _entryItems = items;
@@ -639,6 +651,15 @@ class _ChatScreenState extends State<ChatScreen> {
       return LiveIndicator(live: chat.live, name: who.name, gender: who.gender);
     }
     if (e.day != null) return ServiceLine(text: _dayLabel(e.day!));
+    if (e.system != null) {
+      final l = AppLocalizations.of(context);
+      final open = _openGroups.contains(e.key);
+      return Column(mainAxisSize: MainAxisSize.min, children: [
+        ServiceLine(text: l.systemUpdates(e.system!.length), icon: 'info', onTap: () => setState(() => open ? _openGroups.remove(e.key) : _openGroups.add(e.key)), tapHint: l.more),
+        if (open) for (final m in e.system!)
+          ServiceLine(text: m is EventLine ? cleanSystemText(m.text, l) : l.systemUpdates(1), icon: 'info'),
+      ]);
+    }
     if (e.group != null) {
       return InternalGroupRow(
         count: e.group!.length,
@@ -717,22 +738,22 @@ class _ChatScreenState extends State<ChatScreen> {
       FileMsg() => FileBubble(msg: it),
       ShiftMarker() => ServiceLine(
           icon: 'autorenew',
-          text: 'משמרת ${it.shift} · קיבלה העברה ממשמרת ${it.from} · ${hm(it.ts)}',
+          text: store.preferences.newInterface ? AppLocalizations.of(context).systemUpdates(1) : UiCopy.text(148, [it.shift, it.from, hm(it.ts)]),
         ),
       EventLine() => ServiceLine(text: it.text, icon: it.icon, strong: it.strong),
       InternalMsg() => InternalMsgRow(msg: it),
       HandoffCard() => HandoffCardView(card: it, from: widget.identityId),
       // A turn that ended in an error: hq caught it itself (turn.error, error-watch.ts).
       ErrorLine() => ServiceLine(text: ErrorReports.instance.active ? '${it.text} ${SentNote.text}.' : it.text, icon: 'error', iconColor: context.p.urgent),
-      UnknownItem() => ServiceLine(text: 'אירוע: ${it.kind}'),
+      UnknownItem() => ServiceLine(text: UiCopy.text(149, [it.kind])),
     };
   }
 
   static String _dayLabel(DateTime d) {
     final ago = daysAgo(d, CompanyTime.now());
-    if (ago == 0) return 'היום';
-    if (ago == 1) return 'אתמול';
-    const days = ['ב\'', 'ג\'', 'ד\'', 'ה\'', 'ו\'', 'ש\'', 'א\''];
+    if (ago == 0) return UiCopy.text(150);
+    if (ago == 1) return UiCopy.text(34);
+    final days = [UiCopy.text(151), UiCopy.text(152), UiCopy.text(153), UiCopy.text(154), UiCopy.text(155), UiCopy.text(156), UiCopy.text(157)];
     return '${days[wall(d).weekday - 1]} ${dm(d)}';
   }
 }
@@ -761,6 +782,7 @@ class _ChatBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final store = StoreScope.of(context);
     final d = store.data!;
@@ -772,25 +794,45 @@ class _ChatBar extends StatelessWidget {
     // The live status line is always true (chat.md §1): offline says so instead of "working".
     Widget status;
     if (linkDown) {
-      status = StatusWord(icon: 'cloud_off', word: 'לא מחובר · המצב האחרון: ${statusWord(presence.status, who.gender)}', size: 12);
+      status = StatusWord(icon: 'cloud_off', word: UiCopy.text(158, [statusWord(presence.status, who.gender)]), size: 12);
     } else if (stopped) {
-      status = StatusWord(icon: 'stop_circle', word: '${f ? 'נעצרה' : 'נעצר'} · ${chat.live.stoppedAt}', size: 12);
+      status = StatusWord(icon: 'stop_circle', word: '${f ? UiCopy.text(159) : UiCopy.text(160)} · ${chat.live.stoppedAt}', size: 12);
     } else if (busy) {
       status = StatusWord(
         icon: statusIcon(WorkerStatus.working),
         word: '${statusWord(WorkerStatus.working, who.gender)}${presence.activity != null ? ' · ${presence.activity}' : ''} · ',
         size: 12,
-        trailing: Semantics(button: true, label: 'עצירה', child: GestureDetector(onTap: onStop, child: Text('עצירה', style: TextStyle(fontFamily: kFont, fontSize: 12, height: 1.4, fontWeight: FontWeight.w700, color: p.accent)))),
+        trailing: Semantics(button: true, label: UiCopy.text(145), child: GestureDetector(onTap: onStop, child: Text(UiCopy.text(145), style: TextStyle(fontFamily: kFont, fontSize: 12, height: 1.4, fontWeight: FontWeight.w700, color: p.accent)))),
       );
     } else {
       status = StatusWord.of(presence, who.gender, size: 12);
     }
 
+    if (store.preferences.newInterface) {
+      final l = AppLocalizations.of(context);
+      return Container(decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
+        padding: EdgeInsetsDirectional.fromSTEB(embedded ? 20 : 4, 6, 8, 6), child: Row(children: [
+          if (!embedded) IBtn(backIcon(context), tip: l.back, onTap: () => Navigator.maybePop(context)),
+          ProjectMonogram.person(d, who.id, size: 28), const SizedBox(width: 10),
+          Expanded(child: InkWell(onTap: () => _workerSheet(context, d), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ProductContentText(who.name, style: T.name.copyWith(color: p.text, fontSize: 16)),
+            ProductContentText(d.roleLine(who.id), style: T.meta.copyWith(color: p.text2)),
+            status,
+          ]))),
+          IBtn('search', tip: l.searchChat, onTap: onSearch),
+          IBtn('info', tip: l.role, onTap: () => _workerSheet(context, d)),
+          PopupMenuButton<String>(tooltip: l.more, onSelected: onMenu, icon: Ic('more_vert', color: p.text2), itemBuilder: (_) => [
+            PopupMenuItem(value: 'stop', child: Text(l.stop)),
+            PopupMenuItem(value: 'mute', child: Text(d.conversation(who.id)?.muted == true ? l.unmute : l.mute)),
+            if (store.preferences.advanced) PopupMenuItem(value: 'tools', child: Text(UiCopy.text(164))),
+          ]),
+        ]));
+    }
     return Container(
       decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
       padding: EdgeInsetsDirectional.fromSTEB(embedded ? 16 : 6, 4, 4, 4),
       child: Row(children: [
-        if (!embedded) IBtn('arrow_forward', tip: 'חזרה', onTap: () => Navigator.of(context).maybePop()),
+        if (!embedded) IBtn(backIcon(context), tip: UiCopy.text(161), onTap: () => Navigator.of(context).maybePop()),
         Expanded(
           child: InkWell(
             onTap: () => _workerSheet(context, d),
@@ -817,18 +859,18 @@ class _ChatBar extends StatelessWidget {
             ]),
           ),
         ),
-        IBtn('search', tip: 'חיפוש בשיחה', onTap: onSearch),
+        IBtn('search', tip: UiCopy.text(162), onTap: onSearch),
         PopupMenuButton<String>(
-          tooltip: 'עוד',
+          tooltip: UiCopy.text(163),
           color: p.surface,
           icon: Ic('more_vert', color: p.text2),
           onSelected: onMenu,
           itemBuilder: (_) => [
             for (final (v, t) in [
-              ('search', 'חיפוש בשיחה'),
-              ('stop', 'עצירה'),
-              ('tools', 'פתיחת כל הכלים'),
-              ('mute', d.conversation(who.id)?.muted ?? false ? 'ביטול השתקה' : 'השתקה'),
+              ('search', UiCopy.text(162)),
+              ('stop', UiCopy.text(145)),
+              ('tools', UiCopy.text(164)),
+              ('mute', d.conversation(who.id)?.muted ?? false ? UiCopy.text(165) : UiCopy.text(166)),
             ])
               PopupMenuItem(value: v, child: Text(t, style: T.body.copyWith(color: p.text))),
           ],
@@ -841,12 +883,12 @@ class _ChatBar extends StatelessWidget {
     final p = context.p;
     final pr = presence;
     final rows = <(String, String)>[
-      ('צוות', team?.name ?? '—'),
-      ('ממונה', team?.leadId != null && team!.leadId != who.id ? d.who(team!.leadId!).name : companyNames.manager),
-      if (who.taskRef != null) ('משימה', '`${who.taskRef}`'),
-      if (pr.shift != null) ('משמרת', '${pr.shift}${pr.shiftSince != null ? ' · מ-${pr.shiftSince}' : ''}'),
-      if (pr.contextPct != null) ('הקשר', '${pr.contextPct}%'),
-      if (pr.machine != null) ('מחשב', '`${pr.machine}`'),
+      (UiCopy.text(167), team?.name ?? '—'),
+      (UiCopy.text(168), team?.leadId != null && team!.leadId != who.id ? d.who(team!.leadId!).name : companyNames.manager),
+      if (StoreScope.read(context).preferences.advanced && who.taskRef != null) (UiCopy.text(169), '`${who.taskRef}`'),
+      if (StoreScope.read(context).preferences.advanced && pr.shift != null) (UiCopy.text(170), '${pr.shift}${pr.shiftSince != null ? UiCopy.text(171, [pr.shiftSince]) : ''}'),
+      if (StoreScope.read(context).preferences.advanced && pr.contextPct != null) (UiCopy.text(172), '${pr.contextPct}%'),
+      if (StoreScope.read(context).preferences.advanced && pr.machine != null) (UiCopy.text(173), '`${pr.machine}`'),
     ];
     showModalBottomSheet(
       context: context,
@@ -879,9 +921,9 @@ class _ChatBar extends StatelessWidget {
                 ]),
               ),
           ]),
-          Padding(
+          if (StoreScope.read(context).preferences.advanced || !StoreScope.read(context).preferences.newInterface) Padding(
             padding: const EdgeInsets.all(16),
-            child: Wrap(spacing: 8, children: const [Btn('VS Code', icon: 'open_in_new'), Btn('פרטים טכניים')]),
+            child: Wrap(spacing: 8, children:  [Btn('VS Code', icon: 'open_in_new'), Btn(UiCopy.text(174))]),
           ),
         ]),
       ),
@@ -907,17 +949,18 @@ class _PinBar extends StatelessWidget {
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final ask = open.first;
     final many = open.length > 1;
     final (what, link) = many
-        ? ('${open.length} החלטות פתוחות', 'לראשונה')
+        ? (UiCopy.text(175, [open.length]), UiCopy.text(176))
         : ask is GoCard
-            ? ('בקשת ${ltr('GO')}', 'לבקשה')
-            : (ask.blocking ? 'שאלה חוסמת' : 'שאלה', 'לשאלה');
+            ? (StoreScope.read(context).preferences.newInterface ? AppLocalizations.of(context).approve : UiCopy.text(177, [ltr('GO')]), UiCopy.text(178))
+            : (ask.blocking ? UiCopy.text(179) : UiCopy.text(180), UiCopy.text(181));
     return Semantics(
       button: true,
-      label: many ? what : '$what מ-${hm(ask.ts)}',
+      label: many ? what : UiCopy.text(89, [what, hm(ask.ts)]),
       hint: link,
       excludeSemantics: true,
       child: Material(
@@ -955,19 +998,20 @@ class _SelectionBar extends StatelessWidget {
   final VoidCallback? onSelectText;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Container(
       height: 57,
       decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(children: [
-        IBtn('close', tip: 'סגירה', onTap: onClose),
+        IBtn('close', tip: UiCopy.text(84), onTap: onClose),
         const Spacer(),
-        IBtn('reply', tip: 'ציטוט', onTap: onQuote),
-        IBtn('content_copy', tip: 'העתקה', onTap: onCopy),
-        if (onSelectText != null) IBtn('select_all', tip: 'בחירת טקסט', onTap: onSelectText!),
-        IBtn('help', tip: 'למה?', onTap: onWhy),
-        IBtn('share', tip: 'שיתוף', onTap: onCopy),
+        IBtn('reply', tip: UiCopy.text(182), onTap: onQuote),
+        IBtn('content_copy', tip: UiCopy.text(183), onTap: onCopy),
+        if (onSelectText != null) IBtn('select_all', tip: UiCopy.text(184), onTap: onSelectText!),
+        IBtn('help', tip: UiCopy.text(147), onTap: onWhy),
+        IBtn('share', tip: UiCopy.text(185), onTap: onCopy),
       ]),
     );
   }
@@ -981,24 +1025,25 @@ class _SearchBar extends StatelessWidget {
   final VoidCallback onUp, onDown, onClose;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Container(
       height: 57,
       decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(children: [
-        IBtn('close', tip: 'סגירת החיפוש', onTap: onClose),
+        IBtn('close', tip: UiCopy.text(186), onTap: onClose),
         Expanded(
           child: TextField(
             autofocus: true,
             onChanged: onChanged,
             style: T.body.copyWith(color: p.text),
-            decoration: InputDecoration(border: InputBorder.none, hintText: 'חיפוש בשיחה', hintStyle: T.body.copyWith(color: p.text3)),
+            decoration: InputDecoration(border: InputBorder.none, hintText: UiCopy.text(162), hintStyle: T.body.copyWith(color: p.text3)),
           ),
         ),
-        if (count > 0) Text('${index + 1} מתוך $count', style: T.meta.copyWith(color: p.text2)),
-        IBtn('keyboard_arrow_down', tip: 'הקודמת', onTap: onUp),
-        Transform.flip(flipY: true, child: IBtn('keyboard_arrow_down', tip: 'הבאה', onTap: onDown)),
+        if (count > 0) Text(UiCopy.text(187, [index + 1, count]), style: T.meta.copyWith(color: p.text2)),
+        IBtn('keyboard_arrow_down', tip: UiCopy.text(188), onTap: onUp),
+        Transform.flip(flipY: true, child: IBtn('keyboard_arrow_down', tip: UiCopy.text(189), onTap: onDown)),
       ]),
     );
   }
@@ -1010,9 +1055,10 @@ class _JumpButton extends StatelessWidget {
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Tooltip(
-      message: 'למטה',
+      message: UiCopy.text(190),
       child: GestureDetector(
         onTap: onTap,
         child: Stack(clipBehavior: Clip.none, children: [
@@ -1056,6 +1102,7 @@ class _SelectableState extends State<_Selectable> {
   double dx = 0;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return GestureDetector(
       onLongPress: widget.onLongPress,
@@ -1096,11 +1143,18 @@ List<AskCard> chatDecisions(CompanyData d, Conversation chat, {required Set<Stri
 
 /// One row of the chat list: a day separator, an item, the empty-chat header or the live line.
 class _Entry {
-  const _Entry(this.key, {this.item, this.day, this.group});
+  const _Entry(this.key, {this.item, this.day, this.group, this.system});
+  final List<ChatItem>? system;
   final String key;
 
   /// A run of messages between workers, folded into one line.
   final List<InternalMsg>? group;
   final ChatItem? item;
   final DateTime? day;
+}
+
+/// System transport details are not product copy. Task and message IDs remain available in advanced tools.
+String cleanSystemText(String text, AppLocalizations l) {
+  final cleaned = text.replaceAll(RegExp(r'\b(?:[a-z][a-z0-9-]*-t\d+(?:-[a-z0-9:.-]+)?|t\d+|msg_id|hq-host|ci-host|hq|lease-\d+)\b', caseSensitive: false), '').replaceAll('``', '').replaceAll(RegExp(r'\s+'), ' ').trim();
+  return cleaned.isEmpty ? l.systemUpdates(1) : cleaned;
 }

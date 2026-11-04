@@ -1,3 +1,5 @@
+import 'package:agent_company/l10n/input_copy.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 // "ביקשת" (#118) as a block of its own (the home recipe's `asked {messages[]}`): a row per request of his to a
 // worker that has no answer he read. Open: "מחכה לעידו · לפני 12 דק'". Answered: "ענו", and a tap opens the
 // conversation at the answer. Once he reads it hq drops the row, so an answer can't get lost in the list.
@@ -95,6 +97,7 @@ class AskedBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final store = StoreScope.of(context);
     // Live data wins: a request he read the answer to leaves at once, one just answered says so.
     final live = {for (final r in store.data?.asked ?? const <AskedRequest>[]) r.id: r};
@@ -122,12 +125,12 @@ class AskedBlock extends StatelessWidget {
 }
 
 /// "לעידו", and "ל-agent-company-t62" for a name in Latin letters.
-String _to(String name) => RegExp(r'^[֐-׿]').hasMatch(name) ? 'ל$name' : 'ל-$name';
+String _to(String name) => RegExp(InputCopy.v0).hasMatch(name) ? UiCopy.text(19, [name]) : UiCopy.text(20, [name]);
 
 /// "לפני 12 דק'", "עכשיו".
 String _ago(DateTime at, DateTime now) {
   final a = HeadData.ago(at, now);
-  return a == 'עכשיו' ? a : 'לפני $a';
+  return now.difference(at).inMinutes < 1 ? a : UiCopy.text(21, [a]);
 }
 
 class _Row extends StatelessWidget {
@@ -137,23 +140,24 @@ class _Row extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data;
     final name = d == null ? x.who : d.who(x.who).name;
     final when = x.answered ? (x.replyAt ?? x.at) : x.at;
-    final word = x.answered ? 'ענו' : 'מחכה ${_to(name)}';
-    final rest = [if (x.answered) name, if (x.count > 1) '${x.count} הודעות', _ago(when, now)];
+    final word = x.answered ? UiCopy.text(22) : UiCopy.text(23, [_to(name)]);
+    final rest = [if (x.answered) name, if (x.count > 1) UiCopy.text(24, [x.count]), _ago(when, now)];
     final canOpen = d == null || (d.canChat(x.who) && d.identities.containsKey(x.who));
     final spoken = [
-      'ביקשת מ$name: ${x.text}',
-      x.answered ? 'ענו' : 'מחכה',
-      if (x.count > 1) '${x.count} הודעות',
+      UiCopy.text(25, [name, x.text]),
+      x.answered ? UiCopy.text(22) : UiCopy.text(26),
+      if (x.count > 1) UiCopy.text(24, [x.count]),
       HeadData.agoSpoken(when, now),
     ].join('. ');
     return Semantics(
       button: canOpen,
       label: spoken,
-      hint: canOpen ? (x.answered ? 'פתיחת התשובה' : 'פתיחת השיחה') : null,
+      hint: canOpen ? (x.answered ? UiCopy.text(27) : UiCopy.text(28)) : null,
       excludeSemantics: true,
       child: InkWell(
         onTap: canOpen ? () => openAsked(context, x) : null,
@@ -181,8 +185,8 @@ class _Row extends StatelessWidget {
               ),
               if (x.answered && canOpen) ...[
                 const SizedBox(width: 8),
-                Text('לתשובה', style: T.small.copyWith(fontWeight: FontWeight.w700, color: p.text)),
-                Ic('chevron_left', size: 20, color: p.text2),
+                Text(UiCopy.text(29), style: T.small.copyWith(fontWeight: FontWeight.w700, color: p.text)),
+                Ic(chevronIcon(context), size: 20, color: p.text2),
               ],
             ]),
           ),

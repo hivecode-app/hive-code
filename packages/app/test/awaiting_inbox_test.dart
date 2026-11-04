@@ -39,7 +39,7 @@ Future<void> _list(WidgetTester tester, List<WaitItem> Function(AppStore) items,
     ..removeWhere((w) => alone || (w.kind != WaitKind.go && w.kind != WaitKind.blockingAsk))
     ..insertAll(0, keep);
   // A fresh list: its order is frozen at its first build.
-  await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: Scaffold(key: UniqueKey(), body: const WaitingList())));
+  await tester.pumpWidget(CompanyApp(store: legacyStore(store), themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: Scaffold(key: UniqueKey(), body: const WaitingList())));
   await tester.pumpAndSettle();
   expect(tester.takeException(), isNull);
   await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/awaiting_inbox/$name.png'));

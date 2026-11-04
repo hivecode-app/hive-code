@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // "השימוש" on the home (task 496), under "המכסה": how fast the quota goes and on what. The weekly % the company used in
 // the last hour and day, how many tasks run side by side, and the day's spend by kind and by worker (hq usage.ts). The
 // shares are one series in one ink: a thin bar under each line, the number beside it, never a color per kind.
@@ -8,12 +9,12 @@ import '../../theme/tokens.dart';
 import '../blocks/blocks.dart';
 import '../common.dart';
 
-const kUsageKinds = {
-  'tasks': 'משימות',
-  'leads_workers': 'הודעות מעובדים',
-  'leads_owner': 'הודעות ממך',
-  'leads_hq': 'תזכורות מהמערכת',
-  'leads_other': 'עבודה שחזרה',
+Map<String, String> get kUsageKinds => {
+  'tasks': UiCopy.text(430),
+  'leads_workers': UiCopy.text(516),
+  'leads_owner': UiCopy.text(517),
+  'leads_hq': UiCopy.text(518),
+  'leads_other': UiCopy.text(519),
 };
 
 /// The day's spend as the card lists it: tasks, then the leads with their sum and, under it, what woke them (noa 24/10:
@@ -23,7 +24,7 @@ List<(String, num, bool)> kindRows(List<(String, num)> kinds) {
   final sum = leads.fold<num>(0, (a, k) => a + k.$2);
   final tasks = [for (final k in kinds) if (!k.$1.startsWith('leads_')) (kUsageKinds[k.$1] ?? k.$1, k.$2, false)];
   final lead = [
-    if (leads.isNotEmpty) ('ראשי צוות', sum, false),
+    if (leads.isNotEmpty) (UiCopy.text(520), sum, false),
     for (final (k, s) in leads) (kUsageKinds[k] ?? k, s, true),
   ];
   // Whichever went on more comes first.
@@ -41,14 +42,14 @@ String _num(num v) => '$kLRI${v == v.roundToDouble() ? v.toInt() : v.toStringAsF
 
 /// The rate and parallel rows, in reading order (also their screen reader labels).
 List<String> rateLines(UsageData u) => [
-      if (u.hourPct != null) 'בשעה האחרונה ${_rate(u.hourPct!)}',
-      if (u.dayPct != null) 'ב-24 השעות האחרונות ${_rate(u.dayPct!)}',
-      if (u.hourPct == null && u.dayPct == null) 'עוד אין מדידה של המכסה',
+      if (u.hourPct != null) UiCopy.text(521, [_rate(u.hourPct!)]),
+      if (u.dayPct != null) UiCopy.text(522, [_rate(u.dayPct!)]),
+      if (u.hourPct == null && u.dayPct == null) UiCopy.text(523),
     ];
 
 List<String> parallelLines(UsageData u) => [
-      u.parallelNow == 0 ? 'אין משימה שרצה עכשיו' : u.parallelNow == 1 ? 'משימה אחת רצה עכשיו' : '${u.parallelNow} משימות רצות עכשיו',
-      'ביממה ${_num(u.parallelAvg)} בממוצע, ${_num(u.parallelPeak)} בשעה העמוסה',
+      u.parallelNow == 0 ? UiCopy.text(524) : u.parallelNow == 1 ? UiCopy.text(525) : UiCopy.text(526, [u.parallelNow]),
+      UiCopy.text(527, [_num(u.parallelAvg), _num(u.parallelPeak)]),
     ];
 
 class UsageCard extends StatelessWidget {
@@ -57,15 +58,16 @@ class UsageCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final u = usage;
     final rows = <Widget>[
-      _Row(icon: 'schedule', title: 'קצב, מהמכסה השבועית', lines: rateLines(u)),
-      _Row(icon: 'play_arrow', title: 'במקביל', lines: parallelLines(u)),
+      _Row(icon: 'schedule', title: UiCopy.text(528), lines: rateLines(u)),
+      _Row(icon: 'play_arrow', title: UiCopy.text(529), lines: parallelLines(u)),
       if (u.kinds.isNotEmpty)
-        _Row(icon: 'data_usage', title: 'על מה, ב-24 שעות', bars: kindRows(u.kinds)),
+        _Row(icon: 'data_usage', title: UiCopy.text(530), bars: kindRows(u.kinds)),
       if (u.people.isNotEmpty)
-        _Row(icon: 'group', title: 'מי, ב-24 שעות', bars: [for (final (n, s, task) in u.people) (task ? '$n, משימה' : n, s, false)]),
+        _Row(icon: 'group', title: UiCopy.text(531), bars: [for (final (n, s, task) in u.people) (task ? UiCopy.text(532, [n]) : n, s, false)]),
     ];
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -88,6 +90,7 @@ class _Row extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final second = T.small.copyWith(color: p.text2, height: 19 / 13, fontFeatures: kTabular);
     return Semantics(
@@ -134,6 +137,7 @@ class _Bar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final f = share.clamp(0, 1).toDouble();
     return Padding(

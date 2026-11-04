@@ -20,7 +20,7 @@ Future<void> _until(bool Function() ok, {int ms = 5000}) async {
 
 void main() {
   test('hq: the board\'s asked comes in, and `asked.changed` reloads it', () async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
     var asked = [_asked('m1', identity: 'noa', at: 1)];
     final sockets = <WebSocket>[];
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

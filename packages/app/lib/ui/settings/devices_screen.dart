@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // Settings → devices (#23): every device with its own token, the passkeys, and pairing a new one.
 // Revoking a device stops its token at once (hq closes its live link too); removing a passkey
 // also signs out the devices that came in with it.
@@ -96,7 +97,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
         backgroundColor: p.surface,
         content: Text(question, style: T.body.copyWith(color: p.text)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('השארה', style: T.button.copyWith(color: p.text2))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(UiCopy.text(674), style: T.button.copyWith(color: p.text2))),
           TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(yes, style: T.button.copyWith(color: p.urgent, fontWeight: FontWeight.w700))),
         ],
       ),
@@ -105,16 +106,16 @@ class _DevicesScreenState extends State<DevicesScreen> {
   }
 
   Future<void> _revoke(DeviceInfo d) async {
-    final q = d.current ? 'לצאת מהמכשיר הזה? כדי לחזור צריך טביעת אצבע או קוד צימוד.' : 'לבטל את "${d.name}"? הוא ינותק מיד, וכדי לחזור יצטרך להיכנס שוב.';
-    if (!await _confirm(q, d.current ? 'יציאה' : 'ביטול המכשיר')) return;
+    final q = d.current ? UiCopy.text(675) : UiCopy.text(676, [d.name]);
+    if (!await _confirm(q, d.current ? UiCopy.text(677) : UiCopy.text(678))) return;
     // Signing out this device: hq refuses the token from now on, and the app returns to sign-in.
     await _act(() => client!.revokeDevice(session!.token, d.id));
   }
 
   Future<void> _removePasskey(PasskeyInfo k) async {
     final n = devices?.where((d) => d.passkeyId == k.id).length ?? 0;
-    final q = 'להסיר את ה-passkey "${k.name}"?${n > 0 ? ' $n מכשירים שנכנסו איתו ינותקו.' : ''}';
-    if (!await _confirm(q, 'הסרה')) return;
+    final q = UiCopy.text(680, [k.name, n > 0 ? UiCopy.text(679, [n]) : '']);
+    if (!await _confirm(q, UiCopy.text(219))) return;
     await _act(() => client!.revokePasskey(session!.token, k.id));
   }
 
@@ -135,40 +136,41 @@ class _DevicesScreenState extends State<DevicesScreen> {
   String _when(DateTime t) => '${dm(t)} ${hm(t)}';
 
   String _via(DeviceInfo d) => switch (d.via) {
-        'passkey' => 'נכנס עם טביעת אצבע',
-        'register' => 'צומד עם קוד ו-passkey',
-        _ => 'צומד עם קוד',
+        'passkey' => UiCopy.text(681),
+        'register' => UiCopy.text(682),
+        _ => UiCopy.text(683),
       };
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final pc = pairCode;
     return Scaffold(
       backgroundColor: p.bg,
       body: SafeArea(
         child: Column(children: [
-          TopBar(title: 'מכשירים', leading: IBtn('arrow_forward', tip: 'חזרה', onTap: () => Navigator.of(context).maybePop())),
+          TopBar(title: UiCopy.text(684), leading: IBtn(backIcon(context), tip: UiCopy.text(161), onTap: () => Navigator.of(context).maybePop())),
           Expanded(
             child: ListView(padding: EdgeInsets.zero, children: [
               if (loading)
-                Padding(padding: const EdgeInsets.all(24), child: Center(child: LoadingWatch(screen: 'הגדרות · מכשירים', child: Spin(child: Ic('progress_activity', color: p.text2)))))
+                Padding(padding: const EdgeInsets.all(24), child: Center(child: LoadingWatch(screen: UiCopy.text(685), child: Spin(child: Ic('progress_activity', color: p.text2)))))
               else if (session == null)
                 Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Text('המכשיר הזה לא מחובר לחברה, ולכן אין כאן מכשירים.', style: T.secondary.copyWith(color: p.text2)),
+                  child: Text(UiCopy.text(686), style: T.secondary.copyWith(color: p.text2)),
                 )
               else ...[
-                if (error != null) ShownError(error!, screen: 'הגדרות · מכשירים', padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), report: errorFault),
-                Section('מכשירים', top: 8, count: devices == null ? null : '${devices!.length}'),
+                if (error != null) ShownError(error!, screen: UiCopy.text(685), padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), report: errorFault),
+                Section(UiCopy.text(684), top: 8, count: devices == null ? null : '${devices!.length}'),
                 ListBlock(inset: 16, children: [
                   for (final d in devices ?? const <DeviceInfo>[])
                     _Row(
                       icon: 'devices',
                       title: d.name,
-                      tag: d.current ? 'המכשיר הזה' : null,
-                      sub: '${_via(d)} · ${d.lastSeenAt == null ? 'לא נראה' : 'נראה ${_when(d.lastSeenAt!)}'}',
-                      action: Btn(d.current ? 'יציאה' : 'ביטול', height: 32, onTap: () => _revoke(d)),
+                      tag: d.current ? UiCopy.text(687) : null,
+                      sub: '${_via(d)} · ${d.lastSeenAt == null ? UiCopy.text(688) : UiCopy.text(689, [_when(d.lastSeenAt!)])}',
+                      action: Btn(d.current ? UiCopy.text(677) : UiCopy.text(18), height: 32, onTap: () => _revoke(d)),
                     ),
                 ]),
                 const Section('passkeys'),
@@ -176,35 +178,35 @@ class _DevicesScreenState extends State<DevicesScreen> {
                   if (passkeys.isEmpty)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                      child: Text('אין passkey רשום. מכשיר חדש שמצומד עם קוד יוצר אחד.', style: T.small.copyWith(color: p.text2)),
+                      child: Text(UiCopy.text(690), style: T.small.copyWith(color: p.text2)),
                     ),
                   for (final k in passkeys)
                     _Row(
                       icon: 'passkey',
                       title: k.name,
-                      sub: 'נוצר ${_when(k.createdAt)}${k.lastUsedAt == null ? '' : ' · שימוש אחרון ${_when(k.lastUsedAt!)}'}',
-                      action: Btn('הסרה', height: 32, onTap: () => _removePasskey(k)),
+                      sub: UiCopy.text(692, [_when(k.createdAt), k.lastUsedAt == null ? '' : UiCopy.text(691, [_when(k.lastUsedAt!)])]),
+                      action: Btn(UiCopy.text(219), height: 32, onTap: () => _removePasskey(k)),
                     ),
                 ]),
-                const Section('צימוד מכשיר חדש'),
+                 Section(UiCopy.text(693)),
                 ListBlock(inset: 16, children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('קוד לשימוש אחד, בתוקף 10 דקות. במכשיר החדש מזינים אותו במסך הכניסה, או פותחים את הקישור.',
+                      Text(UiCopy.text(694),
                           style: T.small.copyWith(color: p.text2)),
                       const SizedBox(height: 10),
                       if (pc != null) ...[
                         SelectableText(pc.code, key: const Key('pair-code-shown'), textDirection: TextDirection.ltr,
                             style: T.mono(24, w: FontWeight.w700).copyWith(color: p.text, letterSpacing: 3)),
                         const SizedBox(height: 2),
-                        Text('בתוקף עד ${hm(pc.expiresAt)}', style: T.meta.copyWith(color: p.text2)),
+                        Text(UiCopy.text(695, [hm(pc.expiresAt)]), style: T.meta.copyWith(color: p.text2)),
                         const SizedBox(height: 10),
                       ],
                       Wrap(spacing: 8, runSpacing: 8, children: [
-                        Btn(pc == null ? 'קוד צימוד' : 'קוד חדש', icon: 'link', onTap: _newCode),
+                        Btn(pc == null ? UiCopy.text(696) : UiCopy.text(697), icon: 'link', onTap: _newCode),
                         if (pc?.link != null)
-                          Btn('העתקת קישור', icon: 'content_copy', onTap: () => Clipboard.setData(ClipboardData(text: pc!.link!))),
+                          Btn(UiCopy.text(698), icon: 'content_copy', onTap: () => Clipboard.setData(ClipboardData(text: pc!.link!))),
                       ]),
                     ]),
                   ),
@@ -227,6 +229,7 @@ class _Row extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),

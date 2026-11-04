@@ -21,14 +21,14 @@ class _CountingBackend extends FakeBackend {
 void main() {
   testWidgets('opening a chat fetches it once, not on every change', (tester) async {
     await loadFonts();
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
     tester.view.physicalSize = kPhone * 2;
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
     final backend = _CountingBackend();
     final store = AppStore(backend);
     await store.start();
-    await tester.pumpWidget(CompanyApp(store: store, themeMode: ThemeMode.light, home: const ChatScreen(identityId: 'ido')));
+    await tester.pumpWidget(CompanyApp(store: legacyStore(store), themeMode: ThemeMode.light, home: const ChatScreen(identityId: 'ido')));
     await tester.pump();
     for (var i = 0; i < 10; i++) {
       store.touch();
@@ -39,7 +39,7 @@ void main() {
 
   testWidgets('switching the conversation in place (desktop) opens the new one', (tester) async {
     await loadFonts();
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
     tester.view.physicalSize = kPhone * 2;
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
@@ -48,7 +48,7 @@ void main() {
     await store.start();
     final who = ValueNotifier('ido');
     await tester.pumpWidget(CompanyApp(
-      store: store,
+      store: legacyStore(store),
       themeMode: ThemeMode.light,
       home: Scaffold(body: ValueListenableBuilder<String>(valueListenable: who, builder: (_, id, _) => ChatScreen(identityId: id, embedded: true))),
     ));

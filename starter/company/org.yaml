@@ -16,6 +16,8 @@
 version: 1
 setup: pending
 owner: owner
+owner_language: en      # en | he: initial app language and server notifications
+advanced_mode: false    # company map, resources and automations in settings
 owner_name:             # איך הטקסטים קוראים לבעל החברה. נקבע בשאלה הראשונה של ההקמה
 owner_gender: male      # male | female: ההטיות בטקסטים (אליו/אליה, סגר/סגרה)
 manager: manager        # מקבל הסלמות ושאלות שלא נענו. שמו (name, gender) בטקסטים

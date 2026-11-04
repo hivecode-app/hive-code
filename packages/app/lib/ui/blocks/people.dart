@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // "מי עובד עכשיו": a strip of faces, each with its name and what it is on. A tap opens the conversation.
 import 'package:flutter/material.dart';
 
@@ -14,12 +15,13 @@ class PeopleBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data;
     if (data.people.isEmpty || d == null) return const SizedBox.shrink();
     return Semantics(
       container: true,
-      label: 'מי עובד עכשיו',
+      label: UiCopy.text(110),
       explicitChildNodes: true,
       // Each worker gets the same width, two lines and an ellipsis inside it. When they all fit, they share the
       // card's width; when not, the strip scrolls, with room at both ends so nothing is cut at the card's edge.
@@ -33,7 +35,7 @@ class PeopleBlock extends StatelessWidget {
             for (final x in data.people)
               Semantics(
                 button: true,
-                label: '${d.who(x.id).name}, ${x.text}${x.since == null ? '' : ', מ-${hm(x.since!)}'}',
+                label: '${d.who(x.id).name}, ${x.text}${x.since == null ? '' : UiCopy.text(111, [hm(x.since!)])}',
                 excludeSemantics: true,
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
@@ -65,7 +67,7 @@ class PeopleBlock extends StatelessWidget {
                           Rich(x.text, auto: true, maxLines: 2, style: T.meta.copyWith(color: p.text2)),
                           if (x.since != null)
                             Text(
-                              'מ-${hm(x.since!)}',
+                              UiCopy.text(36, [hm(x.since!)]),
                               style: T.meta.copyWith(color: p.text3, fontFeatures: kTabular),
                             ),
                         ],

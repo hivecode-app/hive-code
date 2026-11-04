@@ -151,7 +151,7 @@ Future<BuildContext> _pump(WidgetTester tester,
     {Size size = kPhone, bool earlierWaiting = false, bool burning = false, bool summaries = false, DateTime? chatsSeen, bool dark = false, double textScale = 1, bool head = false}) async {
   await loadFonts();
   Motion.frozen = true;
-  SharedPreferences.setMockInitialValues({});
+  SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
   tester.view.physicalSize = size * 2;
   tester.view.devicePixelRatio = 2;
   tester.platformDispatcher.textScaleFactorTestValue = textScale;
@@ -165,7 +165,7 @@ Future<BuildContext> _pump(WidgetTester tester,
   store.statusSeenAt = DateTime(2026, 10, 20, 18, 0);
   store.markChatsSeen(chatsSeen ?? _at);
   // [head]: the home alone (homeAlone), unfolded.
-  await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: head ? homeAlone() : null));
+  await tester.pumpWidget(CompanyApp(store: legacyStore(store), themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: head ? homeAlone() : null));
   await tester.pump();
   return tester.element(find.byType(Scaffold).first);
 }

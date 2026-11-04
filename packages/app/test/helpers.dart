@@ -23,7 +23,7 @@ Future<void> loadFonts() async {
     await l.load();
   }
 
-  await family('Heebo', ['assets/fonts/Heebo-400.ttf', 'assets/fonts/Heebo-500.ttf', 'assets/fonts/Heebo-700.ttf']);
+  await family('Heebo', ['assets/fonts/Heebo-400.ttf', 'assets/fonts/Heebo-500.ttf', 'assets/fonts/Heebo-600.ttf', 'assets/fonts/Heebo-700.ttf']);
   await family('JetBrainsMono', ['assets/fonts/JetBrainsMono-400.ttf', 'assets/fonts/JetBrainsMono-700.ttf']);
   await family('packages/material_symbols_icons/MaterialSymbolsRounded', ['packages/material_symbols_icons/lib/fonts/MaterialSymbolsRounded.ttf']);
 }
@@ -49,7 +49,7 @@ Future<AppStore> pumpApp(WidgetTester tester, {Widget? home, bool dark = false, 
   await loadFonts();
   Motion.frozen = true;
   pinClock(kDemoNow);
-  SharedPreferences.setMockInitialValues({});
+  SharedPreferences.setMockInitialValues({'new_interface': false, 'language': 'he'});
   tester.view.physicalSize = size * 2;
   tester.view.devicePixelRatio = 2;
   tester.platformDispatcher.textScaleFactorTestValue = textScale;
@@ -74,4 +74,11 @@ class _HomeAlone extends StatelessWidget {
     if (d == null) return const SizedBox.shrink();
     return Scaffold(body: ListView(padding: EdgeInsets.zero, children: [HomeV2(recipe: d.home, data: d, now: CompanyTime.now())]));
   }
+}
+
+/// Existing behavior and goldens cover the previous interface. Product A has a separate matrix.
+AppStore legacyStore(AppStore store) {
+  store.preferences.setNewInterface(false);
+  store.preferences.setLanguage('he');
+  return store;
 }

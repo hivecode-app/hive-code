@@ -1,0 +1,40 @@
+/// Input protocol patterns, never interface copy.
+class InputCopy {
+  static const v0 = "^[֐-׿]";
+  static const v1 = "עכשיו";
+  static const v2 = "אתמול";
+  static const v3 = "עוזר";
+  static const v4 = "השתמש בכלי";
+  static const v5 = "[֐-׿]";
+  static const v6 = "פרודקשן";
+  static const v7 = "לא עכשיו";
+  static const v8 = "לא עובד";
+  static const v9 = "לא רלוונטי";
+  static const v10 = "^סיכון:\\s*(low|medium|high)\\s*\$";
+  static const v11 = "כן";
+  static const v12 = "לא";
+  static const v13 = "^(?:מה נכנס|מה משתנה(?: למשתמשים)?|What changes(?: for users)?|Changes)\\s*[:：]?\\s*(.*)\$";
+  static const v14 = "^(?:סיכון|Risk)\\s*[:：]?\\s*(.*)\$";
+  static const v15 = "^(?:חזרה אחורה|אם יש בעיה|Rollback|If there is a problem)\\s*[:：]?\\s*(.*)\$";
+  static const v16 = "^(?:מה נבדק|בדיקות|What was checked|Checked|Validation)\\s*[:：]?\\s*(.*)\$";
+  static const v17 = "כובתה ידנית";
+  static const v18 = "מערכת";
+  static const v19 = "השרת לא אישר את הכניסה. אפשר לנסות שוב.";
+  static const v20 = "הודעה לא נמסרה";
+  static const v21 = "עובד לא חזר אחרי קריסה";
+  static const v22 = "\\s*\\((?:מזהה|id|ref)[: ]+[^)]*\\)";
+  static const v23 = "דחה";
+  static const v24 = "דחתה";
+  static const v25 = "סגר";
+  static const v26 = "סגרה";
+  static const v27 = "סיים";
+  static const v28 = "סיימה";
+  static const v29 = "^תשובה לשאלה \\S+: ([\\s\\S]*)\$";
+  static const v30 = "סיימתי";
+  static const v31 = "[א-ת]";
+  static String answerPattern(String owner) => '^תשובה של $owner (?:לבקשת ה-GO|על) "[\\s\\S]*?": ([\\s\\S]*)\$';
+  static String closedWithoutAnswer(String owner, String verb) => '$owner $verb את השאלה בלי תשובה: ';
+  static const completed = ['סיים', 'סיימה'];
+  static const deferred = ['דחה', 'דחתה'];
+  static const closed = ['סגר', 'סגרה'];
+}

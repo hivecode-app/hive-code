@@ -1,3 +1,5 @@
+import 'package:agent_company/l10n/input_copy.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 // Decisions in one tap (#258): a GO or a question shows its answers as buttons that are always there, a tap
 // decides, and the card folds at once to one line ("אישרת · 02:14") with "ביטול" for 5 seconds, in the card
 // itself. The same pieces in the conversation's card and in "מחכה לך" at home, so both look and act the same.
@@ -25,6 +27,7 @@ class DecisionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Semantics(
       button: true,
@@ -63,6 +66,7 @@ class DecisionKeys extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     if (keys.length == 1) return Row(children: [Expanded(child: keys[0]), const SizedBox(width: 8), const Expanded(child: SizedBox.shrink())]);
     final side = keys.length == 2 && keys.every((k) => k.label.length <= 14) && MediaQuery.textScalerOf(context).scale(1) < 1.5;
     if (side) {
@@ -76,8 +80,8 @@ class DecisionKeys extends StatelessWidget {
   /// The buttons of a GO: "אישור" and "לא עכשיו".
   /// Without [onNotNow] (no inbox item behind the card to put off), "אישור" alone.
   static List<DecisionButton> go({required VoidCallback onGo, VoidCallback? onNotNow}) => [
-        DecisionButton('אישור', primary: true, onTap: onGo),
-        if (onNotNow != null) DecisionButton('לא עכשיו', onTap: onNotNow),
+        DecisionButton(UiCopy.text(295), primary: true, onTap: onGo),
+        if (onNotNow != null) DecisionButton(UiCopy.text(508), onTap: onNotNow),
       ];
 
   /// The buttons of a question: one per option, then "תשובה אחרת" ("תשובה" when it has no options).
@@ -88,7 +92,7 @@ class DecisionKeys extends StatelessWidget {
     final opts = options.where((o) => o.id != 'q' && o.id != 'not_now').toList();
     return [
       for (final (i, o) in opts.indexed) DecisionButton(o.label, primary: o.primary, hint: keys && i < 4 ? '${i + 1}' : null, onTap: () => onPick(o)),
-      if (other || opts.isEmpty) DecisionButton(options.isEmpty ? 'תשובה' : 'תשובה אחרת', onTap: onOther),
+      if (other || opts.isEmpty) DecisionButton(options.isEmpty ? UiCopy.text(558) : UiCopy.text(559), onTap: onOther),
     ];
   }
 }
@@ -106,6 +110,7 @@ class DecisionLine extends StatelessWidget {
   /// "ביטול" is a button of its own, away from the line's tap.
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final style = TextStyle(fontFamily: kFont, fontSize: 14, height: 1.4, color: p.text2);
     final line = Row(children: [
@@ -136,7 +141,7 @@ class DecisionLine extends StatelessWidget {
                 constraints: const BoxConstraints(minHeight: 48, minWidth: 64),
                 alignment: Alignment.center,
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Text('ביטול', style: TextStyle(fontFamily: kFont, fontSize: 14, fontWeight: FontWeight.w700, color: p.accent)),
+                child: Text(UiCopy.text(18), style: TextStyle(fontFamily: kFont, fontSize: 14, fontWeight: FontWeight.w700, color: p.accent)),
               ),
             ),
           ),
@@ -147,22 +152,25 @@ class DecisionLine extends StatelessWidget {
 
 /// How a request reads once it is no longer open: its icon and words (#258).
 ({String icon, String text}) closedLine(AskCard card, {required bool superseded, bool notNow = false}) {
-  if (superseded) return (icon: 'history', text: 'הוחלפה בבקשה חדשה');
-  if (notNow) return (icon: 'schedule', text: 'לא עכשיו');
+  if (superseded) return (icon: 'history', text: UiCopy.text(560));
+  if (notNow) return (icon: 'schedule', text: UiCopy.text(508));
   if (card.state == AskState.decidedByManager) {
     final n = companyNames;
-    return (icon: 'check_circle', text: '${n.manager} ${n.m('החליט', 'החליטה')} במקומך: ${card.answer}');
+    return (icon: 'check_circle', text: UiCopy.text(563, [n.manager, n.m(UiCopy.text(561), UiCopy.text(562)), card.answer]));
   }
-  final at = card.answeredAt == null ? '' : ' ב-${hm(card.answeredAt!)}';
+  final at = card.answeredAt == null ? '' : UiCopy.text(564, [hm(card.answeredAt!)]);
   final a = card.answer;
-  if (a == null) return (icon: 'check_circle', text: card is GoCard ? 'הבקשה נסגרה' : 'השאלה נסגרה');
-  if (card is GoCard && a == 'GO') return (icon: 'check_circle', text: 'אישרת$at');
-  if (a == 'לא עכשיו' || a == 'not_now') return (icon: 'do_not_disturb_on', text: 'דחית$at');
-  return (icon: 'check_circle', text: 'ענית$at: $a');
+  if (a == null) return (icon: 'check_circle', text: card is GoCard ? UiCopy.text(301) : UiCopy.text(565));
+  if (card is GoCard && a == 'GO') return (icon: 'check_circle', text: UiCopy.text(566, [at]));
+  if (a == InputCopy.v7 || a == 'not_now') return (icon: 'do_not_disturb_on', text: UiCopy.text(567, [at]));
+  return (icon: 'check_circle', text: UiCopy.text(568, [at, a]));
 }
 
 /// The line while it can still be taken back: "אישרת · 02:14".
-String pendingLine(PendingAnswer p) => '${p.line ?? 'נשלח'} · ${hm(p.at)}';
+String pendingLine(PendingAnswer p) => '${p.line ?? UiCopy.text(569)} · ${hm(p.at)}';
 
 /// Its icon: `close` for "לא עובד" (#219), `do_not_disturb_on` for "לא רלוונטי" (#297), `check_circle` for the rest.
-String pendingIcon(PendingAnswer p) => switch (p.line) { 'לא עובד' => 'close', 'לא רלוונטי' => 'do_not_disturb_on', _ => 'check_circle' };
+String pendingIcon(PendingAnswer p) => switch (p.answerId) {
+  'failed' => 'close', 'irrelevant' => 'do_not_disturb_on',
+  _ => switch (p.line) { InputCopy.v8 => 'close', InputCopy.v9 => 'do_not_disturb_on', _ => 'check_circle' },
+};

@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // Composer (chat.md §3), WhatsApp layout: rounded field with attach + camera inside, one round
 // button beside it: mic when empty, send when there is text or an image. Tap on send while the
 // worker is busy = "after the current step"; long press opens "when to deliver?". Stop is NOT here
@@ -132,7 +133,7 @@ class _ComposerState extends State<Composer> {
     if (transcribing || _starting) return;
     final dict = Dictation.instance;
     if (recording) return _stopAndTranscribe();
-    if (dict.client == null) return _fail('ההכתבה לא מחוברת בגרסה הזו. אפשר להכתיב דרך המיקרופון שבמקלדת.', fault: false);
+    if (dict.client == null) return _fail(UiCopy.text(191), fault: false);
     // Starting waits on the permission prompt; taps meanwhile must not start a second recording.
     _starting = true;
     try {
@@ -171,7 +172,7 @@ class _ComposerState extends State<Composer> {
     final PendingDictation job;
     try {
       final pcm = await dict.recorder.stop();
-      if (pcm.length < kDictateRate * 2 ~/ 4) throw const DictationError('ההקלטה קצרה מדי. אפשר ללחוץ, לדבר, ואז ללחוץ שוב.', fault: false);
+      if (pcm.length < kDictateRate * 2 ~/ 4) throw  DictationError(UiCopy.text(192), fault: false);
       job = await _jobs.add(id, pcm);
     } on DictationError catch (e) {
       return _failOn(store, e.message, fault: e.fault);
@@ -207,11 +208,11 @@ class _ComposerState extends State<Composer> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: p.surface,
-        title: Text('למחוק את ההקלטה?', style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w700)),
-        content: Text('היא לא תומללה, ואחרי המחיקה אי אפשר לשחזר אותה.', style: T.body.copyWith(color: p.text2)),
+        title: Text(UiCopy.text(193), style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w700)),
+        content: Text(UiCopy.text(194), style: T.body.copyWith(color: p.text2)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('ביטול', style: T.secondary.copyWith(color: p.accent))),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('מחיקה', style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(UiCopy.text(18), style: T.secondary.copyWith(color: p.accent))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(UiCopy.text(195), style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700))),
         ],
       ),
     );
@@ -244,8 +245,8 @@ class _ComposerState extends State<Composer> {
   void _addImage(Uint8List bytes, String name, {String? mime}) {
     if (!mounted) return;
     final kind = imageMime(bytes);
-    if (kind == null) return _fail('אפשר לצרף תמונות מסוג PNG, ‏JPEG, ‏GIF או WebP.');
-    if (bytes.length > maxImageBytes) return _fail('התמונה גדולה מדי (עד 25MB).');
+    if (kind == null) return _fail(UiCopy.text(196));
+    if (bytes.length > maxImageBytes) return _fail(UiCopy.text(197));
     StoreScope.read(context).addImage(widget.identityId, Attachment(name: name.isEmpty ? 'image' : name, bytes: bytes.length, mime: kind, data: bytes));
     widget.focus.requestFocus();
   }
@@ -265,12 +266,12 @@ class _ComposerState extends State<Composer> {
     } on PlatformException catch (e) {
       if (!mounted) return;
       if (e.code.contains('camera')) {
-        _fail('אין גישה למצלמה. אפשר לאשר אותה בהגדרות המכשיר.', fault: false);
+        _fail(UiCopy.text(198), fault: false);
       } else {
-        _fail('לא הצלחתי לפתוח את התמונות. אפשר לנסות שוב.');
+        _fail(UiCopy.text(199));
       }
     } catch (_) {
-      if (mounted) _fail('לא הצלחתי לפתוח את התמונות. אפשר לנסות שוב.');
+      if (mounted) _fail(UiCopy.text(199));
     }
   }
 
@@ -282,7 +283,7 @@ class _ComposerState extends State<Composer> {
       showDragHandle: true,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          for (final (icon, label, source) in [('photo_camera', 'מצלמה', ImageSource.camera), ('image', 'גלריה', ImageSource.gallery)])
+          for (final (icon, label, source) in [('photo_camera', UiCopy.text(200), ImageSource.camera), ('image', UiCopy.text(201), ImageSource.gallery)])
             ListTile(
               leading: Ic(icon, color: p.text2),
               title: Text(label, style: T.body.copyWith(color: p.text)),
@@ -299,12 +300,13 @@ class _ComposerState extends State<Composer> {
   /// Android keyboards (Gboard's clipboard chip, a copied screenshot) hand images over this way.
   void _inserted(KeyboardInsertedContent c) {
     final data = c.data;
-    if (data == null || data.isEmpty) return _fail('המקלדת לא העבירה את התמונה. אפשר לצרף אותה מהגלריה.');
+    if (data == null || data.isEmpty) return _fail(UiCopy.text(202));
     _addImage(data, c.uri.split('/').last, mime: c.mimeType);
   }
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final store = StoreScope.of(context);
     final d = store.data!;
@@ -331,7 +333,7 @@ class _ComposerState extends State<Composer> {
                 const Spacer(),
                 TextButton(
                   onPressed: _cancelRecording,
-                  child: Text('ביטול', style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+                  child: Text(UiCopy.text(18), style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
                 ),
               ]),
             )
@@ -341,12 +343,12 @@ class _ComposerState extends State<Composer> {
                     ? NativeComposerField(
                         controller: widget.controller,
                         focus: widget.focus,
-                        hint: 'הודעה ל${who.name}',
+                        hint: UiCopy.text(203, [who.name]),
                         style: T.body.copyWith(color: p.text, height: 1.45),
                         hintColor: p.text3,
                         accent: p.accent,
                         onImage: (bytes, name, mime) => _addImage(bytes, name, mime: mime),
-                        onImageFailed: () => _fail('לא הצלחתי לקרוא את התמונה. אפשר לצרף אותה מהגלריה.'),
+                        onImageFailed: () => _fail(UiCopy.text(204)),
                       )
                     : CallbackShortcuts(
                         bindings: {
@@ -369,20 +371,20 @@ class _ComposerState extends State<Composer> {
                             isCollapsed: true,
                             border: InputBorder.none,
                             contentPadding: const EdgeInsets.fromLTRB(4, 12, 4, 12),
-                            hintText: 'הודעה ל${who.name}',
+                            hintText: UiCopy.text(203, [who.name]),
                             hintStyle: T.body.copyWith(color: p.text3),
                           ),
                         ),
                       ),
               ),
-              _FieldBtn(icon: 'attach_file', tip: 'צירוף', onTap: _attach),
-              if (MediaQuery.sizeOf(context).width < 800) _FieldBtn(icon: 'photo_camera', tip: 'מצלמה', onTap: () => _pick(ImageSource.camera)),
+              _FieldBtn(icon: 'attach_file', tip: UiCopy.text(205), onTap: _attach),
+              if (MediaQuery.sizeOf(context).width < 800) _FieldBtn(icon: 'photo_camera', tip: UiCopy.text(200), onTap: () => _pick(ImageSource.camera)),
             ]),
     );
 
     final round = Semantics(
       button: true,
-      label: hasText ? 'שליחה' : (recording ? 'עצירת ההקלטה' : (transcribing ? 'מתמלל' : 'הכתבה')),
+      label: hasText ? UiCopy.text(206) : (recording ? UiCopy.text(207) : (transcribing ? UiCopy.text(208) : UiCopy.text(209))),
       child: GestureDetector(
         onLongPress: hasText && busy ? _openMenu : null,
         child: Material(
@@ -472,9 +474,10 @@ class _Transcribing extends StatelessWidget {
   final int elapsed;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
-    final piece = job.pieces > 1 ? 'חלק ${job.piece + 1} מתוך ${job.pieces} · ' : '';
-    final step = job.sent < 1 ? 'שולח ${(job.sent * 100).floor()}%' : 'מתמלל';
+    final piece = job.pieces > 1 ? UiCopy.text(210, [job.piece + 1, job.pieces]) : '';
+    final step = job.sent < 1 ? UiCopy.text(211, [(job.sent * 100).floor()]) : UiCopy.text(208);
     // Of the whole recording: pieces done, plus the share of this one that has gone out.
     final done = job.texts.where((t) => t != null).length;
     final share = ((done + job.sent * 0.9) / job.pieces).clamp(0.0, 1.0);
@@ -501,11 +504,12 @@ class _KeptRecording extends StatelessWidget {
   final VoidCallback onDiscard;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final now = CompanyTime.now();
     final ago = daysAgo(job.at, now);
-    final at = ago == 0 ? '-${hm(job.at)}' : (ago == 1 ? 'אתמול, ${hm(job.at)}' : '-${dm(job.at)}, ${hm(job.at)}');
-    final kept = job.onDisk ? 'היא שמורה במכשיר.' : 'היא שמורה עד שהאפליקציה תיסגר.';
+    final at = ago == 0 ? '-${hm(job.at)}' : (ago == 1 ? UiCopy.text(212, [hm(job.at)]) : '-${dm(job.at)}, ${hm(job.at)}');
+    final kept = job.onDisk ? UiCopy.text(213) : UiCopy.text(214);
     const tab = TextStyle(fontFeatures: [FontFeature.tabularFigures()]);
     return Container(
       decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(12), boxShadow: p.hairShadow),
@@ -516,8 +520,8 @@ class _KeptRecording extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('הקלטה מ$at (${_clock(job.seconds)}) לא תומללה', style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w500).merge(tab)),
-              Text('$kept אפשר לנסות שוב או למחוק אותה.', style: T.secondary.copyWith(color: p.text2)),
+              Text(UiCopy.text(215, [at, _clock(job.seconds)]), style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w500).merge(tab)),
+              Text(UiCopy.text(216, [kept]), style: T.secondary.copyWith(color: p.text2)),
             ]),
           ),
         ]),
@@ -527,12 +531,12 @@ class _KeptRecording extends StatelessWidget {
             TextButton(
               onPressed: onDiscard,
               style: TextButton.styleFrom(foregroundColor: p.text2, textStyle: T.secondary),
-              child: const Text('מחיקה'),
+              child:  Text(UiCopy.text(195)),
             ),
             TextButton(
               onPressed: onRetry,
               style: TextButton.styleFrom(foregroundColor: p.accent, disabledForegroundColor: p.text3, textStyle: T.secondary.copyWith(fontWeight: FontWeight.w700)),
-              child: const Text('לנסות שוב'),
+              child:  Text(UiCopy.text(217)),
             ),
           ]),
         ),
@@ -548,6 +552,7 @@ class _ImagePreview extends StatelessWidget {
   final void Function(Attachment) onRemove;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Container(
       decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(12), boxShadow: p.hairShadow),
@@ -560,7 +565,7 @@ class _ImagePreview extends StatelessWidget {
         itemBuilder: (context, i) {
           final a = images[i];
           return Semantics(
-            label: 'תמונה מצורפת ${i + 1}',
+            label: UiCopy.text(218, [i + 1]),
             child: Stack(children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
@@ -570,7 +575,7 @@ class _ImagePreview extends StatelessWidget {
                 top: 2,
                 end: 2,
                 child: Tooltip(
-                  message: 'הסרה',
+                  message: UiCopy.text(219),
                   child: InkWell(
                     customBorder: const CircleBorder(),
                     onTap: () => onRemove(a),
@@ -578,7 +583,7 @@ class _ImagePreview extends StatelessWidget {
                       width: 26,
                       height: 26,
                       decoration: const BoxDecoration(color: Color(0x99000000), shape: BoxShape.circle),
-                      child: const Center(child: Ic('close', size: 16, color: Colors.white, semantic: 'הסרת התמונה')),
+                      child:  Center(child: Ic('close', size: 16, color: Colors.white, semantic: UiCopy.text(220))),
                     ),
                   ),
                 ),
@@ -597,14 +602,7 @@ class _FieldBtn extends StatelessWidget {
   final String tip;
   final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) => Tooltip(
-        message: tip,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: SizedBox(width: 40, height: 46, child: Center(child: Ic(icon, color: context.p.text2, semantic: tip))),
-        ),
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return Tooltip(message: tip, child: InkWell(customBorder: const CircleBorder(), onTap: onTap, child: SizedBox(width: 40, height: 46, child: Center(child: Ic(icon, color: context.p.text2, semantic: tip))))); }
 }
 
 /// `.pmenu`: when to deliver to a busy worker.
@@ -615,6 +613,7 @@ class _PriorityMenu extends StatelessWidget {
   final void Function(Priority) onPick;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     Widget opt(Priority pr, String t, String s, {bool sel = false}) => Material(
           color: sel ? p.surface2 : Colors.transparent,
@@ -644,11 +643,11 @@ class _PriorityMenu extends StatelessWidget {
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
-          child: Text('$name באמצע עבודה. מתי למסור?', style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: p.text2)),
+          child: Text(UiCopy.text(221, [name]), style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: p.text2)),
         ),
-        opt(Priority.now, 'עכשיו', 'עוצר ${female ? 'אותה' : 'אותו'} באמצע הצעד, אם בטוח לעצור. זה מה שקורה בנגיעה רגילה.', sel: true),
-        opt(Priority.next, 'אחרי הצעד הנוכחי', '${female ? 'היא מסיימת' : 'הוא מסיים'} את הצעד, ואז קורא${female ? 'ת' : ''}'),
-        opt(Priority.later, 'בסוף התור', 'אחרי כל מה שכבר מחכה ${female ? 'אצלה' : 'אצלו'}'),
+        opt(Priority.now, UiCopy.text(107), UiCopy.text(224, [female ? UiCopy.text(222) : UiCopy.text(223)]), sel: true),
+        opt(Priority.next, UiCopy.text(225), UiCopy.text(229, [female ? UiCopy.text(226) : UiCopy.text(227), female ? UiCopy.text(228) : ''])),
+        opt(Priority.later, UiCopy.text(230), UiCopy.text(233, [female ? UiCopy.text(231) : UiCopy.text(232)])),
       ]),
     );
   }

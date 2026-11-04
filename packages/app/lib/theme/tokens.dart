@@ -266,3 +266,30 @@ extension PaletteX on BuildContext {
 
 /// Unicode isolates around an LTR run (chat.md §5): first-strong-isolate does not flip `#3712` or a path.
 String ltr(String s) => '\u2066$s\u2069';
+
+/// Values from design-v2/a.css. This palette is selected only by the runtime interface switch.
+Palette productPalette(Brightness brightness) {
+  final dark = brightness == Brightness.dark;
+  final old = Palette.of(brightness);
+  return Palette(
+    bg: Color(dark ? 0xFF141517 : 0xFFF7F7F5), surface: Color(dark ? 0xFF1C1D20 : 0xFFFFFFFF),
+    surface2: Color(dark ? 0xFF111214 : 0xFFF0F0ED), surface3: Color(dark ? 0xFF26272B : 0xFFECECE8),
+    line: Color(dark ? 0xFF2D2E32 : 0xFFE3E3DF), text: Color(dark ? 0xFFECECEA : 0xFF1B1C1E),
+    text2: Color(dark ? 0xFFA6A9AE : 0xFF5C6066), text3: Color(dark ? 0xFF8F9398 : 0xFF6E7277),
+    chatBg: Color(dark ? 0xFF141517 : 0xFFF7F7F5), bubbleIn: Color(dark ? 0xFF1C1D20 : 0xFFFFFFFF),
+    bubbleOut: Color(dark ? 0xFF26272B : 0xFFECECE8), codeBg: old.codeBg, addBg: old.addBg, delBg: old.delBg,
+    urgent: old.urgent, accent: Color(dark ? 0xFFECECEA : 0xFF1B1C1E), onAccent: Color(dark ? 0xFF141517 : 0xFFFFFFFF),
+    accentSoft: Color(dark ? 0xFF26272B : 0xFFECECE8), read: Color(dark ? 0xFF8EB1FF : 0xFF2152C1),
+    toolBg: Color(dark ? 0xFF111214 : 0xFFF0F0ED), dark: dark,
+  );
+}
+
+Color projectColor(BuildContext context, String? tone) {
+  final dark = context.p.dark;
+  return switch (tone) {
+    'teal' || 'green' => Color(dark ? 0xFF4FC2B8 : 0xFF0A6A63),
+    'blue' || 'sky' || 'olive' => Color(dark ? 0xFF9A9EF2 : 0xFF4A4FC4),
+    'clay' || 'rose' => Color(dark ? 0xFFE8A060 : 0xFF9A4A0C),
+    _ => Color(dark ? 0xFFA3ABB6 : 0xFF5B6470),
+  };
+}

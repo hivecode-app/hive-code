@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // Status (#53), the secondary screen: what waits for him, what still waits on him to check or deploy (#108),
 // what finished since his last visit (one line each), and one line per project with what runs there now.
 import 'package:flutter/material.dart';
@@ -23,6 +24,7 @@ class StatusScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final store = StoreScope.of(context);
     final d = store.data;
     if (d == null) return const SizedBox.shrink();
@@ -32,22 +34,22 @@ class StatusScreen extends StatelessWidget {
     final since = store.statusSeenAt ?? dayStart(now);
     final done = [for (final t in d.tickets) if (t.doneAt != null && t.assigneeId != null && t.doneAt!.isAfter(since)) t]..sort((a, b) => b.doneAt!.compareTo(a.doneAt!));
     return Column(children: [
-      TopBar(title: 'סטטוס', showLink: true, actions: [
-        IBtn('dns', tip: 'משאבים', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ResourcesPage()))),
-        IBtn('hub', tip: 'המפה של החברה', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CompanyMapPage()))),
+      TopBar(title: UiCopy.text(738), showLink: true, actions: [
+        IBtn('dns', tip: UiCopy.text(636), onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ResourcesPage()))),
+        IBtn('hub', tip: UiCopy.text(424), onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CompanyMapPage()))),
       ]),
       const SystemBar(),
       Expanded(
         child: ListView(padding: EdgeInsets.zero, children: [
           // "בעבודה ובתור" (#128): every open task, wherever it runs, queued ones too.
-          Section('בעבודה ובתור', count: d.openTasks.isEmpty ? null : '${d.openTasks.length}', top: 8),
+          Section(UiCopy.text(742), count: d.openTasks.isEmpty ? null : '${d.openTasks.length}', top: 8),
           ListBlock(children: [
-            if (d.openTasks.isEmpty) const _Quiet(icon: 'radio_button_unchecked', text: 'אין משימות פתוחות')
+            if (d.openTasks.isEmpty)  _Quiet(icon: 'radio_button_unchecked', text: UiCopy.text(142))
             else TasksBlock(tasks: d.openTasks, now: now),
           ]),
-          Section('מחכה לך', count: waiting.isEmpty ? null : '${waiting.length}'),
+          Section(UiCopy.text(97), count: waiting.isEmpty ? null : '${waiting.length}'),
           ListBlock(children: [
-            if (waiting.isEmpty) const _Quiet(icon: 'check_circle', text: 'אין מה שמחכה לך')
+            if (waiting.isEmpty)  _Quiet(icon: 'check_circle', text: UiCopy.text(743))
             else for (final w in waiting) _WaitLine(item: w),
           ]),
           // "מה לבדוק" (#108): only when something waits on him. A merged task waiting for its deploy is the lead's to
@@ -61,18 +63,18 @@ class StatusScreen extends StatelessWidget {
             child: checks.isEmpty
                 ? const SizedBox(key: ValueKey('awaiting-none'), width: double.infinity)
                 : Column(key: const ValueKey('awaiting'), children: [
-                    Section('מה לבדוק', count: '${checks.length}'),
+                    Section(UiCopy.text(744), count: '${checks.length}'),
                     ListBlock(children: [AwaitingBlock(data: AwaitingData(items: [for (final t in checks) AwaitingItem.of(t)]), now: now)]),
                   ]),
           ),
-          Section('מאז הביקור הקודם', count: 'מ-${_since(since, now)}'),
+          Section(UiCopy.text(745), count: UiCopy.text(36, [_since(since, now)])),
           ListBlock(inset: 16, children: [
-            if (done.isEmpty) const _Quiet(icon: 'radio_button_unchecked', text: 'לא הסתיים כלום מאז')
+            if (done.isEmpty)  _Quiet(icon: 'radio_button_unchecked', text: UiCopy.text(746))
             else for (final t in done.take(kDoneShown)) _DoneLine(t: t),
           ]),
           if (done.length > kDoneShown)
-            MoreRow(icon: 'history', bold: 'עוד ${done.length - kDoneShown}', rest: 'בפרויקטים', top: false, onTap: () => NavScope.read(context).go(AppTab.projects)),
-          const Section('בפרויקטים עכשיו'),
+            MoreRow(icon: 'history', bold: UiCopy.text(625, [done.length - kDoneShown]), rest: UiCopy.text(747), top: false, onTap: () => NavScope.read(context).go(AppTab.projects)),
+           Section(UiCopy.text(748)),
           ListBlock(inset: 16, children: [for (final proj in d.projects.where((x) => x.active)) _ProjectNow(proj: proj)]),
           const SizedBox(height: 24),
         ]),
@@ -83,7 +85,7 @@ class StatusScreen extends StatelessWidget {
   static String _since(DateTime since, DateTime now) {
     final ago = daysAgo(since, now);
     if (ago <= 0) return hm(since);
-    return ago == 1 ? 'אתמול ${hm(since)}' : dm(since);
+    return ago == 1 ? UiCopy.text(391, [hm(since)]) : dm(since);
   }
 }
 
@@ -93,6 +95,7 @@ class _Quiet extends StatelessWidget {
   final String text;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -111,6 +114,7 @@ class _WaitLine extends StatelessWidget {
   final WaitItem item;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final d = StoreScope.of(context).data!;
     final p = context.p;
     final who = d.who(item.from);
@@ -156,6 +160,7 @@ class _DoneLine extends StatelessWidget {
   final Ticket t;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data!;
     return EntityLink(
@@ -184,6 +189,7 @@ class _ProjectNow extends StatelessWidget {
   final ProjectInfo proj;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final d = StoreScope.of(context).data!;
     final p = context.p;
     final running = runningIn(d, proj.id);
@@ -195,7 +201,7 @@ class _ProjectNow extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Expanded(child: Rich(proj.name, style: T.name.copyWith(color: p.text))),
-            if (queued > 0) Text('$queued בתור', style: T.small.copyWith(color: p.text2)),
+            if (queued > 0) Text(UiCopy.text(99, [queued]), style: T.small.copyWith(color: p.text2)),
           ]),
           if (running.isEmpty)
             Padding(
@@ -203,7 +209,7 @@ class _ProjectNow extends StatelessWidget {
               child: Row(children: [
                 Ic('bedtime', size: 16, fill: true, color: p.text2),
                 const SizedBox(width: 4),
-                Text('שקט, אין משימה שרצה', style: T.secondary.copyWith(color: p.text2)),
+                Text(UiCopy.text(749), style: T.secondary.copyWith(color: p.text2)),
               ]),
             )
           else

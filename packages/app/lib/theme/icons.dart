@@ -5,11 +5,6 @@ import 'package:material_symbols_icons/symbols.dart';
 
 const Map<String, IconData> kIcons = {
   'search': Symbols.search_rounded,
-  'bookmark_add': Symbols.bookmark_add_rounded,
-  'manage_search': Symbols.manage_search_rounded,
-  'group_add': Symbols.group_add_rounded,
-  'task_alt': Symbols.task_alt_rounded,
-  'flag': Symbols.flag_rounded,
   'do_not_disturb_on': Symbols.do_not_disturb_on_rounded,
   'more_vert': Symbols.more_vert_rounded,
   'warning': Symbols.warning_rounded,
@@ -127,4 +122,16 @@ const Map<String, IconData> kIcons = {
   'forward_to_inbox': Symbols.forward_to_inbox_rounded,
   'arrow_back': Symbols.arrow_back_rounded,
   'data_usage': Symbols.data_usage_rounded,
+  'bookmark_add': Symbols.bookmark_add_rounded,
+  'manage_search': Symbols.manage_search_rounded,
+  'group_add': Symbols.group_add_rounded,
+  'account_circle': Symbols.account_circle_rounded,
+  'notifications': Symbols.notifications_rounded,
+  'notifications_active': Symbols.notifications_active_rounded,
+  'translate': Symbols.translate_rounded,
+  'contrast': Symbols.contrast_rounded,
+  'key': Symbols.key_rounded,
+  'rule': Symbols.rule_rounded,
+  'memory': Symbols.memory_rounded,
+  'radio_button_checked': Symbols.radio_button_checked_rounded,
 };

@@ -36,7 +36,7 @@ void main() {
     testWidgets('hq snapshot renders on every tab (${size.width.toInt()}px)', (tester) async {
       await loadFonts();
       Motion.frozen = true;
-      SharedPreferences.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
       tester.view.physicalSize = size * 2;
       tester.view.devicePixelRatio = 2;
       addTearDown(tester.view.reset);
@@ -44,7 +44,7 @@ void main() {
           tasks: _load('board', 'tasks'), projects: _load('board', 'projects'));
       final store = AppStore(SnapshotBackend(d));
       await store.start();
-      await tester.pumpWidget(CompanyApp(store: store, themeMode: ThemeMode.light));
+      await tester.pumpWidget(CompanyApp(store: legacyStore(store), themeMode: ThemeMode.light));
       await tester.pump();
       final ctx = tester.element(find.byType(Scaffold).first);
       for (final t in AppTab.values) {

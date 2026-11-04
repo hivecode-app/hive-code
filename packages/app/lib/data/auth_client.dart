@@ -1,3 +1,5 @@
+import 'package:agent_company/l10n/input_copy.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 // Getting and managing device tokens (#23, packages/hq/src/auth.ts). Each device has its own
 // token, which settings → devices can revoke; hq's own token never leaves the server.
 //   open:   GET /health (is hq there), POST /api/auth/login/options, /api/auth/login, /api/auth/register/options,
@@ -90,12 +92,12 @@ class AuthClient {
   /// Is there an hq at [baseUrl]? Its open GET /health answers JSON with the store's schema (503 too:
   /// hq is there, only its scheduler is late).
   Future<void> probe() async {
-    const missing = AuthFailure('לא נמצא שרת של החברה בכתובת הזו. כדאי לבדוק את הכתובת ולנסות שוב.');
+    final missing = AuthFailure(UiCopy.text(762));
     final http.Response r;
     try {
       r = await _http.get(Uri.parse('$baseUrl/health')).timeout(const Duration(seconds: 10));
     } catch (_) {
-      throw const AuthFailure('אין חיבור לשרת בכתובת הזו. כדאי לבדוק את הכתובת ואת החיבור לאינטרנט.');
+      throw  AuthFailure(UiCopy.text(763));
     }
     try {
       final j = jsonDecode(utf8.decode(r.bodyBytes));
@@ -105,7 +107,7 @@ class AuthClient {
   }
 
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body,
-      {String? token, String otherwise = 'השרת לא אישר את הכניסה. אפשר לנסות שוב.'}) async {
+      {String? token, String otherwise = InputCopy.v19}) async {
     final http.Response r;
     try {
       r = await _http
@@ -113,10 +115,10 @@ class AuthClient {
               headers: {'content-type': 'application/json', if (token != null) 'authorization': 'Bearer $token'}, body: jsonEncode(body))
           .timeout(const Duration(seconds: 15));
     } catch (_) {
-      throw const AuthFailure('אין חיבור לשרת. אפשר לנסות שוב.');
+      throw  AuthFailure(UiCopy.text(764));
     }
     if (r.statusCode == 200) return (jsonDecode(utf8.decode(r.bodyBytes)) as Map).cast<String, dynamic>();
-    if (r.statusCode == 429) throw const AuthFailure('היו יותר מדי קודים שגויים. אפשר לנסות שוב בעוד כמה דקות.');
+    if (r.statusCode == 429) throw  AuthFailure(UiCopy.text(765));
     final err = (() {
       try {
         return (jsonDecode(r.body) as Map)['error'] as String? ?? '';
@@ -124,8 +126,8 @@ class AuthClient {
         return '';
       }
     })();
-    if (err.contains('pairing code')) throw const AuthFailure('הקוד שגוי, כבר שומש או שפג תוקפו. צריך קוד חדש ממסך המכשירים שבהגדרות.');
-    if (err.contains('unknown passkey')) throw const AuthFailure('ה-passkey הזה לא רשום בחברה, או שהוסר. צריך לצמד את המכשיר עם קוד.');
+    if (err.contains('pairing code')) throw  AuthFailure(UiCopy.text(766));
+    if (err.contains('unknown passkey')) throw  AuthFailure(UiCopy.text(767));
     throw AuthFailure(otherwise, fault: true);
   }
 
@@ -134,11 +136,11 @@ class AuthClient {
     if (r.json != null) return r.json!;
     throw AuthFailure(
         switch (r.error!) {
-          PasskeyError.cancelled => 'הכניסה בוטלה.',
-          PasskeyError.exists => 'במכשיר הזה כבר יש passkey של החברה. אפשר להיכנס איתו.',
-          PasskeyError.none => 'אין במכשיר הזה passkey של החברה. צריך לצמד אותו עם קוד.',
-          PasskeyError.unsupported => 'המכשיר הזה לא תומך ב-passkey. אפשר לצמד אותו עם קוד בלבד.',
-          PasskeyError.failed => 'טביעת האצבע לא עברה. אפשר לנסות שוב.',
+          PasskeyError.cancelled => UiCopy.text(768),
+          PasskeyError.exists => UiCopy.text(769),
+          PasskeyError.none => UiCopy.text(770),
+          PasskeyError.unsupported => UiCopy.text(771),
+          PasskeyError.failed => UiCopy.text(772),
         },
         code: r.error);
   }
@@ -169,9 +171,9 @@ class AuthClient {
     try {
       r = await _http.get(Uri.parse('$baseUrl/api/devices'), headers: {'authorization': 'Bearer $token'}).timeout(const Duration(seconds: 10));
     } catch (_) {
-      throw const AuthFailure('אין חיבור לשרת. אפשר לנסות שוב.');
+      throw  AuthFailure(UiCopy.text(764));
     }
-    if (r.statusCode != 200) throw const AuthFailure('השרת לא החזיר את רשימת המכשירים.', fault: true);
+    if (r.statusCode != 200) throw  AuthFailure(UiCopy.text(773), fault: true);
     final j = (jsonDecode(utf8.decode(r.bodyBytes)) as Map).cast<String, dynamic>();
     return (
       devices: [for (final d in (j['devices'] as List).cast<Map<String, dynamic>>()) DeviceInfo.fromJson(d)],
@@ -180,11 +182,11 @@ class AuthClient {
   }
 
   Future<PairCode> newPairCode(String token) async =>
-      PairCode.fromJson(await _post('/api/devices/pair', {}, token: token, otherwise: 'השרת לא יצר קוד. אפשר לנסות שוב.'));
+      PairCode.fromJson(await _post('/api/devices/pair', {}, token: token, otherwise: UiCopy.text(774)));
   Future<void> revokeDevice(String token, String id) =>
-      _post('/api/devices/${Uri.encodeComponent(id)}/revoke', {}, token: token, otherwise: 'הביטול לא עבר. ייתכן שהמכשיר כבר בוטל.');
+      _post('/api/devices/${Uri.encodeComponent(id)}/revoke', {}, token: token, otherwise: UiCopy.text(775));
   Future<void> revokePasskey(String token, String id) =>
-      _post('/api/passkeys/${Uri.encodeComponent(id)}/revoke', {}, token: token, otherwise: 'ההסרה לא עברה. ייתכן שה-passkey כבר הוסר.');
+      _post('/api/passkeys/${Uri.encodeComponent(id)}/revoke', {}, token: token, otherwise: UiCopy.text(776));
 
   void close() {
     if (_ownsHttp) _http.close();
@@ -195,12 +197,12 @@ class AuthClient {
 String defaultDeviceName() {
   if (kIsWeb) {
     return switch (defaultTargetPlatform) {
-      TargetPlatform.android => 'דפדפן בטלפון',
-      TargetPlatform.iOS => 'דפדפן באייפון',
-      TargetPlatform.macOS => 'דפדפן ב-Mac',
-      TargetPlatform.windows => 'דפדפן ב-Windows',
-      _ => 'דפדפן במחשב',
+      TargetPlatform.android => UiCopy.text(777),
+      TargetPlatform.iOS => UiCopy.text(778),
+      TargetPlatform.macOS => UiCopy.text(779),
+      TargetPlatform.windows => UiCopy.text(780),
+      _ => UiCopy.text(781),
     };
   }
-  return defaultTargetPlatform == TargetPlatform.android ? 'האפליקציה באנדרואיד' : 'מכשיר';
+  return defaultTargetPlatform == TargetPlatform.android ? UiCopy.text(782) : UiCopy.text(783);
 }

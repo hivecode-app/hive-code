@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // הערכת זמן ליד משימה (noa's direction, 21/10): on a line of its own under the task's meta line (it overloaded the meta
 // line and broke every row in two, noa's review), the estimate its worker gave and where it stands, in the meta's size
 // and colour (no colour, bar or ring), the icon outlined:
@@ -38,14 +39,14 @@ class EstimateShown {
 /// "20 דק'", "1 שע' 20 דק'", "2 שע'". [unit] false drops "דק'" under an hour ("עברו 12").
 /// A non-breaking space joins each number to its unit, so a wrap never splits "1 | שע'".
 String minutesText(int min, {bool unit = true}) {
-  if (min < 60) return unit ? "$min\u00A0דק'" : '$min';
+  if (min < 60) return unit ? UiCopy.text(37, [min]) : '$min';
   final h = min ~/ 60, m = min % 60;
-  return m == 0 ? "$h\u00A0שע'" : "$h\u00A0שע'\u00A0$m\u00A0דק'";
+  return m == 0 ? UiCopy.text(38, [h]) : UiCopy.text(39, [h, m]);
 }
 
-const _unitsF = ['אפס', 'אחת', 'שתיים', 'שלוש', 'ארבע', 'חמש', 'שש', 'שבע', 'שמונה', 'תשע', 'עשר'];
-const _teensF = ['עשר', 'אחת עשרה', 'שתים עשרה', 'שלוש עשרה', 'ארבע עשרה', 'חמש עשרה', 'שש עשרה', 'שבע עשרה', 'שמונה עשרה', 'תשע עשרה'];
-const _tens = ['', '', 'עשרים', 'שלושים', 'ארבעים', 'חמישים', 'שישים', 'שבעים', 'שמונים', 'תשעים'];
+final _unitsF = [UiCopy.text(40), UiCopy.text(41), UiCopy.text(42), UiCopy.text(43), UiCopy.text(44), UiCopy.text(45), UiCopy.text(46), UiCopy.text(47), UiCopy.text(48), UiCopy.text(49), UiCopy.text(50)];
+final _teensF = [UiCopy.text(50), UiCopy.text(51), UiCopy.text(52), UiCopy.text(53), UiCopy.text(54), UiCopy.text(55), UiCopy.text(56), UiCopy.text(57), UiCopy.text(58), UiCopy.text(59)];
+final _tens = ['', '', UiCopy.text(60), UiCopy.text(61), UiCopy.text(62), UiCopy.text(63), UiCopy.text(64), UiCopy.text(65), UiCopy.text(66), UiCopy.text(67)];
 
 /// A number up to 99 in feminine Hebrew words (minutes and hours are feminine); digits above that.
 String _words(int n) {
@@ -53,17 +54,17 @@ String _words(int n) {
   if (n <= 10) return _unitsF[n];
   if (n < 20) return _teensF[n - 10];
   final t = _tens[n ~/ 10], u = n % 10;
-  return u == 0 ? t : '$t ו${_unitsF[u]}';
+  return u == 0 ? t : UiCopy.text(68, [t, _unitsF[u]]);
 }
 
 String _unitSpoken(int n, String one, String two, String many) => n == 1 ? one : (n == 2 ? two : '${_words(n)} $many');
 
 /// "עשרים דקות", "שעה ועשרים דקות", "שעתיים".
 String minutesSpoken(int min) {
-  if (min < 60) return _unitSpoken(min, 'דקה', 'שתי דקות', 'דקות');
+  if (min < 60) return _unitSpoken(min, UiCopy.text(69), UiCopy.text(70), UiCopy.text(71));
   final h = min ~/ 60, m = min % 60;
-  final hs = _unitSpoken(h, 'שעה', 'שעתיים', 'שעות');
-  return m == 0 ? hs : '$hs ו${minutesSpoken(m)}';
+  final hs = _unitSpoken(h, UiCopy.text(72), UiCopy.text(73), UiCopy.text(74));
+  return m == 0 ? hs : UiCopy.text(68, [hs, minutesSpoken(m)]);
 }
 
 /// The estimate at [now]; null when there is nothing to show.
@@ -75,8 +76,8 @@ EstimateShown? estimateShown(Estimate e, DateTime now) {
       phase: EstimatePhase.done,
       icon: 'check_circle',
       strong: '',
-      rest: 'הסתיים ב-${minutesText(took)} מתוך ${minutesText(total, unit: false)}',
-      spoken: 'הסתיים ב${minutesSpoken(took)} מתוך ${minutesSpoken(total)}',
+      rest: UiCopy.text(75, [minutesText(took), minutesText(total, unit: false)]),
+      spoken: UiCopy.text(76, [minutesSpoken(took), minutesSpoken(total)]),
     );
   }
   if (!now.isBefore(e.dueAt)) {
@@ -84,9 +85,9 @@ EstimateShown? estimateShown(Estimate e, DateTime now) {
     return EstimateShown(
       phase: EstimatePhase.overdue,
       icon: 'running_with_errors',
-      strong: 'באיחור של ${minutesText(late)}',
-      rest: 'הערכה ${minutesText(total, unit: false)}',
-      spoken: 'באיחור של ${minutesSpoken(late)}, הערכה ${minutesSpoken(total)}',
+      strong: UiCopy.text(77, [minutesText(late)]),
+      rest: UiCopy.text(78, [minutesText(total, unit: false)]),
+      spoken: UiCopy.text(79, [minutesSpoken(late), minutesSpoken(total)]),
     );
   }
   final passed = now.difference(e.createdAt).inMinutes.clamp(0, total);
@@ -97,16 +98,16 @@ EstimateShown? estimateShown(Estimate e, DateTime now) {
       phase: EstimatePhase.near,
       icon: 'hourglass_bottom',
       strong: '',
-      rest: 'נשארו ${minutesText(left)} מתוך ${minutesText(total, unit: false)}',
-      spoken: 'נשארו ${minutesSpoken(left)} מתוך ${minutesSpoken(total)}',
+      rest: UiCopy.text(80, [minutesText(left), minutesText(total, unit: false)]),
+      spoken: UiCopy.text(80, [minutesSpoken(left), minutesSpoken(total)]),
     );
   }
   return EstimateShown(
     phase: EstimatePhase.onTime,
     icon: 'schedule',
     strong: '',
-    rest: 'הערכה ${minutesText(total)} · עברו ${minutesText(passed, unit: false)}',
-    spoken: 'הערכה ${minutesSpoken(total)}, עברו ${minutesSpoken(passed)}',
+    rest: UiCopy.text(81, [minutesText(total), minutesText(passed, unit: false)]),
+    spoken: UiCopy.text(82, [minutesSpoken(total), minutesSpoken(passed)]),
   );
 }
 
@@ -160,6 +161,7 @@ class _EstimateLineState extends State<EstimateLine> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final e = widget.estimate;
     final shown = e == null ? null : estimateShown(e, widget.now ?? CompanyTime.now());
     if (shown == null) return const SizedBox.shrink();

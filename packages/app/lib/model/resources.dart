@@ -1,3 +1,5 @@
+import 'package:agent_company/l10n/input_copy.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 // The "משאבים" screen's data: what each machine holds by project and who waits for room, as hq's `GET /api/resources` sends
 // it (packages/hq/src/resources.ts, leases.ts). Memory is in MB there; the words ("עמוס", "מתמלא") are decided here.
 
@@ -12,12 +14,12 @@ class Reading {
 }
 
 /// The parts of a machine's reading hq could not take, in his words (`unmeasured`).
-const kPartWords = {
-  'memory': 'זיכרון',
-  'disk': 'דיסק',
-  'cgroups': 'פירוט לפי פרויקט',
+Map<String, String> get kPartWords => {
+  'memory': UiCopy.text(643),
+  'disk': UiCopy.text(646),
+  'cgroups': UiCopy.text(950),
   'docker': 'docker',
-  'docker-df': 'מקום של docker',
+  'docker-df': UiCopy.text(951),
 };
 
 class Holder {
@@ -35,7 +37,7 @@ class Holder {
     final mem = _num(j['mem_mb']);
     if (mem == null) return null;
     final project = _str(j['project']);
-    return Holder(project: project, name: _str(j['name']) ?? (project ?? 'לא מזוהה'), memMb: mem.toDouble(), cpuPct: _num(j['cpu_pct'])?.toDouble(), count: _num(j['count'])?.toInt() ?? 1);
+    return Holder(project: project, name: _str(j['name']) ?? (project ?? UiCopy.text(650)), memMb: mem.toDouble(), cpuPct: _num(j['cpu_pct'])?.toDouble(), count: _num(j['count'])?.toInt() ?? 1);
   }
 }
 
@@ -50,9 +52,9 @@ class Unidentified {
   String get readable {
     var last = name.split('/').last.replaceAll(RegExp(r'\.(service|scope|slice)$'), '');
     last = last.replaceAll(RegExp(r'\s*\(.*\)$'), '');
-    if (RegExp(r'^docker-[0-9a-f]{12,}$').hasMatch(last)) return 'קונטיינר docker';
-    if (last.toLowerCase().contains('gradle')) return 'gradle (בנייה)';
-    if (last.toLowerCase().contains('kotlin')) return 'kotlin (בנייה)';
+    if (RegExp(r'^docker-[0-9a-f]{12,}$').hasMatch(last)) return UiCopy.text(952);
+    if (last.toLowerCase().contains('gradle')) return UiCopy.text(953);
+    if (last.toLowerCase().contains('kotlin')) return UiCopy.text(954);
     return last.isEmpty ? name : last;
   }
 
@@ -119,7 +121,7 @@ class MachineRes {
     final used = memUsedMb, total = memTotalMb;
     if (used == null || total == null || total <= 0) return null;
     final f = used / total;
-    return f >= 0.9 ? const Reading('כמעט מלא', warn: true) : f >= 0.75 ? const Reading('עמוס') : const Reading('תקין');
+    return f >= 0.9 ?  Reading(UiCopy.text(955), warn: true) : f >= 0.75 ?  Reading(UiCopy.text(956)) :  Reading(UiCopy.text(957));
   }
 
   /// CPU: the load of the last minute per core. Under half a core each is quiet; over one, work waits for a core.
@@ -127,18 +129,18 @@ class MachineRes {
     final l = load1, c = cpus;
     if (l == null || c == null || c <= 0) return null;
     final f = l / c;
-    return f >= 1 ? const Reading('עמוס מאוד', warn: true) : f >= 0.5 ? const Reading('עמוס') : const Reading('שקט');
+    return f >= 1 ?  Reading(UiCopy.text(958), warn: true) : f >= 0.5 ?  Reading(UiCopy.text(956)) :  Reading(UiCopy.text(115));
   }
 
   /// Disk: hq cleans at 85% and writes to him at 92%.
   Reading? get disk {
     final p = diskPct;
     if (p == null) return null;
-    return p >= 92 ? const Reading('כמעט מלא', warn: true) : p >= 85 ? const Reading('מתמלא', warn: true) : const Reading('תקין');
+    return p >= 92 ?  Reading(UiCopy.text(955), warn: true) : p >= 85 ?  Reading(UiCopy.text(959), warn: true) :  Reading(UiCopy.text(957));
   }
 
   /// Why there is no reading, in a sentence: hq's own Hebrew when it has one, else that the machine did not answer.
-  String get errorWords => error != null && RegExp('[א-ת]').hasMatch(error!) ? error! : 'השרת לא ענה';
+  String get errorWords => error != null && RegExp(InputCopy.v31).hasMatch(error!) ? error! : UiCopy.text(960);
 
   /// The parts hq could not read, as words: they are said, never left out.
   List<String> get unmeasuredWords => [for (final p in unmeasured) if (p != 'memory' && p != 'disk') kPartWords[p] ?? p];

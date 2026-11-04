@@ -69,7 +69,7 @@ Future<void> until(bool Function() ok, {int ms = 5000}) async {
 
 void main() {
   test('hq: "בדקתי" goes to the server, survives a reload, and comes back when the server refused', () async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
     final hq = _Hq();
     await hq.start();
     addTearDown(() => hq.server.close(force: true));
@@ -92,7 +92,7 @@ void main() {
   });
 
   test('hq: a reload while "בדקתי" is on its way does not bring the row back', () async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
     final hq = _Hq();
     await hq.start();
     addTearDown(() => hq.server.close(force: true));

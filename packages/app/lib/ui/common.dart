@@ -1,3 +1,5 @@
+import 'product/product_theme.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 // Shared building blocks, one per mockup CSS class: .ms (Ic), .av (Monogram), .st (StatusWord),
 // .badge (Badge), .btn (Btn), .sec (Section), .list/.row (ListBlock), and the markup text (Rich).
 
@@ -7,6 +9,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../data/backend.dart';
+import '../data/store.dart';
 import '../data/error_report.dart';
 import '../model/models.dart';
 import '../native/open_url.dart';
@@ -20,6 +23,10 @@ export '../model/company_time.dart' show CompanyTime, wall, dayStart, hourStart,
 export 'bidi.dart';
 
 /// `.ms`: a Material Symbols Rounded glyph. [fill] = FILL 1 (active state, APP-SPEC §7.6).
+String backIcon(BuildContext context) => Directionality.of(context) == TextDirection.rtl ? 'arrow_forward' : 'arrow_back';
+String flowIcon(BuildContext context) => Directionality.of(context) == TextDirection.rtl ? 'arrow_back' : 'arrow_forward';
+String chevronIcon(BuildContext context) => Directionality.of(context) == TextDirection.rtl ? 'chevron_left' : 'chevron_right';
+
 class Ic extends StatelessWidget {
   const Ic(this.name, {super.key, this.size = 24, this.fill = false, this.color, this.weight = 400, this.semantic});
   final String name;
@@ -31,6 +38,7 @@ class Ic extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     // Unknown names (e.g. a team symbol from org.yaml the app does not ship) fall back quietly.
     final data = kIcons[name];
     // Glyphs are drawn as-is like the mockup's font (no automatic RTL mirroring): the back arrow
@@ -64,16 +72,22 @@ String statusIcon(WorkerStatus s) => switch (s) {
 
 /// The status word follows the worker's grammatical gender (APP-SPEC §6.2).
 String statusWord(WorkerStatus s, Gender g) {
+  if (!UiCopy.legacy) {
+    final l = UiCopy.copy;
+    return switch (s) { WorkerStatus.working => l.working, WorkerStatus.resting => l.resting,
+      WorkerStatus.free => l.available, WorkerStatus.waiting => l.waiting, WorkerStatus.blocked => l.blocked,
+      WorkerStatus.stuck => l.stuck, WorkerStatus.restarting => l.restarting, WorkerStatus.done => l.done };
+  }
   final f = g == Gender.f;
   return switch (s) {
-    WorkerStatus.free => f ? 'פנויה' : 'פנוי',
-    WorkerStatus.working => f ? 'עובדת' : 'עובד',
-    WorkerStatus.waiting => 'מחכה לך',
-    WorkerStatus.blocked => f ? 'חסומה' : 'חסום',
-    WorkerStatus.stuck => f ? 'תקועה' : 'תקוע',
-    WorkerStatus.restarting => f ? 'קמה מחדש' : 'קם מחדש',
-    WorkerStatus.resting => f ? 'נחה' : 'נח',
-    WorkerStatus.done => 'הושלם',
+    WorkerStatus.free => f ? UiCopy.text(397) : UiCopy.text(398),
+    WorkerStatus.working => f ? UiCopy.text(85) : UiCopy.text(86),
+    WorkerStatus.waiting => UiCopy.text(97),
+    WorkerStatus.blocked => f ? UiCopy.text(136) : UiCopy.text(399),
+    WorkerStatus.stuck => f ? UiCopy.text(400) : UiCopy.text(401),
+    WorkerStatus.restarting => f ? UiCopy.text(402) : UiCopy.text(403),
+    WorkerStatus.resting => f ? UiCopy.text(404) : UiCopy.text(405),
+    WorkerStatus.done => UiCopy.text(406),
   };
 }
 
@@ -85,8 +99,9 @@ bool statusLoud(WorkerStatus s) => s == WorkerStatus.waiting || s == WorkerStatu
 enum AvSize { md, sm, xs }
 
 class Monogram extends StatelessWidget {
-  const Monogram({super.key, required this.letter, this.size = AvSize.md, this.temp = false, this.teamSymbol, this.ringColor, this.symbol, this.tone, this.toned = false});
+  const Monogram({super.key, required this.letter, this.displayName, this.size = AvSize.md, this.temp = false, this.teamSymbol, this.ringColor, this.symbol, this.tone, this.toned = false});
   final String letter;
+  final String? displayName;
 
   /// The circle is filled with its team's identity tone (language-v2 §3), slate when [tone] is null.
   /// Not toned: grey (the system sender).
@@ -107,12 +122,16 @@ class Monogram extends StatelessWidget {
     if (identityId == kSystemId) return Monogram(letter: '', symbol: 'dns', size: size);
     final team = d.teamOf(identityId);
     // A task worker's team carries its project's tone (hq_backend), so a row shows at once which project it is.
-    return Monogram(letter: who.initial, size: size, temp: who.temp, teamSymbol: team?.symbol, ringColor: ring, tone: team?.tone, toned: true);
+    return Monogram(letter: who.initial, displayName: who.name, size: size, temp: who.temp, teamSymbol: team?.symbol, ringColor: ring, tone: team?.tone, toned: true);
   }
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
+    if (StoreScope.maybeOf(context)?.preferences.newInterface == true && symbol == null) {
+      return ProjectMonogram(name: displayName ?? letter, tone: tone, size: switch(size) {AvSize.md => 36, AvSize.sm => 28, AvSize.xs => 22});
+    }
     final (dim, font) = switch (size) { AvSize.md => (42.0, 17.0), AvSize.sm => (34.0, 14.5), AvSize.xs => (22.0, 11.0) };
     final (bg, fg) = toned ? p.identity(tone) : (p.surface3, p.text);
     final circle = Container(
@@ -175,6 +194,7 @@ class StatusWord extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final color = bold ? p.text : p.text2;
     return Row(mainAxisSize: MainAxisSize.min, children: [
@@ -202,6 +222,7 @@ class Badge2 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final (bg, fg) = switch (kind) {
       BadgeKind.plain => (p.surface2, p.text2),
@@ -260,7 +281,7 @@ class _SpinState extends State<Spin> with SingleTickerProviderStateMixin {
   }
 
   @override
-  Widget build(BuildContext context) => RotationTransition(turns: _c, child: widget.child);
+  Widget build(BuildContext context) { UiCopy.watch(context); return RotationTransition(turns: _c, child: widget.child); }
 }
 
 /// `.stat`: "+48 −11" in mono, LTR.
@@ -269,8 +290,7 @@ class DiffStat extends StatelessWidget {
   final String text;
   final double size;
   @override
-  Widget build(BuildContext context) =>
-      Text(ltr(text), textDirection: TextDirection.ltr, style: T.mono(size, lh: size * 1.4).copyWith(color: context.p.text2));
+  Widget build(BuildContext context) { UiCopy.watch(context); return Text(ltr(text), textDirection: TextDirection.ltr, style: T.mono(size, lh: size * 1.4).copyWith(color: context.p.text2)); }
 }
 
 // ───────────────────────────── buttons ─────────────────────────────
@@ -292,6 +312,7 @@ class Btn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final (bg, border, fg) = switch (kind) {
       BtnKind.plain => (p.surface, p.line, p.text),
@@ -349,6 +370,7 @@ class IBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     Widget ic = Ic(icon, fill: fill, color: color ?? context.p.text2);
     if (mirror) ic = Transform.flip(flipX: true, child: ic);
     return Tooltip(
@@ -374,13 +396,7 @@ class LinkText extends StatelessWidget {
   final VoidCallback? onTap;
   final double size;
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap ?? () {},
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: Text(text, style: TextStyle(fontFamily: kFont, fontSize: size, height: 1.4, fontWeight: FontWeight.w700, color: context.p.accent)),
-        ),
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return GestureDetector(onTap: onTap ?? () {}, child: MouseRegion(cursor: SystemMouseCursors.click, child: Text(text, style: TextStyle(fontFamily: kFont, fontSize: size, height: 1.4, fontWeight: FontWeight.w700, color: context.p.accent)))); }
 }
 
 // ───────────────────────────── sections and lists ─────────────────────────────
@@ -393,6 +409,7 @@ class Section extends StatelessWidget {
   final double top;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Padding(
       padding: EdgeInsets.fromLTRB(16, top, 16, 6),
@@ -415,6 +432,7 @@ class ListBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final out = <Widget>[];
     for (var i = 0; i < children.length; i++) {
@@ -442,6 +460,7 @@ class MoreRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Material(
       color: p.surface,
@@ -479,6 +498,7 @@ class DoneLine extends StatelessWidget {
   final String icon;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Padding(
       padding: EdgeInsets.only(top: top),
@@ -499,6 +519,7 @@ class UndoLine extends StatelessWidget {
   final double top;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Padding(
       padding: EdgeInsets.only(top: top),
@@ -511,7 +532,7 @@ class UndoLine extends StatelessWidget {
             onTap: onCancel,
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Text('ביטול', style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+              child: Text(UiCopy.text(18), style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
             ),
           ),
         ]),
@@ -573,6 +594,7 @@ class Rich extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final base = style ?? DefaultTextStyle.of(context).style;
     // Clamped, it is cut only between words (T2): Flutter's own ellipsis cuts inside one ("כב…"). An explicit
     // [overflow] keeps Flutter's (a clamp under an IntrinsicWidth, where a LayoutBuilder can't measure).
@@ -691,25 +713,7 @@ class TopBar extends StatelessWidget {
   final List<Widget> actions;
   final Widget? leading;
   @override
-  Widget build(BuildContext context) => SizedBox(
-        height: 56,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Row(children: [
-            ?leading,
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(children: [
-                  Flexible(child: Text(title ?? '', style: T.bar.copyWith(color: context.p.text), maxLines: 1)),
-                  if (showLink) ...[const SizedBox(width: 10), const LinkHint()],
-                ]),
-              ),
-            ),
-            ...actions,
-          ]),
-        ),
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return SizedBox(height: 56, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Row(children: [?leading, Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Row(children: [Flexible(child: Text(title ?? '', style: T.bar.copyWith(color: context.p.text), maxLines: 1)), if (showLink) ...[const SizedBox(width: 10), const LinkHint()]]))), ...actions]))); }
 }
 
 /// `.big`: Stripe-style large title with a secondary line.
@@ -719,6 +723,7 @@ class BigTitle extends StatelessWidget {
   final String? sub;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
@@ -738,6 +743,7 @@ class Toggle extends StatelessWidget {
   final String label;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Semantics(
       toggled: on,
@@ -775,10 +781,11 @@ class SentNote extends StatelessWidget {
 
   /// Part of a line of text (" · נשלח לטיפול") rather than a line of its own.
   final bool inline;
-  static const text = 'נשלח לטיפול';
+  static String get text => UiCopy.text(407);
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     if (!ErrorReports.instance.active) return const SizedBox.shrink();
     final p = context.p;
     return Text(inline ? ' · $text' : text, style: T.meta.copyWith(color: p.text2));
@@ -817,6 +824,7 @@ class _ShownErrorState extends State<ShownError> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Padding(
       padding: widget.padding,
@@ -854,7 +862,7 @@ class _LoadingWatchState extends State<LoadingWatch> {
   void initState() {
     super.initState();
     _timer = Timer(widget.after, () {
-      reportShown('stuck', 'המסך נתקע בטעינה יותר מ-${widget.after.inSeconds} שניות', screen: widget.screen);
+      reportShown('stuck', UiCopy.text(408, [widget.after.inSeconds]), screen: widget.screen);
       if (mounted) setState(() => stuck = true);
     });
   }
@@ -866,7 +874,5 @@ class _LoadingWatchState extends State<LoadingWatch> {
   }
 
   @override
-  Widget build(BuildContext context) => !stuck
-      ? widget.child
-      : Column(mainAxisSize: MainAxisSize.min, children: [widget.child, const SizedBox(height: 6), const SentNote()]);
+  Widget build(BuildContext context) { UiCopy.watch(context); return !stuck ? widget.child : Column(mainAxisSize: MainAxisSize.min, children: [widget.child, const SizedBox(height: 6), const SentNote()]); }
 }

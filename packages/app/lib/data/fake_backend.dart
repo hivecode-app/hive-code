@@ -1,3 +1,4 @@
+import '../l10n/ui_copy.dart';
 // In-app backend with the mockup's content (docs/app/prototype/index.html), so every screen can be
 // built, tested and shown before hq is live. Behaviour mirrors the mockup script: 3s undo is the
 // UI's job; this class only applies the result, simulates delivery acks and Dana's streaming.
@@ -143,7 +144,7 @@ class FakeBackend extends Backend {
   @override
   Future<CommandResult> dismiss(WaitItem item) async {
     item.state = WaitState.answered;
-    item.answerLine = 'נסגר';
+    item.answerLineBuilder = () => UiCopy.text(279);
     notifyListeners();
     return const CommandResult.ok();
   }
@@ -524,6 +525,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
   ];
 
   return CompanyData(
+    ownerName: 'רן',
     managerId: 'yoav',
     teams: teams,
     identities: ids,

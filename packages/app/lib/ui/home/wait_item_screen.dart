@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // One "מחכה לך" item on a page of its own, for what has no conversation to open: questions and
 // notes from the system (the accounts manager, pairing, failures). The whole text, selectable,
 // links that open, and the answer right there (#55).
@@ -22,6 +23,7 @@ class WaitItemScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final store = StoreScope.of(context);
     final d = store.data;
@@ -41,9 +43,9 @@ class WaitItemScreen extends StatelessWidget {
         child: Column(children: [
           TopBar(
             title: who.name,
-            leading: IBtn('arrow_forward', tip: 'חזרה', onTap: () => Navigator.of(context).maybePop()),
+            leading: IBtn(backIcon(context), tip: UiCopy.text(161), onTap: () => Navigator.of(context).maybePop()),
             actions: [
-              IBtn('content_copy', tip: 'העתקת הטקסט', onTap: () {
+              IBtn('content_copy', tip: UiCopy.text(613), onTap: () {
                 Clipboard.setData(ClipboardData(text: item.body));
               }),
             ],
@@ -60,14 +62,14 @@ class WaitItemScreen extends StatelessWidget {
               if (item.headline != null) ...[
                 Rich(item.headline!, style: T.bar.copyWith(color: p.text)),
                 const SizedBox(height: 6),
-                if (isDecision && item.body.trim().isNotEmpty) Text('פרטים', style: T.small.copyWith(color: p.text2, fontWeight: FontWeight.w700)),
+                if (isDecision && item.body.trim().isNotEmpty) Text(UiCopy.text(288), style: T.small.copyWith(color: p.text2, fontWeight: FontWeight.w700)),
                 if (isDecision && item.body.trim().isNotEmpty) const SizedBox(height: 4),
                 CopySelectionArea(child: Rich(item.body, auto: true, style: bodyStyle)),
               ] else
                 CopySelectionArea(child: Rich(item.body, auto: true, style: isDecision ? bodyStyle.copyWith(fontWeight: FontWeight.w700) : bodyStyle)),
               const SizedBox(height: 20),
               if (item.state == WaitState.answered)
-                DoneLine(item.answerLine ?? item.doneLine ?? 'טופל', icon: item.failed ? 'close' : 'check')
+                DoneLine(item.answerLine ?? item.doneLine ?? UiCopy.text(616), icon: item.failed ? 'close' : 'check')
               else if (decided != null)
                 DecisionLine(icon: pendingIcon(decided), text: pendingLine(decided), onUndo: () => store.cancelUndo(AppStore.decisionKey(item.askId, item.id)))
               else if (pending != null)
@@ -81,13 +83,13 @@ class WaitItemScreen extends StatelessWidget {
                   if (!isAsk)
                     for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.plain, onTap: () => store.answerWait(item, o)),
                   if (item.state != WaitState.notNow)
-                    Btn('לא עכשיו', onTap: () {
+                    Btn(UiCopy.text(508), onTap: () {
                       store.notNow(item);
                       Navigator.of(context).maybePop();
                     }),
                   // Closed without doing it; the worker who asked is told (#74). A finished task closes with "עובד" or "לא עובד".
                   if (item.inboxId != null && item.kind != WaitKind.awaiting)
-                    Btn('סגירה', onTap: () {
+                    Btn(UiCopy.text(84), onTap: () {
                       store.dismiss(item);
                       Navigator.of(context).maybePop();
                     }),
@@ -97,7 +99,7 @@ class WaitItemScreen extends StatelessWidget {
                 const SizedBox(height: 20),
                 Align(
                   alignment: AlignmentDirectional.centerStart,
-                  child: LinkText('לשיחה עם ${who.name}', size: 15, onTap: () {
+                  child: LinkText(UiCopy.text(321, [who.name]), size: 15, onTap: () {
                     if (item.askId != null) ChatScreen.pendingTarget[item.from] = item.askId!;
                     Nav.chat(context, item.from);
                   }),

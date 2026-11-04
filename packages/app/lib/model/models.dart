@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // Domain model of the app. Shapes follow docs/app/chat.md §8 (ChatItem) and the hq DTOs
 // in packages/shared (InboxItemDTO, AskDTO, BoardEntry). Rendering never reads hq JSON directly.
 import 'dart:typed_data';
@@ -7,9 +8,10 @@ enum Gender { f, m }
 /// The owner's and the manager's names, as hq reads them from org.yaml (`/api/board` `names`). hq's own
 /// texts are built from the same names (packages/shared/src/names.ts), so the app reads them back by them.
 class CompanyNames {
-  const CompanyNames({required this.ownerId, required this.owner, required this.ownerGender, required this.managerId, required this.manager, required this.managerGender});
+  const CompanyNames({required this.ownerId, required this.owner, required this.ownerGender, this.placeholder = false, required this.managerId, required this.manager, required this.managerGender});
   /// org.yaml `owner` ("ran"), not the protocol id `owner`.
   final String ownerId;
+  final bool placeholder;
   final String owner;
   final Gender ownerGender;
   final String managerId;
@@ -17,7 +19,7 @@ class CompanyNames {
   final Gender managerGender;
 
   /// Before hq has said (and from an hq too old to say): the defaults of names.ts.
-  static const fallback = CompanyNames(ownerId: 'owner', owner: 'בעל החברה', ownerGender: Gender.m, managerId: 'manager', manager: 'מנהל החברה', managerGender: Gender.m);
+  static CompanyNames get fallback => CompanyNames(ownerId: 'owner', placeholder: true, owner: UiCopy.text(940), ownerGender: Gender.m, managerId: 'manager', manager: UiCopy.text(941), managerGender: Gender.m);
 
   static CompanyNames fromJson(Object? j) {
     if (j is! Map) return fallback;
@@ -34,7 +36,9 @@ class CompanyNames {
 }
 
 /// The names in force: set from every board hq sends (hq_backend.dart).
-CompanyNames companyNames = CompanyNames.fallback;
+CompanyNames? _companyNames;
+CompanyNames get companyNames => _companyNames ?? CompanyNames.fallback;
+set companyNames(CompanyNames value) => _companyNames = value.placeholder ? null : value;
 
 /// Derived status, always shown as icon + word (APP-SPEC §6.2).
 enum WorkerStatus { free, working, waiting, blocked, stuck, restarting, resting, done }
@@ -56,10 +60,10 @@ class Team {
 /// hq itself as a sender: questions and notes from the server (accounts, pairing, failures).
 /// Shown by name and with a symbol, never as a worker called "hq" (#55).
 const kSystemId = 'hq';
-const kSystem = Identity(id: kSystemId, name: 'המערכת', title: 'הודעה מהשרת', teamId: '');
+Identity get kSystem => Identity(id: kSystemId, name: UiCopy.text(942), title: UiCopy.text(943), teamId: '');
 
 /// "לדנה", and "למערכת" (the article drops after ל).
-String toName(String name) => name == kSystem.name ? 'למערכת' : 'ל$name';
+String toName(String name) => name == kSystem.name ? UiCopy.text(944) : UiCopy.text(19, [name]);
 
 class Identity {
   const Identity({
@@ -173,26 +177,30 @@ class WaitItem {
     required this.time,
     required this.kicker,
     required this.body,
-    this.options = const [],
+    List<AskOption> options = const [],
     this.askId,
     this.inboxId,
+    this.sourceKind,
     this.domain,
     this.link,
     this.links = const [],
     this.doneLine,
     this.state = WaitState.open,
-    this.answerLine,
+    String? answerLine,
+    this.answerLineBuilder,
     this.createdAt,
     this.headline,
+    this.action,
     this.ref,
     this.managerNote,
     this.managerNoteBy,
     String? short,
-  }) : short = short ?? kicker;
+  }) : short = short ?? kicker, _answerLine = answerLine, _options = options; // ignore: prefer_initializing_formals
 
   /// The first line in his words ("עדכון לאפליקציה: תמונות בצ'אט"); [body] is the details under it.
   /// Null on items from before workers gave one: the body is all there is.
   final String? headline;
+  final String? action;
 
   /// The manager's note on an escalated ask (hq's `manager_note`): its own line under the card, which stays the asker's.
   /// Null when there is none, and from an hq before the field.
@@ -222,9 +230,11 @@ class WaitItem {
 
   /// One-tap answers (asks, GO). GO uses a primary option with id `go`.
   /// A GO's [askId] is `inbox:<id>`: it has no ask behind it, and is answered through the inbox item.
-  final List<AskOption> options;
+  final List<AskOption> _options;
+  List<AskOption> get options => kind == WaitKind.awaiting ? kAwaitingOptions : _options;
   final String? askId;
   final int? inboxId;
+  final String? sourceKind;
   final String? domain;
 
   /// The one-time tab handoff link from hq (B.9); "פתיחה" goes there. Null when hq gave none.
@@ -236,7 +246,10 @@ class WaitItem {
   /// What the collapsed row says after delivery ("GO נשלח · דנה מתחילה פריסה").
   final String? doneLine;
   WaitState state;
-  String? answerLine;
+  String? _answerLine;
+  String? Function()? answerLineBuilder;
+  String? get answerLine => answerLineBuilder?.call() ?? _answerLine;
+  set answerLine(String? value) { _answerLine = value; answerLineBuilder = null; }
 
   bool get blocking => kind != WaitKind.softAsk && kind != WaitKind.awaiting;
 
@@ -249,10 +262,10 @@ class WaitItem {
 
 /// "עובד" and "לא עובד" on a task he was asked to check (#219). One tap each; "לא עובד" asks for nothing more.
 // #297: "לא רלוונטי" takes it off without telling anyone it failed.
-const kAwaitingOptions = [
-  AskOption(id: 'done', label: 'עובד', primary: true),
-  AskOption(id: 'failed', label: 'לא עובד'),
-  AskOption(id: 'irrelevant', label: 'לא רלוונטי'),
+List<AskOption> get kAwaitingOptions => [
+  AskOption(id: 'done', label: UiCopy.legacy ? UiCopy.text(86) : UiCopy.copy.works, primary: true),
+  AskOption(id: 'failed', label: UiCopy.text(945)),
+  AskOption(id: 'irrelevant', label: UiCopy.text(946)),
 ];
 
 class DecisionByManager {
@@ -337,14 +350,15 @@ class ConversationSummary {
 
 /// How long "השתקה" lasts (hq `POST /api/conversations/:id/mute {for}`); [off] is "ביטול השתקה".
 enum MuteFor {
-  hours8('8h', '8 שעות'),
-  week('week', 'שבוע'),
-  always('always', 'תמיד'),
-  off('off', 'ביטול השתקה');
+  hours8('8h', 947),
+  week('week', 948),
+  always('always', 949),
+  off('off', 165);
 
-  const MuteFor(this.wire, this.label);
+  const MuteFor(this.wire, this.copyId);
   final String wire;
-  final String label;
+  final int copyId;
+  String get label => UiCopy.text(copyId);
 }
 
 // ───────────────────────────── chat items (chat.md §2, §8) ─────────────────────────────
@@ -484,11 +498,13 @@ class ToolCall {
 }
 
 class ToolLine {
-  const ToolLine({required this.icon, required this.label, this.trail, this.outcome = Outcome.ok, this.name, this.call});
+  const ToolLine({required this.icon, required String label, this.labelBuilder, this.trail, this.outcome = Outcome.ok, this.name, this.call}) : _label = label; // ignore: prefer_initializing_formals
   final String icon;
 
   /// LTR detail: a path, a search, a command.
-  final String label;
+  final String _label;
+  final String Function()? labelBuilder;
+  String get label => labelBuilder?.call() ?? _label;
 
   /// Small trailing info: "1–220", "7".
   final String? trail;
@@ -500,15 +516,21 @@ class ToolLine {
 }
 
 class ToolGroup extends ChatItem {
-  ToolGroup({required super.id, required super.ts, required this.summary, required this.tools, this.outcome = Outcome.ok, this.liveLabel, this.elapsed, super.seq});
+  ToolGroup({required super.id, required super.ts, required String summary, required this.tools, this.outcome = Outcome.ok, String? liveLabel, this.elapsed, super.seq}) : _summary = summary, _liveLabel = liveLabel; // ignore: prefer_initializing_formals
 
   /// The Hebrew sentence (built by hq's summarizeTools; locally until hq ships it).
-  String summary;
+  String _summary;
+  String Function()? summaryBuilder;
+  String get summary => summaryBuilder?.call() ?? _summary;
+  set summary(String value) { _summary = value; summaryBuilder = null; }
   final List<ToolLine> tools;
   Outcome outcome;
 
   /// While running, the live tool in bold: "מריץ בדיקות".
-  String? liveLabel;
+  String? _liveLabel;
+  String? Function()? liveLabelBuilder;
+  String? get liveLabel => liveLabelBuilder?.call() ?? _liveLabel;
+  set liveLabel(String? value) { _liveLabel = value; liveLabelBuilder = null; }
   String? elapsed;
 }
 
@@ -631,7 +653,9 @@ class AskCard extends ChatItem {
 }
 
 class GoCard extends AskCard {
+  final String? action;
   GoCard({
+    this.action,
     required super.id,
     required super.ts,
     required super.from,
@@ -642,14 +666,16 @@ class GoCard extends AskCard {
     super.askId,
     super.ref,
     super.seq,
-  }) : super(question: details, options: const [
+  }) : super(question: details, options:  [
           AskOption(id: 'go', label: 'GO', primary: true),
-          AskOption(id: 'not_now', label: 'לא עכשיו'),
+          AskOption(id: 'not_now', label: UiCopy.text(508)),
         ]);
 }
 
 /// A task he is asked to check (task 986), in its worker's conversation: "עובד" or "לא עובד". Its askId is `check:<inbox id>`.
 class CheckCard extends AskCard {
+  @override
+  List<AskOption> get options => kCheckOptions;
   CheckCard({
     required super.id,
     required super.ts,
@@ -664,7 +690,7 @@ class CheckCard extends AskCard {
 }
 
 /// The answers on a task to check: it works, it doesn't, or it isn't relevant any more (#297).
-const kCheckOptions = kAwaitingOptions;
+List<AskOption> get kCheckOptions => kAwaitingOptions;
 
 /// The card's id for a task to check.
 String checkAskId(WaitItem w) => 'check:${w.inboxId}';
@@ -741,8 +767,10 @@ class HandoffCard extends ChatItem {
 }
 
 class ErrorLine extends ChatItem {
-  ErrorLine({required super.id, required super.ts, required this.text, super.seq});
-  final String text;
+  ErrorLine({required super.id, required super.ts, required String text, this.textBuilder, super.seq}) : _text = text; // ignore: prefer_initializing_formals
+  final String _text;
+  final String Function()? textBuilder;
+  String get text => textBuilder?.call() ?? _text;
 }
 
 class UnknownItem extends ChatItem {
@@ -754,9 +782,11 @@ class UnknownItem extends ChatItem {
 enum LivePhase { idle, starting, thinking, writing, tool, compacting, stopped }
 
 class LiveState {
-  const LiveState({this.phase = LivePhase.idle, this.label, this.seconds, this.runningCommand, this.stoppedAt});
+  const LiveState({this.phase = LivePhase.idle, String? label, this.labelBuilder, this.seconds, this.runningCommand, this.stoppedAt}) : _label = label; // ignore: prefer_initializing_formals
   final LivePhase phase;
-  final String? label;
+  final String? _label;
+  final String? Function()? labelBuilder;
+  String? get label => labelBuilder?.call() ?? _label;
   final int? seconds;
 
   /// A Bash command in flight: stop asks first (chat.md §3).

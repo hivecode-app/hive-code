@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // Conversations (APP-SPEC §4.3, mockup screen 2): WhatsApp-like list, one name per worker,
 // Yoav pinned first, status as icon + word, open code changes as +N −M.
 import 'package:flutter/material.dart';
@@ -43,6 +44,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     // The phone: one list by latest activity, the home its first item (convs_v2.dart, task 205).
     if (!widget.compact) return const ConversationsV2();
     assert(() {
@@ -61,7 +63,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     return Container(
       color: p.surface,
       child: Column(children: [
-        TopBar(title: 'שיחות', actions: [IBtn('sort', tip: 'מיון', onTap: () => pickConvSort(context))]),
+        TopBar(title: UiCopy.text(471), actions: [IBtn('sort', tip: UiCopy.text(472), onTap: () => pickConvSort(context))]),
         _QuickSwitch(onChanged: (v) => setState(() => q = v)),
         const WaitingRow(),
         Expanded(
@@ -92,7 +94,7 @@ void newChat(BuildContext context, CompanyData d) {
         expand: false,
         initialChildSize: 0.7,
         builder: (_, sc) => ListView(controller: sc, children: [
-          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 10), child: Text('עובד או צוות. בצוות, ההודעה הולכת לראש הצוות.', style: T.small.copyWith(color: p.text2))),
+          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 10), child: Text(UiCopy.text(473), style: T.small.copyWith(color: p.text2))),
           ListBlock(children: [
             for (final who in d.identities.values)
               InkWell(
@@ -137,11 +139,11 @@ List<ConversationSummary> sortConversations(CompanyData d, List<ConversationSumm
   return [...convs]..sort(cmp);
 }
 
-const kConvSortLabels = {
-  ConvSort.recent: 'אחרון',
-  ConvSort.working: 'עובדים עכשיו למעלה',
-  ConvSort.waiting: 'מחכה לך למעלה',
-  ConvSort.name: 'לפי שם',
+Map<ConvSort, String> get kConvSortLabels => {
+  ConvSort.recent: UiCopy.text(474),
+  ConvSort.working: UiCopy.text(475),
+  ConvSort.waiting: UiCopy.text(476),
+  ConvSort.name: UiCopy.text(477),
 };
 
 /// "השתקה" (8 hours, a week, always) or its undo, from a long press on the row or the chat menu.
@@ -159,12 +161,12 @@ void pickMute(BuildContext context, String identityId) {
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Text(muted ? 'השיחה עם $name מושתקת' : 'השתקת ההתראות מ$name', style: T.name.copyWith(color: p.text)),
+          child: Text(muted ? UiCopy.text(478, [name]) : UiCopy.text(479, [name]), style: T.name.copyWith(color: p.text)),
         ),
         if (!muted)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text('ההודעות ממשיכות להגיע לשיחה, בלי התראה.', style: T.small.copyWith(color: p.text2)),
+            child: Text(UiCopy.text(480), style: T.small.copyWith(color: p.text2)),
           ),
         for (final f in muted ? const [MuteFor.off] : const [MuteFor.hours8, MuteFor.week, MuteFor.always])
           ListTile(
@@ -190,11 +192,11 @@ void pickConvSort(BuildContext context) {
     showDragHandle: true,
     builder: (ctx) => SafeArea(
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text('מיון השיחות', style: T.name.copyWith(color: p.text))),
+        Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text(UiCopy.text(481), style: T.name.copyWith(color: p.text))),
         for (final s in ConvSort.values)
           ListTile(
             title: Text(kConvSortLabels[s]!, style: T.body.copyWith(color: p.text)),
-            trailing: s == store.convSort ? Ic('check', color: p.text, semantic: 'נבחר') : null,
+            trailing: s == store.convSort ? Ic('check', color: p.text, semantic: UiCopy.text(482)) : null,
             onTap: () {
               Navigator.pop(ctx);
               store.setConvSort(s);
@@ -210,6 +212,7 @@ class _QuickSwitch extends StatelessWidget {
   final ValueChanged<String> onChanged;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 10),
@@ -223,7 +226,7 @@ class _QuickSwitch extends StatelessWidget {
           child: TextField(
             onChanged: onChanged,
             style: T.secondary.copyWith(color: p.text, fontSize: 14),
-            decoration: InputDecoration(isCollapsed: true, border: InputBorder.none, hintText: 'מעבר מהיר', hintStyle: T.secondary.copyWith(color: p.text3, fontSize: 14)),
+            decoration: InputDecoration(isCollapsed: true, border: InputBorder.none, hintText: UiCopy.text(483), hintStyle: T.secondary.copyWith(color: p.text3, fontSize: 14)),
           ),
         ),
         const Kbd('Ctrl K'),
@@ -240,6 +243,7 @@ class Fab extends StatelessWidget {
   final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return DecoratedBox(
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Color(0x1A000000), offset: Offset(0, 1), blurRadius: 3)]),
@@ -274,6 +278,7 @@ class UnreadPill extends StatelessWidget {
   final bool muted;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return ExcludeSemantics(
       child: Container(

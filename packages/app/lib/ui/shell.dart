@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // App frame. Phone (<800px): one column + bottom navigation (mockup `.nav`).
 // Desktop (APP-SPEC §8.1): rail · list · main · context, the context column from 1280px.
 import 'package:flutter/material.dart';
@@ -21,6 +22,7 @@ class Shell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final nav = NavScope.of(context);
     final store = StoreScope.of(context);
     nav.onLeaveStatus = store.markStatusSeen;
@@ -83,6 +85,7 @@ class _ErrorBar extends StatelessWidget {
   final String text;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return PositionedDirectional(
       start: 12,
@@ -103,7 +106,7 @@ class _ErrorBar extends StatelessWidget {
                 if (StoreScope.of(context).errorReported) const SentNote(),
               ]),
             ),
-            TextButton(onPressed: StoreScope.read(context).clearError, child: Text('הבנתי', style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700))),
+            TextButton(onPressed: StoreScope.read(context).clearError, child: Text(UiCopy.text(737), style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700))),
           ]),
         ),
       ),
@@ -118,11 +121,11 @@ class NavDest {
   final String label;
 }
 
-const kDests = [
-  NavDest(AppTab.chats, 'chat', 'שיחות'),
-  NavDest(AppTab.status, 'monitor_heart', 'סטטוס'),
-  NavDest(AppTab.projects, 'folder', 'פרויקטים'),
-  NavDest(AppTab.settings, 'settings', 'הגדרות'),
+List<NavDest> get kDests => [
+  NavDest(AppTab.chats, 'chat', UiCopy.text(471)),
+  NavDest(AppTab.status, 'monitor_heart', UiCopy.text(738)),
+  NavDest(AppTab.projects, 'folder', UiCopy.text(631)),
+  NavDest(AppTab.settings, 'settings', UiCopy.text(702)),
 ];
 
 /// Mockup `.nav`: 72dp, pill 56x30 in accent-soft on the active tab, FILL 1 icon,
@@ -131,6 +134,7 @@ class BottomNav extends StatelessWidget {
   const BottomNav({super.key});
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final nav = NavScope.of(context);
     final d = StoreScope.of(context).data;
     final p = context.p;
@@ -171,12 +175,13 @@ class NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final color = on ? p.text : p.text2;
     return Semantics(
       selected: on,
       button: true,
-      label: count != null && count! > 0 ? '${dest.label}, $count ${dest.tab == AppTab.chats ? 'לא נקראו' : 'מחכים לך'}' : dest.label,
+      label: count != null && count! > 0 ? '${dest.label}, $count ${dest.tab == AppTab.chats ? UiCopy.text(739) : UiCopy.text(740)}' : dest.label,
       child: InkWell(
         onTap: onTap,
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -231,18 +236,19 @@ class _FirstLoad extends StatelessWidget {
   const _FirstLoad();
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Column(children: [
-      const TopBar(title: 'החברה', showLink: true),
+       TopBar(title: UiCopy.text(3), showLink: true),
       const SystemBar(),
       Expanded(
         child: Center(
           child: LoadingWatch(
-            screen: 'טעינה ראשונה',
+            screen: UiCopy.text(741),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Spin(child: Ic('progress_activity', size: 20, color: p.text2)),
               const SizedBox(width: 8),
-              Text('מתעדכן', style: T.secondary.copyWith(color: p.text2)),
+              Text(UiCopy.text(640), style: T.secondary.copyWith(color: p.text2)),
             ]),
           ),
         ),

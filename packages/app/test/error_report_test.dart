@@ -55,7 +55,7 @@ Future<void> _settle(WidgetTester tester) async {
 
 void main() {
   setUp(() {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
     r.reset();
     r.appVersion = 'android 42';
   });
@@ -221,7 +221,7 @@ void main() {
         return 200;
       });
       Widget host(String text, {bool report = true}) =>
-          CompanyApp(store: store, themeMode: ThemeMode.light, home: Scaffold(body: ShownError(text, screen: 'הגדרות · מכשירים', report: report)));
+          CompanyApp(store: legacyStore(store), themeMode: ThemeMode.light, home: Scaffold(body: ShownError(text, screen: 'הגדרות · מכשירים', report: report)));
       await tester.pumpWidget(host('השרת לא החזיר את רשימת המכשירים.'));
       await tester.pump();
       await tester.pumpWidget(host('השרת לא החזיר את רשימת המכשירים.'));
@@ -242,7 +242,7 @@ void main() {
         took.add(b);
         return 200;
       });
-      await tester.pumpWidget(CompanyApp(store: store, home: const Scaffold(body: Center(child: LoadingWatch(screen: 'טעינה ראשונה', child: Text('מתעדכן'))))));
+      await tester.pumpWidget(CompanyApp(store: legacyStore(store), home: const Scaffold(body: Center(child: LoadingWatch(screen: 'טעינה ראשונה', child: Text('מתעדכן'))))));
       await tester.pump(const Duration(seconds: 14));
       expect(find.text('נשלח לטיפול'), findsNothing);
       await tester.pump(const Duration(seconds: 2));

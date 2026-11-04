@@ -181,7 +181,7 @@ void main() {
         started: _answer.ts,
         ended: _answer.ts,
       );
-      await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: Scaffold(body: ToolDetails(identityId: 'noa', call: call, onClose: () {}))));
+      await tester.pumpWidget(CompanyApp(store: legacyStore(store), themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: Scaffold(body: ToolDetails(identityId: 'noa', call: call, onClose: () {}))));
       await tester.pumpAndSettle();
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/internal/details-$look.png'));
     });

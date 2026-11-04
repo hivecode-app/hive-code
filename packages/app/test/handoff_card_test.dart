@@ -46,14 +46,14 @@ void main() {
     await loadFonts();
     Motion.frozen = true;
     pinClock(kDemoNow);
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
     tester.view.physicalSize = const Size(390, 900) * 2;
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
     final store = AppStore(_FailingDone());
     await store.start();
     final card = HandoffCard(id: 'a', ts: _ts, what: _amitWhat);
-    await tester.pumpWidget(CompanyApp(store: store, themeMode: ThemeMode.light, home: Scaffold(body: ListView(children: [HandoffCardView(from: 'amit', card: card)]))));
+    await tester.pumpWidget(CompanyApp(store: legacyStore(store), themeMode: ThemeMode.light, home: Scaffold(body: ListView(children: [HandoffCardView(from: 'amit', card: card)]))));
     await tester.pump();
     await tester.tap(find.text('סיימתי'));
     await tester.pumpAndSettle();

@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // Dictation through dictate-server (the owner's Hebrew transcription service, ~/projects/dictate-server).
 // API: POST <base>/transcribe, multipart `audio` (16 kHz mono 16-bit WAV) + `engine`,
 // `Authorization: Bearer <token>` -> {"text", "ms", "engine"}. 401 on a bad token, 502 when the
@@ -32,13 +33,16 @@ import 'dictation_files.dart';
 const kDictateUrl = String.fromEnvironment('DICTATE_URL');
 const kDictateToken = String.fromEnvironment('DICTATE_TOKEN');
 const kDictateRate = 16000;
-const kMicFailed = 'לא הצלחתי להקליט מהמיקרופון. אפשר להכתיב דרך המיקרופון שבמקלדת.';
+String get kMicFailed => UiCopy.text(786);
 
 /// A failure already worded for the owner. [fault]: ours or the service's, so it goes to hq
 /// (error_report.dart); not so for one that is his to fix (a permission, a recording too short).
 class DictationError implements Exception {
-  const DictationError(this.message, {this.fault = true});
-  final String message;
+  const DictationError(String message, {this.fault = true}) : _message = message, copyId = null; // ignore: prefer_initializing_formals
+  const DictationError.localized(this.copyId, {this.fault = true}) : _message = null;
+  final String? _message;
+  final int? copyId;
+  String get message => copyId == null ? _message! : UiCopy.text(copyId!);
   final bool fault;
   @override
   String toString() => message;
@@ -69,9 +73,9 @@ class MicRecorder implements Recorder {
     try {
       allowed = await rec.hasPermission();
     } catch (_) {
-      throw const DictationError(kMicFailed);
+      throw const DictationError.localized(786);
     }
-    if (!allowed) throw const DictationError('אין הרשאה למיקרופון. אפשר לאשר אותה בהגדרות המכשיר ולנסות שוב.', fault: false);
+    if (!allowed) throw  DictationError.localized(787, fault: false);
     await _sub?.cancel();
     _pcm.clear();
     _broken = false;
@@ -79,7 +83,7 @@ class MicRecorder implements Recorder {
       final stream = await rec.startStream(const RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: kDictateRate, numChannels: 1));
       _sub = stream.listen(_pcm.add, onError: (_) => _broken = true);
     } catch (_) {
-      throw const DictationError(kMicFailed);
+      throw const DictationError.localized(786);
     }
   }
 
@@ -90,7 +94,7 @@ class MicRecorder implements Recorder {
     _sub = null;
     final pcm = _pcm.takeBytes();
     // Half a dictation is worse than none: the owner would send it without noticing the gap.
-    if (_broken) throw const DictationError(kMicFailed);
+    if (_broken) throw const DictationError.localized(786);
     return pcm;
   }
 
@@ -162,7 +166,7 @@ class DictateClient {
     final get = _session;
     if (get == null) return (baseUrl, token);
     final s = await get();
-    if (s == null) throw const DictationError('ההכתבה עובדת רק ממכשיר מחובר. צריך להתחבר קודם.', fault: false);
+    if (s == null) throw  DictationError.localized(788, fault: false);
     final hq = s.baseUrl.endsWith('/') ? s.baseUrl.substring(0, s.baseUrl.length - 1) : s.baseUrl;
     return ('$hq/api/dictate', s.token);
   }
@@ -211,22 +215,22 @@ class DictateClient {
       r = await http.Response.fromStream(await _http.send(req));
     } catch (_) {
       if (!abort.isCompleted) abort.complete();
-      throw const DictationError('אין חיבור לשירות ההכתבה, ולכן ההקלטה לא תומללה. אפשר לנסות שוב.');
+      throw  DictationError.localized(789);
     } finally {
       timer?.cancel();
     }
-    if (r.statusCode == 401 && _session != null) throw const DictationError('המכשיר הזה כבר לא מחובר, ולכן ההקלטה לא תומללה. צריך להתחבר מחדש.');
-    if (r.statusCode == 401) throw const DictationError('שירות ההכתבה לא קיבל את הטוקן, ולכן ההקלטה לא תומללה.');
-    if (r.statusCode != 200) throw const DictationError('שירות ההכתבה לא הצליח לתמלל את ההקלטה. אפשר לנסות שוב.');
+    if (r.statusCode == 401 && _session != null) throw  DictationError.localized(790);
+    if (r.statusCode == 401) throw  DictationError.localized(791);
+    if (r.statusCode != 200) throw  DictationError.localized(792);
     try {
       return ((jsonDecode(utf8.decode(r.bodyBytes)) as Map)['text'] as String? ?? '').trim();
     } catch (_) {
-      throw const DictationError('שירות ההכתבה החזיר תשובה לא צפויה. אפשר לנסות שוב.');
+      throw  DictationError.localized(793);
     }
   }
 }
 
-const kNoSpeech = DictationError('לא נשמע דיבור בהקלטה. אפשר לנסות שוב.', fault: false);
+const kNoSpeech = DictationError.localized(794, fault: false);
 
 /// The multipart body handed to the socket a slice at a time, so [_sent] tracks what has left the
 /// device (the socket pulls the next slice only when it has room) and the stall timer sees a slow
@@ -402,7 +406,7 @@ class DictationJobs extends ChangeNotifier {
       final pcm = p.pcm ??= await files.pcm(p.id);
       if (pcm == null) {
         await _drop(p);
-        throw const DictationError('ההקלטה הזו כבר לא שמורה במכשיר.', fault: false);
+        throw  DictationError.localized(795, fault: false);
       }
       final parts = splitPcm(pcm);
       for (var i = 0; i < parts.length; i++) {
@@ -428,8 +432,8 @@ class DictationJobs extends ChangeNotifier {
       p.error = e.message;
       rethrow;
     } catch (_) {
-      p.error = 'ההקלטה לא תומללה.';
-      throw const DictationError('ההקלטה לא תומללה, והיא שמורה במכשיר. אפשר לנסות שוב.');
+      p.error = UiCopy.text(796);
+      throw  DictationError.localized(797);
     } finally {
       p.running = false;
       notifyListeners();

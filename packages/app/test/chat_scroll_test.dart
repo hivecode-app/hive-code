@@ -27,7 +27,7 @@ Conversation _chat(AppStore store, {List<ChatItem> before = const [], int after 
 }
 
 Future<void> pumpScreen(WidgetTester tester, AppStore store, Widget home) async {
-  await tester.pumpWidget(CompanyApp(store: store, themeMode: ThemeMode.light, home: home));
+  await tester.pumpWidget(CompanyApp(store: legacyStore(store), themeMode: ThemeMode.light, home: home));
   await tester.pumpAndSettle();
   expect(tester.takeException(), isNull);
 }

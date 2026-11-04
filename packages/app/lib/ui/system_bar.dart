@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // System status strip (APP-SPEC §4.1): only when something is off, always in words with a time.
 // Connecting and "updated" are not "off": they show as a small word next to the title (LinkHint,
 // §4.2), so the screen never jumps when the link comes up.
@@ -42,15 +43,16 @@ class _SystemBarState extends State<SystemBar> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final st = StoreScope.of(context).status;
     _watch(st.state);
     final p = context.p;
     final (String? icon, String? text, bool spin) = switch (st.state) {
       LinkState.online || LinkState.reconnected => (null, null, false),
-      LinkState.demo => ('info', 'הדגמה · השרת עוד לא מחובר, והתוכן לדוגמה', false),
+      LinkState.demo => ('info', UiCopy.text(750), false),
       LinkState.connecting when !_slow => (null, null, false),
       LinkState.connecting || LinkState.offline =>
-        ('cloud_off', 'אין חיבור לשרת${st.since != null ? ' מ-${st.since}' : ''}. ההתראות הדחופות ממשיכות בטלגרם.', false),
+        ('cloud_off', UiCopy.text(752, [st.since != null ? UiCopy.text(751, [st.since]) : '']), false),
     };
     // Offline: no update strip either, it could not download anyway.
     if (text == null) return const Column(mainAxisSize: MainAxisSize.min, children: [_NotificationsOff(), _GlueUpdateStrip()]);
@@ -94,6 +96,7 @@ class _LinkHintState extends State<LinkHint> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final st = StoreScope.maybeOf(context)?.status.state;
     if (st != _last) {
       _last = st;
@@ -107,12 +110,12 @@ class _LinkHintState extends State<LinkHint> {
       LinkState.connecting when _shown => Row(mainAxisSize: MainAxisSize.min, key: const ValueKey('c'), children: [
           Spin(child: Ic('progress_activity', size: 15, color: p.text2)),
           const SizedBox(width: 4),
-          Text('מתעדכן', style: style),
+          Text(UiCopy.text(640), style: style),
         ]),
       LinkState.reconnected => Row(mainAxisSize: MainAxisSize.min, key: const ValueKey('r'), children: [
           Ic('check', size: 15, color: p.text2),
           const SizedBox(width: 4),
-          Text('עודכן', style: style),
+          Text(UiCopy.text(753), style: style),
         ]),
       _ => const SizedBox.shrink(key: ValueKey('n')),
     };
@@ -125,6 +128,7 @@ class _NotificationsOff extends StatelessWidget {
   const _NotificationsOff();
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final g = kGlue;
     if (g == null) return const SizedBox.shrink();
     final p = context.p;
@@ -139,14 +143,14 @@ class _NotificationsOff extends StatelessWidget {
               child: Row(children: [
                 Ic('notifications_off', size: 17, color: p.text2),
                 const SizedBox(width: 6),
-                Expanded(child: Text('ההתראות כבויות, ולכן שאלות חוסמות לא יגיעו.', style: T.meta.copyWith(color: p.text2))),
+                Expanded(child: Text(UiCopy.text(754), style: T.meta.copyWith(color: p.text2))),
                 TextButton(
                   onPressed: () async {
                     final ok = await NativeBridge.instance.requestNotificationPermission();
                     if (!ok) await NativeBridge.instance.openNotificationSettings();
                     g.notificationsOff.value = !(await NativeBridge.instance.notificationsEnabled());
                   },
-                  child: Text('הפעלה', style: T.meta.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+                  child: Text(UiCopy.text(438), style: T.meta.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
                 ),
               ]),
             ),
@@ -158,6 +162,7 @@ class _GlueUpdateStrip extends StatelessWidget {
   const _GlueUpdateStrip();
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final g = kGlue;
     return g == null || !g.update.supported ? const SizedBox.shrink() : UpdateStrip(update: g.update);
   }
@@ -172,6 +177,7 @@ class UpdateStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     return ListenableBuilder(listenable: update, builder: (context, _) {
       final p = context.p;
       final meta = T.meta.copyWith(color: p.text2);
@@ -179,7 +185,7 @@ class UpdateStrip extends StatelessWidget {
           TextButton(onPressed: onTap, child: Text(label, style: T.meta.copyWith(color: p.accent, fontWeight: FontWeight.w700)));
       final close = IconButton(
         onPressed: update.dismiss,
-        tooltip: 'לא עכשיו',
+        tooltip: UiCopy.text(508),
         visualDensity: VisualDensity.compact,
         icon: Ic('close', size: 17, color: p.text2),
       );
@@ -189,20 +195,20 @@ class UpdateStrip extends StatelessWidget {
         UpdatePhase.available => [
             Ic('system_update', size: 17, color: p.text2),
             const SizedBox(width: 6),
-            Expanded(child: Text('יש גרסה חדשה של האפליקציה.', style: meta)),
-            action('עדכון', update.install),
+            Expanded(child: Text(UiCopy.text(755), style: meta)),
+            action(UiCopy.text(756), update.install),
             close,
           ],
         UpdatePhase.needsPermission => [
             Ic('system_update', size: 17, color: p.text2),
             const SizedBox(width: 6),
-            Expanded(child: Text('יש לאשר התקנת עדכונים בהגדרות.', style: meta)),
-            action('הגדרות', update.install),
+            Expanded(child: Text(UiCopy.text(757), style: meta)),
+            action(UiCopy.text(702), update.install),
             close,
           ],
         UpdatePhase.downloading => [
             Tooltip(
-              message: 'ביטול ההורדה',
+              message: UiCopy.text(758),
               child: InkResponse(
                 onTap: update.cancel,
                 radius: 18,
@@ -226,19 +232,19 @@ class UpdateStrip extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 6),
-            Expanded(child: Text('הורדת הגרסה החדשה · $pct%', style: meta)),
+            Expanded(child: Text(UiCopy.text(759, [pct]), style: meta)),
           ],
         UpdatePhase.installing => [
             Spin(child: Ic('progress_activity', size: 17, color: p.text2)),
             const SizedBox(width: 6),
-            Expanded(child: Text('יש לאשר את ההתקנה בחלון של אנדרואיד.', style: meta)),
+            Expanded(child: Text(UiCopy.text(760), style: meta)),
             close,
           ],
         UpdatePhase.failed => [
             Ic('error', size: 17, color: p.text2),
             const SizedBox(width: 6),
-            Expanded(child: Text('העדכון לא הצליח.${ErrorReports.instance.active ? ' ${SentNote.text}.' : ''}', style: meta)),
-            action('לנסות שוב', update.install),
+            Expanded(child: Text(UiCopy.text(761, [ErrorReports.instance.active ? ' ${SentNote.text}.' : '']), style: meta)),
+            action(UiCopy.text(217), update.install),
             close,
           ],
       };

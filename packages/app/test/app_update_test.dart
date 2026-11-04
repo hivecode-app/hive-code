@@ -77,7 +77,7 @@ void main() {
   });
 
   test('fetchLatestRelease asks the signed-in hq with the device token', () async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
     expect(await fetchLatestRelease(client: MockClient((_) async => fail('no call when signed out'))), isNull);
 
     SharedPreferences.setMockInitialValues({kHqUrl: 'https://app.hq.example.com/hq', kHqToken: 'dev-tok'});

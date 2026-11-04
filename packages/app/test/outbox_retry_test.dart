@@ -42,7 +42,7 @@ const down = CommandResult.fail('אין חיבור לשרת, ולכן הפעול
 List<Map<String, dynamic>> savedOutbox(SharedPreferences p) => (jsonDecode(p.getString('outbox') ?? '[]') as List).cast<Map<String, dynamic>>();
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() => SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false}));
 
   testWidgets('a send that does not reach hq waits, is kept on the device, and goes again with the same id', (tester) async {
     final prefs = await SharedPreferences.getInstance();

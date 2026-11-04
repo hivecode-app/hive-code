@@ -111,7 +111,7 @@ Future<void> pumpScreen(WidgetTester tester, Widget screen, {Size size = const S
 
 void main() {
   group('server', serverTests);
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() => SharedPreferences.setMockInitialValues({'new_interface': false, 'language': 'he', }));
 
   test('login: options → passkey → token, with this device\'s name', () async {
     final hq = FakeHq(), keys = FakePasskeys();
@@ -208,9 +208,9 @@ void main() {
 
   testWidgets('a device hq refuses (revoked elsewhere) forgets its token and returns to sign-in', (tester) async {
     await loadFonts();
-    SharedPreferences.setMockInitialValues({kHqUrl: base, kHqToken: 'tok-revoked'});
+    SharedPreferences.setMockInitialValues({'new_interface': false, 'language': 'he', kHqUrl: base, kHqToken: 'tok-revoked'});
     final refused = MockClient((r) async => http.Response('{"error":"unauthorized"}', 401));
-    await tester.pumpWidget(AuthGate(
+    await tester.pumpWidget(AuthGate(locale: const Locale('he'),
       initial: HqBackend(baseUrl: base, token: 'tok-revoked', client: refused),
       hqUrl: base,
       client: AuthClient(base, client: FakeHq().client, passkeys: FakePasskeys()),
@@ -252,7 +252,7 @@ void main() {
 }
 
 void serverTests() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() => SharedPreferences.setMockInitialValues({'new_interface': false, 'language': 'he', }));
 
   testWidgets('the app asks for the server: a pasted link fills the address and the code, then pairs there', (tester) async {
     final hq = FakeHq();
@@ -290,7 +290,7 @@ void serverTests() {
   testWidgets('opened from a pairing link: sign-in starts with that server and code', (tester) async {
     await loadFonts();
     final link = 'agentcompany://pair?url=${Uri.encodeComponent('https://box.example.net/pair?code=GOOD-CODE')}';
-    await tester.pumpWidget(AuthGate(initial: null, hqUrl: '', askServer: true, pairLink: link,
+    await tester.pumpWidget(AuthGate(locale: const Locale('he'), initial: null, hqUrl: '', askServer: true, pairLink: link,
         client: AuthClient('', client: FakeHq().client, passkeys: FakePasskeys(supported: false))));
     await tester.pumpAndSettle();
     expect(find.text('box.example.net'), findsOneWidget);
@@ -305,7 +305,7 @@ void serverTests() {
 
   testWidgets('a device that was signed out starts sign-in with its last server', (tester) async {
     await loadFonts();
-    await tester.pumpWidget(AuthGate(initial: null, hqUrl: 'https://app.hq.example.com/hq', askServer: true,
+    await tester.pumpWidget(AuthGate(locale: const Locale('he'), initial: null, hqUrl: 'https://app.hq.example.com/hq', askServer: true,
         client: AuthClient('', client: FakeHq().client, passkeys: FakePasskeys())));
     await tester.pumpAndSettle();
     expect(find.text('app.hq.example.com'), findsOneWidget);
@@ -314,9 +314,9 @@ void serverTests() {
 
   testWidgets('switching servers keeps the current one until the new one lets the device in, then leaves the old one', (tester) async {
     await loadFonts();
-    SharedPreferences.setMockInitialValues({kHqUrl: 'https://old.example.net/hq', kHqToken: 'tok-a'});
+    SharedPreferences.setMockInitialValues({'new_interface': false, 'language': 'he', kHqUrl: 'https://old.example.net/hq', kHqToken: 'tok-a'});
     final hq = FakeHq();
-    await tester.pumpWidget(AuthGate(initial: FakeBackend(simulate: false), hqUrl: 'https://old.example.net/hq', askServer: true,
+    await tester.pumpWidget(AuthGate(locale: const Locale('he'), initial: FakeBackend(simulate: false), hqUrl: 'https://old.example.net/hq', askServer: true,
         client: AuthClient('', client: hq.client, passkeys: FakePasskeys(supported: false))));
     await tester.pumpAndSettle();
     expect(find.byType(SignInScreen), findsNothing);
@@ -348,8 +348,8 @@ void serverTests() {
 
   testWidgets('opened from a pairing link for another server while signed in: an offer to switch, and the app stays', (tester) async {
     await loadFonts();
-    SharedPreferences.setMockInitialValues({kHqUrl: 'https://old.example.net/hq', kHqToken: 'tok-a'});
-    await tester.pumpWidget(AuthGate(initial: FakeBackend(simulate: false), hqUrl: 'https://old.example.net/hq', askServer: true,
+    SharedPreferences.setMockInitialValues({'new_interface': false, 'language': 'he', kHqUrl: 'https://old.example.net/hq', kHqToken: 'tok-a'});
+    await tester.pumpWidget(AuthGate(locale: const Locale('he'), initial: FakeBackend(simulate: false), hqUrl: 'https://old.example.net/hq', askServer: true,
         pairLink: 'agentcompany://pair?url=${Uri.encodeComponent('https://new.example.net/pair?code=GOOD-CODE')}',
         client: AuthClient('', client: FakeHq().client, passkeys: FakePasskeys(supported: false))));
     await tester.pumpAndSettle();

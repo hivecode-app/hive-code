@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // Desktop (APP-SPEC §8, mockup screen 10): rail 72 · list 360 · main · context 330 (from 1280px),
 // a hint bar of shortcuts, and the keyboard map of §8.2 on physical keys (works with a Hebrew layout).
 import 'package:flutter/material.dart';
@@ -154,7 +155,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
                       Nav.chat(context, ids.first.id);
                     },
                     style: T.body.copyWith(color: p.text),
-                    decoration: InputDecoration(hintText: 'מעבר מהיר: עובד, שיחה או טיקט', hintStyle: T.body.copyWith(color: p.text3), border: InputBorder.none),
+                    decoration: InputDecoration(hintText: UiCopy.text(586), hintStyle: T.body.copyWith(color: p.text3), border: InputBorder.none),
                   ),
                 ),
                 Divider(height: 1, color: p.line),
@@ -185,7 +186,7 @@ class _DesktopFrameState extends State<DesktopFrame> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: p.surface,
-        title: Text('קיצורי מקלדת', style: T.name.copyWith(color: p.text)),
+        title: Text(UiCopy.text(587), style: T.name.copyWith(color: p.text)),
         content: SizedBox(
           width: 420,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -196,13 +197,14 @@ class _DesktopFrameState extends State<DesktopFrame> {
               ),
           ]),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text('סגירה', style: T.button.copyWith(color: p.accent)))],
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(UiCopy.text(84), style: T.button.copyWith(color: p.accent)))],
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final nav = NavScope.of(context);
     final store = StoreScope.of(context);
     final d = store.data;
@@ -282,17 +284,17 @@ class _DesktopFrameState extends State<DesktopFrame> {
   }
 }
 
-const kShortcuts = [
-  ('Ctrl K', 'מעבר מהיר'),
-  ('Ctrl F', 'חיפוש בשיחה'),
-  ('G  H / C / B / O', 'בית, שיחות, לוח, ארגון'),
-  ('G  D', 'מחכות לך'),
-  ('J / K', 'הבא, הקודם'),
-  ('Enter', 'שליחה אחרי הצעד הנוכחי'),
-  ('Ctrl Enter', 'שליחה עכשיו'),
-  ('Ctrl .', 'עצירת העובד'),
-  ('Esc', 'סגירה בלבד'),
-  ('?', 'כל הקיצורים'),
+List<(String, String)> get kShortcuts => [
+  ('Ctrl K', UiCopy.text(483)),
+  ('Ctrl F', UiCopy.text(162)),
+  ('G  H / C / B / O', UiCopy.text(588)),
+  ('G  D', UiCopy.text(578)),
+  ('J / K', UiCopy.text(589)),
+  ('Enter', UiCopy.text(590)),
+  ('Ctrl Enter', UiCopy.text(591)),
+  ('Ctrl .', UiCopy.text(592)),
+  ('Esc', UiCopy.text(593)),
+  ('?', UiCopy.text(594)),
 ];
 
 class _KeyBar extends StatelessWidget {
@@ -302,6 +304,7 @@ class _KeyBar extends StatelessWidget {
   final bool chat;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     Widget item(List<String> keys, String label) => Row(mainAxisSize: MainAxisSize.min, children: [
           for (final k in keys) ...[Kbd(k), const SizedBox(width: 4)],
@@ -312,14 +315,14 @@ class _KeyBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(color: p.surface, border: Border(top: BorderSide(color: p.line))),
       child: Wrap(spacing: 18, runSpacing: 6, children: [
-        item(['Ctrl K'], 'מעבר מהיר'),
-        item(['Ctrl F'], 'חיפוש בשיחה'),
-        if ((StoreScope.of(context).data?.waitingCount ?? 0) > 0) item(['G', 'D'], 'מחכות לך'),
+        item(['Ctrl K'], UiCopy.text(483)),
+        item(['Ctrl F'], UiCopy.text(162)),
+        if ((StoreScope.of(context).data?.waitingCount ?? 0) > 0) item(['G', 'D'], UiCopy.text(578)),
         if (chat) ...[
-          item(['1', '3'], 'תשובה לשאלה'),
-          item(['Ctrl .'], 'עצירת העובד'),
+          item(['1', '3'], UiCopy.text(595)),
+          item(['Ctrl .'], UiCopy.text(592)),
         ],
-        item(['?'], 'כל הקיצורים'),
+        item(['?'], UiCopy.text(594)),
       ]),
     );
   }
@@ -332,6 +335,7 @@ class _ContextColumn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final store = StoreScope.of(context);
     final d = store.data!;
     final p = context.p;
@@ -360,23 +364,23 @@ class _ContextColumn extends StatelessWidget {
 
     final files = pr != null && pr.fileList.isNotEmpty ? pr.fileList : <DiffFile>[for (final dc in diffs) ...dc.files];
     return ListView(padding: EdgeInsets.zero, children: [
-      h('משימה'),
+      h(UiCopy.text(169)),
       block([
-        if (ticket != null) kv('טיקט', '${ticket.number} ${ticket.title.split(' ').take(2).join(' ')}'),
-        if (presence?.shift != null) kv('משמרת', '${presence!.shift}${presence.shiftSince != null ? ' · מ-${presence.shiftSince}' : ''}'),
-        if (presence?.contextPct != null) kv('הקשר', '${presence!.contextPct}%'),
-        if (presence?.machine != null) kv('מחשב', '`${presence!.machine}`'),
+        if (ticket != null) kv(UiCopy.text(596), '${ticket.number} ${ticket.title.split(' ').take(2).join(' ')}'),
+        if (presence?.shift != null) kv(UiCopy.text(170), '${presence!.shift}${presence.shiftSince != null ? UiCopy.text(171, [presence.shiftSince]) : ''}'),
+        if (presence?.contextPct != null) kv(UiCopy.text(172), '${presence!.contextPct}%'),
+        if (presence?.machine != null) kv(UiCopy.text(173), '`${presence!.machine}`'),
       ]),
       if (pr != null) ...[
         h('PR #${pr.number}'),
         block([
-          kv('CI', pr.ci == Check.ok ? 'עבר' : (pr.ci == Check.running ? 'רץ' : '—')),
-          kv('סקירה', pr.review == Check.ok ? 'עברה' : (pr.review == Check.running ? 'רצה' : '—')),
-          kv('מיזוג', '${who.name} ממזג כשהכול עובר'),
+          kv('CI', pr.ci == Check.ok ? UiCopy.text(597) : (pr.ci == Check.running ? UiCopy.text(551) : '—')),
+          kv(UiCopy.text(281), pr.review == Check.ok ? UiCopy.text(598) : (pr.review == Check.running ? UiCopy.text(87) : '—')),
+          kv(UiCopy.text(599), UiCopy.text(600, [who.name])),
         ]),
       ],
       if (files.isNotEmpty) ...[
-        h('קבצים'),
+        h(UiCopy.text(280)),
         for (final f in files)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),

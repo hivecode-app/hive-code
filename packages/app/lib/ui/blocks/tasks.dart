@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // "בעבודה ובתור" (#128): every task that is not done, wherever it runs. A task opened by Yoav ran under a
 // project worker, or waited in the queue, and showed nowhere he looks; now it is
 // · under whoever opened it in his conversations, one line ("3 משימות · 2 רצות · 1 בתור") that opens the list;
@@ -38,11 +39,11 @@ String openTasksLine(List<OpenTask> tasks) {
   int n(OpenTaskState s) => tasks.where((t) => t.state == s).length;
   final running = n(OpenTaskState.running), queued = n(OpenTaskState.queued), waiting = n(OpenTaskState.waitingForYou), blocked = n(OpenTaskState.blocked);
   return [
-    '${tasks.length} משימות',
-    if (running > 0) running == 1 ? 'אחת רצה' : '$running רצות',
-    if (waiting > 0) waiting == 1 ? 'אחת מחכה לך' : '$waiting מחכות לך',
-    if (queued > 0) '$queued בתור',
-    if (blocked > 0) blocked == 1 ? 'אחת חסומה' : '$blocked חסומות',
+    UiCopy.text(129, [tasks.length]),
+    if (running > 0) running == 1 ? UiCopy.text(130) : UiCopy.text(103, [running]),
+    if (waiting > 0) waiting == 1 ? UiCopy.text(131) : UiCopy.text(132, [waiting]),
+    if (queued > 0) UiCopy.text(99, [queued]),
+    if (blocked > 0) blocked == 1 ? UiCopy.text(133) : UiCopy.text(134, [blocked]),
   ].join(' · ');
 }
 
@@ -55,18 +56,18 @@ String openTasksIcon(List<OpenTask> tasks) {
 }
 
 String stateWord(OpenTask t) => switch (t.state) {
-      OpenTaskState.running => 'רצה',
-      OpenTaskState.queued => t.position == null ? 'בתור' : 'בתור, מקום ${t.position}',
-      OpenTaskState.waitingForYou => 'מחכה לך',
-      OpenTaskState.blocked => 'חסומה',
+      OpenTaskState.running => UiCopy.text(87),
+      OpenTaskState.queued => t.position == null ? UiCopy.text(98) : UiCopy.text(135, [t.position]),
+      OpenTaskState.waitingForYou => UiCopy.text(97),
+      OpenTaskState.blocked => UiCopy.text(136),
     };
 
 /// The second line of a task, in two parts around its estimate: [head] the state word, [tail] who is on it or why it
 /// waits, who opened it, since when.
 ({List<String> head, List<String> tail}) openTaskMetaParts(CompanyData? d, OpenTask t, {required DateTime now, bool opener = true}) {
   String name(String id) => d == null ? id : d.who(id).name;
-  String opened(String id) => d?.who(id).gender == Gender.f ? 'פתחה' : 'פתח';
-  final since = t.since == null ? null : (daysAgo(t.since!, now) <= 0 ? 'מ-${hm(t.since!)}' : 'מ-${dm(t.since!)}');
+  String opened(String id) => d?.who(id).gender == Gender.f ? UiCopy.text(137) : UiCopy.text(138);
+  final since = t.since == null ? null : (daysAgo(t.since!, now) <= 0 ? UiCopy.text(36, [hm(t.since!)]) : UiCopy.text(36, [dm(t.since!)]));
   return (
     head: [stateWord(t)],
     tail: [
@@ -93,6 +94,7 @@ class TasksBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     return AnimatedSize(
       duration: kBlockMotion,
       curve: kBlockCurve,
@@ -123,6 +125,7 @@ class OpenTaskRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data;
     final parts = openTaskMetaParts(d, t, now: now, opener: opener);
@@ -174,12 +177,13 @@ class OpenTasksLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final line = openTasksLine(tasks);
     return Semantics(
       button: true,
-      label: 'מה פתוח: $line',
-      hint: 'פתיחת הרשימה',
+      label: UiCopy.text(139, [line]),
+      hint: UiCopy.text(140),
       excludeSemantics: true,
       child: InkWell(
         onTap: () => showOpenTasks(context, identityId),
@@ -190,7 +194,7 @@ class OpenTasksLine extends StatelessWidget {
             Ic(openTasksIcon(tasks), size: 18, fill: true, color: p.text),
             const SizedBox(width: 4),
             Expanded(child: Rich(line, auto: true, maxLines: 1, style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.45, color: p.text))),
-            Ic('chevron_left', size: 18, color: p.text3),
+            Ic(chevronIcon(context), size: 18, color: p.text3),
           ]),
         ),
       ),
@@ -214,9 +218,9 @@ void showOpenTasks(BuildContext context, String identityId) {
         child: ConstrainedBox(
           constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.7),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text('מה פתוח אצל $name', style: T.name.copyWith(color: p.text))),
+            Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text(UiCopy.text(141, [name]), style: T.name.copyWith(color: p.text))),
             if (tasks.isEmpty)
-              Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 16), child: Text('אין משימות פתוחות', style: T.row2.copyWith(color: p.text2)))
+              Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 16), child: Text(UiCopy.text(142), style: T.row2.copyWith(color: p.text2)))
             else
               Flexible(
                 child: SingleChildScrollView(

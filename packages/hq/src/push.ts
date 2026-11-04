@@ -1,3 +1,4 @@
+import { notificationTitle, productPreferences } from './i18n.ts';
 // Web Push (VAPID) for "blocked on you" and for a worker's message to him (conversations.ts decides which ones
 // may alert), and Telegram for when the app can't reach him (#204). Telegram goes only while the app is not
 // connected (no live link, no device seen in timers.appSeenMs), once per item: a GO, a login or anything urgent,
@@ -83,7 +84,7 @@ export class Pusher {
     if (this.notifying.has(item.id)) return;
     this.notifying.add(item.id);
     try {
-      const payload = JSON.stringify({ id: item.id, kind: item.kind, title: item.title, body: item.body.slice(0, 300), url: `/?inbox=${item.id}` });
+      const payload = JSON.stringify({ id: item.id, kind: item.kind, title: notificationTitle(item, productPreferences(this.cfg.companyDir).owner_language), body: item.body.slice(0, 300), url: `/?inbox=${item.id}` });
       const { subs, delivered, errors } = await this.sendAll(payload);
       this.inbox.markPushed(item.id, subs && !delivered ? errors.join('; ') : null);
       if (subs) this.store.emit(delivered ? 'push.sent' : 'push.failed', item.from_identity, { inbox: item.id, delivered, errors });

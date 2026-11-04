@@ -1,3 +1,5 @@
+import { search } from './search.ts';
+import { productPreferences } from './i18n.ts';
 // HTTP + WebSocket API on 127.0.0.1 (B.8). Token auth on everything except GET /health (heartbeat), the
 // pairing page GET /pair and GET /.well-known/assetlinks.json (pairing.ts), and
 // /api/auth/* (getting a device token: passkey or pairing code, auth.ts). A token is either hq's own
@@ -119,6 +121,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   const route = (method: string, path: string, h: Handler) => r.push([method, new RegExp(`^${path.replace(/:\w+/g, '([^/]+)')}$`), h]);
 
   // timezone: org.yaml's (#121), so the app shows his hours wherever the phone thinks it is.
+  route('GET', '/api/search', ({ url }) => search(hq, url.searchParams.get('q') ?? ''));
   route('GET', '/api/org', () => ({ identities: hq.board(), teams: hq.teams(), timezone: hq.clock() }));
   // awaiting: "מה לבדוק" (#108), finished tasks that wait for a deploy or for him to check (awaiting.ts).
   // asked: "ביקשת" (#118), his requests to workers still waiting for an answer, and answers he hasn't read (asked.ts).
@@ -128,7 +131,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     const identities = hq.board();
     return { identities, tasks: forApp(hq.scheduler.tasks()), open_tasks: hq.openTasks(identities), awaiting: hq.awaiting.list(), asked: hq.home.asked(),
       projects: hq.projects(), slots: { ...hq.scheduler.slots(), nodes: hq.scheduler.nodeSlots() }, probes: hq.probes.summary(), timezone: hq.clock(), manager: hq.cfg.managerId,
-      names: hq.mailbox.names };
+      names: hq.mailbox.names, ...productPreferences(hq.cfg.companyDir) };
   });
 
   // The head of the conversations screen (home.ts): the recipe in force, and a new one. The app says

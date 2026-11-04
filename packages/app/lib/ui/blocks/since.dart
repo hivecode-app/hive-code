@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // "מאז שהיית פה" as a block of its own: the chats card has it at its foot, the home recipe may place it anywhere.
 import 'package:flutter/material.dart';
 
@@ -12,9 +13,9 @@ import 'parts.dart';
 /// "מאז 19:00", "מאז אתמול 22:10", "מאז 18/10".
 String sinceLabel(DateTime since, DateTime now) {
   final ago = daysAgo(since, now);
-  if (ago <= 0) return 'מאז ${hm(since)}';
-  if (ago == 1) return 'מאז אתמול ${hm(since)}';
-  return 'מאז ${dm(since)}';
+  if (ago <= 0) return UiCopy.text(121, [hm(since)]);
+  if (ago == 1) return UiCopy.text(122, [hm(since)]);
+  return UiCopy.text(121, [dm(since)]);
 }
 
 /// Where a finished line leads: the board's task when a composer named it, else the worker who did it, or
@@ -50,6 +51,7 @@ class _SinceBlockState extends State<SinceBlock> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final items = widget.max == null ? widget.data.items : widget.data.items.take(widget.max!).toList();
     if (items.isEmpty) return const SizedBox.shrink();
     return _Since(
@@ -72,6 +74,7 @@ class _Since extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data!;
     final label = sinceLabel(since, now);
@@ -79,8 +82,8 @@ class _Since extends StatelessWidget {
     final second = T.small.copyWith(color: p.text2);
     final head = Semantics(
       button: true,
-      label: '$label, ${done.length == 1 ? 'הסתיים דבר אחד' : 'הסתיימו ${done.length} דברים'}',
-      hint: open ? 'קיפול' : 'פתיחה',
+      label: '$label, ${done.length == 1 ? UiCopy.text(123) : UiCopy.text(124, [done.length])}',
+      hint: open ? UiCopy.text(125) : UiCopy.text(126),
       excludeSemantics: true,
       child: InkWell(
         onTap: onTap,
@@ -104,10 +107,10 @@ class _Since extends StatelessWidget {
                     duration: kBlockMotion,
                     layoutBuilder: (cur, prev) => Stack(alignment: AlignmentDirectional.centerStart, children: [...prev, ?cur]),
                     child: Row(key: ValueKey(open), crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: open
-                        ? [Expanded(child: Text(done.length == 1 ? 'דבר אחד הסתיים' : '${done.length} דברים הסתיימו', maxLines: 1, style: second))]
+                        ? [Expanded(child: Text(done.length == 1 ? UiCopy.text(127) : UiCopy.text(128, [done.length]), maxLines: 1, style: second))]
                         : [
                             Expanded(child: Rich(done.first.text, auto: true, maxLines: 1, style: second)),
-                            if (more > 0) ...[const SizedBox(width: 8), Text('ועוד $more', style: second.copyWith(fontFeatures: kTabular))],
+                            if (more > 0) ...[const SizedBox(width: 8), Text(UiCopy.text(90, [more]), style: second.copyWith(fontFeatures: kTabular))],
                           ]),
                   ),
                 ]),

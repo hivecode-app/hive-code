@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // Small, safe markdown for worker text (chat.md §2.3, §2.11, §5):
 // paragraphs, headings, bullet/numbered lists, > quotes, ``` code blocks ```, and inline markup
 // (`code`, **bold**, #123). Each block gets its own direction from its first strong character.
@@ -195,15 +196,15 @@ List<MdBlock> _parse(String src) {
 /// Where the bubble's time goes: the end of the last line's own direction. A Hebrew last line
 /// ends on the left, an English one on the right; after code the time takes its own line on the
 /// ambient (RTL) end.
-TextDirection markdownEndDirection(String src) {
+TextDirection markdownEndDirection(String src, {TextDirection fallback = TextDirection.rtl}) {
   final blocks = parseMarkdown(src);
-  if (blocks.isEmpty) return TextDirection.rtl;
+  if (blocks.isEmpty) return fallback;
   return switch (blocks.last) {
     MdPara(:final text) => lastLineDirection(text),
     MdHeading(:final text) => paragraphDirection(text),
     MdList(:final items) => paragraphDirection(items.last.text),
     MdQuote(:final text) => lastLineDirection(text),
-    MdTable() || MdCode() => TextDirection.rtl,
+    MdTable() || MdCode() => fallback,
   };
 }
 
@@ -219,6 +220,7 @@ class Markdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final base = T.body.copyWith(color: p.text);
     var blocks = parseMarkdown(src);
@@ -370,13 +372,7 @@ class _CaretState extends State<Caret> with SingleTickerProviderStateMixin {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-        animation: _c,
-        builder: (_, _) => Opacity(
-          opacity: _c.value < 0.5 ? 1 : 0,
-          child: Container(width: 2, height: 16, margin: const EdgeInsetsDirectional.only(start: 1), color: context.p.text),
-        ),
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return AnimatedBuilder(animation: _c, builder: (_, _) => Opacity(opacity: _c.value < 0.5 ? 1 : 0, child: Container(width: 2, height: 16, margin: const EdgeInsetsDirectional.only(start: 1), color: context.p.text))); }
 }
 
 /// Code block (chat.md §2.11): always LTR, mono on a secondary surface, language + copy in a thin
@@ -394,6 +390,7 @@ class _CodeBlockState extends State<CodeBlock> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final lines = widget.code.split('\n');
     final folded = lines.length > 20 && !open;
@@ -423,8 +420,8 @@ class _CodeBlockState extends State<CodeBlock> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 child: Directionality(
-                  textDirection: TextDirection.rtl,
-                  child: Text(open ? 'קיפול' : 'עוד ${lines.length - 20} שורות',
+                  textDirection: Directionality.of(context),
+                  child: Text(open ? UiCopy.text(125) : UiCopy.text(311, [lines.length - 20]),
                       style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
                 ),
               ),
@@ -445,14 +442,5 @@ class _CopyButton extends StatefulWidget {
 class _CopyButtonState extends State<_CopyButton> {
   bool done = false;
   @override
-  Widget build(BuildContext context) => IconButton(
-        tooltip: done ? 'הועתק' : 'העתקה',
-        visualDensity: VisualDensity.compact,
-        iconSize: 16,
-        onPressed: () async {
-          await Clipboard.setData(ClipboardData(text: widget.text));
-          if (mounted) setState(() => done = true);
-        },
-        icon: Ic(done ? 'check' : 'content_copy', size: 16, color: context.p.text2),
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return IconButton(tooltip: done ? UiCopy.text(312) : UiCopy.text(183), visualDensity: VisualDensity.compact, iconSize: 16, onPressed: () async {await Clipboard.setData(ClipboardData(text: widget.text)); if (mounted) setState(() => done = true);}, icon: Ic(done ? 'check' : 'content_copy', size: 16, color: context.p.text2)); }
 }

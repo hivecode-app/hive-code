@@ -1,3 +1,6 @@
+import '../../l10n/app_localizations.dart';
+import '../product/approval.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 // Every chat item kind (chat.md §2), one widget each, matching the mockup's chat classes:
 // .b (bubbles), .tool, .card (diff, tests, terminal, PR, ask, GO), .svc (service lines).
 import 'dart:async';
@@ -7,7 +10,7 @@ import 'package:flutter/services.dart';
 
 import '../../data/backend.dart';
 import '../../data/error_report.dart';
-import '../../data/engine_model.dart' show hebrewOrEmpty, toolHasDetail, toolLabel;
+import '../../data/engine_model.dart' show hebrewOrEmpty, toolHasDetail, toolHasAgentDescription, toolLabel;
 import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
@@ -29,19 +32,22 @@ class Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return LayoutBuilder(builder: (context, c) {
       final maxW = c.maxWidth;
+      final product = StoreScope.maybeOf(context)?.preferences.newInterface == true;
       return Align(
         alignment: out ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart,
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+          margin: EdgeInsets.symmetric(horizontal: product ? 16 : 12, vertical: product ? 5 : 3),
           constraints: BoxConstraints(maxWidth: maxW * (wide ? 0.92 : 0.88), minWidth: wide ? maxW * 0.92 : 0),
-          padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+          padding: product ? const EdgeInsets.symmetric(horizontal: 13, vertical: 9) : const EdgeInsets.fromLTRB(10, 6, 10, 6),
           decoration: BoxDecoration(
             color: out ? p.bubbleOut : p.bubbleIn,
-            boxShadow: p.hairShadow,
-            borderRadius: BorderRadiusDirectional.only(
+            boxShadow: product ? null : p.hairShadow,
+            border: product && !out ? Border.all(color: p.line) : null,
+            borderRadius: product ? BorderRadiusDirectional.only(topStart: const Radius.circular(14), topEnd: const Radius.circular(14), bottomStart: Radius.circular(out ? 14 : 4), bottomEnd: Radius.circular(out ? 4 : 14)) : BorderRadiusDirectional.only(
               topStart: Radius.circular(out ? 10 : 3),
               topEnd: Radius.circular(out ? 3 : 10),
               bottomStart: const Radius.circular(10),
@@ -65,14 +71,15 @@ class Meta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final (String? icon, Color? color, String label) = switch (delivery) {
       null => (null, null, ''),
-      Delivery.pendingConnection => ('schedule', p.text2, 'ממתינה לחיבור'),
-      Delivery.queued => ('schedule', p.text2, 'בתור'),
-      Delivery.delivered => ('check', p.text3, 'נמסר'),
-      Delivery.read || Delivery.handled => ('done_all', p.read, 'נקרא'),
-      Delivery.failed => ('error', p.urgent, 'לא נמסר'),
+      Delivery.pendingConnection => ('schedule', p.text2, UiCopy.text(234)),
+      Delivery.queued => ('schedule', p.text2, UiCopy.text(98)),
+      Delivery.delivered => ('check', p.text3, UiCopy.text(235)),
+      Delivery.read || Delivery.handled => ('done_all', p.read, UiCopy.text(236)),
+      Delivery.failed => ('error', p.urgent, UiCopy.text(237)),
     };
     return Semantics(
       label: '$time $label',
@@ -87,15 +94,12 @@ class Meta extends StatelessWidget {
 /// Text with the time in the bottom corner where the last line ends: left after a Hebrew line,
 /// right after an English one. The last line reserves the room, so the time never covers text.
 class _WithMeta extends StatelessWidget {
-  const _WithMeta({required this.child, required this.meta, this.end = TextDirection.rtl});
+  const _WithMeta({required this.child, required this.meta, this.end});
   final Widget child;
   final Widget meta;
-  final TextDirection end;
+  final TextDirection? end;
   @override
-  Widget build(BuildContext context) => Stack(children: [
-        Padding(padding: const EdgeInsets.only(bottom: 2), child: child),
-        Positioned(bottom: 0, left: end == TextDirection.rtl ? 0 : null, right: end == TextDirection.ltr ? 0 : null, child: meta),
-      ]);
+  Widget build(BuildContext context) { UiCopy.watch(context); return Stack(children: [Padding(padding: const EdgeInsets.only(bottom: 2), child: child), Positioned(bottom: 0, left: (end ?? Directionality.of(context)) == TextDirection.rtl ? 0 : null, right: (end ?? Directionality.of(context)) == TextDirection.ltr ? 0 : null, child: meta)]); }
 }
 
 // ───────────────────────────── user / text ─────────────────────────────
@@ -112,6 +116,7 @@ class UserBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final multi = parseMarkdown(msg.text).length > 1;
     final images = msg.attachments.where((a) => a.isImage).toList();
     final body = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
@@ -127,7 +132,7 @@ class UserBubble extends StatelessWidget {
     final bubble = Bubble(
       out: true,
       queued: msg.delivery == Delivery.queued,
-      child: _WithMeta(meta: Meta(time: hm(msg.ts), delivery: msg.delivery), end: markdownEndDirection(msg.text), child: images.isEmpty ? body : IntrinsicWidth(child: body)), // as wide as the image (or the text), WhatsApp
+      child: _WithMeta(meta: Meta(time: hm(msg.ts), delivery: msg.delivery), end: markdownEndDirection(msg.text, fallback: Directionality.of(context)), child: images.isEmpty ? body : IntrinsicWidth(child: body)), // as wide as the image (or the text), WhatsApp
     );
     final waiting = msg.waitingOn;
     final under = switch (msg.delivery) {
@@ -136,12 +141,12 @@ class UserBubble extends StatelessWidget {
       // Otherwise his `now` is on its way this second: no line.
       Delivery.queued when msg.priority == Priority.now => null,
       Delivery.queued => _QLine(
-          text: 'בתור · ${msg.priority == Priority.later ? 'בסוף התור' : 'אחרי הצעד הנוכחי'} · ',
-          link: 'משיכה חזרה',
+          text: UiCopy.text(238, [msg.priority == Priority.later ? UiCopy.text(230) : UiCopy.text(225)]),
+          link: UiCopy.text(239),
           onTap: onRetract),
-      Delivery.pendingConnection => _QLine(text: 'ממתינה לחיבור · ', link: 'משיכה חזרה', onTap: onRetract),
+      Delivery.pendingConnection => _QLine(text: UiCopy.text(240), link: UiCopy.text(239), onTap: onRetract),
       // hq catches a message it could not deliver by itself (error-watch.ts): "נשלח לטיפול" is true here too.
-      Delivery.failed => _QLine(text: ErrorReports.instance.active ? 'לא נמסר · ${SentNote.text} · ' : 'לא נמסר · ', link: 'ניסיון נוסף', onTap: onRetry),
+      Delivery.failed => _QLine(text: ErrorReports.instance.active ? UiCopy.text(241, [SentNote.text]) : UiCopy.text(242), link: UiCopy.text(243), onTap: onRetry),
       _ => null,
     };
     if (under == null) return bubble;
@@ -159,6 +164,7 @@ class BubbleImages extends StatelessWidget {
   final bool uploading;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     Widget one(int i, {double? side}) => uploading ? _uploading(images[i], side) : _open(context, i, side);
     if (images.length == 1) {
       // widthFactor 1: the bubble is as wide as the image, not the whole row.
@@ -181,7 +187,7 @@ class BubbleImages extends StatelessWidget {
           height: 44,
           decoration: const BoxDecoration(color: Color(0x80000000), shape: BoxShape.circle),
           padding: const EdgeInsets.all(10),
-          child: Semantics(label: 'מעלה את התמונה', child: const CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)),
+          child: Semantics(label: UiCopy.text(244), child: const CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)),
         ),
       ]);
 
@@ -227,7 +233,7 @@ class _AttachmentImageState extends State<AttachmentImage> {
   Future<Uint8List?> _fetch(Backend b, String id) async {
     final d = await b.attachmentData(id);
     if (d == null && b.status.state == LinkState.online) {
-      reportShown('screen', 'תמונה בשיחה לא נטענה', screen: 'תמונה בשיחה');
+      reportShown('screen', UiCopy.text(245), screen: UiCopy.text(246));
       _reported = true;
     }
     return d;
@@ -235,13 +241,14 @@ class _AttachmentImageState extends State<AttachmentImage> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return FutureBuilder<Uint8List?>(
       future: _load,
       builder: (context, snap) {
         final data = snap.data;
         if (data != null) {
-          return Semantics(image: true, label: 'תמונה', child: Image.memory(data, fit: widget.fit, gaplessPlayback: true));
+          return Semantics(image: true, label: UiCopy.text(247), child: Image.memory(data, fit: widget.fit, gaplessPlayback: true));
         }
         return Container(
           width: 200,
@@ -250,10 +257,10 @@ class _AttachmentImageState extends State<AttachmentImage> {
           child: Center(
             child: snap.connectionState == ConnectionState.done
                 ? Column(mainAxisSize: MainAxisSize.min, children: [
-                    Ic('image', size: 32, color: p.text3, semantic: 'התמונה לא נטענה'),
+                    Ic('image', size: 32, color: p.text3, semantic: UiCopy.text(248)),
                     if (_reported) const SentNote(),
                   ])
-                : LoadingWatch(screen: 'תמונה בשיחה', after: const Duration(seconds: 40), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: p.text3))),
+                : LoadingWatch(screen: UiCopy.text(246), after: const Duration(seconds: 40), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: p.text3))),
           ),
         );
       },
@@ -282,56 +289,24 @@ class _ImageViewerState extends State<ImageViewer> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        backgroundColor: const Color(0xF0000000),
-        body: SafeArea(
-          child: Stack(children: [
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: PageView.builder(
-                  controller: _pages,
-                  itemCount: widget.images.length,
-                  onPageChanged: (i) => setState(() => _at = i),
-                  itemBuilder: (_, i) => InteractiveViewer(maxScale: 5, child: Center(child: AttachmentImage(attachment: widget.images[i], fit: BoxFit.contain))),
-                ),
-              ),
-            ),
-            if (widget.images.length > 1)
-              PositionedDirectional(
-                top: 16,
-                end: 16,
-                child: Text('${_at + 1} מתוך ${widget.images.length}', style: const TextStyle(fontFamily: kFont, fontSize: 14, color: Colors.white)),
-              ),
-            PositionedDirectional(
-              top: 4,
-              start: 4,
-              child: IconButton(
-                tooltip: 'סגירה',
-                onPressed: () => Navigator.pop(context),
-                icon: const Ic('close', color: Colors.white),
-              ),
-            ),
-          ]),
-        ),
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return Scaffold(backgroundColor: const Color(0xF0000000), body: SafeArea(child: Stack(children: [Positioned.fill(child: GestureDetector(onTap: () => Navigator.pop(context), child: PageView.builder(controller: _pages, itemCount: widget.images.length, onPageChanged: (i) => setState(() => _at = i), itemBuilder: (_, i) => InteractiveViewer(maxScale: 5, child: Center(child: AttachmentImage(attachment: widget.images[i], fit: BoxFit.contain)))))), if (widget.images.length > 1) PositionedDirectional(top: 16, end: 16, child: Text(UiCopy.text(187, [_at + 1, widget.images.length]), style: const TextStyle(fontFamily: kFont, fontSize: 14, color: Colors.white))), PositionedDirectional(top: 4, start: 4, child: IconButton(tooltip: UiCopy.text(84), onPressed: () => Navigator.pop(context), icon: const Ic('close', color: Colors.white)))]))); }
 }
 
 /// What the tool a message waits for is called in the line under it: (the noun, is it feminine).
 (String, bool) waitingWhat(WaitingOn w) {
   final cmd = w.command;
   if (w.tool == 'Bash' && cmd != null) {
-    if (RegExp(r'\b(deploy|kubectl\s+apply|helm\s+(upgrade|install))\b').hasMatch(cmd)) return ('הפריסה', true);
+    if (RegExp(r'\b(deploy|kubectl\s+apply|helm\s+(upgrade|install))\b').hasMatch(cmd)) return (UiCopy.text(249), true);
     var first = cmd.trim().split(RegExp(r'&&|\|\||[;|\n]')).map((s) => s.trim()).firstWhere((s) => s.isNotEmpty && !s.startsWith('cd '), orElse: () => cmd.trim())
         .replaceAll(RegExp(r'\s*(\d?>&\d|\d?>\s*/dev/null)'), '');
     if (first.length > 24) first = '${first.substring(0, 23)}…';
-    return ('הפקודה `$first`', true);
+    return (UiCopy.text(250, [first]), true);
   }
-  if (w.tool == 'Bash') return ('הפקודה', true);
-  if (w.tool == 'Edit' || w.tool == 'Write' || w.tool == 'NotebookEdit') return ('העריכה', true);
-  if (w.tool == 'Agent' || w.tool == 'Task') return ('העוזר', false);
+  if (w.tool == 'Bash') return (UiCopy.text(251), true);
+  if (w.tool == 'Edit' || w.tool == 'Write' || w.tool == 'NotebookEdit') return (UiCopy.text(252), true);
+  if (w.tool == 'Agent' || w.tool == 'Task') return (UiCopy.text(253), false);
   final name = w.tool.startsWith('mcp__') ? w.tool.split('__').last : w.tool;
-  return ('הכלי `$name`', false);
+  return (UiCopy.text(254, [name]), false);
 }
 
 /// After this long on one tool the line shows how long, and offers to stop it.
@@ -363,6 +338,7 @@ class _WaitLineState extends State<WaitLine> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final (what, f) = waitingWhat(widget.waiting);
     final ran = CompanyTime.now().difference(widget.waiting.since);
@@ -374,7 +350,7 @@ class _WaitLineState extends State<WaitLine> {
         padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
         // No "·" before the link: when the link wraps to its own line, a dot would be left hanging (design review).
         child: Wrap(alignment: WrapAlignment.end, crossAxisAlignment: WrapCrossAlignment.center, spacing: 10, children: [
-          Rich('נכנסת כש$what ${f ? 'תסתיים' : 'יסתיים'}${long ? ' · כבר ${ran.inMinutes} דק׳' : ''}', style: style),
+          Rich(UiCopy.text(258, [what, f ? UiCopy.text(255) : UiCopy.text(256), long ? UiCopy.text(257, [ran.inMinutes]) : '']), style: style),
           if (long && widget.onStop != null)
             Semantics(
               button: true,
@@ -386,7 +362,7 @@ class _WaitLineState extends State<WaitLine> {
                   constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
                   child: Center(
                     widthFactor: 1,
-                    child: Text('עצירה עכשיו', style: style.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+                    child: Text(UiCopy.text(259), style: style.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
                   ),
                 ),
               ),
@@ -404,13 +380,14 @@ class _QLine extends StatelessWidget {
   final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Align(
       alignment: AlignmentDirectional.centerEnd,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text(text, style: TextStyle(fontFamily: kFont, fontSize: 12, height: 1.5, color: p.text2)),
+          Flexible(child: Text(text, style: TextStyle(fontFamily: kFont, fontSize: 12, height: 1.5, color: p.text2))),
           GestureDetector(
             onTap: onTap,
             child: Text(link, style: TextStyle(fontFamily: kFont, fontSize: 12, height: 1.5, color: p.accent, fontWeight: FontWeight.w700)),
@@ -428,6 +405,7 @@ class QuoteStrip extends StatelessWidget {
   final VoidCallback? onClose;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Container(
       margin: const EdgeInsets.only(top: 2, bottom: 5),
@@ -440,11 +418,11 @@ class QuoteStrip extends StatelessWidget {
       child: Row(children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(quote.askId == null ? quote.author : (quote.go ? 'תשובה לבקשת GO של ${quote.author}' : 'תשובה לשאלה של ${quote.author}'), style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, fontWeight: FontWeight.w700, color: p.text)),
+            Text(quote.askId == null ? quote.author : (quote.go ? UiCopy.text(260, [quote.author]) : UiCopy.text(261, [quote.author])), style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, fontWeight: FontWeight.w700, color: p.text)),
             Rich(quote.text, maxLines: 2, overflow: TextOverflow.ellipsis, auto: true, style: TextStyle(fontFamily: kFont, fontSize: 13, height: 1.4, color: p.text2)),
           ]),
         ),
-        if (onClose != null) IconButton(onPressed: onClose, tooltip: 'ביטול הציטוט', icon: Ic('close', size: 18, color: p.text2)),
+        if (onClose != null) IconButton(onPressed: onClose, tooltip: UiCopy.text(262), icon: Ic('close', size: 18, color: p.text2)),
       ]),
     );
   }
@@ -465,6 +443,7 @@ class _TextBubbleState extends State<TextBubble> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     assert(() {
       TextBubble.debugBuilds++;
       return true;
@@ -490,7 +469,7 @@ class _TextBubbleState extends State<TextBubble> {
           onTap: () => setState(() => expanded = true),
           child: Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text('המשך קריאה (עוד ${lines - 30} שורות)', style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+            child: Text(UiCopy.text(263, [lines - 30]), style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
           ),
         ),
     ]);
@@ -500,7 +479,7 @@ class _TextBubbleState extends State<TextBubble> {
       child: _WithMeta(
         meta: Meta(time: hm(m.ts)),
         // Folded: the bottom row is the "continue reading" link on the right, so the time stays left.
-        end: long ? TextDirection.rtl : markdownEndDirection(text),
+        end: long ? Directionality.of(context) : markdownEndDirection(text, fallback: Directionality.of(context)),
         child: images.isEmpty ? body : IntrinsicWidth(child: body), // as wide as the images (or the text), like UserBubble
       ),
     );
@@ -522,6 +501,7 @@ class ServiceLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final style = TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.5, color: strong ? p.text : p.text2, fontWeight: strong ? FontWeight.w700 : FontWeight.w400);
     final pill = Container(
@@ -567,6 +547,7 @@ class InternalMsgRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data;
     if (d == null) return const SizedBox.shrink();
@@ -575,7 +556,7 @@ class InternalMsgRow extends StatelessWidget {
     final name = T.small.copyWith(color: p.text, fontWeight: FontWeight.w700);
     return Semantics(
       button: true,
-      hint: 'פתיחת ההודעה',
+      hint: UiCopy.text(264),
       label: '$from ← $to: $line',
       excludeSemantics: true,
       child: InkWell(
@@ -592,7 +573,7 @@ class InternalMsgRow extends StatelessWidget {
                   Row(children: [
                     // The arrow is an icon: Heebo has no "←", and the fallback face differs by device.
                     Flexible(child: Text(from, maxLines: 1, overflow: TextOverflow.ellipsis, style: name)),
-                    Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Ic('arrow_back', size: 15, color: p.text)),
+                    Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Ic(flowIcon(context), size: 15, color: p.text)),
                     Flexible(child: Text(to, maxLines: 1, overflow: TextOverflow.ellipsis, style: name)),
                     const SizedBox(width: 8),
                     Text(hm(msg.ts), style: T.meta.copyWith(color: p.text3)),
@@ -618,6 +599,7 @@ class InternalGroupRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Semantics(
@@ -632,7 +614,7 @@ class InternalGroupRow extends StatelessWidget {
               child: Row(children: [
                 Ic('forward_to_inbox', size: 18, color: p.text2),
                 const SizedBox(width: 10),
-                Expanded(child: Text('$count הודעות בין העובדים', style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w700))),
+                Expanded(child: Text(UiCopy.text(265, [count]), style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w700))),
                 AnimatedRotation(turns: open ? 0.5 : 0, duration: _fold, child: Ic('expand_more', size: 20, color: p.text2)),
               ]),
             ),
@@ -674,6 +656,7 @@ class _ToolGroupRowState extends State<ToolGroupRow> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final g = widget.group;
     final p = context.p;
     final style = TextStyle(fontFamily: kFont, fontSize: 13.5, height: 1.45, color: p.text2);
@@ -740,6 +723,7 @@ class _ToolItem extends StatelessWidget {
   final String? identityId;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final name = t.name;
     // Rows built without the event (the demo data) have no tool name: the detail alone, as before.
@@ -759,7 +743,7 @@ class _ToolItem extends StatelessWidget {
       );
     }
     final gender = identityId == null ? Gender.m : StoreScope.of(context).data?.who(identityId!).gender ?? Gender.m;
-    final detail = toolHasDetail(name) && name != 'Bash' ? t.label : (name == 'Task' || name == 'Agent') && t.label != 'עוזר' ? t.label : null;
+    final detail = toolHasDetail(name) && name != 'Bash' ? t.label : toolHasAgentDescription(t) ? t.label : null;
     // A command line says nothing to him: its Hebrew description, and without one only "הריץ פקודה" (נועה, 22/10).
     final said = name == 'Bash' ? hebrewOrEmpty((t.call?.input['description'] ?? '').toString()) : '';
     final err = t.outcome == Outcome.error;
@@ -805,6 +789,7 @@ class ChatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return LayoutBuilder(builder: (context, c) {
       final w = c.maxWidth * 0.92;
@@ -856,6 +841,7 @@ class CardAction extends StatelessWidget {
   final bool rotate;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return InkWell(
       onTap: onTap ?? () {},
@@ -877,15 +863,7 @@ class _CardHead extends StatelessWidget {
   final Widget child;
   final Widget? trailing;
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Padding(padding: const EdgeInsets.only(top: 1), child: Ic(icon, size: 19, color: context.p.text2)),
-          const SizedBox(width: 8),
-          Expanded(child: child),
-          if (trailing != null) ...[const SizedBox(width: 8), trailing!],
-        ]),
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return Padding(padding: const EdgeInsets.fromLTRB(12, 10, 12, 4), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Padding(padding: const EdgeInsets.only(top: 1), child: Ic(icon, size: 19, color: context.p.text2)), const SizedBox(width: 8), Expanded(child: child), if (trailing != null) ...[const SizedBox(width: 8), trailing!]])); }
 }
 
 /// File path, always LTR: folders secondary, file name bold, shortened from the start.
@@ -895,6 +873,7 @@ class PathText extends StatelessWidget {
   final double size;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final i = path.lastIndexOf('/');
     final dir = i < 0 ? '' : path.substring(0, i + 1);
@@ -924,6 +903,7 @@ class _DiffCardViewState extends State<DiffCardView> {
   bool open = false;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final c = widget.card;
     final p = context.p;
     final f = c.files.first;
@@ -931,7 +911,7 @@ class _DiffCardViewState extends State<DiffCardView> {
     final add = c.files.fold(0, (s, f) => s + f.add), del = c.files.fold(0, (s, f) => s + f.del);
     return ChatCard(
       footer: [
-        CardAction(icon: 'expand_more', label: 'השינויים', rotate: open, onTap: () => setState(() => open = !open)),
+        CardAction(icon: 'expand_more', label: UiCopy.text(266), rotate: open, onTap: () => setState(() => open = !open)),
         const CardAction(icon: 'open_in_new', label: 'VS Code'),
         if (c.prRef != null) const CardAction(icon: 'call_merge', label: 'PR'),
       ],
@@ -939,7 +919,7 @@ class _DiffCardViewState extends State<DiffCardView> {
         _CardHead(
           icon: 'edit',
           trailing: DiffStat('+$add −$del'),
-          child: many ? Text('${c.files.length} קבצים', style: T.secondary.copyWith(fontWeight: FontWeight.w700, color: p.text)) : PathText(f.path),
+          child: many ? Text(UiCopy.text(267, [c.files.length]), style: T.secondary.copyWith(fontWeight: FontWeight.w700, color: p.text)) : PathText(f.path),
         ),
         if (c.note != null) Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 8), child: Rich(c.note!, style: T.secondary.copyWith(color: p.text2))),
         AnimatedSize(
@@ -959,6 +939,7 @@ class DiffBody extends StatelessWidget {
   final bool showPath;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final mono = T.mono(11.5, lh: 18.4);
     return Container(
@@ -1014,12 +995,13 @@ class TestCardView extends StatelessWidget {
   final TestResultCard card;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
-    final parts = ['בדיקות', '${card.passed} עברו', if (card.failed > 0) '${card.failed} נכשלו', if (card.skipped > 0) '${card.skipped} דולגו'];
+    final parts = [UiCopy.text(268), UiCopy.text(269, [card.passed]), if (card.failed > 0) UiCopy.text(270, [card.failed]), if (card.skipped > 0) UiCopy.text(271, [card.skipped])];
     return ChatCard(children: [
       _CardHead(
         icon: card.failed > 0 ? 'checklist' : 'check',
-        trailing: card.seconds == null ? null : Text("${card.seconds} שנ'", style: T.meta.copyWith(color: p.text2)),
+        trailing: card.seconds == null ? null : Text(UiCopy.text(272, [card.seconds]), style: T.meta.copyWith(color: p.text2)),
         child: Text(parts.join(' · '), style: TextStyle(fontFamily: kFont, fontSize: 14, height: 1.45, fontWeight: FontWeight.w700, color: p.text)),
       ),
       if (card.failures.isNotEmpty)
@@ -1058,6 +1040,7 @@ class TerminalCardView extends StatelessWidget {
   final TerminalCard card;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final mono = T.mono(11.5, lh: 17.8);
     return ChatCard(children: [
@@ -1072,7 +1055,7 @@ class TerminalCardView extends StatelessWidget {
               child: Row(children: [
                 Expanded(child: Text('\$ ${card.command}', maxLines: 1, overflow: TextOverflow.ellipsis, style: mono.copyWith(color: p.text))),
                 IconButton(
-                  tooltip: 'העתקת הפקודה',
+                  tooltip: UiCopy.text(273),
                   visualDensity: VisualDensity.compact,
                   onPressed: () => Clipboard.setData(ClipboardData(text: card.command)),
                   icon: Ic('content_copy', size: 16, color: p.text2),
@@ -1099,9 +1082,9 @@ class TerminalCardView extends StatelessWidget {
       Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
         child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
-          if (card.exitCode != 0) Text('יצא עם שגיאה (${card.exitCode}) · ', style: T.secondary.copyWith(color: p.text, fontWeight: FontWeight.w700)),
+          if (card.exitCode != 0) Text(UiCopy.text(274, [card.exitCode]), style: T.secondary.copyWith(color: p.text, fontWeight: FontWeight.w700)),
           if (card.footer != null) Text('${card.footer} · ', style: T.secondary.copyWith(color: p.text2)),
-          if (card.totalLines != null) LinkText('כל הפלט (${card.totalLines} שורות)', size: 13.5),
+          if (card.totalLines != null) LinkText(UiCopy.text(275, [card.totalLines]), size: 13.5),
         ]),
       ),
     ]);
@@ -1114,16 +1097,17 @@ class PrCardView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     Widget check(String label, Check c) => switch (c) {
           Check.none => const SizedBox.shrink(),
           Check.running => Badge2(label: label, icon: 'progress_activity', spin: true),
           Check.ok => Badge2(label: label, icon: 'check'),
-          Check.failed => Badge2(label: '$label נכשל', icon: 'error'),
+          Check.failed => Badge2(label: UiCopy.text(276, [label]), icon: 'error'),
         };
-    final state = switch (card.state) { PrState.open => 'פתוח', PrState.merged => 'מוזג', PrState.closed => 'נסגר' };
+    final state = switch (card.state) { PrState.open => UiCopy.text(277), PrState.merged => UiCopy.text(278), PrState.closed => UiCopy.text(279) };
     return ChatCard(
-      footer: const [CardAction(icon: 'description', label: 'קבצים'), CardAction(icon: 'open_in_new', label: 'GitHub')],
+      footer:  [CardAction(icon: 'description', label: UiCopy.text(280)), CardAction(icon: 'open_in_new', label: 'GitHub')],
       children: [
         _CardHead(
           icon: 'call_merge',
@@ -1140,9 +1124,9 @@ class PrCardView extends StatelessWidget {
           child: Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
             Badge2(label: state),
             check('CI', card.ci),
-            check('סקירה', card.review),
+            check(UiCopy.text(281), card.review),
             DiffStat('+${card.add} −${card.del}'),
-            Text('${card.files} קבצים', style: TextStyle(fontFamily: kFont, fontSize: 12, color: p.text2)),
+            Text(UiCopy.text(267, [card.files]), style: TextStyle(fontFamily: kFont, fontSize: 12, color: p.text2)),
           ]),
         ),
       ],
@@ -1175,6 +1159,7 @@ class _AskCardViewState extends State<AskCardView> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final card = widget.card;
     final store = StoreScope.of(context);
     final p = context.p;
@@ -1185,8 +1170,17 @@ class _AskCardViewState extends State<AskCardView> {
     final notNow = go && wait?.state == WaitState.notNow && card.state == AskState.open;
     final closed = widget.superseded || notNow || (card.state != AskState.open && card.state != AskState.pending);
     final check = card is CheckCard;
-    final label = go ? 'בקשת GO מ$from' : check ? 'בדיקה מ$from' : 'שאלה מ$from';
+    final label = go ? UiCopy.text(282, [from]) : check ? UiCopy.text(283, [from]) : UiCopy.text(284, [from]);
 
+    if (go && store.preferences.newInterface && wait != null && !closed && pending == null) {
+      final l = AppLocalizations.of(context);
+      return Bubble(out: false, wide: true, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(approvalTitle(context, wait), style: T.name.copyWith(color: p.text)),
+        const SizedBox(height: 4), Text('${store.nameOf(card.from)} · ${store.data!.roleLine(card.from)}', style: T.small.copyWith(color: p.text2)),
+        const SizedBox(height: 10), Align(alignment: AlignmentDirectional.centerStart, child: FilledButton(
+          onPressed: () => showApproval(context, wait), child: Text(wait.action == 'release' ? l.reviewAndRelease : l.approve))),
+      ]));
+    }
     if (pending != null || closed) {
       final (:icon, :text) = pending != null ? (icon: 'check_circle', text: pendingLine(pending)) : closedLine(card, superseded: widget.superseded, notNow: notNow);
       final VoidCallback? undo = pending != null
@@ -1227,7 +1221,7 @@ class _AskCardViewState extends State<AskCardView> {
           alignment: PlaceholderAlignment.middle,
           child: Padding(padding: const EdgeInsetsDirectional.only(end: 4), child: Ic(check ? 'fact_check' : 'front_hand', size: 16, fill: true, color: p.text2)),
         ),
-        TextSpan(text: go ? 'בקשת ${ltr('GO')}' : check ? 'לבדוק' : (card.blocking ? 'שאלה · חוסמת את העבודה' : 'שאלה · יכולה לחכות')),
+        TextSpan(text: go ? UiCopy.text(177, [ltr('GO')]) : check ? UiCopy.text(31) : (card.blocking ? UiCopy.text(285) : UiCopy.text(286))),
         if (!go && card.escalation != null) TextSpan(text: ' · ${card.escalation!.replaceAll(' ', '\u00A0')}'),
         TextSpan(text: ' · ${hm(card.ts)}'),
       ]),
@@ -1248,7 +1242,7 @@ class _AskCardViewState extends State<AskCardView> {
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(details ? 'הסתרת הפרטים' : 'פרטים', style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+            Text(details ? UiCopy.text(287) : UiCopy.text(288), style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
             AnimatedRotation(turns: details ? 0.5 : 0, duration: _fold, child: Ic('expand_more', size: 18, color: p.accent)),
           ]),
         ),
@@ -1275,7 +1269,7 @@ class _AskCardViewState extends State<AskCardView> {
               Semantics(
                 button: true,
                 expanded: details,
-                hint: details ? 'הסתרת הפרטים' : 'פרטים',
+                hint: details ? UiCopy.text(287) : UiCopy.text(288),
                 child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => setState(() => details = !details), child: top),
               )
             else
@@ -1295,13 +1289,14 @@ class DecidedCardView extends StatelessWidget {
   final DecidedCard card;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final by = StoreScope.of(context).nameOf(card.by);
     return ChatCard(children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 2),
         child: Text.rich(
-          TextSpan(children: [TextSpan(text: '$by החליט במקומך', style: TextStyle(color: p.text, fontWeight: FontWeight.w700)), TextSpan(text: ' · ${card.time}')]),
+          TextSpan(children: [TextSpan(text: UiCopy.text(289, [by]), style: TextStyle(color: p.text, fontWeight: FontWeight.w700)), TextSpan(text: ' · ${card.time}')]),
           style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.5, color: p.text2),
         ),
       ),
@@ -1311,7 +1306,7 @@ class DecidedCardView extends StatelessWidget {
           TextSpan(children: [
             ...Rich.spans(context, card.text, T.row2),
             const TextSpan(text: ' '),
-            WidgetSpan(alignment: PlaceholderAlignment.baseline, baseline: TextBaseline.alphabetic, child: LinkText('שינוי', size: 14.5)),
+            WidgetSpan(alignment: PlaceholderAlignment.baseline, baseline: TextBaseline.alphabetic, child: LinkText(UiCopy.text(290), size: 14.5)),
           ]),
           style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.55, color: p.text),
         ),
@@ -1325,6 +1320,7 @@ class PermissionCardView extends StatelessWidget {
   final PermissionCard card;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final store = StoreScope.of(context);
     final from = store.nameOf(card.from);
@@ -1332,7 +1328,7 @@ class PermissionCardView extends StatelessWidget {
     return ChatCard(edge: !done, children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-        child: Text('$from רוצה להריץ פקודה', style: TextStyle(fontFamily: kFont, fontSize: 14, fontWeight: FontWeight.w700, color: p.text)),
+        child: Text(UiCopy.text(291, [from]), style: TextStyle(fontFamily: kFont, fontSize: 14, fontWeight: FontWeight.w700, color: p.text)),
       ),
       Container(
         margin: const EdgeInsets.symmetric(horizontal: 12),
@@ -1344,24 +1340,24 @@ class PermissionCardView extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
           child: DoneLine(switch (card.state) {
-            PermissionState.allowed => 'אושר',
-            PermissionState.allowedForTask => 'אושר לכל המשימה',
-            _ => 'נדחה',
+            PermissionState.allowed => UiCopy.text(292),
+            PermissionState.allowedForTask => UiCopy.text(293),
+            _ => UiCopy.text(294),
           }),
         )
       else
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
           child: Wrap(spacing: 8, runSpacing: 8, children: [
-            Btn('אישור', kind: BtnKind.primary, onTap: () {
+            Btn(UiCopy.text(295), kind: BtnKind.primary, onTap: () {
               card.state = PermissionState.allowed;
               store.touch();
             }),
-            Btn('דחייה', onTap: () {
+            Btn(UiCopy.text(296), onTap: () {
               card.state = PermissionState.denied;
               store.touch();
             }),
-            Btn('אישור לכל המשימה', onTap: () {
+            Btn(UiCopy.text(297), onTap: () {
               card.state = PermissionState.allowedForTask;
               store.touch();
             }),
@@ -1376,6 +1372,7 @@ class FileBubble extends StatelessWidget {
   final FileMsg msg;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final icon = msg.mime.startsWith('image/') ? 'image' : msg.mime == 'application/pdf' ? 'picture_as_pdf' : 'draft';
     final kb = msg.bytes < 1024 * 1024 ? '${(msg.bytes / 1024).round()}KB' : '${(msg.bytes / 1024 / 1024).toStringAsFixed(1)}MB';
@@ -1413,6 +1410,7 @@ class _HandoffCardViewState extends State<HandoffCardView> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final store = StoreScope.of(context);
     final card = widget.card;
@@ -1431,8 +1429,8 @@ class _HandoffCardViewState extends State<HandoffCardView> {
     final Widget foot;
     if (open) {
       foot = Wrap(spacing: 8, runSpacing: 8, children: [
-        Btn('פתיחה', kind: BtnKind.primary, onTap: () => Nav.handoff(context, w)),
-        Btn('סיימתי', onTap: _sending
+        Btn(UiCopy.text(126), kind: BtnKind.primary, onTap: () => Nav.handoff(context, w)),
+        Btn(UiCopy.text(298), onTap: _sending
             ? null
             : () async {
                 setState(() => _sending = true);
@@ -1445,20 +1443,20 @@ class _HandoffCardViewState extends State<HandoffCardView> {
               }),
       ]);
     } else if (card.failed) {
-      foot = const DoneLine('הבקשה לא הגיעה אליך, והעובד קיבל שגיאה', top: 0, icon: 'close');
+      foot =  DoneLine(UiCopy.text(299), top: 0, icon: 'close');
     } else if (done) {
-      foot = const DoneLine('בוצע', top: 0);
+      foot =  DoneLine(UiCopy.text(300), top: 0);
     } else if (card.ended) {
-      foot = const DoneLine('הבקשה נסגרה', top: 0);
+      foot =  DoneLine(UiCopy.text(301), top: 0);
     } else {
-      foot = const DoneLine('מכין קישור…', top: 0, icon: 'schedule');
+      foot =  DoneLine(UiCopy.text(302), top: 0, icon: 'schedule');
     }
     return ChatCard(edge: open, children: [
       _CardHead(
         icon: 'lock',
         child: Text.rich(
           TextSpan(children: [
-            TextSpan(text: 'בקשה בדפדפן', style: TextStyle(fontWeight: FontWeight.w700, color: p.text)),
+            TextSpan(text: UiCopy.text(303), style: TextStyle(fontWeight: FontWeight.w700, color: p.text)),
             if (domain.isNotEmpty) ...[const TextSpan(text: ' · '), TextSpan(text: ltr(domain), style: T.mono(12.5))],
           ]),
           style: T.secondary.copyWith(color: p.text2),
@@ -1492,15 +1490,16 @@ class LiveIndicator extends StatelessWidget {
   final Gender gender;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final f = gender == Gender.f;
     final (String? icon, String? text, bool spin) = switch (live.phase) {
       LivePhase.idle || LivePhase.writing => (null, null, false),
-      LivePhase.starting => ('check', live.label ?? 'נמסר · $name ${f ? 'מתחילה' : 'מתחיל'}…', false),
-      LivePhase.thinking => (null, "${f ? 'חושבת' : 'חושב'}${live.seconds != null ? " · ${live.seconds} שנ'" : ''}", false),
-      LivePhase.tool => ('progress_activity', '${live.label ?? (f ? 'עובדת' : 'עובד')}${live.seconds != null ? ' · ${live.seconds! ~/ 60}:${(live.seconds! % 60).toString().padLeft(2, '0')}' : ''}', true),
-      LivePhase.compacting => ('progress_activity', 'מסדר את הזיכרון', true),
-      LivePhase.stopped => ('stop_circle', '${f ? 'נעצרה' : 'נעצר'} · ${live.stoppedAt ?? ''}', false),
+      LivePhase.starting => ('check', live.label ?? UiCopy.text(306, [name, f ? UiCopy.text(304) : UiCopy.text(305)]), false),
+      LivePhase.thinking => (null, "${f ? UiCopy.text(307) : UiCopy.text(308)}${live.seconds != null ? UiCopy.text(309, [live.seconds]) : ''}", false),
+      LivePhase.tool => ('progress_activity', '${live.label ?? (f ? UiCopy.text(85) : UiCopy.text(86))}${live.seconds != null ? ' · ${live.seconds! ~/ 60}:${(live.seconds! % 60).toString().padLeft(2, '0')}' : ''}', true),
+      LivePhase.compacting => ('progress_activity', UiCopy.text(310), true),
+      LivePhase.stopped => ('stop_circle', '${f ? UiCopy.text(159) : UiCopy.text(160)} · ${live.stoppedAt ?? ''}', false),
     };
     if (text == null) return const SizedBox.shrink();
     if (live.phase == LivePhase.stopped) return ServiceLine(text: text, icon: icon);
@@ -1546,21 +1545,7 @@ class _DotsState extends State<_Dots> with SingleTickerProviderStateMixin {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-        animation: _c,
-        builder: (_, _) => Row(mainAxisSize: MainAxisSize.min, children: [
-          for (var i = 0; i < 3; i++)
-            Container(
-              width: 4,
-              height: 4,
-              margin: const EdgeInsets.symmetric(horizontal: 1.5),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: context.p.text2.withValues(alpha: ((_c.value * 3 - i) % 3) < 1 ? 1 : 0.35),
-              ),
-            ),
-        ]),
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return AnimatedBuilder(animation: _c, builder: (_, _) => Row(mainAxisSize: MainAxisSize.min, children: [for (var i = 0; i < 3; i++) Container(width: 4, height: 4, margin: const EdgeInsets.symmetric(horizontal: 1.5), decoration: BoxDecoration(shape: BoxShape.circle, color: context.p.text2.withValues(alpha: ((_c.value * 3 - i) % 3) < 1 ? 1 : 0.35)))])); }
 }
 
 /// The question the desktop's number keys answer in a conversation: the newest open one that isn't a GO.

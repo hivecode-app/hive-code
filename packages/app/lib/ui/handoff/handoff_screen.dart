@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // Tab handoff (APP-SPEC §9, mockup screen 8): what the worker needs on a site, the domain from the
 // server's browser (not editable), a code field the SMS autofill can fill, and three exits.
 // The live page from the worker's tab comes with #50; until then the screen shows the request
@@ -61,7 +62,7 @@ class _HandoffScreenState extends State<HandoffScreen> {
     final r = item.askId != null
         ? await store.backend.freeAnswer(item.askId!, c)
         : !store.data!.canChat(item.from)
-            ? const CommandResult.fail('לבקשה הזאת אין למי לשלוח קוד. אפשר לסמן "סיימתי".')
+            ?  CommandResult.fail(UiCopy.text(601))
             : await store.backend.send(item.from, UserMsg(id: 'm-${DateTime.now().millisecondsSinceEpoch}', ts: CompanyTime.now(), text: c));
     if (!mounted) return;
     if (!r.ok) {
@@ -88,6 +89,7 @@ class _HandoffScreenState extends State<HandoffScreen> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final store = StoreScope.of(context);
     final who = store.data!.who(widget.item.from);
@@ -103,15 +105,15 @@ class _HandoffScreenState extends State<HandoffScreen> {
               padding: const EdgeInsets.fromLTRB(4, 2, 4, 10),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
-                  IBtn('close', tip: 'סגירה', onTap: () => Navigator.of(context).maybePop()),
+                  IBtn('close', tip: UiCopy.text(84), onTap: () => Navigator.of(context).maybePop()),
                   const SizedBox(width: 4),
-                  Expanded(child: Text('${who.name} · כניסה לאתר', style: TextStyle(fontFamily: kFont, fontSize: 16, fontWeight: FontWeight.w700, color: p.text))),
+                  Expanded(child: Text(UiCopy.text(602, [who.name]), style: TextStyle(fontFamily: kFont, fontSize: 16, fontWeight: FontWeight.w700, color: p.text))),
                 ]),
                 if (domain != null && domain.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: Semantics(
-                      label: 'הדומיין מהדפדפן של השרת: $domain',
+                      label: UiCopy.text(603, [domain]),
                       child: Container(
                         height: 26,
                         padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -131,7 +133,7 @@ class _HandoffScreenState extends State<HandoffScreen> {
                 child: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 16), children: [
                   Rich(widget.item.body, auto: true, style: T.body.copyWith(color: p.text)),
                   const SizedBox(height: 20),
-                  Text('קוד', style: T.small.copyWith(color: p.text2, fontWeight: FontWeight.w700)),
+                  Text(UiCopy.text(604), style: T.small.copyWith(color: p.text2, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 6),
                   TextField(
                     key: const Key('handoff-code'),
@@ -147,14 +149,14 @@ class _HandoffScreenState extends State<HandoffScreen> {
                     style: T.mono(16, w: FontWeight.w500).copyWith(color: p.text),
                     decoration: InputDecoration(
                       isDense: true,
-                      hintText: 'קוד אימות או קוד מהאתר',
+                      hintText: UiCopy.text(605),
                       hintTextDirection: TextDirection.rtl,
                       hintStyle: T.body.copyWith(color: p.text3),
                       filled: true,
                       fillColor: p.surface2,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
                       suffixIcon: IconButton(
-                        tooltip: 'הדבקה',
+                        tooltip: UiCopy.text(606),
                         icon: Ic('content_paste', size: 20, color: p.text2),
                         onPressed: () async {
                           final t = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
@@ -167,9 +169,9 @@ class _HandoffScreenState extends State<HandoffScreen> {
                   const SizedBox(height: 10),
                   Align(
                     alignment: AlignmentDirectional.centerStart,
-                    child: Btn(busy ? 'שולח…' : 'שליחת הקוד ${toName(who.name)}', kind: BtnKind.primary, onTap: busy || code.text.trim().isEmpty ? null : _send),
+                    child: Btn(busy ? UiCopy.text(607) : UiCopy.text(608, [toName(who.name)]), kind: BtnKind.primary, onTap: busy || code.text.trim().isEmpty ? null : _send),
                   ),
-                  if (error != null) ShownError(error!, screen: 'העברה אליך', padding: const EdgeInsets.only(top: 10), report: errorFault),
+                  if (error != null) ShownError(error!, screen: UiCopy.text(609), padding: const EdgeInsets.only(top: 10), report: errorFault),
                 ]),
               ),
             ),
@@ -178,15 +180,15 @@ class _HandoffScreenState extends State<HandoffScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(children: [
                 // A code typed and not sent yet goes first; "סיימתי" never drops it.
-                Expanded(child: Btn('סיימתי', hpad: 8, onTap: busy ? null : (code.text.trim().isEmpty ? _done : _send))),
+                Expanded(child: Btn(UiCopy.text(298), hpad: 8, onTap: busy ? null : (code.text.trim().isEmpty ? _done : _send))),
                 const SizedBox(width: 8),
-                Expanded(child: Btn('לא עכשיו', hpad: 8, onTap: () {
+                Expanded(child: Btn(UiCopy.text(508), hpad: 8, onTap: () {
                   store.notNow(widget.item);
                   Navigator.of(context).maybePop();
                 })),
                 if (store.data!.canChat(who.id)) ...[
                   const SizedBox(width: 8),
-                  Expanded(child: Btn('הודעה ל${who.name}', hpad: 8, onTap: () {
+                  Expanded(child: Btn(UiCopy.text(203, [who.name]), hpad: 8, onTap: () {
                     Navigator.of(context).maybePop();
                     Nav.chat(context, who.id, focus: true);
                   })),
@@ -203,9 +205,9 @@ class _HandoffScreenState extends State<HandoffScreen> {
                   child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                     Ic('check', size: 44, color: p.text),
                     const SizedBox(height: 8),
-                    Text('תודה. ${who.name} ממשיך.', style: TextStyle(fontFamily: kFont, fontSize: 17, fontWeight: FontWeight.w700, color: p.text)),
+                    Text(UiCopy.text(610, [who.name]), style: TextStyle(fontFamily: kFont, fontSize: 17, fontWeight: FontWeight.w700, color: p.text)),
                     const SizedBox(height: 4),
-                    Text('הדף נסגר לבד', style: T.secondary.copyWith(color: p.text2)),
+                    Text(UiCopy.text(611), style: T.secondary.copyWith(color: p.text2)),
                   ]),
                 ),
               ),

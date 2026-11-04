@@ -1,3 +1,5 @@
+import 'package:agent_company/l10n/ui_copy.dart';
+import 'search.dart';
 // The one interface between the UI and a company backend.
 // FakeBackend (mockup content) and HqBackend (packages/hq HTTP+WS) both implement it;
 // lib/data/backend_select.dart picks one, and that is the only line that changes.
@@ -36,11 +38,17 @@ class CompanyData {
     this.asked = const [],
     this.home,
     this.managerId = '',
+    this.ownerLanguage = 'en',
+    this.ownerName = '',
+    this.advancedMode = false,
     this._openTasks,
   });
 
   /// The company's manager (hq's `manager`, from org.yaml): pinned first in the conversations. '' = an hq that does not say.
   final String managerId;
+  final String ownerLanguage;
+  final String ownerName;
+  final bool advancedMode;
 
   final Map<String, Team> teams;
   final Map<String, Identity> identities;
@@ -150,10 +158,13 @@ typedef RecentLine = ({String id, String text, DateTime at, bool mine});
 
 /// Result of a command that reaches the server. Failure text is one plain sentence (design-taste §7).
 class CommandResult {
-  const CommandResult.ok() : ok = true, error = null, transient = false, gone = false;
-  const CommandResult.fail(this.error, {this.transient = false, this.gone = false}) : ok = false;
+  const CommandResult.ok() : ok = true, _error = null, copyId = null, transient = false, gone = false;
+  const CommandResult.fail(String? error, {this.transient = false, this.gone = false}) : _error = error, copyId = null, ok = false; // ignore: prefer_initializing_formals
+  const CommandResult.localized(this.copyId, {this.transient = false, this.gone = false}) : _error = null, ok = false;
   final bool ok;
-  final String? error;
+  final String? _error;
+  final int? copyId;
+  String? get error => copyId == null ? _error : UiCopy.text(copyId!);
 
   /// It never got an answer from hq (no link, a timeout, the proxy while hq restarts): the same
   /// request may go again later. A refusal (4xx) is not transient.
@@ -194,6 +205,10 @@ abstract class Backend extends ChangeNotifier {
   String get label;
 
   Future<void> start();
+  /// Reformat client-derived labels from retained input, without changing worker content.
+  void relocalize() {}
+
+  Future<List<SearchHit>> search(String query) async => searchLocal(data, query);
 
   Future<CommandResult> answerAsk(String askId, AskOption option, {String? from});
   /// Free text (and images, [UserMsg.attachments] style) as the answer to a question.
@@ -236,7 +251,7 @@ abstract class Backend extends ChangeNotifier {
   Future<AccountsView?> accounts() async => null;
 
   /// "כולם ל-X": new shifts go to [name], live ones move at their next turn boundary. null = automatic.
-  Future<CommandResult> pinAccount(String? name) async => const CommandResult.fail('אין חשבונות בהדגמה.');
+  Future<CommandResult> pinAccount(String? name) async =>  CommandResult.localized(784);
 
   /// Called when a conversation opens (hq: replay events for that identity).
   Future<void> openConversation(String identityId) async {}
@@ -279,5 +294,5 @@ abstract class Backend extends ChangeNotifier {
   Future<MapBody?> companyMessage(String id) async => null;
 
   /// "השתקה" for 8 hours, a week or always, or its undo; kept on the server, the same on every device.
-  Future<CommandResult> mute(String identityId, MuteFor duration) async => const CommandResult.fail('השתקה לא זמינה כאן.');
+  Future<CommandResult> mute(String identityId, MuteFor duration) async =>  CommandResult.localized(785);
 }

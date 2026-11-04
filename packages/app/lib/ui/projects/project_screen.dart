@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // One project (#53): its team, each with what they are doing now; then its open tasks and the ones
 // that finished, task workers included. A standing team without a project shows its team only.
 import 'package:flutter/material.dart';
@@ -28,6 +29,7 @@ class _ProjectScreenState extends State<ProjectScreen> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final d = StoreScope.of(context).data!;
     final p = context.p;
     final proj = d.projects.where((x) => x.id == widget.projectId).firstOrNull;
@@ -50,35 +52,35 @@ class _ProjectScreenState extends State<ProjectScreen> {
       backgroundColor: p.bg,
       body: SafeArea(
         child: Column(children: [
-          TopBar(title: proj?.name ?? team?.name ?? '', leading: IBtn('arrow_forward', tip: 'חזרה', onTap: () => Navigator.of(context).maybePop())),
+          TopBar(title: proj?.name ?? team?.name ?? '', leading: IBtn(backIcon(context), tip: UiCopy.text(161), onTap: () => Navigator.of(context).maybePop())),
           Expanded(
             child: ListView(padding: EdgeInsets.zero, children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
                 child: Text(
-                  [if (lead != null) 'ראש צוות: ${lead.name}', members.length == 1 ? 'עובד קבוע אחד' : '${members.length} עובדים קבועים', if (proj != null) openTasksLineShort(open.length)].join(' · '),
+                  [if (lead != null) UiCopy.text(618, [lead.name]), members.length == 1 ? UiCopy.text(619) : UiCopy.text(620, [members.length]), if (proj != null) openTasksLineShort(open.length)].join(' · '),
                   style: T.secondary.copyWith(color: p.text2),
                 ),
               ),
-              Section('הצוות', count: '${members.length}', top: 10),
+              Section(UiCopy.text(621), count: '${members.length}', top: 10),
               ListBlock(children: [for (final id in members) _MemberRow(id: id, lead: id == leadId)]),
               if (proj != null) ...[
-                Section('משימות פתוחות', count: open.isEmpty ? null : '${open.length}'),
+                Section(UiCopy.text(622), count: open.isEmpty ? null : '${open.length}'),
                 ListBlock(children: [
                   if (open.isEmpty)
-                    Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14), child: Text('אין משימות פתוחות', style: T.row2.copyWith(color: p.text2)))
+                    Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14), child: Text(UiCopy.text(142), style: T.row2.copyWith(color: p.text2)))
                   else
                     for (final t in open) _TaskRow(t: t),
                 ]),
-                Section('הסתיימו היום', count: done.isEmpty ? null : '${done.length}'),
+                Section(UiCopy.text(623), count: done.isEmpty ? null : '${done.length}'),
                 ListBlock(children: [
                   if (done.isEmpty)
-                    Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14), child: Text('עוד לא הסתיימה משימה היום', style: T.row2.copyWith(color: p.text2)))
+                    Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14), child: Text(UiCopy.text(624), style: T.row2.copyWith(color: p.text2)))
                   else
                     for (final t in shownDone) _TaskRow(t: t),
                 ]),
                 if (done.length > shownDone.length)
-                  MoreRow(icon: 'expand_more', bold: 'עוד ${done.length - shownDone.length}', rest: '', top: false, onTap: () => setState(() => allDone = true)),
+                  MoreRow(icon: 'expand_more', bold: UiCopy.text(625, [done.length - shownDone.length]), rest: '', top: false, onTap: () => setState(() => allDone = true)),
               ],
               const SizedBox(height: 24),
             ]),
@@ -89,7 +91,7 @@ class _ProjectScreenState extends State<ProjectScreen> {
   }
 }
 
-String openTasksLineShort(int n) => n == 0 ? 'אין משימות פתוחות' : (n == 1 ? 'משימה פתוחה אחת' : '$n משימות פתוחות');
+String openTasksLineShort(int n) => n == 0 ? UiCopy.text(142) : (n == 1 ? UiCopy.text(626) : UiCopy.text(627, [n]));
 
 /// A team member and what they do now: the status word, and the task when there is one.
 class _MemberRow extends StatelessWidget {
@@ -98,6 +100,7 @@ class _MemberRow extends StatelessWidget {
   final bool lead;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final d = StoreScope.of(context).data!;
     final p = context.p;
     final who = d.who(id);
@@ -116,7 +119,7 @@ class _MemberRow extends StatelessWidget {
               Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
                 Text(who.name, style: T.name.copyWith(color: p.text)),
                 const SizedBox(width: 6),
-                Expanded(child: Rich(lead ? 'ראש צוות · ${who.title}' : who.title, maxLines: 1, style: T.secondary.copyWith(color: p.text2))),
+                Expanded(child: Rich(lead ? UiCopy.text(628, [who.title]) : who.title, maxLines: 1, style: T.secondary.copyWith(color: p.text2))),
               ]),
               Padding(
                 padding: const EdgeInsets.only(top: 3),
@@ -143,6 +146,7 @@ class _TaskRow extends StatelessWidget {
   final Ticket t;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final d = StoreScope.of(context).data!;
     final p = context.p;
     final id = t.assigneeId;
@@ -151,15 +155,15 @@ class _TaskRow extends StatelessWidget {
     final String state;
     if (t.doneAt != null) {
       icon = 'check_circle';
-      state = 'הסתיים ${hm(t.doneAt!)}';
+      state = UiCopy.text(629, [hm(t.doneAt!)]);
     } else if (t.group == TicketGroup.queued) {
       // Its place in line and why it waits (#128), when hq says.
       final o = d.openTasks.where((x) => 't${x.id}' == t.number).firstOrNull;
       icon = 'schedule';
-      state = [o?.position == null ? 'בתור' : 'בתור, מקום ${o!.position}', if (o?.reason?.isNotEmpty == true) o!.reason!].join(' · ');
+      state = [o?.position == null ? UiCopy.text(98) : UiCopy.text(135, [o!.position]), if (o?.reason?.isNotEmpty == true) o!.reason!].join(' · ');
     } else {
       icon = statusLoud(t.status) ? statusIcon(t.status) : 'play_arrow';
-      state = [statusWord(t.status, who?.gender ?? Gender.m), if (t.startedAt != null) 'מ-${hm(t.startedAt!)}'].join(' ');
+      state = [statusWord(t.status, who?.gender ?? Gender.m), if (t.startedAt != null) UiCopy.text(36, [hm(t.startedAt!)])].join(' ');
     }
     final est = d.estimates[int.tryParse(t.number.replaceFirst(RegExp(r'^\D+'), '')) ?? -1];
     final tap = estimateTap(context, d, est, null);
@@ -181,7 +185,7 @@ class _TaskRow extends StatelessWidget {
                   Ic(icon, size: 16, fill: true, color: t.doneAt != null ? p.text2 : p.text),
                   const SizedBox(width: 4),
                   Flexible(
-                    child: Text([if (who != null) '${who.name}${who.temp ? ' (זמני)' : ''}', state].join(' · '),
+                    child: Text([if (who != null) '${who.name}${who.temp ? UiCopy.text(630) : ''}', state].join(' · '),
                         maxLines: 1, overflow: TextOverflow.ellipsis, style: T.small.copyWith(color: p.text2)),
                   ),
                 ]),

@@ -1,3 +1,6 @@
+import 'package:agent_company/l10n/input_copy.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
+import 'search.dart';
 // Backend against packages/hq (HTTP + one WebSocket, token auth, B.8). Endpoints as on the hq
 // lane's branch (packages/hq/src/api.ts):
 //   GET  /api/org /api/board /api/inbox /api/asks /api/toggles /api/messages?identity= /api/events?identity=&after=[&tail=1]
@@ -29,6 +32,31 @@ import 'error_report.dart';
 
 class HqBackend extends Backend {
   HqBackend({required this.baseUrl, required this.token, http.Client? client}) : _http = client ?? http.Client();
+
+  @override
+  Future<List<SearchHit>> search(String query) async {
+    final uri = Uri.parse('$baseUrl/api/search').replace(queryParameters: {'q': query});
+    final res = await _http.get(uri, headers: {'authorization': 'Bearer $token'}).timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) throw StateError('search: ${res.statusCode}');
+    final j = jsonDecode(res.body) as Map<String, dynamic>;
+    return [for (final row in j['results'] as List) SearchHit.fromJson(Map<String, dynamic>.from(row as Map))];
+  }
+
+  @override
+  void relocalize() {
+    final s = _snapshotRaw, previous = _data;
+    if (s == null || previous == null) return;
+    final board = Map<String, dynamic>.from(s['board'] as Map);
+    companyNames = CompanyNames.fromJson(board['names']);
+    _data = mapSnapshot(board: _list(board, 'identities'), inbox: inboxOf(Map<String, dynamic>.from(s['inbox'] as Map)),
+      asks: _list(Map<String, dynamic>.from(s['asks'] as Map), 'asks'), toggles: _list(Map<String, dynamic>.from(s['toggles'] as Map), 'toggles'),
+      tasks: _list(board, 'tasks'), projects: _list(board, 'projects'), awaiting: _list(board, 'awaiting'), asked: _list(board, 'asked'),
+      openTasks: board['open_tasks'] is List ? _list(board, 'open_tasks') : null, manager: board['manager'] as String? ?? '',
+      ownerLanguage: board['owner_language'] == 'he' ? 'he' : 'en', advancedMode: board['advanced_mode'] == true, previous: previous);
+    _data!..home = previous.home..recent = previous.recent..estimates = previous.estimates;
+    if (_lastLines != null) _applyLastLines(_data!, _lastLines!);
+    notifyListeners();
+  }
 
   /// e.g. `https://app.hq.example.com/<secret>/hq`
   final String baseUrl;
@@ -129,18 +157,17 @@ class HqBackend extends Backend {
       }
       if (r.statusCode == 401) {
         _refused();
-        return const CommandResult.fail('המכשיר הזה נותק מהחברה. צריך להיכנס שוב.');
+        return  CommandResult.localized(879);
       }
-      if (r.statusCode == 404 || r.statusCode == 409) return const CommandResult.fail('הפריט כבר טופל או שאינו קיים יותר.', gone: true);
+      if (r.statusCode == 404 || r.statusCode == 409) return  CommandResult.localized(880, gone: true);
       // 502-504: the proxy is up and hq is not (a restart). The request never reached it.
-      if (r.statusCode >= 502 && r.statusCode <= 504) return const CommandResult.fail(_noLink, transient: true);
-      return const CommandResult.fail('השרת לא קיבל את הפעולה. אפשר לנסות שוב.');
+      if (r.statusCode >= 502 && r.statusCode <= 504) return CommandResult.localized(882, transient: true);
+      return  CommandResult.localized(881);
     } catch (_) {
-      return const CommandResult.fail(_noLink, transient: true);
+      return CommandResult.localized(882, transient: true);
     }
   }
 
-  static const _noLink = 'אין חיבור לשרת, ולכן הפעולה לא נשלחה. אפשר לנסות שוב.';
 
   /// What he was shown goes to hq (error_report.dart); 0 when it did not get there.
   Future<int> _postError(Map<String, dynamic> body) async {
@@ -196,7 +223,7 @@ class HqBackend extends Backend {
     final t = _downSince!;
     final hm = company_time.hm(t);
     // Cached data can be days old: "אתמול 22:10" or "18/10 22:10", never a bare time that reads as today.
-    final since = switch (company_time.daysAgo(t, company_time.CompanyTime.now())) { 0 => hm, 1 => 'אתמול $hm', _ => '${company_time.dm(t)} $hm' };
+    final since = switch (company_time.daysAgo(t, company_time.CompanyTime.now())) { 0 => hm, 1 => UiCopy.text(391, [hm]), _ => '${company_time.dm(t)} $hm' };
     _status = SystemStatus(LinkState.offline, since: since);
   }
 
@@ -242,7 +269,7 @@ class HqBackend extends Backend {
     company_time.CompanyTime.apply(results[0]['timezone']);
     final prev = _data;
     if (results[0] is Map && (results[0] as Map).containsKey('names')) companyNames = CompanyNames.fromJson(results[0]['names']);
-    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), awaiting: _list(results[0], 'awaiting'), asked: _list(results[0], 'asked'), openTasks: results[0]['open_tasks'] is List ? _list(results[0], 'open_tasks') : null, manager: (results[0]['manager'] as String?) ?? '', previous: prev);
+    _data = mapSnapshot(board: board, inbox: inbox, asks: asks, toggles: toggles, tasks: _list(results[0], 'tasks'), projects: _list(results[0], 'projects'), awaiting: _list(results[0], 'awaiting'), asked: _list(results[0], 'asked'), openTasks: results[0]['open_tasks'] is List ? _list(results[0], 'open_tasks') : null, manager: (results[0]['manager'] as String?) ?? '', ownerLanguage: results[0]['owner_language'] == 'he' ? 'he' : 'en', advancedMode: results[0]['advanced_mode'] == true, previous: prev);
     // Order and last lines from the last messages fetch, right away: without them the list showed
     // board order, then jumped into recency order when the messages came back (on every event).
     final lines = _lastLines;
@@ -445,7 +472,7 @@ class HqBackend extends Backend {
       final mine = own != null && !own.tapped;
       final c = ConversationSummary(
         identityId: other,
-        lastLine: (mine ? 'את/ה: ' : '') + (own?.text ?? lastLineOf(m)),
+        lastLine: (mine ? UiCopy.text(883) : '') + (own?.text ?? lastLineOf(m)),
         time: _hm(m['created_at'] as int),
         at: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int),
         delivery: mine ? mapDelivery(m['state'] as String?) : null,
@@ -497,7 +524,7 @@ class HqBackend extends Backend {
       _data = mapSnapshot(board: list('board', 'identities'), inbox: inboxOf(c['inbox']), asks: list('asks', 'asks'), toggles: list('toggles', 'toggles'),
           tasks: _list(c['board'], 'tasks'), projects: _list(c['board'], 'projects'), awaiting: _list(c['board'], 'awaiting'), asked: _list(c['board'], 'asked'),
           openTasks: (c['board'] as Map)['open_tasks'] is List ? _list(c['board'], 'open_tasks') : null,
-          manager: ((c['board'] as Map)['manager'] as String?) ?? '');
+          manager: ((c['board'] as Map)['manager'] as String?) ?? '', ownerLanguage: (c['board'] as Map)['owner_language'] == 'he' ? 'he' : 'en', advancedMode: (c['board'] as Map)['advanced_mode'] == true);
       if (c['home'] is Map) {
         try {
           _data!.home = HomeRecipe.fromJson((c['home'] as Map).cast<String, dynamic>());
@@ -968,7 +995,7 @@ class HqBackend extends Backend {
     _keepLast(id, {'id': m['id'], 'from_identity': 'owner', 'to_identity': id, 'body': (m['body'] as String).split('\n').take(2).join('\n'), 'attachments': m['attachments'], 'created_at': ts, 'state': m['state']});
     final c = ConversationSummary(
       identityId: id,
-      lastLine: own.tapped ? line : 'את/ה: $line',
+      lastLine: own.tapped ? line : UiCopy.text(884, [line]),
       time: _hm(ts),
       at: DateTime.fromMillisecondsSinceEpoch(ts),
       delivery: own.tapped ? null : mapDelivery(m['state'] as String?),
@@ -1137,12 +1164,12 @@ class HqBackend extends Backend {
     try {
       await _fresh.future.timeout(const Duration(seconds: 10));
     } catch (_) {
-      return const CommandResult.fail('אין חיבור לשרת, ולכן הפעולה לא נשלחה. אפשר לנסות שוב.');
+      return  CommandResult.localized(882);
     }
     final d = _data;
     final open = d != null && d.waiting.any((w) => (askId != null && w.askId == askId) || (inboxId != null && w.inboxId == inboxId));
     if (open) return null;
-    return CommandResult.fail(answer ? 'הפריט כבר טופל, ולכן התשובה לא נשלחה.' : 'הפריט כבר טופל, ולכן הפעולה לא נשלחה.');
+    return CommandResult.fail(answer ? UiCopy.text(885) : UiCopy.text(886));
   }
 
   @override
@@ -1155,7 +1182,7 @@ class HqBackend extends Backend {
     final stale = await _stale(askId, null);
     if (stale != null) return stale;
     final (up, _) = await _uploadAll(attachments);
-    if (up == null) return const CommandResult.fail(_uploadFailed);
+    if (up == null) return CommandResult.localized(892);
     // A GO is an inbox item: his words close it, and the worker gets them as they are.
     final path = askId.startsWith('inbox:')
         ? '/api/inbox/${askId.substring(6)}/answer'
@@ -1193,7 +1220,7 @@ class HqBackend extends Backend {
   @override
   Future<CommandResult> checked(AwaitingTask t) async {
     final d = _data;
-    if (d == null) return const CommandResult.fail('אין חיבור לשרת.');
+    if (d == null) return  CommandResult.localized(887);
     final orig = d.awaiting.where((x) => x.id == t.id).firstOrNull ?? t;
     _checking.add(t.id);
     d.awaiting = [for (final x in d.awaiting) if (x.id != t.id) x];
@@ -1233,7 +1260,7 @@ class HqBackend extends Backend {
 
   @override
   Future<CommandResult> dismiss(WaitItem item) async {
-    if (item.inboxId == null) return const CommandResult.fail('אי אפשר לסגור את הפריט הזה.');
+    if (item.inboxId == null) return  CommandResult.localized(888);
     final stale = await _stale(null, item.inboxId, answer: false);
     if (stale != null) return stale;
     var told = false;
@@ -1242,7 +1269,7 @@ class HqBackend extends Backend {
       item.state = WaitState.answered;
       // Only when hq did tell someone (an incident or a system item has no one to tell).
       final who = _data?.who(item.from);
-      item.answerLine = told ? 'נסגר · ${who?.name ?? item.from} ${who?.gender == Gender.f ? 'קיבלה' : 'קיבל'} הודעה' : 'נסגר';
+      item.answerLineBuilder = () => told ? UiCopy.text(891, [who?.name ?? item.from, who?.gender == Gender.f ? UiCopy.text(889) : UiCopy.text(890)]) : UiCopy.text(279);
     }
     return _after(r);
   }
@@ -1300,7 +1327,7 @@ class HqBackend extends Backend {
     if (up == null) {
       msg.delivery = transient ? Delivery.pendingConnection : Delivery.failed;
       notifyListeners();
-      return CommandResult.fail(_uploadFailed, transient: transient);
+      return CommandResult.localized(892, transient: transient);
     }
     msg.attachments = up;
     final r = await _send('POST', '/api/messages/tell', {
@@ -1320,7 +1347,6 @@ class HqBackend extends Backend {
     return r;
   }
 
-  static const _uploadFailed = 'התמונה לא עלתה לשרת, ולכן ההודעה לא נשלחה. אפשר לנסות שוב.';
 
   /// Every image that is not up yet goes up; the list with their ids, or null when one did not get
   /// there, and whether that was the link (worth sending again) rather than hq refusing it.
@@ -1376,12 +1402,12 @@ class HqBackend extends Backend {
 
   @override
   Future<CommandResult> retract(String identityId, String msgId) async =>
-      const CommandResult.fail('השרת עוד לא תומך במשיכת הודעה, ולכן היא תימסר כרגיל.');
+       CommandResult.localized(893);
 
   @override
   Future<CommandResult> stop(String identityId) async {
     final shift = _boardShift[identityId];
-    if (shift == null) return const CommandResult.fail('אין לעובד משמרת פעילה, ולכן אין מה לעצור.');
+    if (shift == null) return  CommandResult.localized(894);
     return _send('POST', '/api/shifts/${Uri.encodeComponent(shift)}/interrupt');
   }
 
@@ -1397,7 +1423,7 @@ class HqBackend extends Backend {
   }
 
   @override
-  Future<CommandResult> wake(String teamId) async => const CommandResult.fail('השרת עוד לא תומך בהערת צוות מהאפליקציה.');
+  Future<CommandResult> wake(String teamId) async =>  CommandResult.localized(895);
 }
 
 class HqError implements Exception {
@@ -1458,7 +1484,7 @@ bool isHis(WaitItem w, {String manager = ''}) => switch (w.kind) {
       WaitKind.blockingAsk || WaitKind.softAsk => !isCaughtFault(w.from, w.askId),
       // A failed delivery or shift (by its kicker, kickerFor below); "the manager decided" (escalation_note) is not one.
       WaitKind.urgentProd || WaitKind.failure =>
-        w.ref == 'accounts-all-full' || (manager.isNotEmpty && w.from == manager && const {'הודעה לא נמסרה', 'עובד לא חזר אחרי קריסה'}.contains(w.kicker)),
+        w.ref == 'accounts-all-full' || (manager.isNotEmpty && w.from == manager && (const {'delivery_failure', 'shift_failure'}.contains(w.sourceKind) || (w.sourceKind == null && const {InputCopy.v20, InputCopy.v21}.contains(w.kicker)))),
       _ => false,
     };
 
@@ -1475,10 +1501,12 @@ CompanyData mapSnapshot({
   /// `open_tasks` (#128); null from an hq before it: derived from [tasks].
   List<Map<String, dynamic>>? openTasks,
   String manager = '',
+  String ownerLanguage = 'en',
+  bool advancedMode = false,
   CompanyData? previous,
   DateTime? now,
 }) {
-  const teamNamesBuiltIn = {'mgmt': 'הנהלה', 'management': 'הנהלה', 'monitor': 'ניטור', 'monitoring': 'ניטור', 'personal': 'הצוות האישי', 'improve': 'מחלקת השיפור', 'improvement': 'מחלקת השיפור', 'design': 'עיצוב', 'lumo': 'לומו', 'tikibot': 'טיקיבוט', 'voice': 'voice-bot', 'agent-company': 'החברה'};
+  final teamNamesBuiltIn = {'mgmt': UiCopy.text(896), 'management': UiCopy.text(896), 'monitor': UiCopy.text(897), 'monitoring': UiCopy.text(897), 'personal': UiCopy.text(898), 'improve': UiCopy.text(360), 'improvement': UiCopy.text(360), 'design': UiCopy.text(899), 'lumo': UiCopy.text(900), 'tikibot': UiCopy.text(901), 'voice': 'voice-bot', 'agent-company': UiCopy.text(3)};
   // A project and its team show the owner's name for the project (org.yaml `projects[].name`, from hq).
   // An older hq sends no name: the built-in names, then the id.
   final projectNames = <String, String>{
@@ -1566,16 +1594,16 @@ CompanyData mapSnapshot({
   String kickerFor(Map<String, dynamic> i) {
     final kind = i['kind'] as String;
     return switch (kind) {
-      'incident' when i['ref'] == 'accounts-all-full' => 'החשבונות מלאים',
-      'incident' => 'דחוף בפרודקשן',
-      'go' => 'GO לפרודקשן',
-      'login' => 'כניסה לאתר',
-      'delivery_failure' => 'הודעה לא נמסרה',
-      'shift_failure' => 'עובד לא חזר אחרי קריסה',
-      'awaiting' => 'לבדוק',
+      'incident' when i['ref'] == 'accounts-all-full' => UiCopy.text(902),
+      'incident' => UiCopy.text(903),
+      'go' => UiCopy.text(904),
+      'login' => UiCopy.text(905),
+      'delivery_failure' => UiCopy.text(906),
+      'shift_failure' => UiCopy.text(907),
+      'awaiting' => UiCopy.text(31),
       // The system asks with its own title ("תפסתי תקלה", error-watch.ts): it has no name to stand for it.
       'ask' when isCaughtFault(i['from_identity'] as String?, i['ref'] as String?) && (i['title'] as String?)?.isNotEmpty == true => i['title'] as String,
-      _ => i['blocking'] == true ? 'חוסם' : 'שאלה',
+      _ => i['blocking'] == true ? UiCopy.text(908) : UiCopy.text(180),
     };
   }
 
@@ -1612,7 +1640,9 @@ CompanyData mapSnapshot({
     final headline = ((i['headline'] as String?) ?? (ask?['headline'] as String?))?.trim();
     waiting.add(WaitItem(
       id: 'inbox:${i['id']}',
+      action: i['action'] as String?,
       inboxId: i['id'] as int,
+      sourceKind: i['kind'] as String,
       // A GO has no ask behind it: it is answered through its inbox item, in the conversation too.
       askId: ask != null ? ask['id'] as String : (kind == WaitKind.go ? 'inbox:${i['id']}' : null),
       headline: headline == null || headline.isEmpty ? null : headline,
@@ -1641,9 +1671,9 @@ CompanyData mapSnapshot({
     for (final t in toggles)
       Automation(
         key: t['key'] as String,
-        team: 'מערכת',
+        team: UiCopy.text(909),
         sentence: (t['description'] as String?) ?? t['key'] as String,
-        meta: t['manual'] == true && t['enabled'] == false ? 'כובתה ידנית · ${_hm(t['updated_at'] as int)}' : (t['enabled'] == true ? 'פעילה' : 'כבויה'),
+        meta: t['manual'] == true && t['enabled'] == false ? UiCopy.text(910, [_hm(t['updated_at'] as int)]) : (t['enabled'] == true ? UiCopy.text(911) : UiCopy.text(912)),
         enabled: t['enabled'] == true,
       ),
   ];
@@ -1699,7 +1729,7 @@ CompanyData mapSnapshot({
       assignee: who?.name ?? '',
       sub: who == null || who.title.isEmpty ? null : who.title,
       status: status,
-      endLine: state == 'done' ? 'הסתיים ${_hm(updated)}' : (started != null ? 'התחיל ${_hm(started)}' : null),
+      endLine: state == 'done' ? UiCopy.text(629, [_hm(updated)]) : (started != null ? UiCopy.text(913, [_hm(started)]) : null),
       assigneeId: idn,
       startedAt: started == null ? null : DateTime.fromMillisecondsSinceEpoch(started),
       doneAt: state == 'done' ? DateTime.fromMillisecondsSinceEpoch(updated) : null,
@@ -1739,8 +1769,8 @@ CompanyData mapSnapshot({
         teamId: t.id,
         line: [
           if (lead != null) lead.name,
-          people == 1 ? 'עובד אחד' : '$people עובדים',
-          openCount == 0 ? 'אין משימות פתוחות' : (openCount == 1 ? 'משימה פתוחה אחת' : '$openCount משימות פתוחות'),
+          people == 1 ? UiCopy.text(633) : UiCopy.text(634, [people]),
+          openCount == 0 ? UiCopy.text(142) : (openCount == 1 ? UiCopy.text(626) : UiCopy.text(627, [openCount])),
         ].join(' · '),
         statusIcon: '',
         statusWord: '',
@@ -1755,7 +1785,7 @@ CompanyData mapSnapshot({
     final members = ids.values.where((i) => i.teamId == t.id).toList();
     orgTeams.add(OrgTeam(
       teamId: t.id,
-      line: [if (lead != null) lead.name, members.length == 1 ? 'עובד אחד' : '${members.length} עובדים'].join(' · '),
+      line: [if (lead != null) lead.name, members.length == 1 ? UiCopy.text(633) : UiCopy.text(634, [members.length])].join(' · '),
       statusIcon: '',
       statusWord: '',
       members: [for (final i in members) OrgMember(identityId: i.id, line: i.title)],
@@ -1778,6 +1808,9 @@ CompanyData mapSnapshot({
 
   return CompanyData(
     managerId: manager,
+    ownerLanguage: ownerLanguage,
+    ownerName: companyNames.placeholder ? '' : companyNames.owner,
+    advancedMode: advancedMode,
     teams: teams,
     identities: ids,
     presence: presence,
@@ -1792,14 +1825,14 @@ CompanyData mapSnapshot({
     chats: previous?.chats ?? {},
     tickets: tickets,
     ticketDetails: const {},
-    boardSubtitle: ['כל החברה', open == 1 ? 'משימה פתוחה אחת' : '$open משימות פתוחות', if (doneToday > 0) (doneToday == 1 ? 'אחת הושלמה היום' : '$doneToday הושלמו היום')].join(' · '),
+    boardSubtitle: [UiCopy.text(914), open == 1 ? UiCopy.text(626) : UiCopy.text(627, [open]), if (doneToday > 0) (doneToday == 1 ? UiCopy.text(915) : UiCopy.text(916, [doneToday]))].join(' · '),
     orgTeams: orgTeams,
-    orgSubtitle: '$active עובדים פעילים · ${live.length - active} נחים',
+    orgSubtitle: UiCopy.text(917, [active, live.length - active]),
     projects: projectList,
     capacity: const [],
     automations: automations,
     focus: focus,
-    night: night ? 'לילה פעיל' : null,
+    night: night ? UiCopy.text(918) : null,
     awaiting: [for (final a in awaiting) ?AwaitingTask.fromHq(a)],
     asked: [for (final a in asked) ?AskedRequest.fromHq(a)],
     openTasks: openTasks == null ? null : [for (final t in openTasks) ?OpenTask.fromHq(t)],
@@ -1819,11 +1852,11 @@ String lastLineOf(Map<String, dynamic> m) {
   final first = (m['body'] as String).split('\n').first;
   if (first.isNotEmpty) return first;
   final n = ((m['attachments'] as List?) ?? const []).length;
-  return n > 1 ? '$n תמונות' : (n == 1 ? 'תמונה' : '');
+  return n > 1 ? UiCopy.text(919, [n]) : (n == 1 ? UiCopy.text(247) : '');
 }
 
 String withoutIds(String s) => s
-    .replaceAll(RegExp(r'\s*\((?:מזהה|id|ref)[: ]+[^)]*\)'), '')
+    .replaceAll(RegExp(InputCopy.v22), '')
     .replaceAll(RegExp(r'\b[\w.-]+-\d+:[a-z0-9]{6,}-[a-z0-9]{6,}\b'), '')
     .replaceAll(RegExp(r' {2,}'), ' ')
     .trim();
@@ -1854,7 +1887,7 @@ List<AskCard> historyCards(List<Map<String, dynamic>> events, String identityId)
     final h = headline == null || headline.isEmpty ? null : headline;
     final body = (i['body'] as String?)?.isNotEmpty == true ? i['body'] as String : i['title'] as String;
     if (i['kind'] == 'go') {
-      out.add(GoCard(id: 'go:${i['id']}', ts: ts, askId: 'inbox:${i['id']}', ref: i['ref'] as String?, from: identityId, headline: h, details: body));
+      out.add(GoCard(action: i['action'] as String?, id: 'go:${i['id']}', ts: ts, askId: 'inbox:${i['id']}', ref: i['ref'] as String?, from: identityId, headline: h, details: body));
     } else if (i['kind'] == 'ask' && i['ref'] != null) {
       final ref = i['ref'] as String;
       out.add(AskCard(
@@ -1885,8 +1918,8 @@ AskCard? cardFor(List<ChatItem> items, String? ref) =>
   }
   // Closed without doing it (dismiss) or done without a note: the card's line says so.
   final n = companyNames, owner = n.owner;
-  if (body.startsWith('$owner ${n.o('דחה', 'דחתה')}: ') || body.startsWith('$owner ${n.o('סגר', 'סגרה')} את השאלה בלי תשובה: ')) return ('נסגר', true);
-  if (body.startsWith('$owner ${n.o('סיים', 'סיימה')}: ')) return ('סיימתי', true);
+  if (body.startsWith('$owner ${n.o(InputCopy.v23, InputCopy.v24)}: ') || body.startsWith(InputCopy.closedWithoutAnswer(owner, n.o(InputCopy.v25, InputCopy.v26)))) return (UiCopy.text(279), true);
+  if (body.startsWith('$owner ${n.o(InputCopy.v27, InputCopy.v28)}: ')) return (UiCopy.text(298), true);
   return (body, false);
 }
 
@@ -1898,7 +1931,7 @@ AskCard? cardFor(List<ChatItem> items, String? ref) =>
   // hq's "סיים: / דחה: / סגר" is always a closing tap (mailbox.complete): its note is a button's word ("GO",
   // "retry", "done"), never his own; what he types goes through reply, wrapped differently.
   final n = companyNames, first = body.split('\n').first;
-  for (final (he, you) in [(n.o('סיים', 'סיימה'), 'סיימת'), (n.o('דחה', 'דחתה'), 'דחית'), (n.o('סגר', 'סגרה'), 'סגרת')]) {
+  for (final (he, you) in [(n.o(InputCopy.completed[0], InputCopy.completed[1]), UiCopy.text(923)), (n.o(InputCopy.deferred[0], InputCopy.deferred[1]), UiCopy.text(576)), (n.o(InputCopy.closed[0], InputCopy.closed[1]), UiCopy.text(928))]) {
     if (first.startsWith('${n.owner} $he')) return (text: '$you${first.substring('${n.owner} $he'.length)}', tapped: true);
   }
   final (said, _) = answerText(body);
@@ -1911,10 +1944,10 @@ List<RegExp> get _answerEnvelopes {
   if (!identical(n, _envelopesFor)) {
     final owner = RegExp.escape(n.owner);
     _envelopes = [
-      RegExp(r'^תשובה לשאלה \S+: ([\s\S]*)$'),
-      RegExp('^תשובה של $owner (?:לבקשת ה-GO|על) "[\\s\\S]*?": ([\\s\\S]*)\$'),
+      RegExp(InputCopy.v29),
+      RegExp(InputCopy.answerPattern(owner)),
       // The card's title can run to several lines (ingest.ts); the note, a button's word, is the last one.
-      RegExp('^$owner ${n.o('סיים', 'סיימה')}: [\\s\\S]*\\n([^\\n]*)\$'),
+      RegExp('^$owner ${n.o(InputCopy.v27, InputCopy.v28)}: [\\s\\S]*\\n([^\\n]*)\$'),
     ];
     _envelopesFor = n;
   }
@@ -1931,7 +1964,7 @@ ChatItem? answerItem(Map<String, dynamic> m, AskCard card, String author, List<C
   card.state = AskState.answered;
   card.answer = text;
   if (m['created_at'] is int) card.answeredAt = DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int);
-  final tapped = closed || text == 'GO' || text == 'סיימתי' || card.options.any((o) => o.label == text);
+  final tapped = closed || text == 'GO' || text == InputCopy.v30 || card.options.any((o) => o.label == text);
   // Sent from this device: its own bubble is already here.
   final mine = existing.whereType<UserMsg>().any((u) => u.replyTo?.askId != null && u.replyTo!.askId == card.askId);
   if (tapped || mine) return null;
@@ -1983,7 +2016,7 @@ void syncAskCards(Conversation chat, String identityId, CompanyData d) {
     final card = a.kind == WaitKind.awaiting
         ? CheckCard(id: 'check:${a.inboxId}', ts: ts, askId: askId, from: identityId, headline: a.headline, details: a.body)
         : a.kind == WaitKind.go
-        ? GoCard(id: 'go:${a.inboxId}', ts: ts, askId: askId, ref: a.ref, from: identityId, headline: a.headline, details: a.body)
+        ? GoCard(action: a.action, id: 'go:${a.inboxId}', ts: ts, askId: askId, ref: a.ref, from: identityId, headline: a.headline, details: a.body)
         : AskCard(id: 'ask:$askId', ts: ts, askId: askId, from: identityId, headline: a.headline, question: a.body, options: a.options, blocking: a.blocking);
     // A row's id is its key in the list: never two.
     if (!ids.add(card.id)) continue;

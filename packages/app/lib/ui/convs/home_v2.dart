@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // The home in design language v2 (docs/design/language-v2.md §8): the head of the conversations screen cut down to
 // these parts, in this order, each only when it has something:
 // 1. one sentence on the state: the composer's headline while it is fresh, else one from live data. How many wait
@@ -35,10 +36,10 @@ String homeSentence(CompanyData d, {required int stuck, int decisions = 0}) {
   final projects = {for (final t in running) t.project}.length;
   final work = running.isEmpty
       ? ''
-      : '${_count(running.length, 'משימה אחת רצה', 'שתי משימות רצות', 'משימות רצות')}${projects > 1 ? (projects == 2 ? ' בשני פרויקטים' : ' ב-$projects פרויקטים') : ''}.';
-  if (stuck > 0) return '${_count(stuck, 'תקלה אחת צריכה', 'שתי תקלות צריכות', 'תקלות צריכות')} אותך עכשיו.';
-  if (decisions > 0) return work.isEmpty ? 'אין משימות שרצות עכשיו.' : 'בינתיים $work';
-  return work.isEmpty ? 'שום דבר לא מחכה לך. הכול שקט.' : 'שום דבר לא מחכה לך. $work';
+      : '${_count(running.length, UiCopy.text(102), UiCopy.text(533), UiCopy.text(534))}${projects > 1 ? (projects == 2 ? UiCopy.text(535) : UiCopy.text(536, [projects])) : ''}.';
+  if (stuck > 0) return UiCopy.text(540, [_count(stuck, UiCopy.text(537), UiCopy.text(538), UiCopy.text(539))]);
+  if (decisions > 0) return work.isEmpty ? UiCopy.text(541) : UiCopy.text(542, [work]);
+  return work.isEmpty ? UiCopy.text(543) : UiCopy.text(544, [work]);
 }
 
 /// Workers who are stuck: a fault with no decision, the only thing the home still raises by itself.
@@ -75,6 +76,7 @@ class HomeV2 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = data;
     final blocks = recipe == null ? null : liveBlocks(recipe!, d);
@@ -121,7 +123,7 @@ class HomeV2 extends StatelessWidget {
     // Codex's row is not an account the company runs on: all Claude accounts full is what stops the work.
     final usable = [for (final q in quota) if (q.usable && !q.isCodex) q];
     final allFull = usable.isNotEmpty && usable.every((q) => q.full);
-    final quotaCard = BlockCard(label: 'המכסה', child: QuotaCard(quota: quota, now: now));
+    final quotaCard = BlockCard(label: UiCopy.text(545), child: QuotaCard(quota: quota, now: now));
     // 6. How fast it goes and on what (task 496): right under the quota, and folds with the home.
     final usage = switch (recipe?.usage) { final u? when !u.isEmpty => u, _ => null };
 
@@ -133,18 +135,18 @@ class HomeV2 extends StatelessWidget {
         (
           'stuck',
           BlockCard(
-            label: 'תקלה',
+            label: UiCopy.text(105),
             child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: AlertBlock(items: const [], stuck: stuck, now: now)),
           )
         ),
-      if (allFull) ('quota:label', const _Label('המכסה')),
+      if (allFull) ('quota:label',  _Label(UiCopy.text(545))),
       if (allFull) ('quota', quotaCard),
-      if (projects.isNotEmpty && !folded) ('projects:label', const _Label('הפרויקטים')),
+      if (projects.isNotEmpty && !folded) ('projects:label',  _Label(UiCopy.text(546))),
       if (projects.isNotEmpty && !folded)
         (
           'projects',
           BlockCard(
-            label: 'הפרויקטים',
+            label: UiCopy.text(546),
             child: Column(children: [
               for (final (i, (id, note)) in projects.indexed) ...[
                 if (i > 0) const _Inset(),
@@ -153,17 +155,17 @@ class HomeV2 extends StatelessWidget {
             ]),
           )
         ),
-      if (done.isNotEmpty && !folded) ('done:label', const _Label('הסתיים לאחרונה')),
-      if (done.isNotEmpty && !folded) ('done', BlockCard(label: 'הסתיים לאחרונה', child: _Done(items: done.take(3).toList(), now: now))),
-      if (quota.isNotEmpty && !allFull && !folded) ('quota:label', const _Label('המכסה')),
+      if (done.isNotEmpty && !folded) ('done:label',  _Label(UiCopy.text(547))),
+      if (done.isNotEmpty && !folded) ('done', BlockCard(label: UiCopy.text(547), child: _Done(items: done.take(3).toList(), now: now))),
+      if (quota.isNotEmpty && !allFull && !folded) ('quota:label',  _Label(UiCopy.text(545))),
       if (quota.isNotEmpty && !allFull && !folded) ('quota', quotaCard),
-      if (usage != null && !folded) ('usage:label', const _Label('השימוש')),
-      if (usage != null && !folded) ('usage', BlockCard(label: 'השימוש', child: UsageCard(usage: usage))),
+      if (usage != null && !folded) ('usage:label',  _Label(UiCopy.text(548))),
+      if (usage != null && !folded) ('usage', BlockCard(label: UiCopy.text(548), child: UsageCard(usage: usage))),
       if (quiet.isNotEmpty && !folded) ('quiet', Padding(padding: const EdgeInsets.only(top: 8), child: QuietBlock(projects: quiet, data: d, color: p.bg))),
     ];
     return Semantics(
       container: true,
-      label: 'מה חשוב עכשיו',
+      label: UiCopy.text(549),
       explicitChildNodes: true,
       child: Container(
         color: p.bg,
@@ -183,13 +185,14 @@ class _Sentence extends StatelessWidget {
   final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final sentence = _plain(context, p);
     if (open == null) return sentence;
     return Semantics(
       button: true,
       expanded: open,
-      hint: open! ? 'קיפול הבית' : 'פתיחת הבית',
+      hint: open! ? UiCopy.text(550) : UiCopy.text(487),
       child: InkWell(
         onTap: onTap,
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -226,20 +229,14 @@ class _Label extends StatelessWidget {
   const _Label(this.text);
   final String text;
   @override
-  Widget build(BuildContext context) => ExcludeSemantics(
-        child: Padding(
-          padding: const EdgeInsetsDirectional.fromSTEB(20, 16, 20, 0),
-          // At the start, like every group's name in the app (and WhatsApp's "ארכיון").
-          child: Align(alignment: AlignmentDirectional.centerStart, child: Text(text, style: T.section.copyWith(color: context.p.text2))),
-        ),
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return ExcludeSemantics(child: Padding(padding: const EdgeInsetsDirectional.fromSTEB(20, 16, 20, 0), child: Align(alignment: AlignmentDirectional.centerStart, child: Text(text, style: T.section.copyWith(color: context.p.text2))))); }
 }
 
 /// The line between rows of a card, from where the text starts (the face stands alone).
 class _Inset extends StatelessWidget {
   const _Inset();
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsetsDirectional.only(start: 68), child: Container(height: 1, color: context.p.line));
+  Widget build(BuildContext context) { UiCopy.watch(context); return Padding(padding: const EdgeInsetsDirectional.only(start: 68), child: Container(height: 1, color: context.p.line)); }
 }
 
 /// The project's mark: its icon on a circle in its tone. The name is always beside it.
@@ -250,6 +247,7 @@ class ProjectFace extends StatelessWidget {
   final double size;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final (bg, fg) = context.p.identity(tone);
     return Container(
       width: size,
@@ -273,32 +271,33 @@ class ProjectRowV2 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data!;
     final l = line;
     final project = d.projects.where((x) => x.id == l.id).firstOrNull;
     final tone = d.teams[project?.teamId ?? l.id]?.tone;
     String name(String id) => d.who(id).name;
-    final who = l.who.isEmpty ? '' : (l.who.length == 1 ? name(l.who.first) : '${name(l.who.first)} ועוד ${l.who.length - 1}');
+    final who = l.who.isEmpty ? '' : (l.who.length == 1 ? name(l.who.first) : UiCopy.text(112, [name(l.who.first), l.who.length - 1]));
     final second = T.small.copyWith(color: p.text2, height: 19 / 13);
     final String icon, word;
     String rest = '';
     String end = '';
     if (l.now != null) {
-      (icon, word) = ('play_arrow', 'רץ');
-      rest = [l.now!, if (who.isNotEmpty) who, if (l.queued > 0) 'עוד ${l.queued} בתור'].join(' · ');
+      (icon, word) = ('play_arrow', UiCopy.text(551));
+      rest = [l.now!, if (who.isNotEmpty) who, if (l.queued > 0) UiCopy.text(552, [l.queued])].join(' · ');
     } else if (l.queued > 0) {
-      (icon, word) = ('schedule', l.queued == 1 ? 'משימה אחת בתור' : '${l.queued} משימות בתור');
+      (icon, word) = ('schedule', l.queued == 1 ? UiCopy.text(100) : UiCopy.text(101, [l.queued]));
     } else {
-      (icon, word) = ('bedtime', 'שקט');
-      if (l.last != null) rest = 'אחרון: ${l.last}';
-      if (l.lastAt != null) end = daysAgo(l.lastAt!, now) == 0 ? hm(l.lastAt!) : (daysAgo(l.lastAt!, now) == 1 ? 'אתמול' : dm(l.lastAt!));
+      (icon, word) = ('bedtime', UiCopy.text(115));
+      if (l.last != null) rest = UiCopy.text(553, [l.last]);
+      if (l.lastAt != null) end = daysAgo(l.lastAt!, now) == 0 ? hm(l.lastAt!) : (daysAgo(l.lastAt!, now) == 1 ? UiCopy.text(34) : dm(l.lastAt!));
     }
-    final waits = l.waiting == 0 ? '' : (l.waiting == 1 ? 'מחכה לך' : '${l.waiting} מחכים לך');
+    final waits = l.waiting == 0 ? '' : (l.waiting == 1 ? UiCopy.text(97) : UiCopy.text(554, [l.waiting]));
     return Semantics(
       button: true,
       label: [l.name, ?(waits.isEmpty ? null : waits), word, ?(rest.isEmpty ? null : rest), ?(end.isEmpty ? null : end), ?note].join('. '),
-      hint: 'פתיחת הפרויקט',
+      hint: UiCopy.text(119),
       excludeSemantics: true,
       child: InkWell(
         onTap: () => Nav.project(context, l.id),
@@ -356,6 +355,7 @@ class WordClamp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final full = DefaultTextStyle.of(context).style.merge(style);
     final dir = Directionality.of(context);
     final scaler = MediaQuery.textScalerOf(context);
@@ -380,10 +380,11 @@ class _Done extends StatelessWidget {
   final DateTime now;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data!;
     final second = T.small.copyWith(color: p.text2);
-    String when(DateTime t) => daysAgo(t, now) == 0 ? hm(t) : (daysAgo(t, now) == 1 ? 'אתמול' : dm(t));
+    String when(DateTime t) => daysAgo(t, now) == 0 ? hm(t) : (daysAgo(t, now) == 1 ? UiCopy.text(34) : dm(t));
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -413,7 +414,7 @@ class _Done extends StatelessWidget {
                     Row(children: [
                       // With no face, the face's place already has the icon.
                       if (x.who != null) ...[Ic('check_circle', size: 14, color: p.text2), const SizedBox(width: 4)],
-                      Expanded(child: Text([if (x.who != null) d.who(x.who!).name, 'הסתיים'].join(' · '), maxLines: 1, overflow: TextOverflow.ellipsis, style: second)),
+                      Expanded(child: Text([if (x.who != null) d.who(x.who!).name, UiCopy.text(555)].join(' · '), maxLines: 1, overflow: TextOverflow.ellipsis, style: second)),
                       Text(when(x.at), style: second.copyWith(fontFeatures: kTabular)),
                     ]),
                   ]),
@@ -432,13 +433,14 @@ class HomeV2Page extends StatelessWidget {
   const HomeV2Page({super.key});
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data;
     if (d == null) return const SizedBox.shrink();
     return Container(
       color: p.bg,
       child: Column(children: [
-        const TopBar(title: 'בית'),
+         TopBar(title: UiCopy.text(556)),
         Expanded(
           child: ListView(padding: const EdgeInsets.only(bottom: 24), children: [
             Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 720), child: HomeV2(recipe: d.home, data: d, now: CompanyTime.now()))),
@@ -455,6 +457,7 @@ class HomeEntryRow extends StatelessWidget {
   final bool selected;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final store = StoreScope.of(context);
     final d = store.data!;
@@ -462,7 +465,7 @@ class HomeEntryRow extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      label: 'בית. $sentence',
+      label: UiCopy.text(557, [sentence]),
       excludeSemantics: true,
       child: Material(
         color: selected ? p.surface2 : p.surface,
@@ -485,7 +488,7 @@ class HomeEntryRow extends StatelessWidget {
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
-                    Expanded(child: Text('בית', style: T.name.copyWith(color: p.text))),
+                    Expanded(child: Text(UiCopy.text(556), style: T.name.copyWith(color: p.text))),
                     // How many wait is the pinned row's, right above (task 986).
                   ]),
                   const SizedBox(height: 2),

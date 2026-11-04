@@ -1,3 +1,5 @@
+import 'package:agent_company/l10n/input_copy.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 // "מחכות לך" (task 986, «המסך הזה של החלטות אני לא סובל אותו… אולי שאפשר להחליק»): only what is blocked on him, a
 // question or a GO, and no tab. A row pinned on top of the conversations says how many ("3 מחכות לך") and is not there
 // when nothing waits. A tap opens a pile of cards, one at a time: who asks and the one line of what they ask, the
@@ -195,7 +197,7 @@ class DecisionText {
   final String? prUrl;
 
   static final _prLine = RegExp(r'^PR:\s*(?:#?\d+|(https://github\.com/\S+/pull/\d+))\s*$');
-  static final _riskLine = RegExp(r'^סיכון:\s*(low|medium|high)\s*$');
+  static final _riskLine = RegExp(InputCopy.v10);
 
   factory DecisionText.of(WaitItem w) {
     String? prUrl, risk;
@@ -207,7 +209,7 @@ class DecisionText {
       if (m != null) {
         prUrl = m.group(1);
       } else if (r != null) {
-        risk = const {'low': 'סיכון נמוך', 'medium': 'סיכון בינוני', 'high': 'סיכון גבוה'}[r.group(1)];
+        risk =  {'low': UiCopy.text(570), 'medium': UiCopy.text(571), 'high': UiCopy.text(572)}[r.group(1)];
       } else {
         lines.add(l);
       }
@@ -229,7 +231,7 @@ class DecisionText {
 // ───────────────────────────── the pinned row ─────────────────────────────
 
 /// "3 מחכות לך": how many wait for him, in words up to two.
-String waitingLine(int n) => switch (n) { 1 => 'אחת מחכה לך', 2 => 'שתיים מחכות לך', _ => '$n מחכות לך' };
+String waitingLine(int n) => switch (n) { 1 => UiCopy.text(131), 2 => UiCopy.text(573), _ => UiCopy.text(132, [n]) };
 
 /// The row pinned on top of the conversations: how many wait for him, and a tap opens the pile. Not there when none do.
 class WaitingRow extends StatelessWidget {
@@ -237,6 +239,7 @@ class WaitingRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final n = StoreScope.of(context).data?.waitingCount ?? 0;
     return AnimatedSize(
@@ -248,7 +251,7 @@ class WaitingRow extends StatelessWidget {
           : Semantics(
               button: true,
               label: waitingLine(n),
-              hint: 'פתיחה, אחת אחרי השנייה',
+              hint: UiCopy.text(574),
               excludeSemantics: true,
               onTap: () => openDecisions(context),
               child: Material(
@@ -263,7 +266,7 @@ class WaitingRow extends StatelessWidget {
                       Ic('front_hand', size: 20, fill: true, color: p.text),
                       const SizedBox(width: 12),
                       Expanded(child: Text(waitingLine(n), style: T.row2.copyWith(color: p.text, fontWeight: FontWeight.w700, fontFeatures: kTabular))),
-                      Ic('chevron_left', size: 22, color: p.text2),
+                      Ic(chevronIcon(context), size: 22, color: p.text2),
                     ]),
                   ),
                 ),
@@ -320,19 +323,19 @@ StackActs actsOf(BuildContext context, WaitItem item) {
     case WaitKind.go:
       return (
         yes: opt(item.options.first, primary: true),
-        no: StackAct('לא', 'close', () {
+        no: StackAct(UiCopy.text(575), 'close', () {
           store.dismiss(item);
-          decisionQueue.decided(item, 'דחית', icon: 'do_not_disturb_on', undo: () => store.cancelUndo(item.id));
+          decisionQueue.decided(item, UiCopy.text(576), icon: 'do_not_disturb_on', undo: () => store.cancelUndo(item.id));
         }),
         more: const [],
       );
     case WaitKind.blockingAsk || WaitKind.softAsk when item.askId != null:
       final opts = item.options.where((o) => o.id != 'q' && o.id != 'not_now').toList();
-      final words = [if (!isCaughtFault(item.from, item.askId)) StackAct(opts.isEmpty ? 'תשובה' : 'תשובה אחרת', 'reply', other)];
+      final words = [if (!isCaughtFault(item.from, item.askId)) StackAct(opts.isEmpty ? UiCopy.text(558) : UiCopy.text(559), 'reply', other)];
       if (yesNo(opts) case (final y, final n)) return (yes: opt(y, primary: true), no: opt(n, icon: 'close', primary: false), more: words);
       return (yes: null, no: null, more: [for (final o in opts) opt(o, primary: opts.length == 1 ? true : null), ...words]);
     default:
-      return (yes: null, no: null, more: [StackAct('פתיחה', 'open_in_new', () => openWait(context, item), primary: true)]);
+      return (yes: null, no: null, more: [StackAct(UiCopy.text(126), 'open_in_new', () => openWait(context, item), primary: true)]);
   }
 }
 
@@ -341,8 +344,8 @@ StackActs actsOf(BuildContext context, WaitItem item) {
 (AskOption, AskOption)? yesNo(List<AskOption> opts) {
   if (opts.length != 2) return null;
   String bare(AskOption o) => o.label.trim().replaceAll(RegExp(r'[\s.!\u200e\u200f]+$'), '');
-  bool yes(AskOption o) => bare(o) == 'כן';
-  bool no(AskOption o) => bare(o) == 'לא';
+  bool yes(AskOption o) => bare(o) == InputCopy.v11;
+  bool no(AskOption o) => bare(o) == InputCopy.v12;
   if (yes(opts[0]) && no(opts[1])) return (opts[0], opts[1]);
   if (no(opts[0]) && yes(opts[1])) return (opts[1], opts[0]);
   return null;
@@ -389,6 +392,7 @@ class _DecisionStackState extends State<DecisionStack> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data;
     // Built again when it is back on top, for an auto-close that had to wait.
@@ -433,7 +437,7 @@ class _DecisionStackState extends State<DecisionStack> {
                     if (acts != null) ...{
                       const SingleActivator(LogicalKeyboardKey.arrowRight): () => _act(acts.yes, AxisDirection.right),
                       const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _act(acts.no, AxisDirection.left),
-                      const SingleActivator(LogicalKeyboardKey.arrowDown): () => _act(StackAct('אחר כך', 'schedule', decisionQueue.later), AxisDirection.down),
+                      const SingleActivator(LogicalKeyboardKey.arrowDown): () => _act(StackAct(UiCopy.text(577), 'schedule', decisionQueue.later), AxisDirection.down),
                     },
                   };
                   return CallbackShortcuts(
@@ -475,20 +479,21 @@ class _Top extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final pos = this.pos;
     return SizedBox(
       height: 56,
       child: Row(children: [
         const SizedBox(width: 4),
-        IBtn('close', tip: 'סגירה', onTap: () => Navigator.of(context).maybePop()),
+        IBtn('close', tip: UiCopy.text(84), onTap: () => Navigator.of(context).maybePop()),
         const SizedBox(width: 4),
-        Expanded(child: Semantics(header: true, child: Text('מחכות לך', style: T.name.copyWith(color: p.text)))),
+        Expanded(child: Semantics(header: true, child: Text(UiCopy.text(578), style: T.name.copyWith(color: p.text)))),
         if (pos != null)
           Semantics(
-            label: '${pos.$1} מתוך ${pos.$2}',
+            label: UiCopy.text(187, [pos.$1, pos.$2]),
             excludeSemantics: true,
-            child: Text('${pos.$1} מתוך ${pos.$2}', style: T.secondary.copyWith(color: p.text2, fontFeatures: kTabular)),
+            child: Text(UiCopy.text(187, [pos.$1, pos.$2]), style: T.secondary.copyWith(color: p.text2, fontFeatures: kTabular)),
           ),
         const SizedBox(width: 16),
       ]),
@@ -501,6 +506,7 @@ class _Empty extends StatelessWidget {
   const _Empty();
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Center(
       child: Semantics(
@@ -508,9 +514,9 @@ class _Empty extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Ic('check_circle', size: 32, color: p.text2),
           const SizedBox(height: 12),
-          Text('שום דבר לא מחכה לך.', style: T.body.copyWith(color: p.text2)),
+          Text(UiCopy.text(579), style: T.body.copyWith(color: p.text2)),
           const SizedBox(height: 16),
-          Btn('חזרה לשיחות', onTap: () => Navigator.of(context).maybePop()),
+          Btn(UiCopy.text(580), onTap: () => Navigator.of(context).maybePop()),
         ]),
       ),
     );
@@ -581,7 +587,7 @@ class _PileState extends State<_Pile> with SingleTickerProviderStateMixin {
   StackAct? _actFor(AxisDirection? w) => switch (w) {
         AxisDirection.right => widget.acts.yes,
         AxisDirection.left => widget.acts.no,
-        AxisDirection.down => StackAct('אחר כך', 'schedule', decisionQueue.later),
+        AxisDirection.down => StackAct(UiCopy.text(577), 'schedule', decisionQueue.later),
         _ => null,
       };
 
@@ -639,6 +645,7 @@ class _PileState extends State<_Pile> with SingleTickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return LayoutBuilder(builder: (context, c) {
       _size = c.biggest;
@@ -722,6 +729,7 @@ class _Card extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data!;
     final who = d.who(item.from);
@@ -744,7 +752,7 @@ class _Card extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: T.secondary.copyWith(color: p.text2),
             ),
-            Text([caught ? 'תקלה' : item.kicker, when, ?t.risk].join(' · '), style: T.small.copyWith(color: p.text2, fontFeatures: kTabular)),
+            Text([caught ? UiCopy.text(105) : item.kicker, when, ?t.risk].join(' · '), style: T.small.copyWith(color: p.text2, fontFeatures: kTabular)),
           ]),
         ),
       ]),
@@ -792,7 +800,7 @@ class _Card extends StatelessWidget {
             onPressed: () => _details(context, item),
             style: TextButton.styleFrom(minimumSize: const Size(64, 44), padding: const EdgeInsets.symmetric(horizontal: 8)),
             icon: Ic('description', size: 18, color: p.accent),
-            label: Text('כל הפרטים', style: T.button.copyWith(color: p.accent)),
+            label: Text(UiCopy.text(581), style: T.button.copyWith(color: p.accent)),
           ),
         ),
       ]),
@@ -823,10 +831,10 @@ void _details(BuildContext context, WaitItem item) {
         if (t.details.isNotEmpty) ...[const SizedBox(height: 12), CopySelectionArea(child: Markdown(t.details))],
         const SizedBox(height: 20),
         Wrap(spacing: 8, runSpacing: 8, children: [
-          if (report != null) Btn('הדוח המלא', icon: 'description', height: 40, fontSize: 13.5, hpad: 14, onTap: () => openExternalUrl(report)),
-          if (pr != null) Btn('ה-PR', icon: 'call_merge', height: 40, fontSize: 13.5, hpad: 14, onTap: () => openExternalUrl(pr)),
+          if (report != null) Btn(UiCopy.text(582), icon: 'description', height: 40, fontSize: 13.5, hpad: 14, onTap: () => openExternalUrl(report)),
+          if (pr != null) Btn(UiCopy.text(583), icon: 'call_merge', height: 40, fontSize: 13.5, hpad: 14, onTap: () => openExternalUrl(pr)),
           if (d.canChat(item.from))
-            Btn('השיחה עם ${d.who(item.from).name}', icon: 'chat', height: 40, fontSize: 13.5, hpad: 14, onTap: () {
+            Btn(UiCopy.text(584, [d.who(item.from).name]), icon: 'chat', height: 40, fontSize: 13.5, hpad: 14, onTap: () {
               Navigator.of(sheet).pop();
               final nav = Navigator.of(context);
               if (nav.canPop()) nav.pop();
@@ -847,6 +855,7 @@ class _Foot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     const h = 56.0;
     DecisionButton b(StackAct a, AxisDirection dir) => DecisionButton(a.label, primary: a.primary, height: h, onTap: () => onAct(a, dir));
@@ -860,22 +869,22 @@ class _Foot extends StatelessWidget {
           Directionality(
             textDirection: TextDirection.ltr,
             child: Row(children: [
-              Expanded(child: no == null ? const SizedBox.shrink() : Directionality(textDirection: TextDirection.rtl, child: b(no, AxisDirection.left))),
+              Expanded(child: no == null ? const SizedBox.shrink() : Directionality(textDirection: Directionality.of(context), child: b(no, AxisDirection.left))),
               const SizedBox(width: 10),
-              Expanded(child: yes == null ? const SizedBox.shrink() : Directionality(textDirection: TextDirection.rtl, child: b(yes, AxisDirection.right))),
+              Expanded(child: yes == null ? const SizedBox.shrink() : Directionality(textDirection: Directionality.of(context), child: b(yes, AxisDirection.right))),
             ]),
           ),
         const SizedBox(height: 2),
         Row(children: [
           TextButton.icon(
-            onPressed: () => onAct(StackAct('אחר כך', 'schedule', decisionQueue.later), AxisDirection.down),
+            onPressed: () => onAct(StackAct(UiCopy.text(577), 'schedule', decisionQueue.later), AxisDirection.down),
             style: TextButton.styleFrom(minimumSize: const Size(64, 44), foregroundColor: p.text2),
             icon: Ic('schedule', size: 18, color: p.text2),
-            label: Text('אחר כך', style: T.button.copyWith(color: p.text2)),
+            label: Text(UiCopy.text(577), style: T.button.copyWith(color: p.text2)),
           ),
           const Spacer(),
           if (decisionQueue.remaining > 1)
-            Text('עוד ${decisionQueue.remaining - 1} אחרי זו', style: T.meta.copyWith(color: p.text3, fontFeatures: kTabular)),
+            Text(UiCopy.text(585, [decisionQueue.remaining - 1]), style: T.meta.copyWith(color: p.text3, fontFeatures: kTabular)),
         ]),
       ]),
     );
@@ -890,6 +899,7 @@ class _ManagerNote extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Padding(padding: const EdgeInsets.only(top: 2), child: Ic('forward_to_inbox', size: 18, color: p.text2)),
@@ -914,7 +924,7 @@ class _LastLine extends StatelessWidget {
   // Its own listener: it is const under the screen's builder, which does not rebuild it, and after "לא עכשיו" no
   // change in the store comes when the 5 seconds end (22/10: the line stayed, with a "ביטול" that did nothing).
   @override
-  Widget build(BuildContext context) => ListenableBuilder(listenable: decisionQueue, builder: (context, _) => _line(context));
+  Widget build(BuildContext context) { UiCopy.watch(context); return ListenableBuilder(listenable: decisionQueue, builder: (context, _) => _line(context)); }
 
   Widget _line(BuildContext context) {
     final p = context.p;

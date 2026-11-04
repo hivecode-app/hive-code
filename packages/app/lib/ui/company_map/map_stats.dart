@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // The tables under the company map: quiet tables in Stripe's manner, tabular figures, one chart only where a
 // table can't say it (when in the day each worker worked).
 import 'package:flutter/material.dart';
@@ -8,14 +9,14 @@ import '../../model/map_day.dart';
 
 const _tab = [FontFeature.tabularFigures()];
 
-const _kindName = {
-  'small-fix': 'תיקון קטן',
-  'feature': 'פיצ\'ר',
-  'investigation': 'חקירה',
-  'report': 'דוח',
-  'build': 'בילד',
-  'deploy': 'פריסה',
-  'release': 'שחרור לחנויות',
+Map<String, String> get _kindName => {
+  'small-fix': UiCopy.text(439),
+  'feature': UiCopy.text(440),
+  'investigation': UiCopy.text(441),
+  'report': UiCopy.text(442),
+  'build': UiCopy.text(443),
+  'deploy': UiCopy.text(444),
+  'release': UiCopy.text(445),
 };
 
 class MapStats extends StatelessWidget {
@@ -24,6 +25,7 @@ class MapStats extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     return LayoutBuilder(builder: (context, c) {
       final wide = c.maxWidth >= 960;
       final side = [
@@ -59,11 +61,11 @@ class MapStats extends StatelessWidget {
   Widget _projects(BuildContext context) {
     final rows = [...day.projects.where((r) => r.opened + r.done + r.open > 0)]..sort((a, b) => b.done.compareTo(a.done));
     return QuietTable(
-      title: 'משימות לפי פרויקט',
-      head: const ['פרויקט', 'נפתחו', 'הושלמו', 'פתוחות בסוף היום'],
+      title: UiCopy.text(446),
+      head:  [UiCopy.text(382), UiCopy.text(447), UiCopy.text(448), UiCopy.text(449)],
       flex: const [5, 2, 2, 3],
       rows: [for (final r in rows) [_project(context, r.project), _num(context, r.opened), _num(context, r.done), _num(context, r.open)]],
-      total: ['סה"כ', _sum(rows.map((r) => r.opened)), _sum(rows.map((r) => r.done)), _sum(rows.map((r) => r.open))],
+      total: [UiCopy.text(450), _sum(rows.map((r) => r.opened)), _sum(rows.map((r) => r.done)), _sum(rows.map((r) => r.open))],
     );
   }
 
@@ -80,19 +82,19 @@ class MapStats extends StatelessWidget {
     final other = keys.where((k) => !known.contains(k)).toList();
     final otherM = other.fold(0, (s, k) => s + (merges[k] ?? 0));
     return QuietTable(
-      title: 'מוזג ונפרס',
-      head: const ['פרויקט', 'מיזוגים', 'פריסות'],
+      title: UiCopy.text(451),
+      head:  [UiCopy.text(382), UiCopy.text(432), UiCopy.text(434)],
       flex: const [5, 2, 2],
       rows: [
         for (final k in known) [_project(context, k), _num(context, merges[k] ?? 0), _num(context, deploys[k] ?? 0)],
         if (other.isNotEmpty)
           [
-            Text('בלי פרויקט', style: T.row2.copyWith(color: context.p.text2)),
+            Text(UiCopy.text(452), style: T.row2.copyWith(color: context.p.text2)),
             _num(context, otherM),
             _num(context, other.fold(0, (s, k) => s + (deploys[k] ?? 0))),
           ],
       ],
-      total: ['סה"כ', '${merges.values.fold(0, (a, b) => a + b)}', '${deploys.values.fold(0, (a, b) => a + b)}'],
+      total: [UiCopy.text(450), '${merges.values.fold(0, (a, b) => a + b)}', '${deploys.values.fold(0, (a, b) => a + b)}'],
     );
   }
 
@@ -100,9 +102,9 @@ class MapStats extends StatelessWidget {
     final rows = [...day.estimates]..sort((a, b) => b.n.compareTo(a.n));
     String ratio(double? r) => r == null ? '' : '${(r * 100).round()}%';
     return QuietTable(
-      title: 'דיוק הערכות',
-      note: 'כל ההערכות מאז שהתחילו למדוד. "בפועל": כמה מהזמן שהוערך נוצל, בחציון.',
-      head: const ['סוג', 'ניתנו', 'בזמן', 'באיחור', 'פתוחות', 'בפועל'],
+      title: UiCopy.text(453),
+      note: UiCopy.text(454),
+      head:  [UiCopy.text(316), UiCopy.text(455), UiCopy.text(456), UiCopy.text(457), UiCopy.text(458), UiCopy.text(459)],
       flex: const [4, 2, 2, 2, 2, 2],
       rows: [
         for (final r in rows)
@@ -139,6 +141,7 @@ class QuietTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     Widget row(List<Widget> cells, {double v = 11}) => Container(
           padding: EdgeInsets.symmetric(vertical: v),
@@ -180,19 +183,20 @@ class _WorkersState extends State<_Workers> {
 
   /// How long it took, as he reads it: "40 שנ'", "3 דק'", "1.5 שע'".
   static String took(int ms) {
-    if (ms < 60000) return '${(ms / 1000).round()} שנ\'';
-    if (ms < 3600000) return '${(ms / 60000).round()} דק\'';
-    return '${(ms / 3600000).toStringAsFixed(1)} שע\'';
+    if (ms < 60000) return UiCopy.text(272, [(ms / 1000).round()]);
+    if (ms < 3600000) return UiCopy.text(460, [(ms / 60000).round()]);
+    return UiCopy.text(461, [(ms / 3600000).toStringAsFixed(1)]);
   }
 
   /// His messages to this worker and what came back: the time to the first answer (median), or that none came.
   static String answer(WorkerStat w) {
     if (w.answerMs != null) return took(w.answerMs!);
-    return w.asked > 0 ? 'לא ענה' : '';
+    return w.asked > 0 ? UiCopy.text(462) : '';
   }
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = widget.day;
     final ws = [...d.workers.where((w) => d.people.containsKey(w.id) && w.workMs > 0)]..sort((a, b) => b.workMs.compareTo(a.workMs));
@@ -213,9 +217,9 @@ class _WorkersState extends State<_Workers> {
     return LayoutBuilder(builder: (context, c) {
       final narrow = c.maxWidth < 520;
       return QuietTable(
-        title: 'עובדים',
-        note: 'לפי שעות במשמרת. "כמה זמן לקח לענות לך": מהודעה שלך עד התשובה הראשונה אליך, בחציון.${narrow ? '' : ' הפס: באילו שעות ביום כל אחד עבד, כהה יותר = יותר מהשעה.'}',
-        head: narrow ? const ['עובד', 'הודעות', 'כמה זמן לקח לענות לך'] : const ['עובד', 'שעות במשמרת', 'הודעות', 'כמה זמן לקח לענות לך', 'במהלך היום'],
+        title: UiCopy.text(463),
+        note: UiCopy.text(465, [narrow ? '' : UiCopy.text(464)]),
+        head: narrow ?  [UiCopy.text(86), UiCopy.text(421), UiCopy.text(466)] :  [UiCopy.text(86), UiCopy.text(467), UiCopy.text(421), UiCopy.text(466), UiCopy.text(468)],
         flex: narrow ? const [7, 3, 5] : const [7, 2, 3, 4, 6],
         rows: [
           for (final w in shown)
@@ -229,7 +233,7 @@ class _WorkersState extends State<_Workers> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Row(children: [
-                    Text(all ? 'פחות' : 'עוד ${ws.length - 12} עובדים', style: T.row2.copyWith(color: p.accent)),
+                    Text(all ? UiCopy.text(469) : UiCopy.text(470, [ws.length - 12]), style: T.row2.copyWith(color: p.accent)),
                     Ic(all ? 'expand_less' : 'expand_more', size: 20, color: p.accent),
                   ]),
                 ),
@@ -248,6 +252,7 @@ class _Strip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Directionality(
       textDirection: TextDirection.ltr,

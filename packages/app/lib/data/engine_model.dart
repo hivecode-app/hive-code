@@ -1,3 +1,5 @@
+import 'package:agent_company/l10n/input_copy.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 // hq event log -> chat items. A Dart port of spikes/bet7-chat/model.ts, adapted to the
 // EngineEvent kinds hq persists (packages/shared/src/shift-protocol.ts) instead of raw stream-json:
 //   engine.text, engine.tool_use, engine.tool_result, engine.result, engine.user_echo,
@@ -120,24 +122,24 @@ class EngineModel {
           final card = HandoffCard(id: 'ask:$id', ts: ts, what: (input['what'] ?? '').toString().trim(), seq: seq);
           items.add(card);
           _askCards[id] = card;
-          onLive?.call(LiveState(phase: LivePhase.tool, label: liveLabel(name, input, gender)));
+          onLive?.call(LiveState(phase: LivePhase.tool, label: liveLabel(name, input, gender), labelBuilder: () => liveLabel(name, input, gender)));
           return;
         }
         if (hiddenTool(name, input)) {
           _hiddenTools.add(id);
-          onLive?.call(LiveState(phase: LivePhase.tool, label: liveLabel(name, input, gender)));
+          onLive?.call(LiveState(phase: LivePhase.tool, label: liveLabel(name, input, gender), labelBuilder: () => liveLabel(name, input, gender)));
           return;
         }
         final g = _group ??= _newGroup(ts, seq);
         _groupTools[id] = (g, g.tools.length);
         _toolStarted[id] = ts;
         (_toolNames[g.id] ??= []).add(name);
-        g.tools.add(ToolLine(icon: toolIcon(name), label: toolDetail(name, input), name: name, outcome: Outcome.running,
+        g.tools.add(ToolLine(icon: toolIcon(name), label: toolDetail(name, input), labelBuilder: () => toolDetail(name, input), name: name, outcome: Outcome.running,
             call: ToolCall(name: name, input: input, started: ts, why: _why)));
         g.outcome = Outcome.running;
-        g.liveLabel = liveLabel(name, input, gender);
-        g.summary = summarizeTools(_toolNames[g.id]!.sublist(0, _toolNames[g.id]!.length - 1), gender, files: _files(g));
-        onLive?.call(LiveState(phase: LivePhase.tool, label: g.liveLabel, runningCommand: name == 'Bash' ? (input['command'] as String?) : null));
+        g.liveLabelBuilder = () => liveLabel(name, input, gender);
+        g.summaryBuilder = () => summarizeTools(_toolNames[g.id]!.sublist(0, _toolNames[g.id]!.length - 1), gender, files: _files(g));
+        onLive?.call(LiveState(phase: LivePhase.tool, label: g.liveLabel, labelBuilder: () => g.liveLabel, runningCommand: name == 'Bash' ? (input['command'] as String?) : null));
       case 'tool_result':
         final id = ev['toolUseId'] as String? ?? '';
         if (_hiddenTools.remove(id)) {
@@ -158,12 +160,12 @@ class EngineModel {
         final (g, i) = at;
         final old = g.tools[i];
         final err = ev['isError'] == true;
-        g.tools[i] = ToolLine(icon: old.icon, label: old.label, name: old.name, trail: old.trail, outcome: err ? Outcome.error : Outcome.ok,
+        g.tools[i] = ToolLine(icon: old.icon, label: old.label, labelBuilder: old.labelBuilder, name: old.name, trail: old.trail, outcome: err ? Outcome.error : Outcome.ok,
             call: old.call?.done(at: ts, preview: ev['preview'] as String?, isError: err));
         if (err) g.outcome = Outcome.error;
         final started = g.ts;
         final secs = ts.difference(started).inSeconds;
-        g.summary = summarizeTools(_toolNames[g.id]!, gender, files: _files(g), seconds: secs, failed: g.tools.any((t) => t.outcome == Outcome.error));
+        g.summaryBuilder = () => summarizeTools(_toolNames[g.id]!, gender, files: _files(g), seconds: secs, failed: g.tools.any((t) => t.outcome == Outcome.error));
         g.liveLabel = null;
       case 'result':
         for (final s in _streams.values) {
@@ -184,7 +186,7 @@ class EngineModel {
         _turnTexts.clear();
         _toldAt = null;
         if (failed) {
-          items.add(ErrorLine(id: 'r:$seq', ts: ts, text: 'הסבב נגמר בשגיאה. ${gender == Gender.f ? 'היא תנסה' : 'הוא ינסה'} שוב בהודעה הבאה.', seq: seq));
+          items.add(ErrorLine(id: 'r:$seq', ts: ts, text: UiCopy.text(800, [gender == Gender.f ? UiCopy.text(798) : UiCopy.text(799)]), textBuilder: () => UiCopy.text(800, [gender == Gender.f ? UiCopy.text(798) : UiCopy.text(799)]), seq: seq));
         }
         onLive?.call(const LiveState());
       case 'user_echo':
@@ -209,7 +211,7 @@ class EngineModel {
     if (g.outcome == Outcome.running) g.outcome = o;
     for (var i = 0; i < g.tools.length; i++) {
       final t = g.tools[i];
-      if (t.outcome == Outcome.running) g.tools[i] = ToolLine(icon: t.icon, label: t.label, name: t.name, trail: t.trail, outcome: Outcome.interrupted, call: t.call);
+      if (t.outcome == Outcome.running) g.tools[i] = ToolLine(icon: t.icon, label: t.label, labelBuilder: t.labelBuilder, name: t.name, trail: t.trail, outcome: Outcome.interrupted, call: t.call);
     }
     g.liveLabel = null;
     _group = null;
@@ -252,26 +254,36 @@ String toolIcon(String name) => switch (name) {
 String toolLabel(String name, Gender g) {
   final f = g == Gender.f;
   return switch (name) {
-    'mcp__company__remember' => f ? 'רשמה לזיכרון' : 'רשם לזיכרון',
-    'mcp__company__recall' => f ? 'חיפשה בזיכרון' : 'חיפש בזיכרון',
-    'mcp__company__tell' => f ? 'שלחה הודעה' : 'שלח הודעה',
-    'mcp__company__ask' => f ? 'שאלה אותך' : 'שאל אותך',
-    'mcp__company__open_team' => f ? 'פתחה משימה' : 'פתח משימה',
-    'mcp__company__close_team' => f ? 'סגרה משימה' : 'סגר משימה',
-    'mcp__company__request_go' => f ? 'ביקשה GO' : 'ביקש GO',
-    'mcp__company__status' => f ? 'עדכנה מצב' : 'עדכן מצב',
-    'mcp__company__compose_home' => f ? 'עדכנה את הבית' : 'עדכן את הבית',
-    'Bash' => f ? 'הריצה פקודה' : 'הריץ פקודה',
-    'Read' => f ? 'קראה קובץ' : 'קרא קובץ',
-    'Edit' || 'Write' || 'MultiEdit' || 'NotebookEdit' => f ? 'ערכה קובץ' : 'ערך קובץ',
-    'Grep' || 'Glob' => f ? 'חיפשה בקוד' : 'חיפש בקוד',
-    'WebSearch' || 'WebFetch' => f ? 'חיפשה ברשת' : 'חיפש ברשת',
-    'Task' || 'Agent' => 'עוזר',
-    _ => f ? 'השתמשה בכלי' : 'השתמש בכלי',
+    'mcp__company__remember' => f ? UiCopy.text(801) : UiCopy.text(802),
+    'mcp__company__recall' => f ? UiCopy.text(803) : UiCopy.text(804),
+    'mcp__company__tell' => f ? UiCopy.text(805) : UiCopy.text(806),
+    'mcp__company__ask' => f ? UiCopy.text(807) : UiCopy.text(808),
+    'mcp__company__open_team' => f ? UiCopy.text(809) : UiCopy.text(810),
+    'mcp__company__close_team' => f ? UiCopy.text(811) : UiCopy.text(812),
+    'mcp__company__request_go' => f ? UiCopy.text(813) : UiCopy.text(814),
+    'mcp__company__status' => f ? UiCopy.text(815) : UiCopy.text(816),
+    'mcp__company__compose_home' => f ? UiCopy.text(817) : UiCopy.text(818),
+    'Bash' => f ? UiCopy.text(819) : UiCopy.text(820),
+    'Read' => f ? UiCopy.text(821) : UiCopy.text(822),
+    'Edit' || 'Write' || 'MultiEdit' || 'NotebookEdit' => f ? UiCopy.text(823) : UiCopy.text(824),
+    'Grep' || 'Glob' => f ? UiCopy.text(825) : UiCopy.text(826),
+    'WebSearch' || 'WebFetch' => f ? UiCopy.text(827) : UiCopy.text(828),
+    'Task' || 'Agent' => UiCopy.text(829),
+    _ => f ? UiCopy.text(830) : UiCopy.text(831),
   };
 }
 
 /// Tools with no LTR detail of their own (company tools, unknown ones): the row is the Hebrew label alone.
+bool toolKnown(String name) => const {
+  'mcp__company__remember', 'mcp__company__recall', 'mcp__company__tell', 'mcp__company__ask',
+  'mcp__company__open_team', 'mcp__company__close_team', 'mcp__company__request_go',
+  'mcp__company__status', 'mcp__company__compose_home', 'Bash', 'Read', 'Edit', 'Write',
+  'MultiEdit', 'NotebookEdit', 'Grep', 'Glob', 'WebSearch', 'WebFetch', 'Task', 'Agent',
+}.contains(name);
+
+bool toolHasAgentDescription(ToolLine tool) => (tool.name == 'Task' || tool.name == 'Agent') &&
+    hebrewOrEmpty((tool.call?.input['description'] ?? '').toString()).isNotEmpty;
+
 bool toolHasDetail(String name) => const {'Read', 'Edit', 'Write', 'MultiEdit', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch'}.contains(name);
 
 /// The LTR detail line of one tool (chat.md §2.4 table, open state).
@@ -282,7 +294,7 @@ String toolDetail(String name, Map<String, dynamic> input) {
     'Grep' => '"${s('pattern')}"${input['path'] != null ? ' in ${s('path')}' : ''}',
     'Glob' => s('pattern'),
     'Bash' => s('command'),
-    'Task' || 'Agent' => hebrewOrEmpty(s('description')).isNotEmpty ? s('description') : 'עוזר',
+    'Task' || 'Agent' => hebrewOrEmpty(s('description')).isNotEmpty ? s('description') : UiCopy.text(829),
     'WebFetch' => s('url'),
     'WebSearch' => s('query'),
     _ => name,
@@ -290,34 +302,34 @@ String toolDetail(String name, Map<String, dynamic> input) {
 }
 
 /// A tool's own description is shown only when it has Hebrew (dir-0002); otherwise the caller falls back to a generic Hebrew line.
-String hebrewOrEmpty(String d) => RegExp(r'[֐-׿]').hasMatch(d) ? d : '';
+String hebrewOrEmpty(String d) => (!UiCopy.legacy && UiCopy.copy.localeName == 'en' && RegExp(r'[A-Za-z]').hasMatch(d)) ? d : RegExp(InputCopy.v5).hasMatch(d) ? d : '';
 
 /// What the live tool row says while it runs: "מריץ בדיקות".
 String liveLabel(String name, Map<String, dynamic> input, Gender g) {
   final f = g == Gender.f;
   if (name == 'Bash') {
     final cmd = (input['command'] ?? '').toString();
-    if (_isTest(cmd)) return f ? 'מריצה בדיקות' : 'מריץ בדיקות';
+    if (_isTest(cmd)) return f ? UiCopy.text(832) : UiCopy.text(833);
     final d = hebrewOrEmpty((input['description'] ?? '').toString());
-    return d.isNotEmpty ? d : (f ? 'מריצה פקודה' : 'מריץ פקודה');
+    return d.isNotEmpty ? d : (f ? UiCopy.text(834) : UiCopy.text(835));
   }
   return switch (name) {
-    'Read' => f ? 'קוראת' : 'קורא',
-    'Grep' || 'Glob' => f ? 'מחפשת' : 'מחפש',
-    'Edit' || 'Write' || 'MultiEdit' => f ? 'עורכת' : 'עורך',
-    'Task' || 'Agent' => f ? 'שולחת עוזר' : 'שולח עוזר',
-    'mcp__company__tell' => f ? 'כותבת' : 'כותב',
-    'mcp__company__ask' => f ? 'שואלת' : 'שואל',
-    'mcp__company__remember' => f ? 'רושמת לזיכרון' : 'רושם לזיכרון',
-    'mcp__company__open_team' => f ? 'פותחת צוות' : 'פותח צוות',
-    askUserTool => 'מחכה לך בדפדפן',
-    _ => f ? 'עובדת' : 'עובד',
+    'Read' => f ? UiCopy.text(836) : UiCopy.text(837),
+    'Grep' || 'Glob' => f ? UiCopy.text(838) : UiCopy.text(839),
+    'Edit' || 'Write' || 'MultiEdit' => f ? UiCopy.text(840) : UiCopy.text(841),
+    'Task' || 'Agent' => f ? UiCopy.text(842) : UiCopy.text(843),
+    'mcp__company__tell' => f ? UiCopy.text(844) : UiCopy.text(845),
+    'mcp__company__ask' => f ? UiCopy.text(846) : UiCopy.text(847),
+    'mcp__company__remember' => f ? UiCopy.text(848) : UiCopy.text(849),
+    'mcp__company__open_team' => f ? UiCopy.text(850) : UiCopy.text(851),
+    askUserTool => UiCopy.text(852),
+    _ => f ? UiCopy.text(85) : UiCopy.text(86),
   };
 }
 
 bool _isTest(String cmd) => RegExp(r'\b(go test|flutter test|pytest|npm (run )?test|node --test|jest|vitest)\b').hasMatch(cmd);
 
-String _times(int n, bool f) => switch (n) { 1 => 'פעם אחת', 2 => 'פעמיים', _ => '$n פעמים' };
+String _times(int n, bool f) => switch (n) { 1 => UiCopy.text(853), 2 => UiCopy.text(854), _ => UiCopy.text(855, [n]) };
 
 /// One Hebrew sentence for a run of tools (chat.md §2.4): "קרא 4 קבצים · חיפש פעמיים · ערך `renew.go`".
 /// hq will own this (summarizeTools); the client keeps the same rules until it does.
@@ -335,18 +347,18 @@ String summarizeTools(List<String> names, Gender g, {List<String> files = const 
   final tells = count((n) => n == 'mcp__company__tell');
   final memory = count((n) => n == 'mcp__company__remember');
   final teams = count((n) => n == 'mcp__company__open_team');
-  if (reads > 0) parts.add('${f ? 'קראה' : 'קרא'} ${reads == 1 ? 'קובץ' : '$reads קבצים'}');
-  if (searches > 0) parts.add('${f ? 'חיפשה' : 'חיפש'} ${_times(searches, f)}');
-  if (edits.length == 1) parts.add('${f ? 'ערכה' : 'ערך'} `${edits.first}`');
-  if (edits.length > 1) parts.add('${f ? 'ערכה' : 'ערך'} ${edits.length} קבצים');
-  if (bash > 0) parts.add('${f ? 'הריצה' : 'הריץ'} ${bash == 1 ? 'פקודה' : '$bash פקודות'}${failed ? ' · נכשל' : ''}');
-  if (agents > 0) parts.add(f ? 'שלחה עוזר' : 'שלח עוזר');
-  if (web > 0) parts.add(f ? 'קראה ברשת' : 'קרא ברשת');
-  if (tells > 0) parts.add('${f ? 'שלחה' : 'שלח'} ${tells == 1 ? 'הודעה' : '$tells הודעות'}');
-  if (memory > 0) parts.add(f ? 'רשמה לזיכרון' : 'רשם לזיכרון');
-  if (teams > 0) parts.add(f ? 'פתחה צוות' : 'פתח צוות');
+  if (reads > 0) parts.add('${f ? UiCopy.text(856) : UiCopy.text(857)} ${reads == 1 ? UiCopy.text(858) : UiCopy.text(267, [reads])}');
+  if (searches > 0) parts.add('${f ? UiCopy.text(859) : UiCopy.text(860)} ${_times(searches, f)}');
+  if (edits.length == 1) parts.add('${f ? UiCopy.text(861) : UiCopy.text(862)} `${edits.first}`');
+  if (edits.length > 1) parts.add(UiCopy.text(863, [f ? UiCopy.text(861) : UiCopy.text(862), edits.length]));
+  if (bash > 0) parts.add('${f ? UiCopy.text(864) : UiCopy.text(865)} ${bash == 1 ? UiCopy.text(366) : UiCopy.text(866, [bash])}${failed ? UiCopy.text(867) : ''}');
+  if (agents > 0) parts.add(f ? UiCopy.text(868) : UiCopy.text(869));
+  if (web > 0) parts.add(f ? UiCopy.text(870) : UiCopy.text(871));
+  if (tells > 0) parts.add('${f ? UiCopy.text(872) : UiCopy.text(873)} ${tells == 1 ? UiCopy.text(874) : UiCopy.text(24, [tells])}');
+  if (memory > 0) parts.add(f ? UiCopy.text(801) : UiCopy.text(802));
+  if (teams > 0) parts.add(f ? UiCopy.text(875) : UiCopy.text(876));
   final other = names.length - reads - searches - count((n) => n == 'Edit' || n == 'Write' || n == 'MultiEdit') - bash - agents - web - tells - memory - teams;
-  if (other > 0) parts.add(f ? 'השתמשה בכלים' : 'השתמש בכלים');
-  if (seconds != null && seconds > 0) parts.add("$seconds שנ'");
+  if (other > 0) parts.add(f ? UiCopy.text(877) : UiCopy.text(878));
+  if (seconds != null && seconds > 0) parts.add(UiCopy.text(272, [seconds]));
   return parts.join(' · ');
 }

@@ -1,0 +1,4 @@
+Heebo SemiBold (600), instantiated with fontTools from the Google Fonts variable font:
+https://github.com/google/fonts/tree/main/ofl/heebo
+License: SIL Open Font License, see OFL.txt.
+The 600 weight is used by Direction A (docs/product/design-v2/a.css).

@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // What a worker did with one tool, in plain Hebrew (נועה, 22/10): a tap on a tool row in the chat opens it.
 // A full-height sheet on the phone, the side panel on a wide desktop. Above: the icon, the Hebrew label, who
 // and when. Below, by kind: what went into memory and where, the message and whom it answered, how a command
@@ -88,6 +89,7 @@ class ToolDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data;
     if (d == null) return const SizedBox.shrink();
@@ -121,14 +123,14 @@ class ToolDetails extends StatelessWidget {
                 ]),
               ]),
             ),
-            IconButton(onPressed: onClose, tooltip: 'סגירה', icon: Ic('close', size: 22, color: p.text2)),
+            IconButton(onPressed: onClose, tooltip: UiCopy.text(84), icon: Ic('close', size: 22, color: p.text2)),
           ]),
         ),
         Divider(height: 1, color: p.line),
         Expanded(
           child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 32), children: [
             ...sections,
-            if (why != null) _Section('למה', child: Rich(why, style: T.row2.copyWith(color: p.text))),
+            if (why != null) _Section(UiCopy.text(313), child: Rich(why, style: T.row2.copyWith(color: p.text))),
           ]),
         ),
       ]),
@@ -147,14 +149,14 @@ class ToolDetails extends StatelessWidget {
     final where = memoryWhere(d, i);
     return [
       if (c.isError) _failed(context, c),
-      _Section('מה נרשם', child: _Box(child: Markdown(text))),
-      _Section('איפה', child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _Section(UiCopy.text(314), child: _Box(child: Markdown(text))),
+      _Section(UiCopy.text(315), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(where, style: T.row2.copyWith(color: p.text)),
         if (file != null) Padding(padding: const EdgeInsets.only(top: 2), child: _Ltr(file, color: p.text2, size: 12)),
       ])),
-      if (kind != null) _Section('סוג', child: Text(kind, style: T.row2.copyWith(color: p.text))),
+      if (kind != null) _Section(UiCopy.text(316), child: Text(kind, style: T.row2.copyWith(color: p.text))),
       if (quote != null && quote.trim().isNotEmpty)
-        _Section('ציטוט', child: _Quoted(child: Text('«${quote.trim()}»', style: T.row2.copyWith(color: p.text)))),
+        _Section(UiCopy.text(182), child: _Quoted(child: Text('«${quote.trim()}»', style: T.row2.copyWith(color: p.text)))),
     ];
   }
 
@@ -173,9 +175,9 @@ class ToolDetails extends StatelessWidget {
     final refChat = ref == null ? null : (ref.from == 'owner' ? identityId : ref.from);
     return [
       if (c.isError) _failed(context, c),
-      _Section('ממי', child: _Person(id: identityId, onTap: d.canChat(identityId) ? () => open(identityId) : null)),
-      _Section('למי', child: _Person(id: toId, name: to, onTap: d.identities.containsKey(toId) && d.canChat(toId) ? () => open(toId) : null)),
-      _Section('ההודעה', child: Align(
+      _Section(UiCopy.text(317), child: _Person(id: identityId, onTap: d.canChat(identityId) ? () => open(identityId) : null)),
+      _Section(UiCopy.text(318), child: _Person(id: toId, name: to, onTap: d.identities.containsKey(toId) && d.canChat(toId) ? () => open(toId) : null)),
+      _Section(UiCopy.text(319), child: Align(
         alignment: AlignmentDirectional.centerStart,
         child: Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
@@ -184,7 +186,7 @@ class ToolDetails extends StatelessWidget {
         ),
       )),
       if (ref != null)
-        _Section('בתגובה ל־', child: _Quoted(
+        _Section(UiCopy.text(320), child: _Quoted(
           onTap: refChat != null && d.canChat(refChat) ? () => _openChat(context, refChat, id: refId, text: withoutIds(ref.body)) : null,
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('${d.who(ref.from).name} · ${_when(ref.ts)}', style: T.small.copyWith(color: p.text2, fontWeight: FontWeight.w700)),
@@ -199,7 +201,7 @@ class ToolDetails extends StatelessWidget {
             style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), side: BorderSide(color: p.line), foregroundColor: p.text),
             onPressed: () => open(toId),
             icon: Ic('chat', size: 20, color: p.text),
-            label: Text('לשיחה עם ${d.who(toId).name}', style: T.button),
+            label: Text(UiCopy.text(321, [d.who(toId).name]), style: T.button),
           ),
         ),
     ];
@@ -222,9 +224,9 @@ class ToolDetails extends StatelessWidget {
     final out = c.preview ?? '';
     return [
       if (title.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 12), child: Text(title, style: T.name.copyWith(color: p.text))),
-      _Section('מה קרה', child: _outcome(context, c)),
-      _Section('הפקודה', child: _CodeFold(code: cmd, foldedLines: 2, open: 'הצגת כל הפקודה')),
-      if (out.trim().isNotEmpty) _Section('הפלט', child: _CodeFold(code: out.trimRight(), foldedLines: _short(out) ? 3 : 0, open: _outputLabel(out))),
+      _Section(UiCopy.text(322), child: _outcome(context, c)),
+      _Section(UiCopy.text(251), child: _CodeFold(code: cmd, foldedLines: 2, open: UiCopy.text(323))),
+      if (out.trim().isNotEmpty) _Section(UiCopy.text(324), child: _CodeFold(code: out.trimRight(), foldedLines: _short(out) ? 3 : 0, open: _outputLabel(out))),
     ];
   }
 
@@ -235,24 +237,24 @@ class ToolDetails extends StatelessWidget {
     final cut = out.endsWith('…');
     final n = '\n'.allMatches(out.trimRight()).length + 1;
     // hq keeps the first 400 characters of a result: past that, the real line count is unknown.
-    if (cut) return 'הצגת תחילת הפלט';
-    return n == 1 ? 'הצגת הפלט (שורה אחת)' : 'הצגת הפלט ($n שורות)';
+    if (cut) return UiCopy.text(325);
+    return n == 1 ? UiCopy.text(326) : UiCopy.text(327, [n]);
   }
 
   Widget _outcome(BuildContext context, ToolCall c) {
     final p = context.p;
     final secs = c.ended?.difference(c.started).inMilliseconds;
     final dur = secs == null ? '' : ' · ${_duration(secs)}';
-    if (c.ended == null) return _IconLine(icon: 'progress_activity', text: 'עדיין רץ', color: p.text);
-    if (!c.isError) return _IconLine(icon: 'check_circle', text: 'הסתיים בהצלחה$dur', color: p.text);
+    if (c.ended == null) return _IconLine(icon: 'progress_activity', text: UiCopy.text(328), color: p.text);
+    if (!c.isError) return _IconLine(icon: 'check_circle', text: UiCopy.text(329, [dur]), color: p.text);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _IconLine(icon: 'error', text: 'נכשל$dur', color: p.text, bold: true),
+      _IconLine(icon: 'error', text: UiCopy.text(330, [dur]), color: p.text, bold: true),
       if (_lastLine(c.preview) case final l?)
         Padding(padding: const EdgeInsets.only(top: 6), child: _Box(child: _Ltr(l, color: p.text, size: 12.5, wrap: true))),
     ]);
   }
 
-  Widget _failed(BuildContext context, ToolCall c) => _Section('מה קרה', child: _outcome(context, c));
+  Widget _failed(BuildContext context, ToolCall c) => _Section(UiCopy.text(322), child: _outcome(context, c));
 
   // ── קרא קובץ / ערך קובץ ──
 
@@ -265,13 +267,13 @@ class ToolDetails extends StatelessWidget {
     final limit = (c.input['limit'] as num?)?.toInt();
     return [
       if (c.isError) _failed(context, c),
-      _Section('הקובץ', child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _Section(UiCopy.text(331), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _Ltr(name, color: p.text, size: 15, bold: true),
         Padding(padding: const EdgeInsets.only(top: 2), child: _Ltr(i < 0 ? path : path.substring(0, i + 1), color: p.text2, size: 12, wrap: true)),
         if (c.name == 'Read' && (from != null || limit != null))
           Padding(
             padding: const EdgeInsets.only(top: 6),
-            child: Text('שורות ${from ?? 1}–${(from ?? 1) + (limit ?? 2000) - 1}', style: T.small.copyWith(color: p.text2)),
+            child: Text(UiCopy.text(332, [from ?? 1, (from ?? 1) + (limit ?? 2000) - 1]), style: T.small.copyWith(color: p.text2)),
           ),
       ])),
       if (c.name != 'Read') ...[
@@ -283,8 +285,8 @@ class ToolDetails extends StatelessWidget {
 
   String _diffTitle(DiffFile f) {
     String n(int k, String one, String many) => k == 1 ? one : '$k $many';
-    final parts = [if (f.add > 0) n(f.add, 'שורה אחת נוספה', 'שורות נוספו'), if (f.del > 0) n(f.del, 'שורה אחת נמחקה', 'שורות נמחקו')];
-    return parts.isEmpty ? 'השינוי' : parts.join(' · ');
+    final parts = [if (f.add > 0) n(f.add, UiCopy.text(333), UiCopy.text(334)), if (f.del > 0) n(f.del, UiCopy.text(335), UiCopy.text(336))];
+    return parts.isEmpty ? UiCopy.text(337) : parts.join(' · ');
   }
 
   /// A small diff from the edit itself: the old lines out, the new ones in (no line numbers: the tool has none).
@@ -318,7 +320,7 @@ class ToolDetails extends StatelessWidget {
       add += nl.length - head - tail;
       del += ol.length - head - tail;
       // A whole new file shows its first 30 lines.
-      hunks.add(DiffHunk(edits.length > 1 ? 'שינוי ${hunks.length + 1}' : '', lines.length > 30 ? lines.sublist(0, 30) : lines));
+      hunks.add(DiffHunk(edits.length > 1 ? UiCopy.text(338, [hunks.length + 1]) : '', lines.length > 30 ? lines.sublist(0, 30) : lines));
     }
     if (hunks.isEmpty) return null;
     return DiffFile(path: path, add: add, del: del, hunks: [for (final h in hunks) DiffHunk(h.header, h.lines)]);
@@ -328,7 +330,7 @@ class ToolDetails extends StatelessWidget {
 
   List<Widget> _other(BuildContext context, ToolCall c) {
     final p = context.p;
-    final known = toolLabel(c.name, Gender.m) != 'השתמש בכלי';
+    final known = toolKnown(c.name);
     // An unknown tool's name shows here only, as code (נועה, 22/10).
     final fields = [
       for (final e in c.input.entries)
@@ -338,14 +340,14 @@ class ToolDetails extends StatelessWidget {
     final json = RegExp(r'^\s*[\[{]').hasMatch(out);
     return [
       if (!known) Padding(padding: const EdgeInsets.only(top: 12), child: Align(alignment: AlignmentDirectional.centerStart, child: _Chip(c.name))),
-      _Section('מה קרה', child: _outcome(context, c)),
+      _Section(UiCopy.text(322), child: _outcome(context, c)),
       for (final (k, v) in fields)
           _Section(k, child: v is String ? _Folding(text: v, lines: 6) : _Ltr(v is List ? v.join(', ') : jsonEncode(v), color: p.text, size: 12.5, wrap: true)),
       // A reply in words is worth showing; a JSON reply is a technical detail like the input.
-      if (out.trim().isNotEmpty && !json) _Section('מה חזר', child: _CodeFold(code: out, foldedLines: 3, open: 'הצגת הכול')),
-      _Section('פרטים טכניים', child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _CodeFold(code: const JsonEncoder.withIndent('  ').convert(c.input), foldedLines: 0, open: 'הצגת מה נשלח לכלי'),
-        if (json) _CodeFold(code: out, foldedLines: 0, open: 'הצגת מה חזר'),
+      if (out.trim().isNotEmpty && !json) _Section(UiCopy.text(339), child: _CodeFold(code: out, foldedLines: 3, open: UiCopy.text(340))),
+      _Section(UiCopy.text(174), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _CodeFold(code: const JsonEncoder.withIndent('  ').convert(c.input), foldedLines: 0, open: UiCopy.text(341)),
+        if (json) _CodeFold(code: out, foldedLines: 0, open: UiCopy.text(342)),
       ])),
     ];
   }
@@ -361,75 +363,75 @@ String memoryWhere(CompanyData d, Map<String, dynamic> i) {
     final base = parts.last.replaceAll(RegExp(r'\.md$'), '');
     final open = RegExp(r'^open-(.+)$').firstMatch(base);
     final what = open != null
-        ? 'מה פתוח אצל ${d.identities[open.group(1)]?.name ?? open.group(1)}'
-        : _files[base] ?? (base.endsWith('-actions') ? 'פעולות' : base);
+        ? UiCopy.text(141, [d.identities[open.group(1)]?.name ?? open.group(1)])
+        : _files[base] ?? (base.endsWith('-actions') ? UiCopy.text(343) : base);
     if (parts.length >= 3 && parts[1] == 'projects') return '${projectName(parts[2])} · $what';
-    if (parts.length >= 4 && parts[1] == 'company') return '${_teams[parts[2]] ?? 'זיכרון החברה'} · $what';
-    return 'זיכרון החברה · $what';
+    if (parts.length >= 4 && parts[1] == 'company') return '${_teams[parts[2]] ?? UiCopy.text(344)} · $what';
+    return UiCopy.text(345, [what]);
   }
-  final kind = _kindsPlural[i['kind']] ?? 'רישומים';
+  final kind = _kindsPlural[i['kind']] ?? UiCopy.text(346);
   return switch (scope) {
-    'project' => '${i['project'] is String ? projectName(i['project'] as String) : 'זיכרון הפרויקט'} · $kind',
-    'personal' => 'הזיכרון האישי שלך · $kind',
-    'identity' => 'הזיכרון של העובד · $kind',
-    _ => 'זיכרון החברה · $kind',
+    'project' => '${i['project'] is String ? projectName(i['project'] as String) : UiCopy.text(347)} · $kind',
+    'personal' => UiCopy.text(348, [kind]),
+    'identity' => UiCopy.text(349, [kind]),
+    _ => UiCopy.text(345, [kind]),
   };
 }
 
-const _files = {
-  'design-taste': 'ספר העיצוב',
-  'decisions': 'החלטות',
-  'lessons': 'לקחים',
-  'customers': 'לקוחות',
-  'conventions': 'נהלים',
-  'time-estimates': 'הערכות זמן',
-  'repos': 'מאגרי קוד',
-  'INDEX': 'תוכן העניינים',
+final _files = {
+  'design-taste': UiCopy.text(350),
+  'decisions': UiCopy.text(351),
+  'lessons': UiCopy.text(352),
+  'customers': UiCopy.text(353),
+  'conventions': UiCopy.text(354),
+  'time-estimates': UiCopy.text(355),
+  'repos': UiCopy.text(356),
+  'INDEX': UiCopy.text(357),
 };
-const _teams = {'design': 'צוות העיצוב', 'monitoring': 'צוות הניטור', 'improvement': 'מחלקת השיפור'};
-const _kinds = {'decision': 'החלטה', 'lesson': 'לקח', 'fact': 'עובדה', 'directive': 'הוראה', 'trap': 'מלכודת', 'command': 'פקודה'};
-const _kindsPlural = {'decision': 'החלטות', 'lesson': 'לקחים', 'fact': 'עובדות', 'directive': 'הוראות', 'trap': 'מלכודות', 'command': 'פקודות'};
+final _teams = {'design': UiCopy.text(358), 'monitoring': UiCopy.text(359), 'improvement': UiCopy.text(360)};
+final _kinds = {'decision': UiCopy.text(361), 'lesson': UiCopy.text(362), 'fact': UiCopy.text(363), 'directive': UiCopy.text(364), 'trap': UiCopy.text(365), 'command': UiCopy.text(366)};
+final _kindsPlural = {'decision': UiCopy.text(351), 'lesson': UiCopy.text(352), 'fact': UiCopy.text(367), 'directive': UiCopy.text(368), 'trap': UiCopy.text(369), 'command': UiCopy.text(370)};
 
 /// Input fields worth a Hebrew label on the generic details; the rest stay in "פרטים טכניים".
-const _fieldNames = {
-  'query': 'חיפוש',
-  'pattern': 'חיפוש',
-  'path': 'איפה',
-  'url': 'כתובת',
-  'prompt': 'הבקשה',
-  'description': 'תיאור',
-  'title': 'כותרת',
-  'brief': 'הבריף',
-  'headline': 'בשורה אחת',
-  'question': 'השאלה',
-  'options': 'אפשרויות',
-  'summary': 'סיכום',
-  'state': 'מצב',
-  'project': 'פרויקט',
-  'priority': 'עדיפות',
-  'reason': 'סיבה',
-  'risk': 'סיכון',
-  'rollback': 'איך חוזרים אחורה',
-  'what': 'מה',
-  'scope': 'היקף',
-  'need': 'מה צריך',
+final _fieldNames = {
+  'query': UiCopy.text(371),
+  'pattern': UiCopy.text(371),
+  'path': UiCopy.text(315),
+  'url': UiCopy.text(372),
+  'prompt': UiCopy.text(373),
+  'description': UiCopy.text(374),
+  'title': UiCopy.text(375),
+  'brief': UiCopy.text(376),
+  'headline': UiCopy.text(377),
+  'question': UiCopy.text(378),
+  'options': UiCopy.text(379),
+  'summary': UiCopy.text(380),
+  'state': UiCopy.text(381),
+  'project': UiCopy.text(382),
+  'priority': UiCopy.text(383),
+  'reason': UiCopy.text(384),
+  'risk': UiCopy.text(385),
+  'rollback': UiCopy.text(386),
+  'what': UiCopy.text(387),
+  'scope': UiCopy.text(388),
+  'need': UiCopy.text(389),
 };
 
 String _when(DateTime t) {
   final now = CompanyTime.now();
   final today = dayStart(now);
   final day = dayStart(t);
-  if (day == today) return 'היום ${hm(t)}';
-  if (today.difference(day).inDays == 1) return 'אתמול ${hm(t)}';
+  if (day == today) return UiCopy.text(390, [hm(t)]);
+  if (today.difference(day).inDays == 1) return UiCopy.text(391, [hm(t)]);
   return '${dm(t)} ${hm(t)}';
 }
 
 String _duration(int ms) {
-  if (ms < 1000) return "פחות משנייה";
-  if (ms < 10000) return "${(ms / 1000).toStringAsFixed(1)} שנ'";
+  if (ms < 1000) return UiCopy.text(392);
+  if (ms < 10000) return UiCopy.text(272, [(ms / 1000).toStringAsFixed(1)]);
   final s = ms ~/ 1000;
-  if (s < 60) return "$s שנ'";
-  return "${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')} דק'";
+  if (s < 60) return UiCopy.text(272, [s]);
+  return UiCopy.text(393, [s ~/ 60, (s % 60).toString().padLeft(2, '0')]);
 }
 
 /// The last non-empty line of an error, without the "…" hq adds when it cuts.
@@ -460,6 +462,7 @@ class _Section extends StatelessWidget {
   final Widget child;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Padding(
       padding: const EdgeInsets.only(top: 20),
@@ -481,6 +484,7 @@ class _Quoted extends StatelessWidget {
   final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final box = ClipRRect(
       borderRadius: BorderRadius.circular(8),
@@ -490,13 +494,13 @@ class _Quoted extends StatelessWidget {
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Container(width: 3, color: p.text3),
             Expanded(child: Padding(padding: const EdgeInsetsDirectional.fromSTEB(10, 6, 12, 8), child: child)),
-            if (onTap != null) Padding(padding: const EdgeInsetsDirectional.only(end: 10), child: Center(child: Ic('chevron_left', size: 20, color: p.text2))),
+            if (onTap != null) Padding(padding: const EdgeInsetsDirectional.only(end: 10), child: Center(child: Ic(chevronIcon(context), size: 20, color: p.text2))),
           ]),
         ),
       ),
     );
     if (onTap == null) return box;
-    return Semantics(button: true, hint: 'מעבר להודעה', child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: box));
+    return Semantics(button: true, hint: UiCopy.text(394), child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: box));
   }
 }
 
@@ -510,6 +514,7 @@ class _Person extends StatelessWidget {
   final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data!;
     final known = d.identities.containsKey(id);
@@ -523,11 +528,11 @@ class _Person extends StatelessWidget {
             if (known && d.who(id).title.isNotEmpty) Text(d.who(id).title, style: T.small.copyWith(color: p.text2)),
           ]),
         ),
-        if (onTap != null) Ic('chevron_left', size: 20, color: p.text2),
+        if (onTap != null) Ic(chevronIcon(context), size: 20, color: p.text2),
       ]),
     );
     if (onTap == null) return row;
-    return Semantics(button: true, hint: known ? 'שיחה עם ${d.who(id).name}' : null, child: InkWell(onTap: onTap, child: row));
+    return Semantics(button: true, hint: known ? UiCopy.text(395, [d.who(id).name]) : null, child: InkWell(onTap: onTap, child: row));
   }
 }
 
@@ -535,11 +540,7 @@ class _Box extends StatelessWidget {
   const _Box({required this.child});
   final Widget child;
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        decoration: BoxDecoration(color: context.p.surface2, borderRadius: BorderRadius.circular(8)),
-        child: child,
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return Container(padding: const EdgeInsets.fromLTRB(12, 10, 12, 10), decoration: BoxDecoration(color: context.p.surface2, borderRadius: BorderRadius.circular(8)), child: child); }
 }
 
 class _IconLine extends StatelessWidget {
@@ -549,11 +550,7 @@ class _IconLine extends StatelessWidget {
   final Color color;
   final bool bold;
   @override
-  Widget build(BuildContext context) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(padding: const EdgeInsets.only(top: 1), child: Ic(icon, size: 20, color: color, fill: icon == 'error')),
-        const SizedBox(width: 8),
-        Expanded(child: Text(text, style: T.row2.copyWith(color: color, fontWeight: bold ? FontWeight.w700 : null))),
-      ]);
+  Widget build(BuildContext context) { UiCopy.watch(context); return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Padding(padding: const EdgeInsets.only(top: 1), child: Ic(icon, size: 20, color: color, fill: icon == 'error')), const SizedBox(width: 8), Expanded(child: Text(text, style: T.row2.copyWith(color: color, fontWeight: bold ? FontWeight.w700 : null)))]); }
 }
 
 /// Latin text set left to right: a path, a command line, an error.
@@ -565,15 +562,7 @@ class _Ltr extends StatelessWidget {
   final bool bold;
   final bool wrap;
   @override
-  Widget build(BuildContext context) => SizedBox(
-        width: double.infinity,
-        child: Text(text,
-            textDirection: TextDirection.ltr,
-            textAlign: TextAlign.left,
-            maxLines: wrap ? null : 1,
-            overflow: wrap ? null : TextOverflow.ellipsis,
-            style: T.mono(size, lh: size * 1.5, w: bold ? FontWeight.w700 : FontWeight.w400).copyWith(color: color)),
-      );
+  Widget build(BuildContext context) { UiCopy.watch(context); return SizedBox(width: double.infinity, child: Text(text, textDirection: TextDirection.ltr, textAlign: TextAlign.left, maxLines: wrap ? null : 1, overflow: wrap ? null : TextOverflow.ellipsis, style: T.mono(size, lh: size * 1.5, w: bold ? FontWeight.w700 : FontWeight.w400).copyWith(color: color))); }
 }
 
 class _Chip extends StatelessWidget {
@@ -581,6 +570,7 @@ class _Chip extends StatelessWidget {
   final String text;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -603,6 +593,7 @@ class _FoldingState extends State<_Folding> {
   bool open = false;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final long = '\n'.allMatches(widget.text).length + 1 > widget.lines || widget.text.length > widget.lines * 60;
     if (open || !long) return Markdown(widget.text);
@@ -611,7 +602,7 @@ class _FoldingState extends State<_Folding> {
       TextButton(
         style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 36), tapTargetSize: MaterialTapTargetSize.shrinkWrap),
         onPressed: () => setState(() => open = true),
-        child: Text('עוד', style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+        child: Text(UiCopy.text(163), style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
       ),
     ]);
   }
@@ -631,6 +622,7 @@ class _CodeFoldState extends State<_CodeFold> {
   bool open = false;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final lines = widget.code.split('\n');
     final fits = widget.foldedLines > 0 && lines.length <= widget.foldedLines && widget.code.length < widget.foldedLines * 70;
@@ -653,7 +645,7 @@ class _CodeFoldState extends State<_CodeFold> {
                 top: -12,
                 right: -34,
                 child: IconButton(
-                  tooltip: 'העתקה',
+                  tooltip: UiCopy.text(183),
                   onPressed: () => Clipboard.setData(ClipboardData(text: widget.code)),
                   icon: Ic('content_copy', size: 18, color: p.text2),
                 ),
@@ -667,7 +659,7 @@ class _CodeFoldState extends State<_CodeFold> {
             style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4), minimumSize: const Size(0, 40)),
             onPressed: () => setState(() => open = !open),
             icon: AnimatedRotation(turns: open ? 0.5 : 0, duration: const Duration(milliseconds: 200), child: Ic('expand_more', size: 18, color: p.accent)),
-            label: Text(open ? 'הסתרה' : widget.open, style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+            label: Text(open ? UiCopy.text(396) : widget.open, style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
           ),
         ),
     ]);

@@ -1,3 +1,5 @@
+import 'package:agent_company/l10n/input_copy.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 // The conversations screen on the phone (design language v2, mockup company-engine#37, built in task 205): one
 // list by latest activity, his own messages too, as in WhatsApp. Yoav stays pinned. A row says who, their team
 // or project, the last line ("אתה: " with the delivery ticks when he wrote last), when, and the state when it
@@ -45,7 +47,7 @@ List<ConversationSummary> convsByActivity(CompanyData d, {bool withDone = false}
 String firstSentence(String s) => RegExp(r'^.*?[.!?](?=\s|$)').firstMatch(s.trim())?.group(0) ?? s.trim();
 
 /// "14:02" today, "אתמול", else "20/10", as in WhatsApp.
-String whenV2(DateTime t, DateTime now) => switch (daysAgo(t, now)) { 0 => hm(t), 1 => 'אתמול', _ => dm(t) };
+String whenV2(DateTime t, DateTime now) => switch (daysAgo(t, now)) { 0 => hm(t), 1 => UiCopy.text(34), _ => dm(t) };
 
 /// The text a row shows: no markdown marks (the chat draws them, a one-line preview can't).
 String plainLine(String s) => s.replaceAll(RegExp(r'\*\*|__|`'), '').replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -175,6 +177,7 @@ class _ConversationsV2State extends State<ConversationsV2> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     assert(() {
       ConversationsScreen.debugBuilds++;
       return true;
@@ -191,7 +194,7 @@ class _ConversationsV2State extends State<ConversationsV2> {
         ConversationRowV2(c: c, now: now, pinned: c.identityId == d.managerId),
       ],
     ];
-    final title = TopBar(title: 'שיחות', showLink: true);
+    final title = TopBar(title: UiCopy.text(471), showLink: true);
     return Stack(children: [
       Column(children: [
         title,
@@ -238,7 +241,7 @@ class _ConversationsV2State extends State<ConversationsV2> {
       PositionedDirectional(
         end: 16,
         bottom: 16,
-        child: Fab(icon: 'edit_square', label: 'שיחה חדשה', onTap: () => newChat(context, d)),
+        child: Fab(icon: 'edit_square', label: UiCopy.text(484), onTap: () => newChat(context, d)),
       ),
     ]);
   }
@@ -252,6 +255,7 @@ class _SearchField extends StatelessWidget {
   final VoidCallback onClear;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Container(
       height: _ConversationsV2State._fieldH,
@@ -269,12 +273,12 @@ class _SearchField extends StatelessWidget {
               onChanged: onChanged,
               textInputAction: TextInputAction.search,
               style: T.body.copyWith(color: p.text),
-              decoration: InputDecoration(isCollapsed: true, border: InputBorder.none, hintText: 'חיפוש', hintStyle: T.body.copyWith(color: p.text2)),
+              decoration: InputDecoration(isCollapsed: true, border: InputBorder.none, hintText: UiCopy.text(371), hintStyle: T.body.copyWith(color: p.text2)),
             ),
           ),
           ListenableBuilder(
             listenable: controller,
-            builder: (context, _) => controller.text.isEmpty ? const SizedBox(width: 40) : IBtn('close', tip: 'ניקוי החיפוש', onTap: onClear),
+            builder: (context, _) => controller.text.isEmpty ? const SizedBox(width: 40) : IBtn('close', tip: UiCopy.text(485), onTap: onClear),
           ),
         ]),
       ),
@@ -291,17 +295,18 @@ class HomeBarV2 extends StatelessWidget {
   final double height;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = StoreScope.of(context).data!;
     // How many wait for him is the pinned row above (task 986): the folded home says the rest.
     final top = firstSentence(topSentence(d, d.home, stuck: stuckWorkers(d)));
-    final sentence = top.isEmpty ? 'הבית' : top;
+    final sentence = top.isEmpty ? UiCopy.text(486) : top;
     final chevron = Ic('expand_more', size: 22, color: p.text2);
     final decorated = BoxDecoration(border: Border(bottom: BorderSide(color: p.line)));
     return Semantics(
       button: true,
       label: sentence,
-      hint: 'פתיחת הבית',
+      hint: UiCopy.text(487),
       excludeSemantics: true,
       child: Material(
         color: p.bg,
@@ -337,12 +342,13 @@ class ConversationRowV2 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final d = StoreScope.of(context).data!;
     final p = context.p;
     final who = d.who(c.identityId);
     final pr = d.presence[c.identityId] ?? const Presence(status: WorkerStatus.free);
     final team = d.teamOf(c.identityId)?.name ?? '';
-    final teamText = team.isEmpty ? '' : (RegExp(r'[֐-׿]').hasMatch(team) ? team : ltr(team));
+    final teamText = team.isEmpty ? '' : (RegExp(InputCopy.v5).hasMatch(team) ? team : ltr(team));
     final unread = c.unread > 0;
     final loud = unread && !c.muted;
     final time = c.at == null ? c.time : whenV2(c.at!, now);
@@ -353,10 +359,10 @@ class ConversationRowV2 extends StatelessWidget {
     final showStatus = (statusLoud(pr.status) || working || d.isDone(c.identityId)) && pr.status != WorkerStatus.waiting;
     final lineStyle = T.row2.copyWith(color: unread ? p.text : p.text2, fontWeight: unread ? FontWeight.w500 : null);
     final (String tick, Color tickColor, String tickWord) = switch (c.delivery) {
-      Delivery.read || Delivery.handled => ('done_all', p.read, 'נקרא'),
-      Delivery.delivered => ('done', p.text3, 'נמסר'),
-      Delivery.failed => ('error', p.urgent, 'לא נמסר'),
-      _ => ('schedule', p.text2, 'בתור'),
+      Delivery.read || Delivery.handled => ('done_all', p.read, UiCopy.text(236)),
+      Delivery.delivered => ('done', p.text3, UiCopy.text(235)),
+      Delivery.failed => ('error', p.urgent, UiCopy.text(237)),
+      _ => ('schedule', p.text2, UiCopy.text(98)),
     };
     // The state at the end of the second line, as the count is (נועה, 21/10): only when it says something.
     final statusText = statusWord(pr.status, who.gender);
@@ -367,12 +373,12 @@ class ConversationRowV2 extends StatelessWidget {
       button: true,
       label: [
         who.name, if (team.isNotEmpty) team, time,
-        if (mine) 'אתה: $line, $tickWord' else if (draft.isNotEmpty) 'טיוטה: $line' else line,
+        if (mine) UiCopy.text(488, [line, tickWord]) else if (draft.isNotEmpty) UiCopy.text(489, [line]) else line,
         if (showStatus) statusText,
-        if (decides) 'מחכה להחלטה שלך',
-        if (unread) c.unread == 1 ? 'הודעה אחת שלא נקראה' : '${c.unread} הודעות שלא נקראו',
-        if (c.muted) 'מושתקת',
-        if (pinned) 'מוצמדת',
+        if (decides) UiCopy.text(490),
+        if (unread) c.unread == 1 ? UiCopy.text(491) : UiCopy.text(492, [c.unread]),
+        if (c.muted) UiCopy.text(493),
+        if (pinned) UiCopy.text(494),
       ].join(', '),
       excludeSemantics: true,
       selected: selected,
@@ -404,7 +410,7 @@ class ConversationRowV2 extends StatelessWidget {
                       if (mine) ...[Padding(padding: const EdgeInsets.only(top: 2), child: Ic(tick, size: 17, color: tickColor, fill: tick == 'error')), const SizedBox(width: 3)],
                       Expanded(
                         child: WordFit(
-                          lead: mine ? 'אתה: ' : (draft.isNotEmpty ? 'טיוטה: ' : null),
+                          lead: mine ? UiCopy.text(495) : (draft.isNotEmpty ? UiCopy.text(496) : null),
                           leadStyle: draft.isNotEmpty && !mine ? TextStyle(color: p.accent, fontWeight: FontWeight.w700) : null,
                           text: line.isEmpty ? ' ' : line,
                           style: lineStyle,
@@ -440,6 +446,7 @@ class SearchResultsV2 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final d = StoreScope.of(context).data!;
     final p = context.p;
     bool hit(String s) => wordStart(s, q) >= 0;
@@ -451,7 +458,7 @@ class SearchResultsV2 extends StatelessWidget {
     if (convs.isEmpty && lines.isEmpty) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(24, 32, 24, 0),
-        child: Text('לא נמצאה שיחה או הודעה עם "$q"', textAlign: TextAlign.center, style: T.row2.copyWith(color: p.text2)),
+        child: Text(UiCopy.text(497, [q]), textAlign: TextAlign.center, style: T.row2.copyWith(color: p.text2)),
       );
     }
     Widget label(String s) => Padding(
@@ -461,7 +468,7 @@ class SearchResultsV2 extends StatelessWidget {
     Widget hairline() => Padding(padding: const EdgeInsetsDirectional.only(start: 72), child: Container(height: 1, color: p.line));
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       if (convs.isNotEmpty) ...[
-        label('שיחות'),
+        label(UiCopy.text(471)),
         ColoredBox(
           color: p.surface,
           child: Column(children: [
@@ -470,7 +477,7 @@ class SearchResultsV2 extends StatelessWidget {
         ),
       ],
       if (lines.isNotEmpty) ...[
-        label('הודעות'),
+        label(UiCopy.text(421)),
         ColoredBox(
           color: p.surface,
           child: Column(children: [
@@ -489,6 +496,7 @@ class _MessageHit extends StatelessWidget {
   final DateTime now;
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final d = StoreScope.of(context).data!;
     final p = context.p;
     final text = plainLine(line.text);
@@ -508,7 +516,7 @@ class _MessageHit extends StatelessWidget {
                 Text(whenV2(line.at, now), softWrap: false, style: T.meta.copyWith(color: p.text3, fontFeatures: kTabular)),
               ]),
               const SizedBox(height: 2),
-              WordFit(lead: line.mine ? 'אתה: ' : null, text: text, mark: q, maxLines: 2, style: style, markStyle: TextStyle(color: p.text, fontWeight: FontWeight.w700)),
+              WordFit(lead: line.mine ? UiCopy.text(495) : null, text: text, mark: q, maxLines: 2, style: style, markStyle: TextStyle(color: p.text, fontWeight: FontWeight.w700)),
             ]),
           ),
         ]),
@@ -549,6 +557,7 @@ class WordFit extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final full = DefaultTextStyle.of(context).style.merge(style);
     final dir = Directionality.of(context);
     final scaler = MediaQuery.textScalerOf(context);

@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // The company map: the org as a fixed map, the day's messages as thin lines that light up and fade, a replay of the
 // whole day in 20 seconds, and quiet tables under it. Opened from "סטטוס"; the day comes from hq.
 import 'dart:async';
@@ -32,6 +33,7 @@ class CompanyMapPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final backend = StoreScope.read(context).backend;
     return CompanyMapScreen(load: backend.companyDay, loadBody: backend.companyMessage, refresh: kMapRefresh);
   }
@@ -191,6 +193,7 @@ class _CompanyMapScreenState extends State<CompanyMapScreen> with SingleTickerPr
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final mq = MediaQuery.of(context);
     final h = mq.size.height;
@@ -251,20 +254,21 @@ class _Waiting extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Center(
       child: failed
           ? Column(mainAxisSize: MainAxisSize.min, children: [
-              Text('לא הצלחתי לטעון את היום.', style: T.row2.copyWith(color: p.text)),
+              Text(UiCopy.text(409), style: T.row2.copyWith(color: p.text)),
               const SizedBox(height: 4),
-              InkWell(onTap: onRetry, child: Padding(padding: const EdgeInsets.all(8), child: Text('לנסות שוב', style: T.row2.copyWith(color: p.accent)))),
+              InkWell(onTap: onRetry, child: Padding(padding: const EdgeInsets.all(8), child: Text(UiCopy.text(217), style: T.row2.copyWith(color: p.accent)))),
             ])
-          : Text('טוען את היום', style: T.row2.copyWith(color: p.text2)),
+          : Text(UiCopy.text(410), style: T.row2.copyWith(color: p.text2)),
     );
   }
 }
 
-const _weekdays = ['שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת', 'ראשון'];
+List<String> get _weekdays => [UiCopy.text(411), UiCopy.text(412), UiCopy.text(413), UiCopy.text(414), UiCopy.text(415), UiCopy.text(416), UiCopy.text(417)];
 
 class _Header extends StatelessWidget {
   const _Header({required this.date, required this.day, required this.compact, required this.canNext, required this.onPrev, required this.onNext});
@@ -275,15 +279,16 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final d = DateTime.parse(date);
-    final when = 'יום ${_weekdays[d.weekday - 1]}, ${d.day}/${d.month}';
-    final count = day == null ? null : (day!.messages.isEmpty ? 'אין הודעות' : plural(day!.messages.length, 'הודעה אחת', 'הודעות'));
+    final when = UiCopy.text(418, [_weekdays[d.weekday - 1], d.day, d.month]);
+    final count = day == null ? null : (day!.messages.isEmpty ? UiCopy.text(419) : plural(day!.messages.length, UiCopy.text(420), UiCopy.text(421)));
     final sub = count == null ? when : '$when · $count';
-    final back = Navigator.of(context).canPop() ? IBtn('arrow_forward', tip: 'חזרה', onTap: () => Navigator.of(context).maybePop()) : const SizedBox(width: 12);
+    final back = Navigator.of(context).canPop() ? IBtn(backIcon(context), tip: UiCopy.text(161), onTap: () => Navigator.of(context).maybePop()) : const SizedBox(width: 12);
     final nav = [
-      IBtn('chevron_right', tip: 'היום הקודם', onTap: onPrev),
-      if (canNext) IBtn('chevron_left', tip: 'היום הבא', onTap: onNext) else const SizedBox(width: 44),
+      IBtn('chevron_right', tip: UiCopy.text(422), onTap: onPrev),
+      if (canNext) IBtn('chevron_left', tip: UiCopy.text(423), onTap: onNext) else const SizedBox(width: 44),
     ];
     final tab = T.secondary.copyWith(color: p.text2, fontFeatures: const [FontFeature.tabularFigures()]);
     if (compact) {
@@ -291,7 +296,7 @@ class _Header extends StatelessWidget {
         height: 44,
         child: Row(children: [
           back,
-          Expanded(child: Text.rich(TextSpan(children: [TextSpan(text: 'המפה של החברה', style: T.name.copyWith(color: p.text)), TextSpan(text: '  $sub', style: tab)]), maxLines: 1, overflow: TextOverflow.ellipsis)),
+          Expanded(child: Text.rich(TextSpan(children: [TextSpan(text: UiCopy.text(424), style: T.name.copyWith(color: p.text)), TextSpan(text: '  $sub', style: tab)]), maxLines: 1, overflow: TextOverflow.ellipsis)),
           ...nav,
         ]),
       );
@@ -303,7 +308,7 @@ class _Header extends StatelessWidget {
         const SizedBox(width: 4),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('המפה של החברה', style: T.bar.copyWith(color: p.text)),
+            Text(UiCopy.text(424), style: T.bar.copyWith(color: p.text)),
             const SizedBox(height: 2),
             Text(sub, style: tab),
           ]),
@@ -402,6 +407,7 @@ class _MapState extends State<_Map> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final off = Mo.off(context);
     return LayoutBuilder(builder: (context, c) {
       final canvas = mapCanvas(Size(c.maxWidth, c.maxHeight));
@@ -489,7 +495,7 @@ class _MapState extends State<_Map> {
     final halo = [for (final (dx, dy) in const [(1, 0), (-1, 0), (0, 1), (0, -1), (.7, .7), (-.7, .7), (.7, -.7), (-.7, -.7)]) Shadow(color: p.bg, offset: Offset(dx * 1.6 * ui, dy * 1.6 * ui))];
     final style = T.meta.copyWith(color: p.text2, fontSize: 12.5 * ui, height: 1.2, shadows: halo);
     if (team.id == 'management') {
-      for (final (id, name) in [('owner', 'רן'), ('yoav', 'יואב'), ('hq', 'hq')]) {
+      for (final (id, name) in [('owner', UiCopy.text(425)), ('yoav', UiCopy.text(426)), ('hq', 'hq')]) {
         final at = layout.pos[id]!;
         yield _label(at + Offset(0, _dim(d.people[id]!.role) * g / 2 + 4), Text(name, style: style), ui);
       }
@@ -533,6 +539,7 @@ class _Face extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final neutral = person.role == MapRole.owner || person.role == MapRole.system;
     final tone = neutral ? null : team.tone;
@@ -636,6 +643,7 @@ class _MessageCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     MapPerson who(String id) => day.people[id]!;
     Widget face(String id) {
@@ -660,19 +668,19 @@ class _MessageCard extends StatelessWidget {
           Flexible(child: Text(who(m.to).name, style: T.chip.copyWith(color: p.text, fontSize: 13.5))),
           const Spacer(),
           Text(hhmm(m.t), style: T.meta.copyWith(color: p.text3, fontFeatures: const [FontFeature.tabularFigures()])),
-          IBtn('close', tip: 'סגירה', onTap: onClose),
+          IBtn('close', tip: UiCopy.text(84), onTap: onClose),
         ]),
         const SizedBox(height: 4),
         if (body != null)
           Flexible(child: SingleChildScrollView(child: Text(body!.body, style: T.small.copyWith(color: p.text))))
         else if (failed)
           Row(children: [
-            Text('לא הצלחתי לטעון את ההודעה.', style: T.small.copyWith(color: p.text2)),
+            Text(UiCopy.text(427), style: T.small.copyWith(color: p.text2)),
             const SizedBox(width: 8),
-            InkWell(onTap: onRetry, child: Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text('לנסות שוב', style: T.small.copyWith(color: p.accent)))),
+            InkWell(onTap: onRetry, child: Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text(UiCopy.text(217), style: T.small.copyWith(color: p.accent)))),
           ])
         else
-          Text('טוען', style: T.small.copyWith(color: p.text3)),
+          Text(UiCopy.text(428), style: T.small.copyWith(color: p.text3)),
       ]),
     );
   }
@@ -707,6 +715,7 @@ class _TimelineState extends State<_Timeline> {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     final tab = const [FontFeature.tabularFigures()];
     return ValueListenableBuilder<int>(
@@ -715,8 +724,8 @@ class _TimelineState extends State<_Timeline> {
         final (tasks, merges, deploys) = widget.day.countsAt(t);
         final end = t >= widget.day.upTo;
         // A time right before a colon flips sides in RTL: the running line puts the time last.
-        final counts = '${plural(tasks, 'משימה אחת', 'משימות')}, ${plural(merges, 'מיזוג אחד', 'מיזוגים')}, ${plural(deploys, 'פריסה אחת', 'פריסות')}';
-        final sum = end ? '${widget.today ? 'היום' : 'כל היום'}: $counts' : '$counts, עד ${hhmm(t)}';
+        final counts = '${plural(tasks, UiCopy.text(429), UiCopy.text(430))}, ${plural(merges, UiCopy.text(431), UiCopy.text(432))}, ${plural(deploys, UiCopy.text(433), UiCopy.text(434))}';
+        final sum = end ? '${widget.today ? UiCopy.text(150) : UiCopy.text(435)}: $counts' : UiCopy.text(436, [counts, hhmm(t)]);
         return Padding(
           padding: EdgeInsets.symmetric(horizontal: widget.compact ? 12 : 24),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -775,7 +784,7 @@ class _TimelineState extends State<_Timeline> {
                       decoration: BoxDecoration(color: p.text, borderRadius: BorderRadius.circular(6)),
                       child: Directionality(
                         textDirection: TextDirection.rtl,
-                        child: Text('${hhmm(h * kDayMs ~/ bins)} · ${plural(counts[h], 'הודעה אחת', 'הודעות')}',
+                        child: Text('${hhmm(h * kDayMs ~/ bins)} · ${plural(counts[h], UiCopy.text(420), UiCopy.text(421))}',
                             style: T.meta.copyWith(color: p.bg, fontSize: 12, fontFeatures: const [FontFeature.tabularFigures()])),
                       ),
                     ),
@@ -829,9 +838,10 @@ class _PlayButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiCopy.watch(context);
     final p = context.p;
     return Tooltip(
-      message: playing ? 'השהיה' : 'הפעלה',
+      message: playing ? UiCopy.text(437) : UiCopy.text(438),
       child: Material(
         color: p.accent,
         shape: const CircleBorder(),

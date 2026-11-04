@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/ui_copy.dart';
 // The in-app update on Android: hq says which APK is the newest (GET /api/app/latest,
 // packages/hq/src/app-release.ts); when its versionCode is above ours, the system strip offers
 // "עדכון", and one tap downloads it through hq and opens Android's installer (AppUpdater.kt).
@@ -141,7 +142,7 @@ class AppUpdate extends ChangeNotifier {
 
   /// "העדכון לא הצליח." is shown, and so sent to hq (error_report.dart).
   void _failed(String why) {
-    reportShown('screen', 'העדכון לא הצליח ($why)', screen: 'עדכון גרסה');
+    reportShown('screen', UiCopy.text(961, [why]), screen: UiCopy.text(962));
     _set(UpdatePhase.failed);
   }
 

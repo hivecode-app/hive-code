@@ -46,7 +46,7 @@ Future<AppStore> _open(WidgetTester tester, WaitItem item, {bool dark = false, d
   final store = await pumpApp(tester, dark: dark, textScale: scale, size: const Size(390, 800), home: const SizedBox());
   store.data!.waiting.removeWhere((w) => w.kind != WaitKind.awaiting && w.kind != WaitKind.go && w.kind != WaitKind.blockingAsk);
   store.data!.waiting.insert(0, item);
-  await tester.pumpWidget(CompanyApp(store: store, themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: WaitItemScreen(item: item)));
+  await tester.pumpWidget(CompanyApp(store: legacyStore(store), themeMode: dark ? ThemeMode.dark : ThemeMode.light, home: WaitItemScreen(item: item)));
   await tester.pumpAndSettle();
   return store;
 }
@@ -57,7 +57,7 @@ void main() {
     final item = _ask();
     store.data!.waiting.insert(0, item);
     store.touch();
-    await tester.pumpWidget(CompanyApp(store: store, home: Builder(builder: (c) => Scaffold(body: TextButton(onPressed: () => Nav.waitItem(c, item), child: const Text('פתיחה'))))));
+    await tester.pumpWidget(CompanyApp(store: legacyStore(store), home: Builder(builder: (c) => Scaffold(body: TextButton(onPressed: () => Nav.waitItem(c, item), child: const Text('פתיחה'))))));
     await tester.tap(find.text('פתיחה'));
     await tester.pumpAndSettle();
     expect(find.byType(WaitItemScreen), findsOneWidget);
