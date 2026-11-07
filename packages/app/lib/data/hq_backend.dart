@@ -1927,6 +1927,7 @@ CompanyData mapSnapshot({
     for (final p in projects)
       if (p['id'] is String) p['id'] as String: p['team'] is String ? p['team'] as String : p['id'] as String,
   };
+  final projectOfTeam = {for (final e in projectTeam.entries) e.value: e.key};
   final byId = {for (final b in board) b['id'] as String: b};
   String? hostTeam(Map<String, dynamic> b, [int depth = 0]) {
     final project = b['project'] as String?;
@@ -1958,7 +1959,7 @@ CompanyData mapSnapshot({
       final t = teams[team]!;
       teams[team] = Team(id: team, name: t.name, symbol: t.symbol, leadId: id, permanent: t.permanent, tone: t.tone);
     }
-    final gender = (b['gender'] as String?) == 'f' ? Gender.f : Gender.m;
+    final gender = switch (b['gender'] as String?) { 'f' => Gender.f, 'm' => Gender.m, _ => titleGender(b['title'] as String? ?? '') };
     ids[id] = Identity(
       id: id,
       name: b['name'] as String? ?? id,
@@ -1967,6 +1968,8 @@ CompanyData mapSnapshot({
       gender: gender,
       temp: b['lifecycle'] == 'ephemeral',
       taskRef: b['team_kind'] == 'task' ? team : null,
+      project: project ?? (host == null ? null : projectOfTeam[host]),
+      host: host,
     );
     final shift = b['shift'] as Map?;
     final shiftNo = shift == null ? null : int.tryParse((shift['id'] as String).split('-').last);
@@ -2448,4 +2451,11 @@ void syncAskCards(Conversation chat, String identityId, CompanyData d) {
 class ArtifactAccessFailure implements Exception {
   ArtifactAccessFailure(this.status);
   final int status;
+}
+
+/// hq does not send a gender yet; his titles carry it ("ראשת צוות", "מנכ"לית", "מפתחת"): a first word ending in ת is
+/// feminine. Only a fallback for when the board says nothing.
+Gender titleGender(String title) {
+  final first = title.trim().split(RegExp(r'\s+')).first;
+  return first.length > 2 && first.codeUnitAt(first.length - 1) == 0x05EA /* ת */ ? Gender.f : Gender.m;
 }

@@ -1564,5 +1564,9 @@
       }
     }
   },
-  "mediaUploadFailedShort": "לא עלה"
+  "mediaUploadFailedShort": "לא עלה",
+  "standingTeams": "צוותים קבועים",
+  "projectLead": "{gender, select, f{ראשת צוות: {name}} other{ראש צוות: {name}}}",
+  "teamLead": "{gender, select, f{ראשת צוות} other{ראש צוות}}",
+  "openTasksCount": "{count, plural, =0{אין משימות פתוחות} =1{משימה פתוחה אחת} other{{count} משימות פתוחות}}"
 }

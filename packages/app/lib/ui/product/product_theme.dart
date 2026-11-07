@@ -17,7 +17,7 @@ class ProjectMonogram extends StatelessWidget {
   final String name;
   final String? tone;
   final double size;
-  factory ProjectMonogram.person(CompanyData d, String id, {double size = 36}) => ProjectMonogram(name: d.who(id).name, tone: d.teamOf(id)?.tone, size: size);
+  factory ProjectMonogram.person(CompanyData d, String id, {double size = 36}) => ProjectMonogram(name: d.who(id).name, tone: d.toneOf(id), size: size);
   @override
   Widget build(BuildContext context) {
     final color = projectColor(context, tone);

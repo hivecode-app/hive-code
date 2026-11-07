@@ -31,7 +31,7 @@ export const STATUS_SYMBOL: Record<DerivedStatus, string> = {
 
 /** A team's identity tone (org.yaml `teams[].tone`, docs/design/language-v2.md §3): one of eight muted hues on the
  *  faces of its workers. Identity only, beside the name or the icon; a state is never told by it. None = slate. */
-export const TONES = ['blue', 'teal', 'clay', 'green', 'rose', 'sky', 'olive', 'slate'] as const;
+export const TONES = ['blue', 'teal', 'clay', 'green', 'rose', 'sky', 'olive', 'violet', 'plum', 'ochre', 'slate'] as const;
 export type Tone = (typeof TONES)[number];
 
 export type ShiftState = 'starting' | 'live' | 'ended' | 'dead';

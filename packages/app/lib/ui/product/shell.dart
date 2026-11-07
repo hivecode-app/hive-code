@@ -2,6 +2,7 @@ import '../tasks/tasks_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../data/backend.dart';
 import '../../data/store.dart';
 import '../../l10n/app_localizations.dart';
 import '../../theme/tokens.dart';
@@ -206,23 +207,7 @@ class _Sidebar extends StatelessWidget {
                 padding: const EdgeInsetsDirectional.fromSTEB(20, 18, 20, 6),
                 child: Text(l.projects, style: T.small.copyWith(color: p.text2)),
               ),
-              Expanded(
-                child: ListView(
-                  children: [
-                    for (final t in d.teams.values.where((t) => !t.permanent))
-                      ListTile(
-                        dense: true,
-                        leading: Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(color: projectColor(context, t.tone), shape: BoxShape.circle),
-                        ),
-                        title: Text(t.name),
-                        onTap: () => Nav.project(context, t.id),
-                      ),
-                  ],
-                ),
-              ),
+              Expanded(child: _SidebarProjects(d: d)),
             ] else
               const Spacer(),
             item('settings', l.settings, () => nav.go(AppTab.settings), selected: nav.tab == AppTab.settings),
@@ -234,12 +219,99 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
+/// The desktop sidebar's projects (the mockup's `a-he-home-desktop`): each by his name for it, with its dot and how
+/// many tasks are open; under the project of the conversation on screen, its lead and who works on it now.
+class _SidebarProjects extends StatelessWidget {
+  const _SidebarProjects({required this.d});
+  final CompanyData d;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p, store = StoreScope.of(context), nav = NavScope.of(context);
+    final current = nav.tab == AppTab.chats ? store.currentConversation : null;
+    final here = current == null ? null : d.projectOf(current);
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        for (final x in d.activeProjects) ...[
+          InkWell(
+            onTap: () => Nav.project(context, x.id),
+            child: Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(22, 8, 20, 8),
+              child: Row(
+                children: [
+                  ProjectDot(d.projectTone(x.id)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(x.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.row2.copyWith(color: p.text)),
+                  ),
+                  Text('${d.openTasks.where((t) => t.project == x.id).length}', style: T.meta.copyWith(color: p.text3)),
+                ],
+              ),
+            ),
+          ),
+          if (x.id == here)
+            for (final id in projectPeople(d, x.id, max: 4))
+              InkWell(
+                onTap: () => Nav.chat(context, id),
+                child: Padding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(42, 4, 20, 4),
+                  child: Row(
+                    children: [
+                      ProjectMonogram.person(d, id, size: 24),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('${d.who(id).name}, ${d.teams[x.teamId ?? x.id]?.leadId == id ? AppLocalizations.of(context).teamLead(d.who(id).gender.name) : d.who(id).short}', maxLines: 1, overflow: TextOverflow.ellipsis, style: T.small.copyWith(color: p.text)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+        ],
+      ],
+    );
+  }
+}
+
+/// A project's lead, then whoever works on it now (not resting, not done): the faces under its name.
+List<String> projectPeople(CompanyData d, String project, {int max = 1 << 20}) {
+  final x = d.activeProjects.where((p) => p.id == project).firstOrNull;
+  final lead = d.teams[x?.teamId ?? project]?.leadId;
+  bool busy(String id) => switch (d.presence[id]?.status) {
+    WorkerStatus.working || WorkerStatus.waiting || WorkerStatus.blocked || WorkerStatus.stuck || WorkerStatus.restarting => true,
+    _ => false,
+  };
+  return [
+    if (lead != null && d.identities.containsKey(lead)) lead,
+    for (final i in d.identities.values)
+      if (i.id != lead && d.canChat(i.id) && d.projectOf(i.id) == project && busy(i.id)) i.id,
+  ].take(max).toList();
+}
+
+class ProjectDot extends StatelessWidget {
+  const ProjectDot(this.tone, {super.key, this.size = 8});
+  final String? tone;
+  final double size;
+  @override
+  Widget build(BuildContext context) => Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(color: projectColor(context, tone), shape: BoxShape.circle),
+  );
+}
+
+/// Standing teams outside any project (management, monitoring, personal…): after the projects, by their own names.
+List<Team> standingTeams(CompanyData d) => [
+  for (final t in d.teams.values)
+    if (t.permanent && !d.activeProjects.any((x) => (x.teamId ?? x.id) == t.id)) t,
+];
+
 class ProductDirectory extends StatelessWidget {
   const ProductDirectory({super.key, this.projects = false});
   final bool projects;
   @override
   Widget build(BuildContext context) {
-    final d = StoreScope.of(context).data!, l = AppLocalizations.of(context), p = context.p;
+    final d = StoreScope.of(context).data!, l = AppLocalizations.of(context);
+    final standing = standingTeams(d);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -249,41 +321,110 @@ class ProductDirectory extends StatelessWidget {
         ),
         Expanded(
           child: ListView(
-            children: [
-              for (final t in d.teams.values) ...[
-                if (projects)
-                  ListTile(
-                    leading: Ic('folder', color: projectColor(context, t.tone)),
-                    title: Text(t.name),
-                    onTap: () => Nav.project(context, t.id),
-                  )
-                else ...[
-                  Section(t.name),
-                  for (final who in d.identities.values.where((who) => who.teamId == t.id && d.canChat(who.id)))
-                    ListTile(
-                      leading: ProjectMonogram.person(d, who.id),
-                      title: Text(who.name),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(d.roleLine(who.id)),
-                          Row(
-                            children: [
-                              Ic(statusIcon(d.presence[who.id]?.status ?? WorkerStatus.free), size: 16, color: p.text2),
-                              const SizedBox(width: 4),
-                              Expanded(child: Text(productStatus(context, d.presence[who.id]?.status ?? WorkerStatus.free))),
-                            ],
-                          ),
-                        ],
-                      ),
-                      onTap: () => Nav.chat(context, who.id),
-                    ),
-                ],
-              ],
-            ],
+            children: projects
+                ? [
+                    for (final x in d.activeProjects) _ProjectTile(project: x),
+                    if (standing.isNotEmpty) ...[
+                      Section(l.standingTeams),
+                      for (final t in standing) _TeamTile(team: t),
+                    ],
+                  ]
+                : [
+                    for (final g in teamGroups(d, standing)) ..._group(context, g.$1, g.$2),
+                  ],
           ),
         ),
       ],
+    );
+  }
+
+  /// Everyone who can be chatted with, once: by active project, then by standing team (an errand by the team it
+  /// was opened from), then whoever is left (a dormant project, or a team org.yaml does not know) under its own name.
+  static List<(String, List<Identity>)> teamGroups(CompanyData d, List<Team> standing) {
+    final placed = <String>{};
+    List<Identity> take(bool Function(Identity who) member) => [
+      for (final who in d.identities.values)
+        if (d.canChat(who.id) && !placed.contains(who.id) && member(who)) who,
+    ]..forEach((who) => placed.add(who.id));
+    final groups = <(String, List<Identity>)>[
+      for (final x in d.activeProjects) (x.name, take((who) => d.projectOf(who.id) == x.id)),
+      for (final t in standing) (t.name, take((who) => d.projectOf(who.id) == null && (who.host ?? who.teamId) == t.id)),
+    ];
+    // Keyed by id, not by name, so two homes that share a name stay two groups.
+    final rest = <String, (String, List<Identity>)>{};
+    for (final who in take((_) => true)) {
+      final project = d.projectOf(who.id), team = who.host ?? who.teamId;
+      rest.putIfAbsent(project ?? team, () => (project != null ? d.projectName(project) : d.teams[team]?.name ?? team, [])).$2.add(who);
+    }
+    return [...groups, ...rest.values].where((g) => g.$2.isNotEmpty).toList();
+  }
+
+  List<Widget> _group(BuildContext context, String title, List<Identity> people) {
+    final d = StoreScope.of(context).data!, p = context.p;
+    return [
+      Section(title),
+      for (final who in people)
+        ListTile(
+          leading: ProjectMonogram.person(d, who.id),
+          title: Text(who.name),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(who.title),
+              Row(
+                children: [
+                  Ic(statusIcon(d.presence[who.id]?.status ?? WorkerStatus.free), size: 16, color: p.text2),
+                  const SizedBox(width: 4),
+                  Expanded(child: Text(productStatus(context, d.presence[who.id]?.status ?? WorkerStatus.free))),
+                ],
+              ),
+            ],
+          ),
+          onTap: () => Nav.chat(context, who.id),
+        ),
+    ];
+  }
+}
+
+/// A project as a row: its dot and name, its lead, and how many tasks are open.
+class _ProjectTile extends StatelessWidget {
+  const _ProjectTile({required this.project});
+  final ProjectInfo project;
+  @override
+  Widget build(BuildContext context) {
+    final d = StoreScope.of(context).data!, l = AppLocalizations.of(context), p = context.p;
+    final lead = d.teams[project.teamId ?? project.id]?.leadId;
+    final open = d.openTasks.where((t) => t.project == project.id).length;
+    return ListTile(
+      leading: SizedBox(width: 36, child: Center(child: ProjectDot(d.projectTone(project.id), size: 12))),
+      title: Text(project.name, style: T.name.copyWith(color: p.text)),
+      subtitle: lead == null ? null : Text(l.projectLead(d.who(lead).gender.name, d.who(lead).name), style: T.small.copyWith(color: p.text2)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(l.openTasksCount(open), style: T.small.copyWith(color: open > 0 ? p.text : p.text3)),
+          const SizedBox(width: 4),
+          Ic(chevronIcon(context), size: 20, color: p.text3),
+        ],
+      ),
+      onTap: () => Nav.project(context, project.id),
+    );
+  }
+}
+
+class _TeamTile extends StatelessWidget {
+  const _TeamTile({required this.team});
+  final Team team;
+  @override
+  Widget build(BuildContext context) {
+    final d = StoreScope.of(context).data!, l = AppLocalizations.of(context), p = context.p;
+    final lead = team.leadId;
+    return ListTile(
+      leading: SizedBox(width: 36, child: Center(child: ProjectDot(team.tone, size: 12))),
+      title: Text(team.name, style: T.name.copyWith(color: p.text)),
+      subtitle: lead == null ? null : Text(l.projectLead(d.who(lead).gender.name, d.who(lead).name), style: T.small.copyWith(color: p.text2)),
+      trailing: Ic(chevronIcon(context), size: 20, color: p.text3),
+      onTap: () => Nav.team(context, team.id),
     );
   }
 }

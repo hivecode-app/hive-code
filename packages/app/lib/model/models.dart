@@ -83,7 +83,7 @@ Identity get kSystem => Identity(id: kSystemId, name: UiCopy.text(942), title: U
 String toName(String name) => name == kSystem.name ? UiCopy.text(944) : UiCopy.text(19, [name]);
 
 class Identity {
-  const Identity({required this.id, required this.name, required this.title, required this.teamId, this.gender = Gender.m, this.temp = false, this.taskRef, String? short})
+  const Identity({required this.id, required this.name, required this.title, required this.teamId, this.gender = Gender.m, this.temp = false, this.taskRef, this.project, this.host, String? short})
     : short = short ?? title;
   final String id;
   final String name;
@@ -99,6 +99,12 @@ class Identity {
 
   /// e.g. `t3711` for a task-team worker ("עידו · מפתח · t3711").
   final String? taskRef;
+
+  /// The project it works for (hq `project`; a task errand: its host's), null for a standing team outside any project.
+  final String? project;
+
+  /// The standing team a task errand was opened from (hq `hostTeam`), null for everyone else.
+  final String? host;
 
   String get initial => name.characters.first;
 }

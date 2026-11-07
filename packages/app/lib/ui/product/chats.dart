@@ -108,7 +108,7 @@ class _ProductChatsState extends State<ProductChats> {
       d,
       d.conversations,
       store.convSort,
-    ).where((c) => d.canChat(c.identityId) && (project == null || d.who(c.identityId).teamId == project));
+    ).where((c) => d.canChat(c.identityId) && (project == null || d.projectOf(c.identityId) == project));
     final list = [...ordered.where((c) => !d.isDone(c.identityId)), ...ordered.where((c) => d.isDone(c.identityId))];
     return ColoredBox(
       color: widget.compact ? p.surface : p.bg,
@@ -167,8 +167,8 @@ class _ProductChatsState extends State<ProductChats> {
               children: [
                 _chip(context, l.all, selected: project == null, onTap: () => setState(() => filter = null)),
                 if (d.waitingCount > 0) _chip(context, l.needsYouCount(d.waitingCount), icon: 'front_hand', onTap: () => openRequests(context)),
-                for (final team in d.teams.values.where((t) => d.conversations.any((c) => d.who(c.identityId).teamId == t.id)))
-                  _chip(context, team.name, selected: project == team.id, onTap: () => setState(() => filter = team.id)),
+                for (final x in d.activeProjects.where((x) => d.conversations.any((c) => d.projectOf(c.identityId) == x.id)))
+                  _chip(context, x.name, selected: project == x.id, onTap: () => setState(() => filter = x.id)),
               ],
             ),
           ),

@@ -255,7 +255,7 @@ void main() {
     await tester.pump();
     Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => const ProjectScreen(projectId: 'agent-company')));
     await tester.pumpAndSettle();
-    expect(findShown('שני (זמני) · עובד מ-19:40'), findsOneWidget);
+    expect(findShown('שני (זמני) · עובדת מ-19:40'), findsOneWidget);
     expect(find.text('עוד 29'), findsOneWidget);
     await _shot(tester, '05-project-agent-company');
     await tester.tap(find.text('עוד 29'));
@@ -335,7 +335,7 @@ void main() {
     store.data!.presence['keren'] = Presence(status: WorkerStatus.stuck, currentTask: keren.currentTask, activity: keren.activity);
     store.touch();
     await tester.pumpAndSettle();
-    expect(findShown('תקוע · קרן'), findsOneWidget);
+    expect(findShown('תקועה · קרן'), findsOneWidget);
     expect(findShown('שעת משלוח "לא ידוע" לא נאמרת ללקוח'), findsWidgets);
   });
 
@@ -465,7 +465,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
     await headShot(tester, 'lanes');
-    await tester.tap(find.bySemanticsLabel(RegExp(r'^קרן עובד על זה מ-19:46\. ')));
+    await tester.tap(find.bySemanticsLabel(RegExp(r'^קרן עובדת על זה מ-19:46\. ')));
     await tester.pumpAndSettle();
     expect(findShown('קרן · מ-19:46'), findsOneWidget);
     await headShot(tester, 'lanes-picked');

@@ -156,6 +156,46 @@ class CompanyData {
     return title.isEmpty ? name : '$title · $name';
   }
 
+  /// The projects he goes in by (org.yaml `projects`, active ones, in its order). An hq without them (and the
+  /// mockup company) has project teams instead: each is a project by its team's name. Never the task teams:
+  /// every task worker has a team of its own, named after its host ("החברה" sixteen times, app-gap §1).
+  List<ProjectInfo> get activeProjects {
+    if (projects.isNotEmpty) return [for (final p in projects) if (p.active) p];
+    return [for (final t in teams.values) if (!t.permanent && identities.values.any((i) => i.teamId == t.id && !i.temp)) ProjectInfo(id: t.id, name: t.name, active: true, teamId: t.id)];
+  }
+
+  /// A project id as he calls it: org.yaml's name, else its team's, else the id itself ("lumo" → "האפליקציה לומו").
+  String projectName(String id) => projects.where((p) => p.id == id).firstOrNull?.name ?? teams[id]?.name ?? id;
+
+  ProjectInfo? project(String? id) => id == null ? null : activeProjects.where((p) => p.id == id).firstOrNull;
+
+  /// The project [identityId] works for: its own (hq), else the project its team belongs to; null for a standing team.
+  String? projectOf(String identityId) {
+    final who = identities[identityId];
+    if (who == null) return null;
+    if (who.project != null) return who.project;
+    return activeProjects.where((p) => (p.teamId ?? p.id) == who.teamId).firstOrNull?.id;
+  }
+
+  /// A project's hue on its workers' faces and its dot: its team's tone in org.yaml, else one of the three by
+  /// its place, so two projects next to each other never share one.
+  /// Nine project tones (design, noa 07/11): in org.yaml's project order, so a project without its own tone still
+  /// keeps the same colour; no red or pink, so a project never reads as an error.
+  static const kProjectTones = ['teal', 'blue', 'clay', 'green', 'violet', 'ochre', 'sky', 'plum', 'olive'];
+
+  String? projectTone(String projectId) {
+    final list = activeProjects;
+    final i = list.indexWhere((p) => p.id == projectId);
+    if (i < 0) return null;
+    return teams[list[i].teamId ?? projectId]?.tone ?? kProjectTones[i % kProjectTones.length];
+  }
+
+  /// The hue of [identityId]'s face: its project's, else its standing team's (slate when it has none).
+  String? toneOf(String identityId) {
+    final project = projectOf(identityId);
+    return project != null ? projectTone(project) : teamOf(identityId)?.tone;
+  }
+
   /// A finished task worker (APP-SPEC §4.3): its conversation shows "הושלם" and goes below the live ones.
   bool isDone(String identityId) => who(identityId).temp && presence[identityId]?.status == WorkerStatus.done;
 }

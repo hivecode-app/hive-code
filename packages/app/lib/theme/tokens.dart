@@ -287,9 +287,15 @@ Palette productPalette(Brightness brightness) {
 Color projectColor(BuildContext context, String? tone) {
   final dark = context.p.dark;
   return switch (tone) {
-    'teal' || 'green' => Color(dark ? 0xFF4FC2B8 : 0xFF0A6A63),
-    'blue' || 'sky' || 'olive' => Color(dark ? 0xFF9A9EF2 : 0xFF4A4FC4),
+    'teal' => Color(dark ? 0xFF4FC2B8 : 0xFF0A6A63),
+    'sky' => Color(dark ? 0xFF5FA0BF : 0xFF136E90),
+    'blue' => Color(dark ? 0xFF9A9EF2 : 0xFF4A4FC4),
+    'violet' => Color(dark ? 0xFFA986E3 : 0xFF7A4FB7),
+    'plum' => Color(dark ? 0xFFD778B0 : 0xFFA83C81),
     'clay' || 'rose' => Color(dark ? 0xFFE8A060 : 0xFF9A4A0C),
+    'ochre' => Color(dark ? 0xFFB99057 : 0xFF8A5D0B),
+    'olive' => Color(dark ? 0xFF9A9C55 : 0xFF696901),
+    'green' => Color(dark ? 0xFF5DA861 : 0xFF0A7520),
     _ => Color(dark ? 0xFFA3ABB6 : 0xFF5B6470),
   };
 }

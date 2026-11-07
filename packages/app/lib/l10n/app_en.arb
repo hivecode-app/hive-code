@@ -3329,5 +3329,33 @@
       }
     }
   },
-  "mediaUploadFailedShort": "Failed"
+  "mediaUploadFailedShort": "Failed",
+  "standingTeams": "Standing teams",
+  "projectLead": "{gender, select, f{Lead: {name}} other{Lead: {name}}}",
+  "@projectLead": {
+    "placeholders": {
+      "gender": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "teamLead": "{gender, select, f{team lead} other{team lead}}",
+  "@teamLead": {
+    "placeholders": {
+      "gender": {
+        "type": "String"
+      }
+    }
+  },
+  "openTasksCount": "{count, plural, =0{No open tasks} =1{1 open task} other{{count} open tasks}}",
+  "@openTasksCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  }
 }
