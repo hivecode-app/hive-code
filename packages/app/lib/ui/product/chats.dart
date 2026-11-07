@@ -3,6 +3,11 @@ import '../../l10n/ui_copy.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/store.dart';
+import '../blocks/since.dart' show SinceBlock;
+import '../blocks/data.dart' show SinceData;
+import '../tasks/task_copy.dart' show stageIcon, stageLabel;
+import '../../model/task_progress.dart';
+import '../../data/backend.dart';
 import '../../l10n/app_localizations.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
@@ -10,7 +15,6 @@ import '../common.dart';
 import '../convs/conversations_screen.dart' show newChat, pickMute, pickConvSort, sortConversations, whenV2;
 import '../nav.dart';
 import '../system_bar.dart';
-import 'approval.dart';
 import 'product_theme.dart';
 import 'search_screen.dart';
 
@@ -28,61 +32,6 @@ String productStatus(BuildContext context, WorkerStatus status) {
   };
 }
 
-Future<void> openRequests(BuildContext context) => showModalBottomSheet<void>(
-  context: context,
-  useSafeArea: true,
-  isScrollControlled: true,
-  constraints: const BoxConstraints(maxWidth: 600),
-  builder: (_) => const RequestsSheet(),
-);
-
-class RequestsSheet extends StatelessWidget {
-  const RequestsSheet({super.key});
-  @override
-  Widget build(BuildContext context) {
-    final store = StoreScope.of(context), l = AppLocalizations.of(context), p = context.p;
-    final d = store.data!;
-    final list = d.waiting.where((w) => w.state != WaitState.answered && !d.superseded(w)).toList();
-    return SizedBox(
-      height: MediaQuery.sizeOf(context).height * .8,
-      child: Column(
-        children: [
-          Row(
-            children: [
-              const SizedBox(width: 20),
-              Expanded(child: Text(l.needsYou, style: T.bar)),
-              IBtn('close', tip: l.close, onTap: () => Navigator.pop(context)),
-            ],
-          ),
-          Expanded(
-            child: list.isEmpty
-                ? Center(child: Text(l.noRequests))
-                : ListView(
-                    children: [
-                      for (final w in list)
-                        ListTile(
-                          leading: Ic(w.kind == WaitKind.go ? 'front_hand' : 'help', color: p.text2),
-                          title: Text(w.headline ?? w.short),
-                          subtitle: Text('${d.who(w.from).name} · ${d.roleLine(w.from)}'),
-                          onTap: () {
-                            final navigator = Navigator.of(context);
-                            navigator.pop();
-                            if (w.kind == WaitKind.go) {
-                              showApproval(navigator.context, w);
-                            } else {
-                              Nav.waitItem(navigator.context, w);
-                            }
-                          },
-                        ),
-                    ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class ProductChats extends StatefulWidget {
   const ProductChats({super.key, this.compact = false, this.project});
   final bool compact;
@@ -90,6 +39,9 @@ class ProductChats extends StatefulWidget {
   @override
   State<ProductChats> createState() => _ProductChatsState();
 }
+
+/// The "מחכה לך" chip's filter: only the chats of who asks him something.
+const _kNeedsYou = '\u0000needs-you';
 
 class _ProductChatsState extends State<ProductChats> {
   String? filter;
@@ -102,12 +54,19 @@ class _ProductChatsState extends State<ProductChats> {
         child: Semantics(label: l.loading, child: const CircularProgressIndicator()),
       );
     }
-    final project = widget.project ?? filter;
-    final ordered = sortConversations(
-      d,
-      d.conversations,
-      store.convSort,
-    ).where((c) => d.canChat(c.identityId) && (project == null || d.projectOf(c.identityId) == project));
+    final asking = {for (final w in d.needsYou) w.from};
+    // Nothing asks him: no chips, the card says so (mockup a-he-empty-phone), and a filter left from before is off.
+    final quiet = asking.isEmpty && widget.project == null;
+    // Nothing asks him: the "מחכה לך" filter is over, and does not come back by itself with the next ask.
+    if (asking.isEmpty && filter == _kNeedsYou) filter = null;
+    final chosen = filter;
+    final project = widget.project ?? (chosen == _kNeedsYou ? null : chosen);
+    final ordered = sortConversations(d, d.conversations, store.convSort).where(
+      (c) =>
+          d.canChat(c.identityId) &&
+          (project == null || d.projectOf(c.identityId) == project) &&
+          (chosen != _kNeedsYou || asking.contains(c.identityId)),
+    );
     final list = [...ordered.where((c) => !d.isDone(c.identityId)), ...ordered.where((c) => d.isDone(c.identityId))];
     return ColoredBox(
       color: widget.compact ? p.surface : p.bg,
@@ -139,7 +98,7 @@ class _ProductChatsState extends State<ProductChats> {
               ],
             ),
           ),
-          if (!widget.compact) const SystemBar(),
+          if (!widget.compact) const OfflineCard(),
           Padding(
             padding: const EdgeInsetsDirectional.fromSTEB(16, 0, 16, 10),
             child: Material(
@@ -161,19 +120,7 @@ class _ProductChatsState extends State<ProductChats> {
               ),
             ),
           ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsetsDirectional.fromSTEB(16, 0, 16, 14),
-            child: Row(
-              children: [
-                _chip(context, l.all, selected: project == null, onTap: () => setState(() => filter = null)),
-                if (d.waitingCount > 0) _chip(context, l.needsYouCount(d.waitingCount), icon: 'front_hand', onTap: () => openRequests(context)),
-                for (final x in d.activeProjects.where((x) => d.conversations.any((c) => d.projectOf(c.identityId) == x.id)))
-                  _chip(context, x.name, selected: project == x.id, onTap: () => setState(() => filter = x.id)),
-              ],
-            ),
-          ),
-          if (d.waitingCount == 0)
+          if (quiet)
             Container(
               margin: const EdgeInsetsDirectional.fromSTEB(16, 0, 16, 12),
               padding: const EdgeInsets.all(14),
@@ -192,6 +139,29 @@ class _ProductChatsState extends State<ProductChats> {
                 ],
               ),
             ),
+          // The project chips stay when nothing asks him (a deviation from a-he-empty: most of the time nothing does,
+          // and the phone would lose its project filter); only "מחכה לך" goes.
+          if (widget.project == null)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsetsDirectional.fromSTEB(16, 0, 16, 14),
+              child: Row(
+                children: [
+                  _chip(context, l.all, selected: chosen == null, onTap: () => setState(() => filter = null)),
+                  if (!quiet)
+                    _chip(
+                    context,
+                    l.needsYouCount(d.waitingCount),
+                    icon: 'front_hand',
+                    selected: chosen == _kNeedsYou,
+                    onTap: () => setState(() => filter = chosen == _kNeedsYou ? null : _kNeedsYou),
+                  ),
+                  for (final x in d.activeProjects.where((x) => d.conversations.any((c) => d.projectOf(c.identityId) == x.id)))
+                    _chip(context, x.name, selected: chosen == x.id, onTap: () => setState(() => filter = x.id)),
+                ],
+              ),
+            ),
+          if (!widget.compact) _SinceHere(d: d),
           Expanded(
             child: list.isEmpty
                 ? Center(
@@ -250,7 +220,7 @@ class ProductChatRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = StoreScope.of(context), p = context.p;
     final d = store.data!, c = conversation;
-    final who = d.who(c.identityId), presence = d.presence[c.identityId];
+    final who = d.who(c.identityId);
     final selected = NavScope.of(context).wide && !store.homeOpen && store.currentConversation == who.id;
     return Material(
       color: selected ? p.accentSoft : p.surface,
@@ -307,21 +277,16 @@ class ProductChatRow extends StatelessWidget {
                         if (c.unread > 0) Padding(padding: const EdgeInsetsDirectional.only(start: 8), child: ProductUnreadBadge(c.unread)),
                       ],
                     ),
-                    if (presence != null && presence.status != WorkerStatus.resting && presence.status != WorkerStatus.free)
+                    if (chatLine(context, d, store, who.id) case (final icon, final text, final fill))
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Ic(statusIcon(presence.status), size: 16, color: p.text2),
+                            Ic(icon, size: 16, fill: fill, color: p.text),
                             const SizedBox(width: 4),
                             Expanded(
-                              child: Text(
-                                [productStatus(context, presence.status), if (presence.activity?.isNotEmpty == true) presence.activity!].join(' · '),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: T.meta.copyWith(color: p.text),
-                              ),
+                              child: ProductContentText(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: T.meta.copyWith(color: p.text)),
                             ),
                           ],
                         ),
@@ -333,6 +298,50 @@ class ProductChatRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// He answered "לא עכשיו" to something of its, and it still waits.
+bool putOff(CompanyData d, String id) => d.waiting.any((w) => w.from == id && w.state == WaitState.notNow && !d.superseded(w));
+
+/// A chat's third line (mockup a-he-home-phone), the first that holds: what he is asked ("מחכה לך", "שאלה אליך"),
+/// stuck, the stage of its task ("בבדיקה: …"), what it works on, "הושלם" (#40). Free and resting have none.
+(String, String, bool)? chatLine(BuildContext context, CompanyData d, AppStore store, String id) {
+  final l = AppLocalizations.of(context);
+  final asks = [for (final w in d.needsYou) if (w.from == id) w];
+  if (asks.any((w) => w.kind != WaitKind.blockingAsk && w.kind != WaitKind.softAsk)) return ('front_hand', l.needsYou, true);
+  if (asks.isNotEmpty) return ('contact_support', l.questionForYou, false);
+  final presence = d.presence[id], task = store.taskOf(id);
+  final status = presence?.status;
+  if (status == null || status == WorkerStatus.free || status == WorkerStatus.resting) return null;
+  final title = task == null ? null : plainTitle(task.title);
+  // "מחכה לך" comes only from what asks him (above, the chip's source). Stuck says so first; one he put off says
+  // "לא עכשיו", unfilled; a presence that says waiting with nothing of its open (the ask went back to the manager) is
+  // blocked on someone.
+  if (status == WorkerStatus.stuck) return ('warning', title == null ? l.stuck : l.stuckTask(title), false);
+  if (putOff(d, id)) return ('front_hand', l.notNow, false);
+  if (status == WorkerStatus.waiting) return ('block', title == null ? l.blocked : '${l.blocked} · $title', false);
+  // Approval waits on someone, not done: front_hand and check marks are kept for "מחכה לך" and what finished.
+  if (task != null && task.stage != TaskStage.development) return (task.stage == TaskStage.approval ? 'hourglass_top' : stageIcon(task.stage!), l.stageTask(stageLabel(l, task.stage!), title!), false);
+  final now = title ?? presence?.currentTask ?? presence?.activity;
+  if (status == WorkerStatus.working && now != null && now.trim().isNotEmpty) return ('play_arrow', plainTitle(now), false);
+  return (statusIcon(status), [productStatus(context, status), if (now?.trim().isNotEmpty == true) plainTitle(now!)].join(' · '), false);
+}
+
+/// "מאז שהיית פה" (notifications-policy): what finished since he last left the chats, one folded line.
+class _SinceHere extends StatelessWidget {
+  const _SinceHere({required this.d});
+  final CompanyData d;
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context), p = context.p;
+    final now = CompanyTime.now();
+    final data = SinceData.of(d, since: store.chatsSeenAt ?? dayStart(now));
+    if (data.items.isEmpty) return const SizedBox.shrink();
+    return Container(
+      decoration: BoxDecoration(color: p.surface, border: Border(top: BorderSide(color: p.line))),
+      child: SinceBlock(data: data, now: now, max: 3),
     );
   }
 }

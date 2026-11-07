@@ -100,7 +100,7 @@ void main() {
     expect(find.byType(ProjectScreen), findsOneWidget);
   });
 
-  testWidgets('a standing team heading opens its team page; a team org.yaml does not know opens nothing', (tester) async {
+  testWidgets('a standing team heading opens its team page', (tester) async {
     final store = await productApp(tester);
     await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text(l(tester).team)));
     await tester.pumpAndSettle();

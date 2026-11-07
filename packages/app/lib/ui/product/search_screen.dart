@@ -194,7 +194,7 @@ class _ProductSearchState extends State<ProductSearch> {
     String join(Iterable<String?> parts) => parts.whereType<String>().where((s) => s.isNotEmpty).join(' · ');
     return switch (h.kind) {
       'project' => join([if (h.leadName != null) l.searchLedBy(h.leadName!), if (h.openTasks != null) l.searchOpenTasks(h.openTasks!)]),
-      'person' => h.status == 'waiting_for_you'
+      'person' => d.needsYou.any((w) => w.from == (h.identity ?? h.id))
           ? l.needsYou
           : join([
               if (h.leadName != null) h.leads ? l.reportsTo(h.leadName!) : l.searchInTeamOf(h.leadName!),

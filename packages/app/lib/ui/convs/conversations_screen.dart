@@ -58,9 +58,11 @@ void newChat(BuildContext context, CompanyData d) {
 List<ConversationSummary> sortConversations(CompanyData d, List<ConversationSummary> convs, ConvSort sort) {
   final at = {for (final (i, c) in convs.indexed) c.identityId: i};
   WorkerStatus st(ConversationSummary c) => d.presence[c.identityId]?.status ?? WorkerStatus.free;
+  final asking = {for (final w in d.needsYou) w.from};
   int key(ConversationSummary c) => switch (sort) {
         ConvSort.working => st(c) == WorkerStatus.working ? 0 : 1,
-        ConvSort.waiting => st(c) == WorkerStatus.waiting ? 0 : 1,
+        // Who asks him (needsYou), the one source for "מחכה לך", not the presence word.
+        ConvSort.waiting => asking.contains(c.identityId) ? 0 : 1,
         _ => 0,
       };
   int cmp(ConversationSummary a, ConversationSummary b) {

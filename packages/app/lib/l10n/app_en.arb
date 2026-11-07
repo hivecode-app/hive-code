@@ -3554,5 +3554,15 @@
         "type": "int"
       }
     }
-  }
+  },
+  "questionForYou": "Question for you",
+  "stageTask": "{stage}: {task}",
+  "@stageTask": {"placeholders": {"stage": {"type": "String"}, "task": {"type": "String"}}},
+  "stuckTask": "Stuck · {task}",
+  "@stuckTask": {"placeholders": {"task": {"type": "String"}}},
+  "offlineSince": "No connection to the server since {time}",
+  "@offlineSince": {"placeholders": {"time": {"type": "String"}}},
+  "offlineNow": "No connection to the server",
+  "offlineBody": "New messages will be sent when the connection is back. Retrying every few seconds.",
+  "troubleshoot": "Troubleshooting"
 }

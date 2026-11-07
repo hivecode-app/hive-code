@@ -153,4 +153,6 @@ const Map<String, IconData> kIcons = {
   'memory': Symbols.memory_rounded,
   'radio_button_checked': Symbols.radio_button_checked_rounded,
   'rate_review': Symbols.rate_review_rounded,
+  'contact_support': Symbols.contact_support_rounded,
+  'hourglass_top': Symbols.hourglass_top_rounded,
 };

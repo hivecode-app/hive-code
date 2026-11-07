@@ -112,7 +112,10 @@ class CompanyData {
   /// His latest messages both ways (hq: the last 200), newest first: what v2's search reads for content.
   List<RecentLine> recent = [];
 
-  int get waitingCount => waiting.where((w) => (w.state == WaitState.open || w.state == WaitState.pending) && !superseded(w)).length;
+  /// What asks him now: the one source for "מחכה לך" (the chip, each chat's third line, the counts, the badge). An
+  /// answered one, or a GO a newer one replaced, leaves all of them at once.
+  List<WaitItem> get needsYou => [for (final w in waiting) if ((w.state == WaitState.open || w.state == WaitState.pending) && !superseded(w)) w];
+  int get waitingCount => needsYou.length;
 
   /// A GO request with a newer one open from the same worker (#258): only the newest asks him; the older
   /// ones fold to "הוחלפה בבקשה חדשה" and leave "מחכה לך".

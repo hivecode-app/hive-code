@@ -1,7 +1,7 @@
 {
   "@@locale": "he",
   "company": "החברה",
-  "chats": "שיחות",
+  "chats": "צ'אטים",
   "search": "חיפוש",
   "projects": "פרויקטים",
   "team": "צוות",
@@ -1680,5 +1680,12 @@
   "teamSumFree": "{count, plural, =1{1 פנוי} other{{count} פנויים}}",
   "teamSumResting": "{count} במנוחה",
   "teamChatWith": "צ'אט עם {name}",
-  "teamSumStuck": "{count, plural, =1{1 תקוע} other{{count} תקועים}}"
+  "teamSumStuck": "{count, plural, =1{1 תקוע} other{{count} תקועים}}",
+  "questionForYou": "שאלה אליך",
+  "stageTask": "{stage}: {task}",
+  "stuckTask": "תקוע · {task}",
+  "offlineSince": "אין חיבור לשרת מאז {time}",
+  "offlineNow": "אין חיבור לשרת",
+  "offlineBody": "הודעות חדשות יישלחו כשהחיבור יחזור. ניסיון חוזר כל כמה שניות.",
+  "troubleshoot": "פתרון בעיות"
 }

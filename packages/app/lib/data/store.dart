@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../model/company_time.dart' as company_time;
 import '../model/models.dart';
+import '../model/task_progress.dart';
 import 'backend.dart';
 import 'error_report.dart';
 import 'uploads.dart';
@@ -77,7 +78,64 @@ class AppStore extends ChangeNotifier {
     final on = _online;
     if (on && !_wasOnline && !_restoring) unawaited(flushOutbox());
     _wasOnline = on;
+    if (data != null) unawaited(refreshPipeline());
     notifyListeners();
+  }
+
+  /// The tasks with their stages (`/api/tasks`), for each chat's third line ("בבדיקה: …"). Read again at most once a
+  /// minute, on the backend's own updates; an update inside the minute is read at its end (hq's `tasks.progress`
+  /// comes seconds after a read, with the stage the PRs gave). A failed read keeps the last one.
+  List<TaskProgress> pipeline = const [];
+  DateTime? _pipelineAt;
+  bool _pipelineBusy = false;
+  Timer? _pipelineLater;
+  // The read at the end of the minute makes hq look at GitHub again, which sends tasks.progress again: an update
+  // after that read does not schedule another, or a connected app hidden on the desktop would keep hq reading forever.
+  bool _pipelineWasLater = false;
+  static const kPipelineEvery = Duration(minutes: 1);
+
+  /// Off in tests (test/flutter_test_config.dart), so a test does not end with the minute's read still pending;
+  /// the test of that read turns it on.
+  static bool readPipelineLater = true;
+  Future<void> refreshPipeline({bool due = false}) async {
+    if (_disposed || _pipelineBusy) return;
+    final now = DateTime.now();
+    final since = _pipelineAt == null ? null : now.difference(_pipelineAt!);
+    if (!due && since != null && since < kPipelineEvery) {
+      if (readPipelineLater && !_pipelineWasLater) {
+        _pipelineLater ??= Timer(kPipelineEvery - since, () {
+          _pipelineLater = null;
+          unawaited(refreshPipeline(due: true));
+        });
+      }
+      return;
+    }
+    _pipelineBusy = true;
+    _pipelineAt = now;
+    _pipelineWasLater = due;
+    try {
+      final value = await backend.taskProgress();
+      if (_disposed) return;
+      pipeline = value;
+      notifyListeners();
+    } catch (_) {
+      // Kept as it was: the line falls back to what the worker is doing.
+    } finally {
+      _pipelineBusy = false;
+    }
+  }
+
+  /// The task a worker's chat line names, as hq picks `current_task`: one that is on (running first, then resting,
+  /// open or interrupted), never queued, a proposal, or cancelled.
+  TaskProgress? taskOf(String worker) {
+    const on = ['running', 'resting', 'open', 'interrupted'];
+    final mine = [
+      for (final t in pipeline)
+        if (t.worker == worker && t.stage != null && t.stage != TaskStage.released && t.stage != TaskStage.proposal && on.contains(t.state) && t.outcome != 'cancelled') t,
+    ];
+    int rank(TaskProgress t) => on.indexOf(t.state);
+    mine.sort((a, b) => rank(a) != rank(b) ? rank(a).compareTo(rank(b)) : (b.updatedAt ?? b.startedAt ?? DateTime(0)).compareTo(a.updatedAt ?? a.startedAt ?? DateTime(0)));
+    return mine.firstOrNull;
   }
 
   bool get _online => status.state == LinkState.online || status.state == LinkState.demo || status.state == LinkState.reconnected;
@@ -242,6 +300,7 @@ class AppStore extends ChangeNotifier {
     }
     _sourcePaths.clear();
     _retryTimer?.cancel();
+    _pipelineLater?.cancel();
     for (final p in _pending.values) {
       p.timer?.cancel();
     }

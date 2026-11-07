@@ -11,6 +11,8 @@ import '../data/store.dart';
 import '../model/models.dart';
 import '../theme/tokens.dart';
 import 'common.dart';
+import 'nav.dart';
+import '../l10n/app_localizations.dart';
 import '../native/app_update.dart';
 import '../native/native_bridge.dart';
 import '../native/native_glue.dart';
@@ -69,6 +71,61 @@ class _SystemBarState extends State<SystemBar> {
           const SizedBox(width: 6),
           Expanded(child: Text(text, style: T.meta.copyWith(color: p.text2))),
         ]),
+      ),
+    );
+  }
+}
+
+/// The chats' head when the link is down (mockup a-he-trouble-phone): a framed card that says since when, that the
+/// work goes on, and where to look. Anything else that is off is the usual strip.
+class OfflineCard extends StatelessWidget {
+  const OfflineCard({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final st = StoreScope.of(context).status;
+    if (st.state != LinkState.offline) return const SystemBar();
+    final l = AppLocalizations.of(context), p = context.p;
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        margin: const EdgeInsetsDirectional.fromSTEB(16, 0, 16, 12),
+        padding: const EdgeInsetsDirectional.fromSTEB(16, 14, 16, 12),
+        decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: p.text3)),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Ic('cloud_off', size: 22, color: p.text),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(st.since == null ? l.offlineNow : l.offlineSince(st.since!), style: T.name.copyWith(fontWeight: FontWeight.w600, color: p.text)),
+                  const SizedBox(height: 4),
+                  Text(l.offlineBody, style: T.small.copyWith(color: p.text2)),
+                  const SizedBox(height: 4),
+                  // A row that reads as an action, as in settings: the words and the forward chevron; a button to a reader.
+                  Semantics(
+                    button: true,
+                    child: InkWell(
+                      onTap: () => Nav.settings(context),
+                      borderRadius: BorderRadius.circular(6),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 48),
+                        child: Row(
+                          children: [
+                            Expanded(child: Text(l.troubleshoot, style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w600))),
+                            Ic(chevronIcon(context), size: 20, color: p.text2),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

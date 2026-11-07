@@ -1,12 +1,15 @@
 // The team tab (app-gap §2, mockup a-he-team): only who is in the team now, the lead first, a summary line, and
 // who finished today folded at the end. On the real board 16 done task workers of "החברה" filled the tab.
 import 'package:agent_company/data/hq_backend.dart';
+import 'package:agent_company/model/models.dart';
 import 'package:agent_company/l10n/app_localizations_he.dart';
 import 'package:agent_company/ui/product/team.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Map<String, dynamic> _id(String id, String name, String team, String kind, String lifecycle, String status, {String? project, String? reportsTo, String title = ''}) =>
     {'id': id, 'name': name, 'title': title, 'symbol': '', 'team': team, 'team_kind': kind, 'project': project, 'lifecycle': lifecycle, 'status': status, 'shift': null, 'reports_to': reportsTo, 'tone': null};
+
+WaitItem _go(String from) => WaitItem(id: 'go-$from', kind: WaitKind.go, from: from, time: '10:00', kicker: 'k', body: 'b');
 
 void main() {
   final now = DateTime(2026, 11, 7, 12);
@@ -32,6 +35,8 @@ void main() {
     {'id': 31, 'title': 'מסך התשלום', 'state': 'resting', 'identity': 'lumo-t31', 'project': 'lumo', 'updated_at': DateTime(2026, 11, 7, 11).millisecondsSinceEpoch},
   ];
   final d = mapSnapshot(board: board, inbox: const [], asks: const [], toggles: const [], tasks: tasks, projects: projects, now: now);
+  // "מחכה לך" is what asks him (needsYou), not the presence word alone.
+  d.waiting.add(_go('agent-company-t20'));
 
   test('only who is in the team now: a task worker whose task is done is gone', () {
     final groups = ProductTeam.groups(d);
@@ -73,8 +78,18 @@ void main() {
       ],
       inbox: const [], asks: const [], toggles: const [], tasks: const [], projects: projects, now: now,
     );
+    many.waiting.addAll([_go('adi'), _go('dana')]);
     final shown = [for (final g in ProductTeam.groups(many)) ...g.$2];
     expect(ProductTeam.summary(AppLocalizationsHe(), many, shown), '2 מחכים לך · 2 פנויים');
+  });
+
+  test('a presence still saying waiting with nothing open on him counts as blocked, not "מחכה לך"', () {
+    final answered = mapSnapshot(
+      board: [_id('adi', 'עדי', 'agent-company', 'project', 'lead', 'waiting_for_you', project: 'agent-company')],
+      inbox: const [], asks: const [], toggles: const [], tasks: const [], projects: projects, now: now,
+    );
+    final shown = [for (final g in ProductTeam.groups(answered)) ...g.$2];
+    expect(ProductTeam.summary(AppLocalizationsHe(), answered, shown), '1 חסום');
   });
 
   test('blocked and stuck are counted apart', () {

@@ -44,7 +44,7 @@ class ProductTeam extends StatelessWidget {
   /// The groups as shown: the directory's groups (everyone once), only who is in the team now, the lead first.
   static List<(String, List<Identity>)> groups(CompanyData d) {
     final leads = {for (final t in d.teams.values) if (t.leadId != null) t.leadId!};
-    int rank(Identity who) => leads.contains(who.id) ? -1 : _rank[d.presence[who.id]?.status ?? WorkerStatus.free]!;
+    int rank(Identity who) => leads.contains(who.id) ? -1 : _rank[shownStatus(d, who.id)]!;
     // By rank, and within a rank in the directory's order (Dart's sort is not stable past 32 rows).
     List<Identity> sorted(List<Identity> people) {
       final index = {for (final (i, who) in people.indexed) who.id: i};
@@ -59,7 +59,7 @@ class ProductTeam extends StatelessWidget {
   /// "1 מחכה לך · 4 בעבודה · 1 פנוי · 2 במנוחה", only the states someone is in. Who waits on him comes first, so a
   /// big resting count does not bury it.
   static List<String> summaryParts(AppLocalizations l, CompanyData d, Iterable<Identity> shown) {
-    WorkerStatus st(Identity who) => d.presence[who.id]?.status ?? WorkerStatus.free;
+    WorkerStatus st(Identity who) => shownStatus(d, who.id);
     int count(bool Function(WorkerStatus) f) => shown.where((who) => f(st(who))).length;
     return [
       (count((s) => s == WorkerStatus.waiting), l.teamSumWaiting),
@@ -93,7 +93,7 @@ class ProductTeam extends StatelessWidget {
     final shown = groups(d), finished = finishedToday(d);
     final all = [for (final g in shown) ...g.$2];
     final parts = summaryParts(l, d, all);
-    final waits = all.any((who) => d.presence[who.id]?.status == WorkerStatus.waiting);
+    final waits = all.any((who) => shownStatus(d, who.id) == WorkerStatus.waiting);
     // Who waits on him leads the line in medium weight, as in the mockup.
     final line = Text.rich(
       TextSpan(
@@ -175,6 +175,15 @@ VoidCallback? _open(BuildContext context, CompanyData d, Identity who) {
   return d.teams[team] == null ? null : () => Nav.team(context, team);
 }
 
+/// Its state as the team shows it. "מחכה לך" comes from what asks him (`needsYou`), the same source as the chats' chip
+/// and card. A presence that says waiting with nothing of his open (the ask went back to the manager, it was just
+/// answered, or he put it off) is blocked, never shown as at work.
+WorkerStatus shownStatus(CompanyData d, String id) {
+  final status = d.presence[id]?.status ?? WorkerStatus.free;
+  if (d.needsYou.any((w) => w.from == id)) return WorkerStatus.waiting;
+  return status == WorkerStatus.waiting ? WorkerStatus.blocked : status;
+}
+
 class _GroupHead extends StatelessWidget {
   const _GroupHead(this.title, {required this.wide, this.onTap});
   final String title;
@@ -244,7 +253,7 @@ class _State extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final d = StoreScope.of(context).data!, p = context.p;
-    final status = d.presence[id]?.status ?? WorkerStatus.free;
+    final status = shownStatus(d, id);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [

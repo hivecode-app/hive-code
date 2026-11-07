@@ -189,7 +189,10 @@ void main() {
     expect(meta(const SearchHit(kind: 'task', id: '1', title: 't', projectName: 'Field log', outcome: 'completed')), 'Field log · Finished');
     expect(meta(const SearchHit(kind: 'person', id: 'a', title: 'A', leadName: 'Mira')), "In Mira's team");
     expect(meta(const SearchHit(kind: 'person', id: 'a', title: 'A', leadName: 'Yoav', leads: true)), l.reportsTo('Yoav'));
-    expect(meta(const SearchHit(kind: 'person', id: 'a', title: 'A', status: 'waiting_for_you', leadName: 'Mira')), l.needsYou);
+    // "מחכה לך" is what asks him (needsYou), not the presence word.
+    expect(meta(const SearchHit(kind: 'person', id: 'a', title: 'A', status: 'waiting_for_you', leadName: 'Mira')), "In Mira's team");
+    store.data!.waiting.add(WaitItem(id: 'go-a', kind: WaitKind.go, from: 'a', time: '10:00', kicker: 'k', body: 'b'));
+    expect(meta(const SearchHit(kind: 'person', id: 'a', title: 'A', leadName: 'Mira')), l.needsYou);
   });
 
   test('a note shows the words that matched, in bold, even deep in a long note', () {

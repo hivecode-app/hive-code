@@ -13,6 +13,8 @@ import 'helpers.dart';
 void main() {
   Future<void> finish(WidgetTester tester, AppStore store, String id, String task) async {
     store.data!.presence[id] = Presence(status: WorkerStatus.done, activity: task);
+    // What it still asks him would win the third line ("מחכה לך"): finished and asking nothing.
+    store.data!.waiting.removeWhere((w) => w.from == id);
     store.notifyListeners();
     await tester.pump();
   }

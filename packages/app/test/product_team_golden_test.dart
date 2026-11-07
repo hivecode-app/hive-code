@@ -3,6 +3,7 @@
 import 'package:agent_company/data/backend.dart';
 import 'package:agent_company/data/fake_backend.dart';
 import 'package:agent_company/data/hq_backend.dart';
+import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/product/team.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,7 +18,7 @@ class _TeamBackend extends FakeBackend {
   _TeamBackend() : super(simulate: false, now: kDemoNow);
   late final CompanyData _snap = () {
     final today = DateTime(kDemoNow.year, kDemoNow.month, kDemoNow.day, 9).millisecondsSinceEpoch;
-    return mapSnapshot(
+    final d = mapSnapshot(
       board: [
         _id('yoav', 'יואב', 'management', 'permanent', 'resident', 'free', title: 'מנהל החברה'),
         _id('adi', 'עדי', 'agent-company', 'project', 'lead', 'working', project: 'agent-company', title: 'מנכ"לית החברה'),
@@ -48,6 +49,9 @@ class _TeamBackend extends FakeBackend {
       ],
       now: kDemoNow,
     );
+    // Maya waits on him because a GO of hers asks him (needsYou), the one source for "מחכה לך".
+    d.waiting.add(WaitItem(id: 'go-t2', kind: WaitKind.go, from: 'agent-company-t2', time: '10:00', kicker: 'k', body: 'b'));
+    return d;
   }();
   @override
   CompanyData? get data => _snap;

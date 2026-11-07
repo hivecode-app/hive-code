@@ -54,7 +54,8 @@ void main() {
   testWidgets('"מחכה לך למעלה" and "לפי שם"', (tester) async {
     final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ProductChats(compact: true)));
     await pick(tester, 'מחכה לך למעלה');
-    expect(order(tester), ['יואב', 'עידו', 'רותם', 'עמית', 'דנה', 'נועה', 'איתי', 'נגה', 'אלי']);
+    // Who asks him (needsYou): Ido, Dana and Amit. In the demo Rotem's ask is only a card in its chat, not in waiting.
+    expect(order(tester), ['יואב', 'עידו', 'דנה', 'עמית', 'רותם', 'נועה', 'איתי', 'נגה', 'אלי']);
     await pick(tester, 'לפי שם');
     expect(order(tester), ['יואב', 'איתי', 'אלי', 'דנה', 'נגה', 'נועה', 'עידו', 'עמית', 'רותם']);
     expect(names(store, ConvSort.name).first, 'יואב');
