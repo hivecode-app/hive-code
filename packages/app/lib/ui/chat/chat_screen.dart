@@ -845,7 +845,6 @@ class _ChatBar extends StatelessWidget {
           PopupMenuButton<String>(tooltip: l.more, onSelected: onMenu, icon: Ic('more_vert', color: p.text2), itemBuilder: (_) => [
             PopupMenuItem(value: 'stop', child: Text(l.stop)),
             PopupMenuItem(value: 'mute', child: Text(d.conversation(who.id)?.muted == true ? l.unmute : l.mute)),
-            if (store.preferences.advanced) PopupMenuItem(value: 'tools', child: Text(UiCopy.text(164))),
           ]),
         ]));
     }
@@ -906,10 +905,6 @@ class _ChatBar extends StatelessWidget {
     final rows = <(String, String)>[
       (UiCopy.text(167), team?.name ?? '—'),
       (UiCopy.text(168), team?.leadId != null && team!.leadId != who.id ? d.who(team!.leadId!).name : companyNames.manager),
-      if (StoreScope.read(context).preferences.advanced && who.taskRef != null) (UiCopy.text(169), '`${who.taskRef}`'),
-      if (StoreScope.read(context).preferences.advanced && pr.shift != null) (UiCopy.text(170), '${pr.shift}${pr.shiftSince != null ? UiCopy.text(171, [pr.shiftSince]) : ''}'),
-      if (StoreScope.read(context).preferences.advanced && pr.contextPct != null) (UiCopy.text(172), '${pr.contextPct}%'),
-      if (StoreScope.read(context).preferences.advanced && pr.machine != null) (UiCopy.text(173), '`${pr.machine}`'),
     ];
     showModalBottomSheet(
       context: context,
@@ -942,7 +937,7 @@ class _ChatBar extends StatelessWidget {
                 ]),
               ),
           ]),
-          if (StoreScope.read(context).preferences.advanced || !StoreScope.read(context).preferences.newInterface) Padding(
+          if (!StoreScope.read(context).preferences.newInterface) Padding(
             padding: const EdgeInsets.all(16),
             child: Wrap(spacing: 8, children:  [Btn('VS Code', icon: 'open_in_new'), Btn(UiCopy.text(174))]),
           ),

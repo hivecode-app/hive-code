@@ -46,6 +46,10 @@ test('pairing: hq serves /pair and assetlinks.json without a token', async () =>
     const link = encodeURIComponent('https://box.tail1.ts.net/pair?code=ABCD-EFGH');
     assert.ok(html.includes(`intent://pair?url=${link}#Intent;scheme=agentcompany;package=${APP_PACKAGE};`), html);
     assert.ok(html.includes('href="https://box.tail1.ts.net/?pair=ABCD-EFGH"'), 'go on in the browser');
+    // Hebrew, right to left, in the app's palette: a black primary button, not the old blue.
+    assert.match(html, /<html lang="he" dir="rtl">/);
+    assert.match(html, /--accent: #1B1C1E/);
+    assert.ok(!html.includes('#1F6FEB'));
 
     // A desktop browser gets only the web app.
     const desk = await (await get('/pair?code=ABCD-EFGH', { 'x-forwarded-host': 'box.tail1.ts.net', 'user-agent': 'Mozilla/5.0 (X11; Linux x86_64)' })).text();

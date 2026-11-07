@@ -4,11 +4,11 @@ import { join } from 'node:path';
 import { parse } from 'yaml';
 
 export type OwnerLanguage = 'en' | 'he';
-export function productPreferences(companyDir: string): { owner_language: OwnerLanguage; advanced_mode: boolean } {
+export function productPreferences(companyDir: string): { owner_language: OwnerLanguage } {
   try {
     const org = parse(readFileSync(join(companyDir, 'org.yaml'), 'utf8')) as Record<string, unknown> | null;
-    return { owner_language: org?.owner_language === 'he' ? 'he' : 'en', advanced_mode: org?.advanced_mode === true };
-  } catch { return { owner_language: 'en', advanced_mode: false }; }
+    return { owner_language: org?.owner_language === 'he' ? 'he' : 'en' };
+  } catch { return { owner_language: 'en' }; }
 }
 
 export const systemCopy = {

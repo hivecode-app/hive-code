@@ -85,16 +85,17 @@ ${intent ? `<a class="btn primary" href="${esc(intent)}">פתיחה באפליק
 <meta name="robots" content="noindex, nofollow">
 <title>צימוד מכשיר</title>
 <style>
-  :root { color-scheme: light dark; --bg: #F5F5F3; --surface: #FFFFFF; --text: #1A1B1D; --text2: #5E6167; --line: #E3E3DF; --accent: #1F6FEB; --on-accent: #FFFFFF; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #121314; --surface: #1B1C1E; --text: #E8E8E5; --text2: #A0A3A9; --line: #2D2F33; --accent: #7AAEFF; --on-accent: #0B1A33; } }
-  html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, sans-serif; }
-  main { max-width: 420px; margin: 0 auto; padding: 48px 16px; }
-  h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
-  .sub { color: var(--text2); margin: 0 0 20px; }
-  .code { font: 700 26px ui-monospace, monospace; letter-spacing: 3px; text-align: center; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
-  .meta { color: var(--text2); font-size: 13px; margin: 8px 0 20px; }
-  .btn { display: block; text-align: center; text-decoration: none; font-weight: 700; border-radius: 8px; padding: 12px; margin-bottom: 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line); }
+  :root { color-scheme: light dark; --bg: #F7F7F5; --surface: #FFFFFF; --text: #1B1C1E; --text2: #5C6066; --line: #E3E3DF; --accent: #1B1C1E; --on-accent: #FFFFFF; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141517; --surface: #1C1D20; --text: #ECECEA; --text2: #A6A9AE; --line: #2D2E32; --accent: #ECECEA; --on-accent: #141517; } }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 Rubik, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 420px; margin: 0 auto; padding: 56px 24px 32px; }
+  h1 { font-size: 28px; line-height: 34px; font-weight: 700; margin: 0 0 8px; }
+  .sub { color: var(--text2); margin: 0 0 28px; }
+  .code { font: 500 32px/1 ui-monospace, "Roboto Mono", monospace; letter-spacing: 4px; text-align: center; padding: 8px 0; }
+  .meta { color: var(--text2); font-size: 14px; margin: 10px 0 28px; }
+  .btn { display: flex; align-items: center; justify-content: center; height: 48px; box-sizing: border-box; text-decoration: none; font-weight: 700; font-size: 15px; border-radius: 10px; margin-bottom: 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line); }
   .btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 </style>
 </head>
 <body><main>

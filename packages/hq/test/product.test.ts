@@ -83,10 +83,10 @@ test('search: project names instead of ids, a stage per task, open work before f
 test('product preferences and system templates are bilingual with English defaults', async () => {
   const env = await makeEnv({ noStart: true });
   try {
-    assert.deepEqual(productPreferences(env.cfg.companyDir), { owner_language: 'en', advanced_mode: false });
+    assert.deepEqual(productPreferences(env.cfg.companyDir), { owner_language: 'en' });
     const file = join(env.cfg.companyDir, 'org.yaml');
     writeFileSync(file, readFileSync(file, 'utf8') + '\nowner_language: he\nadvanced_mode: true\n');
-    assert.deepEqual(productPreferences(env.cfg.companyDir), { owner_language: 'he', advanced_mode: true });
+    assert.deepEqual(productPreferences(env.cfg.companyDir), { owner_language: 'he' }, 'an old advanced_mode in org.yaml is ignored: there is one interface');
     for (const c of Object.values(systemCopy)) { assert(c.en); assert(c.he); }
     assert.equal(systemText('done', 'en', 'Map fix'), 'Done: Map fix');
     assert.equal(systemText('done', 'he', 'תיקון במפה'), 'הסתיים: תיקון במפה');
@@ -106,7 +106,7 @@ test('search API requires authentication and board carries server language defau
     const headers = { authorization: `Bearer ${token}` };
     assert.equal((await fetch(`${base}/api/search?q=eli`, { headers })).status, 200);
     const board = await (await fetch(`${base}/api/board`, { headers })).json() as Record<string, unknown>;
-    assert.equal(board.owner_language, 'en'); assert.equal(board.advanced_mode, false);
+    assert.equal(board.owner_language, 'en'); assert(!('advanced_mode' in board));
   } finally { await env.cleanup(); }
 });
 

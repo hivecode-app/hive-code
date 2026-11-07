@@ -92,7 +92,7 @@ class FakeHq {
   });
 }
 
-Future<void> pumpScreen(WidgetTester tester, Widget screen, {Size size = const Size(342, 716)}) async {
+Future<void> pumpScreen(WidgetTester tester, Widget screen, {Size size = const Size(342, 716), Palette? palette}) async {
   await loadFonts();
   Motion.frozen = true;
   tester.view.physicalSize = size * 2;
@@ -100,7 +100,7 @@ Future<void> pumpScreen(WidgetTester tester, Widget screen, {Size size = const S
   addTearDown(tester.view.reset);
   await tester.pumpWidget(MaterialApp(
     debugShowCheckedModeBanner: false,
-    theme: buildTheme(Palette.light),
+    theme: palette != null ? buildTheme(palette, product: true) : buildTheme(Palette.light),
     locale: const Locale('he'),
     supportedLocales: const [Locale('he')],
     localizationsDelegates: const [GlobalMaterialLocalizations.delegate, GlobalWidgetsLocalizations.delegate, GlobalCupertinoLocalizations.delegate],
@@ -134,12 +134,28 @@ void main() {
   testWidgets('sign-in golden, and fingerprint login hands the session up', (tester) async {
     final hq = FakeHq();
     Session? got;
-    await pumpScreen(tester, SignInScreen(client: AuthClient(base, client: hq.client, passkeys: FakePasskeys()), onSignedIn: (s) => got = s));
-    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/sign_in_light.png'));
+    await pumpScreen(tester, SignInScreen(client: AuthClient(base, client: hq.client, passkeys: FakePasskeys()), onSignedIn: (s) => got = s),
+        palette: productPalette(Brightness.light));
     await tester.tap(find.text('כניסה עם טביעת אצבע'));
     await tester.pumpAndSettle();
     expect(got?.token, 'tok-new');
   });
+
+  // The sign-in screen is drawn in the product palette, as the app draws it: the primary button is black
+  // (light) or near-white (dark), as the onboarding's "המשך", never the old blue.
+  for (final dark in [false, true]) {
+    for (final passkeys in [true, false]) {
+      testWidgets('sign-in in the product palette: ${dark ? 'dark' : 'light'}, ${passkeys ? 'with' : 'without'} a passkey', (tester) async {
+        final palette = productPalette(dark ? Brightness.dark : Brightness.light);
+        await pumpScreen(tester, SignInScreen(client: AuthClient(base, client: FakeHq().client, passkeys: FakePasskeys(supported: passkeys)), onSignedIn: (_) {}),
+            palette: palette);
+        final colors = tester.widgetList<Material>(find.byType(Material)).map((m) => m.color).toList();
+        expect(colors, contains(palette.accent), reason: 'the primary button');
+        expect(colors, isNot(contains(Palette.of(dark ? Brightness.dark : Brightness.light).accent)), reason: 'no old blue');
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/sign_in_${dark ? 'dark' : 'light'}_${passkeys ? 'passkey' : 'code'}.png'));
+      });
+    }
+  }
 
   testWidgets('pairing: the code from the link registers a passkey here', (tester) async {
     final hq = FakeHq(), keys = FakePasskeys();
@@ -258,7 +274,8 @@ void serverTests() {
     final hq = FakeHq();
     Session? got;
     await pumpScreen(tester, SignInScreen(
-        askServer: true, client: AuthClient('', client: hq.client, passkeys: FakePasskeys(supported: false)), onSignedIn: (s) => got = s));
+        askServer: true, client: AuthClient('', client: hq.client, passkeys: FakePasskeys(supported: false)), onSignedIn: (s) => got = s),
+        palette: productPalette(Brightness.light));
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/sign_in_server_light.png'));
     await tester.enterText(find.byKey(const Key('server-address')), 'https://box.example.net/pair?code=good-code');
     await tester.pump();

@@ -425,7 +425,10 @@ class _ProductSearchState extends State<ProductSearch> {
                                   padding: const EdgeInsetsDirectional.fromSTEB(66, 12, 20, 12),
                                   alignment: AlignmentDirectional.centerStart,
                                   decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line, width: .5))),
-                                  child: Text(l.searchAll(hidden(h.kind)!), style: T.row2.copyWith(color: p.text, fontWeight: FontWeight.w600)),
+                                  child: Row(children: [
+                                    Expanded(child: Text(l.searchAll(hidden(h.kind)!), style: T.row2.copyWith(color: p.text, fontWeight: FontWeight.w600))),
+                                    Ic(chevronIcon(context), size: 20, color: p.text3),
+                                  ]),
                                 ),
                               ),
                             ),

@@ -123,109 +123,112 @@ class _SignInScreenState extends State<SignInScreen> {
     UiCopy.watch(context);
     final p = context.p;
     final hasPasskeys = widget.client.passkeysSupported;
+    InputDecoration field(String hint, TextStyle style) => InputDecoration(
+          hintText: hint,
+          hintTextDirection: TextDirection.ltr,
+          hintStyle: style.copyWith(color: p.text3),
+          filled: true,
+          fillColor: p.surface2,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+        );
+    Widget label(String s) => Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(s, style: T.row2.copyWith(color: p.text2)));
+    final pairLabel = hasPasskeys ? UiCopy.text(14) : UiCopy.text(15);
     return Scaffold(
       backgroundColor: p.bg,
       body: SafeArea(
-        child: Center(
+        child: Align(
+          alignment: Alignment.topCenter,
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(vertical: 24),
+            padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                BigTitle(UiCopy.text(3), sub: widget.current != null ? UiCopy.text(4) : UiCopy.text(5)),
+                Text(UiCopy.text(5), style: T.big.copyWith(color: p.text, height: 1.2)),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 28),
+                  child: Text(widget.current != null ? UiCopy.text(4) : hasPasskeys ? UiCopy.text(3) : UiCopy.text(13), style: T.body.copyWith(color: p.text2)),
+                ),
                 if (widget.note != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: Text(widget.note!, style: T.secondary.copyWith(color: p.text)),
-                  ),
+                  Padding(padding: const EdgeInsets.only(bottom: 16), child: Text(widget.note!, style: T.body.copyWith(color: p.text))),
                 if (widget.current != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: Text(UiCopy.text(6, [widget.current]),
-                        style: T.secondary.copyWith(color: p.text)),
-                  ),
+                  Padding(padding: const EdgeInsets.only(bottom: 16), child: Text(UiCopy.text(6, [widget.current]), style: T.row2.copyWith(color: p.text))),
                 if (widget.askServer) ...[
-                   Section(UiCopy.text(7), top: 8),
-                  ListBlock(inset: 16, children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                        Text(UiCopy.text(8), style: T.small.copyWith(color: p.text2)),
-                        const SizedBox(height: 8),
-                        TextField(
-                          key: const Key('server-address'),
-                          controller: server,
-                          textDirection: TextDirection.ltr,
-                          keyboardType: TextInputType.url,
-                          autocorrect: false,
-                          enableSuggestions: false,
-                          onChanged: _serverChanged,
-                          style: T.mono(15).copyWith(color: p.text),
-                          decoration: InputDecoration(
-                            isDense: true,
-                            hintText: 'app.example.com',
-                            hintTextDirection: TextDirection.ltr,
-                            hintStyle: T.mono(15).copyWith(color: p.text3),
-                            filled: true,
-                            fillColor: p.surface2,
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                          ),
-                        ),
-                      ]),
-                    ),
-                  ]),
+                  label(UiCopy.text(8)),
+                  TextField(
+                    key: const Key('server-address'),
+                    controller: server,
+                    textDirection: TextDirection.ltr,
+                    keyboardType: TextInputType.url,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    onChanged: _serverChanged,
+                    style: T.mono(15).copyWith(color: p.text),
+                    decoration: field('app.example.com', T.mono(15)),
+                  ),
                   const SizedBox(height: 24),
                 ],
                 if (hasPasskeys) ...[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Btn(busy ? UiCopy.text(9) : UiCopy.text(10), kind: BtnKind.primary, icon: 'fingerprint', height: 44, onTap: busy ? null : _login),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    child: Text(UiCopy.text(11), style: T.small.copyWith(color: p.text2)),
-                  ),
+                  _BigButton(busy ? UiCopy.text(9) : UiCopy.text(10), icon: 'fingerprint', primary: true, onTap: busy ? null : _login),
+                  Padding(padding: const EdgeInsets.only(top: 8, bottom: 28), child: Text(UiCopy.text(11), style: T.small.copyWith(color: p.text2))),
+                  label(UiCopy.text(12)),
+                  Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(UiCopy.text(13), style: T.small.copyWith(color: p.text2))),
                 ],
-                Section(UiCopy.text(12), top: hasPasskeys ? 24 : 8),
-                ListBlock(inset: 16, children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                      Text(UiCopy.text(13), style: T.small.copyWith(color: p.text2)),
-                      const SizedBox(height: 8),
-                      TextField(
-                        key: const Key('pair-code'),
-                        controller: code,
-                        textDirection: TextDirection.ltr,
-                        textCapitalization: TextCapitalization.characters,
-                        autocorrect: false,
-                        style: T.mono(16, w: FontWeight.w500).copyWith(color: p.text, letterSpacing: 2),
-                        onSubmitted: (_) => busy ? null : _pair(),
-                        decoration: InputDecoration(
-                          isDense: true,
-                          hintText: 'XXXX-XXXX',
-                          hintStyle: T.mono(16).copyWith(color: p.text3, letterSpacing: 2),
-                          filled: true,
-                          fillColor: p.surface2,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                        Btn(hasPasskeys ? UiCopy.text(14) : UiCopy.text(15), icon: 'link', onTap: busy ? null : _pair),
-                        if (offerCodeOnly) Btn(UiCopy.text(16), onTap: busy ? null : _codeOnly),
-                      ]),
-                    ]),
-                  ),
-                ]),
-                if (error != null) ShownError(error!, screen: UiCopy.text(17), padding: const EdgeInsets.fromLTRB(16, 12, 16, 0), report: errorFault),
+                TextField(
+                  key: const Key('pair-code'),
+                  controller: code,
+                  textDirection: TextDirection.ltr,
+                  textAlign: TextAlign.center,
+                  textCapitalization: TextCapitalization.characters,
+                  autocorrect: false,
+                  style: T.mono(20, w: FontWeight.w500).copyWith(color: p.text, letterSpacing: 3),
+                  onSubmitted: (_) => busy ? null : _pair(),
+                  decoration: field('XXXX-XXXX', T.mono(20).copyWith(letterSpacing: 3)),
+                ),
+                const SizedBox(height: 12),
+                _BigButton(busy && !hasPasskeys ? UiCopy.text(9) : pairLabel, icon: 'link', primary: !hasPasskeys, onTap: busy ? null : _pair),
+                if (offerCodeOnly) ...[const SizedBox(height: 8), _BigButton(UiCopy.text(16), onTap: busy ? null : _codeOnly)],
+                if (error != null) ShownError(error!, screen: UiCopy.text(17), padding: const EdgeInsets.only(top: 16), report: errorFault),
                 if (widget.onCancel != null)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+                    padding: const EdgeInsets.only(top: 24),
                     child: Align(alignment: AlignmentDirectional.centerStart, child: Btn(UiCopy.text(18), onTap: busy ? null : widget.onCancel)),
                   ),
               ]),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A full-width 48px button with a 10px radius, as the onboarding's "המשך" (a-he-onboard-*).
+class _BigButton extends StatelessWidget {
+  const _BigButton(this.label, {this.icon, this.primary = false, this.onTap});
+  final String label;
+  final String? icon;
+  final bool primary;
+  final VoidCallback? onTap;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final fg = primary ? p.onAccent : p.text;
+    return Semantics(
+      button: true,
+      enabled: onTap != null,
+      child: Material(
+        color: primary ? p.accent : p.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: primary ? p.accent : p.line)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            height: 48,
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              if (icon != null) ...[Ic(icon!, size: 20, color: fg), const SizedBox(width: 8)],
+              Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.button.copyWith(color: fg, fontWeight: FontWeight.w700, fontSize: 15))),
+            ]),
           ),
         ),
       ),

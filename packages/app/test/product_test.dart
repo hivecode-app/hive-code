@@ -18,6 +18,9 @@ import 'package:agent_company/l10n/app_localizations.dart';
 import 'package:agent_company/model/task_progress.dart';
 import 'package:agent_company/ui/product/search_screen.dart';
 import 'package:agent_company/ui/product/settings.dart';
+import 'package:agent_company/ui/product/notifications_settings.dart';
+import 'package:agent_company/ui/settings/settings_screen.dart' show AccountSwitch;
+import 'package:agent_company/model/home_recipe.dart';
 import 'package:agent_company/ui/product/shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -317,14 +320,93 @@ void main() {
       }
     }
   }
-  testWidgets('advanced tools stay hidden until enabled; project filtering changes only the list', (tester) async {
-    final store = await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
-    expect(store.preferences.advanced, isFalse);
+  testWidgets('settings follow the mockup: no interface or advanced switches; the tools are one row', (tester) async {
+    await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
+    for (final gone in ['New interface', 'Advanced mode']) {
+      expect(find.text(gone), findsNothing);
+    }
+    expect(find.byType(AccountSwitch), findsNothing);
+    final order = ['Claude subscription', 'Server', 'Notifications', 'Language', 'Appearance', 'Tools'];
+    for (final t in order) {
+      await tester.scrollUntilVisible(find.text(t), 200);
+    }
     expect(find.text('Company map'), findsNothing);
-    await store.preferences.setAdvanced(true);
-    await tester.pump();
-    await tester.scrollUntilVisible(find.text('Company map'), 200);
-    expect(find.text('Company map'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('settings-tools')));
+    await tester.pumpAndSettle();
+    for (final t in ['Company overview', 'Company map', 'Automations']) {
+      expect(find.text(t), findsOneWidget);
+    }
+  });
+
+  testWidgets('the account switch lives in the Claude subscription page', (tester) async {
+    await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
+    await tester.tap(find.text('Claude subscription'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SettingsPageView), findsOneWidget);
+    expect(find.byType(AccountSwitch), findsOneWidget);
+    expect(find.text('Work settings'), findsOneWidget);
+  });
+
+  test('the subscription line is the Claude week as one, and its nearest reset', () {
+    final l = lookupAppLocalizations(const Locale('he'));
+    final now = DateTime(2026, 11, 7, 9);
+    final friday = DateTime(2026, 11, 13, 6), sunday = DateTime(2026, 11, 8, 6);
+    expect(claudeWeek(l, const [], now), isNull);
+    final line = claudeWeek(l, [
+      QuotaLine(name: 'a', label: 'a', sevenDay: 30, sevenDayResets: friday),
+      QuotaLine(name: 'b', label: 'b', sevenDay: 46, sevenDayResets: friday),
+      const QuotaLine(name: 'codex', label: 'Codex', sevenDay: 99),
+      QuotaLine(name: 'c', label: 'c', usable: false, sevenDay: 100, sevenDayResets: sunday),
+    ], now)!;
+    expect(stripBidi(line), 'נוצל 38% השבוע · מתאפס ביום שישי');
+    // The day it resets is "today" on that day; a week that already reset counts as unused, not last week's.
+    final tonight = DateTime(2026, 11, 7, 22), lastNight = DateTime(2026, 11, 7, 3);
+    expect(stripBidi(claudeWeek(l, [
+      QuotaLine(name: 'a', label: 'a', sevenDay: 80, sevenDayResets: tonight),
+      QuotaLine(name: 'b', label: 'b', sevenDay: 90, sevenDayResets: lastNight),
+    ], now)!), 'נוצל 40% השבוע · מתאפס היום');
+  });
+
+  test('the reset day is his day on the company clock, not the phone\'s', () {
+    final l = lookupAppLocalizations(const Locale('he'));
+    addTearDown(CompanyTime.reset);
+    // Friday 23:00 UTC is already Saturday in Bangkok (+7).
+    final resets = DateTime.utc(2026, 11, 13, 23), now = DateTime.utc(2026, 11, 7, 9);
+    CompanyTime.offset = const Duration(hours: 7);
+    expect(stripBidi(claudeWeek(l, [QuotaLine(name: 'a', label: 'a', sevenDay: 10, sevenDayResets: resets)], now)!), 'נוצל 10% השבוע · מתאפס ביום שבת');
+    CompanyTime.offset = const Duration(hours: -5);
+    expect(stripBidi(claudeWeek(l, [QuotaLine(name: 'a', label: 'a', sevenDay: 10, sevenDayResets: resets)], now)!), 'נוצל 10% השבוע · מתאפס ביום שישי');
+  });
+
+  testWidgets('notifications say what hq does: what rings, what is silent, the number; focus is one tap', (tester) async {
+    final store = await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
+    await tester.tap(find.byKey(const Key('notifications-settings')));
+    await tester.pumpAndSettle();
+    expect(find.byType(NotificationsSettings), findsOneWidget);
+    for (final t in ['A request to approve a release', 'A message from a worker', 'An update with an expected time', 'An update for your information']) {
+      expect(find.text(t), findsOneWidget);
+    }
+    expect(find.text('Rings'), findsWidgets);
+    expect(find.text('Silent'), findsOneWidget);
+    expect(find.text('Number only'), findsOneWidget);
+    // The number is what waits for him (and unread messages only in the browser); off still rings on Android.
+    expect(find.textContaining('What waits for you: approval requests and questions.'), findsOneWidget);
+    expect(lookupAppLocalizations(const Locale('he')).notifPushHint, contains('באנדרואיד'));
+    expect(find.textContaining('all accounts being full'), findsOneWidget);
+    final before = store.data!.focus;
+    await tester.tap(find.byKey(const Key('notif-focus')));
+    await tester.pumpAndSettle();
+    expect(store.data!.focus, !before);
+  });
+
+  testWidgets('on a wide screen settings are a menu with the page beside it', (tester) async {
+    await productApp(tester, size: const Size(1280, 840), home: const Scaffold(body: ProductSettings(embedded: true)));
+    expect(find.byType(SettingsPageView), findsOneWidget);
+    await tester.tap(find.text('Notifications'));
+    await tester.pumpAndSettle();
+    expect(find.byType(NotificationsSettings), findsOneWidget);
+    expect(find.byType(SettingsPageView), findsOneWidget);
+    expect(Navigator.of(tester.element(find.byType(NotificationsSettings))).canPop(), isFalse);
   });
 
   testWidgets('settings choices use mapped symbols and one notifications destination', (tester) async {
@@ -413,11 +495,11 @@ void main() {
     expect(backend.starts, 2);
     await tester.pumpWidget(const SizedBox.shrink());
   });
-  testWidgets('advanced overview opens the manager recipe from the new interface', (tester) async {
-    final store = await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
-    await store.preferences.setAdvanced(true);
-    await tester.pump();
-    await tester.scrollUntilVisible(find.text('Company overview'), 200);
+  testWidgets('the company overview opens from the tools row', (tester) async {
+    await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
+    await tester.scrollUntilVisible(find.byKey(const Key('settings-tools')), 200);
+    await tester.tap(find.byKey(const Key('settings-tools')));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Company overview'));
     await tester.pumpAndSettle();
     expect(find.byType(HomeV2), findsOneWidget);

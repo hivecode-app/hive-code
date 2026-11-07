@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'data/app_preferences.dart';
 import 'data/auth_client.dart';
 import 'data/backend.dart';
 import 'data/backend_select.dart';
@@ -37,7 +38,7 @@ Future<void> main() async {
   var newInterface = true;
   try {
     final prefs = await SharedPreferences.getInstance();
-    locale = Locale(prefs.getString('language') == 'he' ? 'he' : 'en');
+    locale = Locale(startLanguage(prefs));
     newInterface = prefs.getBool('new_interface') ?? true;
   } catch (_) { /* A first start can continue with English defaults. */ }
   runApp(AuthGate(locale: newInterface ? locale : const Locale('he'), newInterface: newInterface, initial: await selectBackend(), hqUrl: await initialServer(), pairLink: await NativeBridge.instance.getPairLink()));

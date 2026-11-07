@@ -4,21 +4,28 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  test('English and basic mode by default; Ran settings come from server fields', () async {
+  test('English by default; the server language applies and is kept for the next sign-in screen', () async {
     SharedPreferences.setMockInitialValues({});
+    final disk = await SharedPreferences.getInstance();
     final prefs = AppPreferences();
-    await prefs.load(await SharedPreferences.getInstance());
+    await prefs.load(disk);
     expect(prefs.language, 'en');
-    expect(prefs.advanced, isFalse);
     expect(prefs.newInterface, isTrue);
-    prefs.defaults('he', true);
+    prefs.defaults('he');
     expect(prefs.language, 'he');
-    expect(prefs.advanced, isTrue);
+    // Signed out, before any data: the sign-in screen speaks the server's language, not English.
+    expect(startLanguage(disk, device: 'en'), 'he');
     await prefs.setLanguage('en');
-    await prefs.setAdvanced(false);
-    prefs.defaults('he', true);
+    prefs.defaults('he');
     expect(prefs.language, 'en');
-    expect(prefs.advanced, isFalse);
+    expect(startLanguage(disk, device: 'he'), 'en');
+  });
+  test('before any server: his choice, else the device language', () async {
+    SharedPreferences.setMockInitialValues({});
+    final disk = await SharedPreferences.getInstance();
+    expect(startLanguage(disk, device: 'he'), 'he');
+    expect(startLanguage(disk, device: 'fr'), 'en');
+    expect(startLanguage(null, device: 'he'), 'he');
   });
   test('device choices survive restarting and server defaults cannot override them', () async {
     SharedPreferences.setMockInitialValues({});
@@ -26,14 +33,12 @@ void main() {
     final prefs = AppPreferences();
     await prefs.load(disk);
     await prefs.setLanguage('he');
-    await prefs.setAdvanced(true);
     await prefs.setNewInterface(false);
     await prefs.setAppearance(ThemeMode.dark);
     final reloaded = AppPreferences();
     await reloaded.load(disk);
-    reloaded.defaults('en', false);
+    reloaded.defaults('en');
     expect(reloaded.language, 'he');
-    expect(reloaded.advanced, isTrue);
     expect(reloaded.newInterface, isFalse);
     expect(reloaded.themeMode, ThemeMode.dark);
   });

@@ -43,7 +43,6 @@ class CompanyData {
     this.managerId = '',
     this.ownerLanguage = 'en',
     this.ownerName = '',
-    this.advancedMode = false,
     this._openTasks,
   });
 
@@ -51,7 +50,6 @@ class CompanyData {
   final String managerId;
   final String ownerLanguage;
   final String ownerName;
-  final bool advancedMode;
 
   final Map<String, Team> teams;
   final Map<String, Identity> identities;

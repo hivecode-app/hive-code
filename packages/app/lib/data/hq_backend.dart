@@ -98,7 +98,6 @@ class HqBackend extends Backend {
       openTasks: board['open_tasks'] is List ? _list(board, 'open_tasks') : null,
       manager: board['manager'] as String? ?? '',
       ownerLanguage: board['owner_language'] == 'he' ? 'he' : 'en',
-      advancedMode: board['advanced_mode'] == true,
       previous: previous,
     );
     _data!
@@ -357,7 +356,6 @@ class HqBackend extends Backend {
       openTasks: results[0]['open_tasks'] is List ? _list(results[0], 'open_tasks') : null,
       manager: (results[0]['manager'] as String?) ?? '',
       ownerLanguage: results[0]['owner_language'] == 'he' ? 'he' : 'en',
-      advancedMode: results[0]['advanced_mode'] == true,
       previous: prev,
     );
     // Order and last lines from the last messages fetch, right away: without them the list showed
@@ -641,7 +639,6 @@ class HqBackend extends Backend {
         openTasks: (c['board'] as Map)['open_tasks'] is List ? _list(c['board'], 'open_tasks') : null,
         manager: ((c['board'] as Map)['manager'] as String?) ?? '',
         ownerLanguage: (c['board'] as Map)['owner_language'] == 'he' ? 'he' : 'en',
-        advancedMode: (c['board'] as Map)['advanced_mode'] == true,
       );
       if (c['home'] is Map) {
         try {
@@ -1868,7 +1865,6 @@ CompanyData mapSnapshot({
   List<Map<String, dynamic>>? openTasks,
   String manager = '',
   String ownerLanguage = 'en',
-  bool advancedMode = false,
   CompanyData? previous,
   DateTime? now,
 }) {
@@ -2218,7 +2214,6 @@ CompanyData mapSnapshot({
     managerId: manager,
     ownerLanguage: ownerLanguage,
     ownerName: companyNames.placeholder ? '' : companyNames.owner,
-    advancedMode: advancedMode,
     teams: teams,
     identities: ids,
     presence: presence,

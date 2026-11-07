@@ -73,7 +73,7 @@ class AppStore extends ChangeNotifier {
   /// outbox was never flushed and a message stayed "ממתינה לחיבור" for good (#55).
   void _onBackend() {
     if (_disposed) return;
-    preferences.defaults(data?.ownerLanguage ?? 'en', data?.advancedMode ?? false);
+    if (data case final d?) preferences.defaults(d.ownerLanguage);
     final on = _online;
     if (on && !_wasOnline && !_restoring) unawaited(flushOutbox());
     _wasOnline = on;
@@ -216,7 +216,7 @@ class AppStore extends ChangeNotifier {
     await preferences.load(_prefs);
     UiCopy.configure(preferences.newInterface ? preferences.language : 'he', preferences.newInterface);
     await backend.start();
-    preferences.defaults(data?.ownerLanguage ?? 'en', data?.advancedMode ?? false);
+    if (data case final d?) preferences.defaults(d.ownerLanguage);
     await uploads.load(_prefs);
     for (final key in _prefs?.getKeys().where((k) => k.startsWith(_storageKey('media-draft:'))) ?? <String>{}) {
       _images[key.substring(_storageKey('media-draft:').length)] = [

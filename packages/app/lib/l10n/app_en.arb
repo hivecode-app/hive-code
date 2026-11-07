@@ -58,10 +58,8 @@
   "deviceSetting": "Device setting",
   "light": "Light",
   "dark": "Dark",
-  "advancedMode": "Advanced mode",
   "newInterface": "New interface",
   "newInterfaceHint": "Turn off to return to the previous interface.",
-  "advancedHint": "Company map, resources and automations",
   "companyMap": "Company map",
   "resources": "Resources",
   "automations": "Automations",
@@ -3403,5 +3401,62 @@
         "type": "int"
       }
     }
-  }
+  },
+  "settingsAccountSub": "Devices, sign out and version",
+  "claudeSubscription": "Claude subscription",
+  "claudeUsage": "{pct} used this week",
+  "@claudeUsage": {
+    "placeholders": {
+      "pct": {
+        "type": "String"
+      }
+    }
+  },
+  "claudeResets": "resets on {day}",
+  "@claudeResets": {
+    "placeholders": {
+      "day": {
+        "type": "String"
+      }
+    }
+  },
+  "claudeResetsToday": "resets today",
+  "claudeAccounts": "Accounts",
+  "accessFull": "Full",
+  "tools": "Tools",
+  "toolsHint": "Company overview, map, resources, automations and status",
+  "notifSummaryOn": "Approvals and questions: right away",
+  "notifSummaryOff": "Off",
+  "notifSummaryFocus": "Focus: urgent only",
+  "notifSummaryNight": "Night: urgent only",
+  "notifTitleSub": "When the phone rings, when it stays quiet, and what the number on the app means.",
+  "notifPushHint": "When it is off, the server sends no notifications, and messages are still counted. On Android an approval request, a question that stops work and a sign-in request still ring.",
+  "notifNightOn": "Night work is on now: like focus, until it ends.",
+  "notifDevice": "This device's notification settings",
+  "notifWhen": "When it rings",
+  "notifEvent": "Event",
+  "notifAlert": "Alert",
+  "notifRing": "Rings",
+  "notifSilent": "Silent",
+  "notifBadge": "Number only",
+  "notifNone": "No alert",
+  "notifGo": "A request to approve a release",
+  "notifAsk": "A question that stops work",
+  "notifLogin": "A request to sign in to a site",
+  "notifMessage": "A message from a worker",
+  "notifMessageHint": "Rings once. More in the same chat within 10 minutes arrive silently.",
+  "notifUrgent": "An urgent message",
+  "notifUrgentHint": "Rings right away, also in focus and at night.",
+  "notifEta": "An update with an expected time",
+  "notifFyi": "An update for your information",
+  "notifSoftAsk": "A question that can wait",
+  "notifSoftAskHint": "Waits for you in the list, without ringing.",
+  "focusAndNight": "Focus and night",
+  "notifFocusBody": "In focus and during night work only an urgent message, the company manager going down, and all accounts being full ring. Everything else is counted and waits for you.",
+  "notifNeverTitle": "Never rings",
+  "notifNeverBody": "A chat that is open on your screen, and a muted chat.",
+  "notifBadgeTitle": "The number on the app",
+  "notifBadgeBody": "What waits for you: approval requests and questions. In the browser it also counts worker messages you haven't read yet, without muted chats.",
+  "notifTogetherTitle": "A few in a row",
+  "notifTogetherBody": "A regular message waits 20 seconds before it rings, so a few in a row ring once. An urgent one rings right away."
 }
