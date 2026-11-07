@@ -72,6 +72,8 @@ class TaskProgress {
     this.summary,
     this.workerStatus,
     this.awaiting,
+    this.awaitingAt,
+    this.releaseStuck = false,
     this.requests = const [],
     this.prs = const [],
     this.op,
@@ -96,6 +98,15 @@ class TaskProgress {
   /// What the task changes for him, in his words (open_team `about`); null on tasks opened without one.
   final String? about;
   final DateTime? createdAt, startedAt, updatedAt;
+
+  /// Since when it waits for what [awaiting] says (hq `awaiting_at`).
+  final DateTime? awaitingAt;
+
+  /// Merged and waiting for its release longer than a week (hq `release_stuck`): "תקועה".
+  final bool releaseStuck;
+
+  /// Merged, waiting for its release: the lead's GO and the deploy, not a decision of his.
+  bool get releasing => awaiting == 'deploy';
   final TaskStage? stage;
   final List<TaskRequest> requests;
   final List<TaskPr> prs;
@@ -113,6 +124,8 @@ class TaskProgress {
     summary: j['summary'] as String?,
     workerStatus: j['worker_status'] as String?,
     awaiting: j['awaiting'] as String?,
+    awaitingAt: _ms(j['awaiting_at']),
+    releaseStuck: j['release_stuck'] == true,
     requests: taskRows(j['requests']).map(TaskRequest.fromJson).toList(),
     prs: taskRows(j['prs']).map(TaskPr.fromJson).toList(),
     op: j['op'] as String?,

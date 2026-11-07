@@ -50,6 +50,7 @@ class TaskBackend extends FakeBackend {
   bool accepted = false;
   int released = 0;
   bool orphanGo = false;
+  bool stuckRelease = false, checkTask = false, deferredGo = false;
   final sent = <UserMsg>[];
   bool failSend = false;
   @override
@@ -140,7 +141,14 @@ class TaskBackend extends FakeBackend {
       awaiting: 'deploy',
       stage: TaskStage.approval,
       outcome: 'completed',
+      releaseStuck: stuckRelease,
     ),
+    if (stuckRelease)
+      const TaskProgress(id: 8, title: 'Voice merged', project: 'voice', state: 'done', awaiting: 'deploy', stage: TaskStage.approval, outcome: 'completed'),
+    if (deferredGo)
+      const TaskProgress(id: 9, title: 'Deferred GO', project: 'voice', state: 'done', awaiting: 'deploy', stage: TaskStage.approval, outcome: 'completed', requests: [TaskRequest(id: 77, kind: 'go', title: 'GO', askedBy: 'dana', task: 9)]),
+    if (checkTask)
+      const TaskProgress(id: 7, title: 'Check the new map', project: 'lumo', state: 'done', awaiting: 'check', stage: TaskStage.approval, outcome: 'completed'),
     TaskProgress(
       id: 5,
       title: he ? 'תיקון ההתראות שוחרר' : 'Notification fix released',
@@ -609,9 +617,90 @@ void main() {
     expect(find.text('Released 7', skipOffstage: false), findsOneWidget);
   });
 
-  testWidgets('a task waiting on him stays in the list when its request is not among his', (tester) async {
+  testWidgets('a task whose request is not among his stays in the list, under "waiting for release"', (tester) async {
     await productApp(tester, backend: TaskBackend()..orphanGo = true, home: const Scaffold(body: ProductTasks()));
+    expect(find.byKey(const ValueKey('task-200')), findsNothing);
+    await tester.ensureVisible(find.byKey(const Key('task-releasing')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('task-releasing')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('task-200')), findsOneWidget);
+  });
+
+  testWidgets('"needs you" is what the count says, and a check; merged work waits folded for its release', (tester) async {
+    final store = await productApp(tester, backend: TaskBackend()..checkTask = true, home: const Scaffold(body: ProductTasks()));
+    final d = store.data!;
+    // A request he put off ("not now") is not counted, so it is not listed either.
+    final later = d.needsYou.first;
+    later.state = WaitState.notNow;
+    store.notifyListeners();
+    await tester.pumpAndSettle();
+    for (final w in d.waiting) {
+      expect(find.byKey(ValueKey('task-request-${w.id}'), skipOffstage: false), d.needsYou.contains(w) ? findsOneWidget : findsNothing, reason: w.id);
+    }
+    expect(find.descendant(of: find.byKey(const Key('task-needs-you')), matching: find.text('${d.needsYou.length + 1}')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-7')), findsOneWidget, reason: 'a check is his');
+    expect(find.text('Merged, waiting for release'), findsNothing);
+    expect(find.byKey(const ValueKey('task-4')), findsNothing, reason: 'folded');
+    await tester.ensureVisible(find.byKey(const Key('task-releasing')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('task-releasing')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('task-4'), skipOffstage: false), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a release waiting over a week is stuck: said folded, and on its row, under its project', (tester) async {
+    await productApp(tester, backend: TaskBackend()..stuckRelease = true, home: const Scaffold(body: ProductTasks()));
+    await tester.ensureVisible(find.byKey(const Key('task-releasing')));
+    await tester.pumpAndSettle();
+    expect(find.text('Waiting for release'), findsOneWidget);
+    expect(find.text('1 stuck'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('task-releasing')));
+    await tester.pumpAndSettle();
+    expect(find.text('לומו · 1', skipOffstage: false), findsOneWidget);
+    expect(find.textContaining('Stuck: merged and waiting for release over a week', findRichText: true, skipOffstage: false), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-8'), skipOffstage: false), findsOneWidget);
+  });
+
+  testWidgets('a GO he put off is not in "needs you": its task waits for release, saying so, with its action on the board', (tester) async {
+    final backend = TaskBackend()..deferredGo = true;
+    final store = await productApp(
+      tester,
+      backend: backend,
+      size: const Size(1440, 900),
+      home: const Scaffold(body: ProductTasks()),
+      prepare: (s) => s.taskBoard = true,
+    );
+    store.data!.waiting.add(
+      WaitItem(id: 'w-deferred', inboxId: 77, kind: WaitKind.go, from: 'dana', time: '12:00', kicker: 'GO', headline: 'Deferred GO', body: '', options: const [], short: 'GO')
+        ..state = WaitState.notNow,
+    );
+    store.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('task-request-w-deferred')), findsNothing);
+    await tester.tap(find.byKey(const Key('task-releasing')));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byKey(const ValueKey('task-9')), matching: find.text('Waiting for your approval')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const ValueKey('task-9')), matching: find.byType(FilledButton)), findsOneWidget);
+    expect(find.text('הבוט הקולי · 1'), findsOneWidget, reason: 'the fold is by project on the board too');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('on the board, what waits for its release folds beside the released', (tester) async {
+    await productApp(
+      tester,
+      backend: TaskBackend()..checkTask = true,
+      size: const Size(1440, 900),
+      home: const Scaffold(body: ProductTasks()),
+      prepare: (s) => s.taskBoard = true,
+    );
+    expect(find.byKey(const ValueKey('task-7')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-4')), findsNothing);
+    await tester.tap(find.byKey(const Key('task-releasing')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('task-4')), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a finished task that shipped nothing is not "in development", even with finished ones shown', (tester) async {
@@ -748,6 +837,10 @@ void main() {
         ),
       );
       expect(proposal.name, 'lightbulb');
+      await tester.ensureVisible(find.byKey(const Key('task-releasing')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('task-releasing')));
+      await tester.pumpAndSettle();
       expect(
         find.descendant(
           of: find.byKey(const Key('task-4')),
@@ -1313,6 +1406,47 @@ void main() {
       expect(find.byKey(const Key('org-person-ido')), findsOneWidget);
     },
   );
+
+  // "מחכות לשחרור": folded with its stuck count, and open: a project's heading, a stuck row and one that is not.
+  for (final (language, dark, scale) in [('he', false, 1.0), ('he', true, 1.0), ('en', false, 1.0), ('en', true, 1.0), ('he', false, 2.0)]) {
+    testWidgets('task releasing golden $language $dark $scale', (tester) async {
+      await productApp(
+        tester,
+        backend: TaskBackend(he: language == 'he')..stuckRelease = true,
+        language: language,
+        dark: dark,
+        scale: scale,
+        home: const Scaffold(body: ProductTasks()),
+      );
+      final fold = find.byKey(const Key('task-releasing'));
+      final list = find.descendant(of: find.byKey(const PageStorageKey('task-list')), matching: find.byType(Scrollable)).first;
+      await tester.scrollUntilVisible(fold, 100, scrollable: list);
+      await tester.pumpAndSettle();
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('golden/tasks/releasing-folded-$language-$dark-$scale.png'));
+      await tester.tap(fold);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('task-4')), 100, scrollable: list);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('golden/tasks/releasing-open-$language-$dark-$scale.png'));
+    });
+  }
+  for (final language in ['he', 'en']) {
+    testWidgets('task board releasing golden $language', (tester) async {
+      await productApp(
+        tester,
+        backend: TaskBackend(he: language == 'he')..stuckRelease = true,
+        language: language,
+        size: const Size(1440, 900),
+        home: const Scaffold(body: ProductTasks()),
+        prepare: (s) => s.taskBoard = true,
+      );
+      await tester.tap(find.byKey(const Key('task-releasing')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('golden/tasks/board-releasing-$language.png'));
+    });
+  }
 
   for (final language in ['he', 'en']) {
     for (final dark in [false, true]) {

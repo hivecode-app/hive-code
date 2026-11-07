@@ -6,6 +6,7 @@ import { charter, makeEnv } from './helpers.ts';
 import { ensureRuntimeIdentity } from '../src/org.ts';
 import { TaskCatalog, orgTree, prEvidence, sourceTask, taskRequests, taskStage, taskTimeline, type PrEvidence } from '../src/task-product.ts';
 import { search } from '../src/search.ts';
+import { RELEASE_STUCK_MS, releaseStuck } from '../src/awaiting.ts';
 import { readCharter } from '../src/workspace.ts';
 
 const pr: PrEvidence = { url: 'https://github.com/example/project/pull/1', head: 'a'.repeat(40), state: 'OPEN', draft: false, merged: false, review: 'pending', ci: 'pending', quote: null, checked_at: 1 };
@@ -43,6 +44,26 @@ test('six tasks: proposals, development with an ask, review, approval, release, 
     assert.equal(done.stage, null, 'a report shipped nothing: no stage, only its outcome'); assert.equal(done.outcome, 'completed');
     assert(!(await catalog.list()).groups.some((g) => g.tasks.some((t) => t.id === report.id)), 'nor an unknown one');
     assert((await catalog.list()).groups.find((g) => g.stage === 'approval')!.tasks.some((t) => t.id === approval.id), 'completed implementation still awaiting release remains visible');
+  } finally { await env.cleanup(); }
+});
+
+test('a task merged and waiting for its release says since when, and is stuck after a week', async () => {
+  const env = await makeEnv({ noStart: true });
+  try {
+    const { hq } = env; await hq.start({ timers: false }); hq.store.setToggle('scheduler', false);
+    const t = hq.scheduler.addTask({ title: 'Merged', project: 'agent-company', state: 'done' });
+    const check = hq.scheduler.addTask({ title: 'Check', project: 'agent-company', state: 'done' });
+    const at = hq.store.now() - RELEASE_STUCK_MS - 1;
+    hq.store.db.prepare('UPDATE tasks SET awaiting = ?, awaiting_at = ? WHERE id = ?').run('deploy', at, t.id);
+    hq.store.db.prepare('UPDATE tasks SET awaiting = ?, awaiting_at = ? WHERE id = ?').run('check', at, check.id);
+    const catalog = new TaskCatalog(hq);
+    const row = await catalog.item(hq.scheduler.task(t.id)!, undefined, false);
+    assert.equal(row.awaiting_at, at);
+    assert.equal(row.release_stuck, true);
+    assert.equal((await catalog.item(hq.scheduler.task(check.id)!, undefined, false)).release_stuck, false, 'a check waits on him, not on a release');
+    hq.store.db.prepare('UPDATE tasks SET awaiting_at = ? WHERE id = ?').run(hq.store.now() - RELEASE_STUCK_MS + 60_000, t.id);
+    assert.equal((await catalog.item(hq.scheduler.task(t.id)!, undefined, false)).release_stuck, false, 'six days is not stuck');
+    assert.equal(releaseStuck({ awaiting: 'deploy', awaiting_at: null }, hq.store.now()), false);
   } finally { await env.cleanup(); }
 });
 

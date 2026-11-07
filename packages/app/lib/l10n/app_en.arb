@@ -2953,6 +2953,16 @@
   "progressDetailAsk": "Waiting for your answer",
   "progressDetailGo": "Waiting for your approval",
   "progressDetailDeploy": "Merged, waiting for release",
+  "progressReleasing": "Waiting for release",
+  "progressReleasingStuck": "{count, plural, =1{1 stuck} other{{count} stuck}}",
+  "progressDetailReleaseStuck": "Stuck: merged and waiting for release over a week",
+  "@progressReleasingStuck": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "progressDetailVerify": "To check before release",
   "progressDetailCheck": "Released, for you to check",
   "progressDetailQueued": "In line",

@@ -46,7 +46,7 @@ String taskDetail(CompanyData d, AppLocalizations l, TaskProgress t) {
   if (t.requests.any((r) => r.kind == 'ask')) return l.progressDetailAsk;
   switch (t.awaiting) {
     case 'deploy':
-      return l.progressDetailDeploy;
+      return t.releaseStuck ? l.progressDetailReleaseStuck : l.progressDetailDeploy;
     case 'verify':
       return l.progressDetailVerify;
     case 'check':

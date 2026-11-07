@@ -30,6 +30,13 @@ export interface AwaitingTask {
 /** A `deploy` with no GO about it reminds its opener after this long without a deploy. */
 export const DEPLOY_STUCK_MS = 6 * 3600_000;
 
+/** A task merged and waiting for its release longer than this is stuck: the tasks tab marks it "תקועה". */
+export const RELEASE_STUCK_MS = 7 * 86400_000;
+
+/** Waits for its release (merged, no deploy yet) longer than RELEASE_STUCK_MS. */
+export const releaseStuck = (t: { awaiting?: string | null; awaiting_at?: number | null }, now: number): boolean =>
+  t.awaiting === 'deploy' && t.awaiting_at != null && now - t.awaiting_at > RELEASE_STUCK_MS;
+
 /** What he tapped on the task's card. */
 export type AwaitingOutcome = 'done' | 'failed' | 'irrelevant';
 

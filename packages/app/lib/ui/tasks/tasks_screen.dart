@@ -29,6 +29,8 @@ class _ProductTasksState extends State<ProductTasks> with WidgetsBindingObserver
   bool busy = false, failed = false;
   /// The released column shows the latest few; the rest open on request, like the list's "including finished".
   bool releasedAll = false;
+  /// "מחכות לשחרור" opens on request: merged work waits for the lead's GO and the deploy, not for him.
+  bool releasingOpen = false;
   final starting = <int>{};
   Timer? refresh;
   @override
@@ -164,12 +166,15 @@ class _ProductTasksState extends State<ProductTasks> with WidgetsBindingObserver
     );
   }
 
-  /// His requests, from the same list as the home and the chats: answered ones are gone from all of them.
+  /// His requests: `needsYou`, the source of the count on the home and the chats, so both say the same.
   List<WaitItem> requests(CompanyData d, String? project) => [
-    for (final w in d.waiting)
-      if (w.state != WaitState.answered && !d.superseded(w) && (project == null || requestTask(w)?.project == project || (requestTask(w) == null && d.identities[w.from]?.teamId == project)))
+    for (final w in d.needsYou)
+      if ((project == null || requestTask(w)?.project == project || (requestTask(w) == null && d.identities[w.from]?.teamId == project)))
         w,
   ];
+
+  /// He has something to check on it himself: before its release (verify) or after it (check).
+  static bool checksFor(TaskProgress t) => t.awaiting == 'check' || t.awaiting == 'verify';
 
   TaskProgress? requestTask(WaitItem w) =>
       w.inboxId == null ? null : tasks?.where((t) => t.requests.any((r) => r.id == w.inboxId)).firstOrNull;
@@ -197,8 +202,16 @@ class _ProductTasksState extends State<ProductTasks> with WidgetsBindingObserver
         if (t.stage == s && (s != TaskStage.released || recent(t))) t,
     ];
     final asks = requests(d, project);
-    // A task waiting on him shows as itself unless one of his requests on it is already shown.
-    final waiting = [for (final t in of(TaskStage.approval)) if (!asks.any((w) => t.requests.any((r) => r.id == w.inboxId))) t];
+    bool asked(TaskProgress t) => asks.any((w) => t.requests.any((r) => r.id == w.inboxId));
+    // What waits on him as a task: something to check or verify, unless his request on it is already shown.
+    final waiting = [for (final t in of(TaskStage.approval)) if (checksFor(t) && !asked(t)) t];
+    // The rest of "approval" waits for its release (the lead's GO, the deploy): folded, by project, the oldest first.
+    // A GO he put off ("not now") is not counted, so its task waits here too, saying it waits for his approval.
+    final releasing = [for (final t in of(TaskStage.approval)) if (!checksFor(t) && !asked(t)) t]
+      ..sort((a, b) {
+        final byProject = projectName(d, a.project).compareTo(projectName(d, b.project));
+        return byProject != 0 ? byProject : (a.awaitingAt ?? a.updatedAt ?? now).compareTo(b.awaitingAt ?? b.updatedAt ?? now);
+      });
     // Projects with something open, for the chips: the ones he moves between.
     final active = {for (final t in list) if (t.outcome == null && t.project != null) t.project!};
     return Material(
@@ -251,7 +264,14 @@ class _ProductTasksState extends State<ProductTasks> with WidgetsBindingObserver
                             Expanded(
                               child: _Column(
                                 stage: s,
-                                tasks: [...of(s), if (s == TaskStage.development) ...of(null)],
+                                tasks: [
+                                  for (final t in [...of(s), if (s == TaskStage.development) ...of(null)])
+                                    if (s != TaskStage.approval || !releasing.contains(t)) t,
+                                ],
+                                // "מחכה לך" says only what waits on him; merged work waits for its release beside the released.
+                                releasing: s == TaskStage.released ? releasing : const [],
+                                releasingOpen: releasingOpen,
+                                onReleasing: () => setState(() => releasingOpen = !releasingOpen),
                                 selected: store.selectedTask,
                                 starting: starting,
                                 limit: s == TaskStage.released && !releasedAll ? 5 : null,
@@ -259,7 +279,10 @@ class _ProductTasksState extends State<ProductTasks> with WidgetsBindingObserver
                                 onOpen: open,
                                 onStart: start,
                                 onRequest: (t) {
-                                  final w = asks.where((w) => t.requests.any((r) => r.id == w.inboxId)).firstOrNull;
+                                  // Also a GO he put off ("not now"): its task waits in "מחכות לשחרור" with its action.
+                                  final w = [...asks, ...d.waiting.where((w) => w.state == WaitState.notNow)]
+                                      .where((w) => t.requests.any((r) => r.id == w.inboxId))
+                                      .firstOrNull;
                                   if (w != null) openRequest(w);
                                 },
                               ),
@@ -276,7 +299,7 @@ class _ProductTasksState extends State<ProductTasks> with WidgetsBindingObserver
                   children: [
                     // What waits for him: his requests first, then tasks that wait on him with no request of their own.
                     if (asks.isNotEmpty || waiting.isNotEmpty) ...[
-                      _Heading(label: l.needsYou, count: asks.length + waiting.length),
+                      _Heading(key: const Key('task-needs-you'), label: l.needsYou, count: asks.length + waiting.length),
                       for (final w in asks) _RequestRow(item: w, task: requestTask(w), onTap: () => openRequest(w)),
                       for (final t in waiting)
                         TaskRow(task: t, now: now, selected: store.selectedTask == t.id, onTap: () => open(t)),
@@ -285,9 +308,17 @@ class _ProductTasksState extends State<ProductTasks> with WidgetsBindingObserver
                       (TaskStage.review, of(TaskStage.review)),
                       (TaskStage.development, [...of(TaskStage.development), ...of(null)]),
                       (TaskStage.proposal, of(TaskStage.proposal)),
+                      (TaskStage.approval, releasing),
                       (TaskStage.released, of(TaskStage.released)),
                     ])
-                      if (rows.isNotEmpty) ...[
+                      if (stage == TaskStage.approval && rows.isNotEmpty) ...[
+                        _ReleasingHeading(tasks: rows, open: releasingOpen, onTap: () => setState(() => releasingOpen = !releasingOpen)),
+                        if (releasingOpen)
+                          for (final (i, t) in rows.indexed) ...[
+                            if (rows.any((x) => x.project != rows.first.project) && (i == 0 || rows[i - 1].project != t.project)) _ProjectHeading(name: projectName(d, t.project), count: rows.where((x) => x.project == t.project).length),
+                            TaskRow(task: t, now: now, selected: store.selectedTask == t.id, onTap: () => open(t)),
+                          ],
+                      ] else if (rows.isNotEmpty) ...[
                         _Heading(label: groupLabel(l, stage), count: rows.length),
                         for (final t in rows)
                           TaskRow(
@@ -446,7 +477,7 @@ class _DesktopHeader extends StatelessWidget {
 }
 
 class _Heading extends StatelessWidget {
-  const _Heading({required this.label, required this.count});
+  const _Heading({super.key, required this.label, required this.count});
   final String label;
   final int count;
   @override
@@ -492,7 +523,7 @@ class _RequestRow extends StatelessWidget {
             children: [
               Padding(
                 padding: const EdgeInsets.only(top: 2),
-                child: Ic(item.kind == WaitKind.go ? 'front_hand' : 'help', size: 24, color: p.text, fill: item.kind == WaitKind.go),
+                child: Ic(item.kind == WaitKind.go ? 'front_hand' : 'contact_support', size: 24, color: p.text, fill: item.kind == WaitKind.go),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -543,7 +574,7 @@ class TaskRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context), d = StoreScope.of(context).data!, p = context.p;
     final detail = task.stage == null ? l.progressUnknown : taskDetail(d, l, task);
-    final stuck = task.workerStatus == 'stuck' && task.outcome == null;
+    final stuck = (task.workerStatus == 'stuck' && task.outcome == null) || task.releaseStuck;
     return Material(
       color: selected ? p.accentSoft : p.surface,
       child: InkWell(
@@ -558,11 +589,11 @@ class TaskRow extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Ic(
-                  stuck ? 'warning' : (task.stage == null ? 'progress_activity' : stageIcon(task.stage!)),
+                  stuck ? 'warning' : (task.stage == null ? 'progress_activity' : task.releasing ? 'hourglass_top' : stageIcon(task.stage!)),
                   key: const Key('task-row-icon'),
                   size: 22,
                   color: p.text2,
-                  fill: task.stage == TaskStage.approval,
+                  fill: task.stage == TaskStage.approval && !task.releasing,
                 ),
               ),
               const SizedBox(width: 14),
@@ -640,7 +671,7 @@ class _RequestStrip extends StatelessWidget {
                       ),
                       child: Row(
                         children: [
-                          Ic(w.kind == WaitKind.go ? 'front_hand' : 'help', size: 22, color: p.text, fill: w.kind == WaitKind.go),
+                          Ic(w.kind == WaitKind.go ? 'front_hand' : 'contact_support', size: 22, color: p.text, fill: w.kind == WaitKind.go),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
@@ -685,9 +716,16 @@ class _Column extends StatelessWidget {
     required this.onRequest,
     required this.onMore,
     this.limit,
+    this.releasing = const [],
+    this.releasingOpen = false,
+    this.onReleasing,
   });
   final TaskStage stage;
   final List<TaskProgress> tasks;
+  /// The released column's fold: merged work waiting for its release, under what was released.
+  final List<TaskProgress> releasing;
+  final bool releasingOpen;
+  final VoidCallback? onReleasing;
   final int? selected, limit;
   final VoidCallback onMore;
   final Set<int> starting;
@@ -696,6 +734,25 @@ class _Column extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context), p = context.p;
     final shown = limit == null ? tasks.length : tasks.length.clamp(0, limit!), more = tasks.length - shown;
+    final d = StoreScope.of(context).data!, several = releasing.any((t) => t.project != releasing.first.project);
+    Widget card(TaskProgress t) => _Card(
+      task: t,
+      selected: selected == t.id,
+      onTap: () => onOpen(t),
+      action: t.canStart
+          ? OutlinedButton(key: Key('start-${t.id}'), onPressed: starting.contains(t.id) ? null : () => onStart(t), child: Text(l.progressStart))
+          : t.requests.any((r) => r.kind == 'go')
+          ? FilledButton(onPressed: () => onRequest(t), child: Text(l.reviewAndRelease))
+          : null,
+    );
+    // The fold, by project: a project's name over its tasks when there is more than one.
+    final folded = [
+      for (final (i, t) in releasing.indexed) ...[
+        if (several && (i == 0 || releasing[i - 1].project != t.project))
+          _ProjectHeading(name: projectName(d, t.project), count: releasing.where((x) => x.project == t.project).length, card: true),
+        card(t),
+      ],
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -736,25 +793,18 @@ class _Column extends StatelessWidget {
           child: ListView.builder(
             key: PageStorageKey('task-board-${stage.name}'),
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-            itemCount: shown + (more > 0 ? 1 : 0),
+            itemCount: shown + (more > 0 ? 1 : 0) + (releasing.isEmpty ? 0 : 1 + (releasingOpen ? folded.length : 0)),
             itemBuilder: (_, i) {
+              final fold = shown + (more > 0 ? 1 : 0);
+              if (i == fold) return _ReleasingHeading(tasks: releasing, open: releasingOpen, onTap: onReleasing ?? () {}, card: true);
+              if (i > fold) return folded[i - fold - 1];
               if (i == shown) {
                 return Align(
                   alignment: AlignmentDirectional.centerStart,
                   child: TextButton.icon(key: Key('more-${stage.name}'), onPressed: onMore, icon: const Ic('expand_more', size: 18), label: Text(l.progressMore(more))),
                 );
               }
-              final t = tasks[i];
-              return _Card(
-                task: t,
-                selected: selected == t.id,
-                onTap: () => onOpen(t),
-                action: t.canStart
-                    ? OutlinedButton(key: Key('start-${t.id}'), onPressed: starting.contains(t.id) ? null : () => onStart(t), child: Text(l.progressStart))
-                    : t.requests.any((r) => r.kind == 'go')
-                    ? FilledButton(onPressed: () => onRequest(t), child: Text(l.reviewAndRelease))
-                    : null,
-              );
+              return card(tasks[i]);
             },
           ),
         ),
@@ -773,7 +823,7 @@ class _Card extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context), d = StoreScope.of(context).data!, p = context.p;
     final detail = task.stage == null ? l.progressUnknown : taskDetail(d, l, task);
-    final waits = task.stage == TaskStage.approval;
+    final waits = task.stage == TaskStage.approval && !task.releasing;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Material(
@@ -816,6 +866,84 @@ class _Card extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// "מחכות לשחרור", folded: merged work that waits for the lead's GO and the deploy. The count says how many are
+/// stuck (a week and more) without opening it.
+class _ReleasingHeading extends StatelessWidget {
+  const _ReleasingHeading({required this.tasks, required this.open, required this.onTap, this.card = false});
+  final List<TaskProgress> tasks;
+  final bool open, card;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context), p = context.p;
+    final stuck = tasks.where((t) => t.releaseStuck).length;
+    // It wraps rather than cut "תקועה" off: in a board column and at a large text size.
+    final row = Row(
+      children: [
+        Expanded(
+          child: Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(l.progressReleasing, style: T.section.copyWith(color: p.text)),
+              const SizedBox(width: 8),
+              Text('${tasks.length}', style: T.secondary.copyWith(color: p.text2)),
+              if (stuck > 0)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(' · ', style: T.secondary.copyWith(color: p.text2)),
+                    Ic('warning', size: 16, color: p.text2),
+                    const SizedBox(width: 4),
+                    Text(l.progressReleasingStuck(stuck), style: T.secondary.copyWith(color: p.text2)),
+                  ],
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Ic(open ? 'expand_less' : 'expand_more', size: 20, color: p.text2),
+      ],
+    );
+    return Semantics(
+      button: true,
+      expanded: open,
+      child: Material(
+        color: card ? Colors.transparent : p.bg,
+        child: InkWell(
+          key: const Key('task-releasing'),
+          onTap: onTap,
+          child: Container(
+            padding: card ? const EdgeInsets.fromLTRB(4, 12, 4, 12) : const EdgeInsets.fromLTRB(20, 14, 20, 10),
+            decoration: card ? null : BoxDecoration(border: Border(top: BorderSide(color: p.line), bottom: BorderSide(color: p.line))),
+            child: row,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A project's name over its tasks inside "מחכות לשחרור".
+class _ProjectHeading extends StatelessWidget {
+  const _ProjectHeading({required this.name, required this.count, this.card = false});
+  final String name;
+  final int count;
+  /// In a board column: no band of its own.
+  final bool card;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Container(
+      color: card ? null : p.bg,
+      padding: card ? const EdgeInsets.fromLTRB(4, 4, 4, 8) : const EdgeInsets.fromLTRB(20, 10, 20, 6),
+      child: Semantics(
+        header: true,
+        child: Text('$name · $count', style: T.small.copyWith(color: p.text2)),
       ),
     );
   }

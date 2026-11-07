@@ -6,6 +6,7 @@ import type { Hq } from './hq.ts';
 import type { TaskRow } from './scheduler.ts';
 import { projectLead } from './org.ts';
 import { openedBy } from './open-tasks.ts';
+import { releaseStuck } from './awaiting.ts';
 import { recordedTaskPrs } from './task-prs.ts';
 import { readCharter } from './workspace.ts';
 
@@ -318,7 +319,8 @@ export class TaskCatalog {
       opened_by: openedBy(task) ?? info?.lead ?? null, op: context.ops.get(task.id) ?? null,
       state: task.state, stage,
       outcome: task.state === 'closed' || JSON.parse(task.labels).includes('cancelled') ? 'cancelled' : task.state === 'done' ? 'completed' : null,
-      summary: task.summary ?? null, about: this.hq.store.getMeta(`task-about:${task.id}`) ?? null, awaiting: task.awaiting ?? null, worker_status: context.people.get(task.identity ?? '')?.status ?? null,
+      summary: task.summary ?? null, about: this.hq.store.getMeta(`task-about:${task.id}`) ?? null, awaiting: task.awaiting ?? null,
+      awaiting_at: task.awaiting ? task.awaiting_at ?? null : null, release_stuck: releaseStuck(task, this.hq.store.now()), worker_status: context.people.get(task.identity ?? '')?.status ?? null,
       requests: context.requests.filter((r) => r.task === task.id), prs, created_at: task.created_at, started_at: task.started_at ?? null, updated_at: task.updated_at };
   }
   async list(): Promise<TaskList> {
