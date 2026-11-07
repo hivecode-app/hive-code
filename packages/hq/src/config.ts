@@ -245,7 +245,9 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     engine: { model: 'claude-opus-5-5', effort: null, effortByTeam: { personal: 'medium' } },
     batching: { enabled: true, gatherMs: 10 * 60_000 },
     capacity: { reserveMb: 4096, rssIdleMb: 400, rssWorkMb: 1300, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8, maxLoad: 1.5 },
-    backups: { hourly: 24, daily: 7 },
+    // Task 1531: 24 hourly + 7 daily of a 2.6GB hq.db (360MB each in zstd) were 29 files, 9.8GB of hq-host's disk. Five hours
+    // back is enough to undo a bad hour; past that, one a day for a week.
+    backups: { hourly: 5, daily: 7 },
     heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: {} },
     auth: {
       rpId: 'localhost',

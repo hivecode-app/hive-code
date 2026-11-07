@@ -2,7 +2,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv as make } from './helpers.ts';
-import { parseConsumers, parseBytes, type Machine } from '../src/disk-watch.ts';
+import { consumersCmd, localPaths, parseConsumers, parseBytes, type Machine } from '../src/disk-watch.ts';
 
 // Each hq here runs (noStart: false): it is closed at the end, or its timers keep the run up (an incident wakes the manager).
 const envs: Awaited<ReturnType<typeof make>>[] = [];
@@ -79,6 +79,43 @@ test('92% גם אחרי הניקוי: פריט דחוף אחד עם הצרכני
   assert.equal(items[0]!.urgency, 'urgent');
   assert.match(items[0]!.title, /94%/);
   assert.match(items[0]!.body, /55\.0GB · docker images/);
+});
+
+test('92%: גם הבעלים של האוטומציה מקבל הודעה דחופה (משימה 1531), ושוב פעם אחת ב-97%', async () => {
+  const { hq, clock } = await makeEnv({ org: ORG(true), noStart: false });
+  const log: string[] = [];
+  let pct = 94;
+  const m = fake('local', [94], log);
+  hq.diskWatch.machines = () => [{ ...m, usage: async () => ({ pct, freeMb: 900 }) }];
+  const told = () => hq.mailbox.list('yoav').filter((x) => x.from_identity === 'hq' && x.id.startsWith('disk-local-'));
+  await hq.diskWatch.sweep();
+  assert.equal(told().length, 1);
+  assert.equal(told()[0]!.priority, 'now');
+  assert.match(told()[0]!.body, /94%[\s\S]*55\.0GB · docker images[\s\S]*97%/);
+  clock.t += 5 * MIN;
+  await hq.diskWatch.sweep();
+  assert.equal(told().length, 1, 'not again at the same level the same day');
+  pct = 98;
+  clock.t += 5 * MIN;
+  await hq.diskWatch.sweep();
+  assert.equal(told().length, 2);
+  assert.equal(hq.inbox.open().filter((i) => i.kind === 'incident').length, 2);
+});
+
+test('localPaths: ה-worktree_dir של כל אמנה, הגיבויים ו-hq.db, רק מה שקיים; consumersCmd מצטט אותם', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const d = mkdtempSync(join(tmpdir(), 'lp-'));
+  try {
+    mkdirSync(join(d, 'company', 'projects'), { recursive: true });
+    mkdirSync(join(d, "it's", '.wt'), { recursive: true });
+    mkdirSync(join(d, 'state', 'backups'), { recursive: true });
+    writeFileSync(join(d, 'company', 'projects', 'p.md'), `---\nproject: p\nstatus: active\ncheckouts:\n  - path: ${join(d, "it's")}\nworktree_dir: .wt\n---\n`);
+    const paths = localPaths(join(d, 'company'), join(d, 'state'));
+    assert.deepEqual(paths.sort(), [join(d, "it's", '.wt'), join(d, 'state', 'backups')].sort());
+    assert.ok(consumersCmd(paths).includes(`'${join(d, "it")}'\\''s/.wt'`));
+  } finally { rmSync(d, { recursive: true, force: true }); }
 });
 
 test('כבוי: לא קוראים ולא מנקים', async () => {

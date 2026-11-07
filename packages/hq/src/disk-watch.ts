@@ -3,16 +3,28 @@
 // Now, every 5 minutes, hq reads how full the disk is, here and on each node:
 //   85% → scripts/disk-clean.mjs runs at once (at most once in 30 minutes per machine; the daily timer runs the same script);
 //   92% (after that cleaning) → one urgent item for him, with the five biggest consumers.
+// Task 1531: on 07/11 the 92% item sat in his inbox for 13 hours while the disk went to 100%, and the cleaning freed 0:
+// what had grown (worktrees workers opened in lumo, hourly backups of a 2.6GB hq.db, copies of hq.db in /tmp) was
+// outside it, and the consumers list did not even show the lumo worktrees (~/new-lumo-application is not under
+// ~/projects). The monitoring probe at 80% had told רותם once, on 01/11, and stayed open since. Now, here (not on a
+// node): at 85% the leftovers of tasks go too (leftovers-gc.ts) and the backups are pruned to their policy; the
+// consumers list has every charter's worktree_dir, the backups and hq.db; and at 92%, and again at 97%, the
+// automation's owner gets a `now` message too, so a worker acts and not only an inbox item waits for him.
 // The automation is `disk-watch` in org.yaml; off, nothing is read and nothing is deleted.
 import { execFile } from 'node:child_process';
-import { statfsSync } from 'node:fs';
+import { existsSync, readdirSync, statfsSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Hq } from './hq.ts';
 import { q } from './nodes.ts';
+import { pruneBackups } from './backup.ts';
+import { readCharter } from './workspace.ts';
 
 export const AUTOMATION = 'disk-watch';
 export const CLEAN_AT = 85;
 export const ALERT_AT = 92;
+/** A second, separate alert the same day: 92% that kept growing. */
+export const CRITICAL_AT = 97;
 export const CLEAN_EVERY_MS = 30 * 60_000;
 const KEEP_AFTER_CLOSE_MS = 24 * 3600_000;
 const SCRIPT = fileURLToPath(new URL('../../../scripts/disk-clean.mjs', import.meta.url));
@@ -57,7 +69,23 @@ function sh(cmd: string, args: string[], timeout: number): Promise<string> {
   return new Promise((res, rej) => execFile(cmd, args, { timeout, maxBuffer: 8 << 20 }, (e, out) => (e ? rej(e) : res(String(out)))));
 }
 
-export function localMachine(path: string): Machine {
+/** Paths whose size is worth showing on this machine beyond CONSUMERS_CMD: every charter's worktree_dir, the backups and hq.db. */
+export function localPaths(companyDir: string, stateDir: string): string[] {
+  const out = new Set<string>([join(stateDir, 'backups'), join(stateDir, 'hq.db'), join(stateDir, 'db-copies')]);
+  const dir = join(companyDir, 'projects');
+  for (const f of existsSync(dir) ? readdirSync(dir).filter((x) => x.endsWith('.md')) : []) {
+    const ch = readCharter(companyDir, f.slice(0, -3));
+    for (const c of ch?.checkouts ?? []) out.add(join(c.path, ch!.worktreeDir));
+  }
+  return [...out].filter((p) => existsSync(p));
+}
+
+/** CONSUMERS_CMD with `paths` measured too (each one quoted). */
+export const consumersCmd = (paths: string[] = []) => paths.length
+  ? CONSUMERS_CMD.replace('"$HOME/.cache"', `"$HOME/.cache" ${paths.map(q).join(' ')}`)
+  : CONSUMERS_CMD;
+
+export function localMachine(path: string, extra: () => string[] = () => []): Machine {
   return {
     name: 'local',
     async usage() {
@@ -67,7 +95,11 @@ export function localMachine(path: string): Machine {
     async clean(closed) {
       return JSON.parse((await sh(process.execPath, [SCRIPT, '--json', '--closed-tasks', closed.join(',')], 35 * 60_000)).trim().split('\n').pop()!);
     },
-    async consumers() { return parseConsumers(await sh('bash', ['-c', CONSUMERS_CMD], 3 * 60_000).catch(() => '')); },
+    async consumers() {
+      // du of a path inside another one counts it twice: the list is "who is big", not a sum.
+      const rows = parseConsumers(await sh('bash', ['-c', consumersCmd(extra())], 3 * 60_000).catch(() => ''));
+      return rows.filter((r, i) => rows.findIndex((x) => x.name === r.name) === i);
+    },
   };
 }
 
@@ -95,7 +127,7 @@ export class DiskWatch {
   constructor(hq: Hq, machines?: () => Machine[]) {
     this.hq = hq;
     this.machines = machines ?? (() => [
-      localMachine(hq.cfg.stateDir),
+      localMachine(hq.cfg.stateDir, () => localPaths(hq.cfg.companyDir, hq.cfg.stateDir)),
       ...hq.nodes.list.map((n) => remoteMachine(n.def.name, (c, i, t) => n.exec(c, i, t))),
     ]);
   }
@@ -132,6 +164,7 @@ export class DiskWatch {
     if (now - Number(store.getMeta(lastKey) ?? 0) >= CLEAN_EVERY_MS) {
       store.setMeta(lastKey, String(now));
       try {
+        if (m.name === 'local') await this.cleanCompany();
         const r = await m.clean(this.closedTasks());
         cleaned = 'ok';
         store.emit('disk.cleaned', null, { machine: m.name, before: u.pct, freed: r.freed, steps: r.steps });
@@ -143,12 +176,27 @@ export class DiskWatch {
     }
     if (u.pct < ALERT_AT) return;
     const where = m.name === 'local' ? 'hq-host' : m.name;
-    const key = `disk-${m.name}-${new Date(now).toISOString().slice(0, 10)}`;
+    const critical = u.pct >= CRITICAL_AT;
+    const key = `disk-${m.name}-${new Date(now).toISOString().slice(0, 10)}${critical ? '-critical' : ''}`;
     if (store.db.prepare(`SELECT 1 FROM inbox WHERE dedupe_key = ?`).get(key)) return; // today's item exists: no heavy du again
     const top = (await m.consumers()).slice(0, 5);
     const ran = { ok: 'הניקוי האוטומטי רץ ולא הספיק.', failed: 'הניקוי האוטומטי נכשל (הפירוט באירוע `disk.clean_failed`).', 'not-now': 'הניקוי האוטומטי רץ לפני פחות מחצי שעה ולא הספיק.' }[cleaned];
     inbox.add({ kind: 'incident', urgency: 'urgent', from_identity: this.owner(), dedupe_key: key,
       title: `הדיסק של ${where} מלא ${u.pct}%, נשארו ${human(u.freeMb * 1024 ** 2)}`,
       body: `${ran}\n\nמה שתופס הכי הרבה:\n${top.length ? top.map((c) => `- ${human(c.bytes)} · ${c.name}`).join('\n') : 'לא הצלחתי למדוד'}\n\nב-100% נופלות עבודות באמצע (כך נעצרה משימה באמצע ב-22/10).` });
+    const owner = this.owner();
+    if (owner) this.hq.mailbox.tell({ msg_id: `${key}-${now}`, from: 'hq', to: owner, urgency: 'urgent', priority: 'now', body: [
+      `הדיסק של ${where} ב-${u.pct}%, נשארו ${human(u.freeMb * 1024 ** 2)}. ${ran} צריך לפנות מקום עכשיו, או לפתוח משימה שמפנה (p0): ב-100% נופלות משימות באמצע.`,
+      `מה שתופס הכי הרבה:\n${top.length ? top.map((c) => `- ${human(c.bytes)} · ${c.name}`).join('\n') : 'לא הצלחתי למדוד'}`,
+      critical ? '' : `אם הוא ימשיך לעלות, הודעה נוספת תגיע ב-${CRITICAL_AT}%.`,
+    ].filter(Boolean).join('\n\n') });
+  }
+
+  /** This machine's own leftovers before the generic cleaning: tasks' (leftovers-gc.ts, if on) and the backups' policy. */
+  private async cleanCompany(): Promise<void> {
+    const { hq } = this;
+    await hq.leftovers.sweep().catch((e) => hq.store.emit('disk.clean_failed', null, { machine: 'local', step: 'leftovers', error: (e as Error).message.slice(0, 300) }));
+    const dir = join(hq.cfg.stateDir, 'backups');
+    if (existsSync(dir)) await pruneBackups(dir, hq.cfg.backups).catch((e) => hq.store.emit('disk.clean_failed', null, { machine: 'local', step: 'backups', error: (e as Error).message.slice(0, 300) }));
   }
 }

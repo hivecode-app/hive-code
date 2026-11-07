@@ -4,6 +4,7 @@
 #   company pair | company status | company update [<tag> | --from-tarball <file>]   a new engine version, checked, with a safe restart and a rollback (scripts/company-update.sh)
 #   company doctor [<file>]  everything support needs, in one file, without secrets (scripts/company-doctor.mjs)
 #   company check [<dir>]    the company's contract (scripts/check-contract.mjs), default COMPANY_HOME
+#   company db-copy          a consistent copy of hq.db for this worker, removed when its task closes (scripts/hq-db-copy.mjs)
 set -euo pipefail
 engine="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd -P)"
 cmd="${1:-}"
@@ -13,8 +14,9 @@ case "$cmd" in
   update) exec "$engine/scripts/company-update.sh" "$@" ;;
   doctor) exec node "$engine/scripts/company-doctor.mjs" "$@" ;;
   check) exec node "$engine/scripts/check-contract.mjs" "${1:-$(node "$engine/scripts/company-home.mjs")}" ;;
+  db-copy) exec node "$engine/scripts/hq-db-copy.mjs" "$@" ;;
   *)
-    echo "שימוש: company pair | company status | company update [<tag> | --from-tarball <file>] | company doctor [<file>] | company check [<dir>]" >&2
+    echo "שימוש: company pair | company status | company update [<tag> | --from-tarball <file>] | company doctor [<file>] | company check [<dir>] | company db-copy" >&2
     exit 2
     ;;
 esac

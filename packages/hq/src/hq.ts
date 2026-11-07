@@ -39,6 +39,7 @@ import { PressureWatch } from './pressure-watch.ts';
 import { UnidentifiedWatch } from './unidentified-watch.ts';
 import { CodemagicWatch } from './codemagic-watch.ts';
 import { DiskWatch } from './disk-watch.ts';
+import { LeftoversGc } from './leftovers-gc.ts';
 import { Resources, SAMPLE_EVERY_MS } from './resources.ts';
 import { StallWatch, type OpenFilesReader } from './stall-watch.ts';
 import { ErrorWatch } from './error-watch.ts';
@@ -147,6 +148,7 @@ export class Hq {
   readonly unidentifiedWatch: UnidentifiedWatch;
   readonly codemagicWatch: CodemagicWatch;
   readonly diskWatch: DiskWatch;
+  readonly leftovers: LeftoversGc;
   readonly resources: Resources;
   readonly nodes: Nodes;
   /** hq's own event loop, frozen (loop-watch.ts): `hq.event_loop_stall`. */
@@ -210,6 +212,7 @@ export class Hq {
     this.unidentifiedWatch = new UnidentifiedWatch(this);
     this.codemagicWatch = new CodemagicWatch(this);
     this.diskWatch = new DiskWatch(this);
+    this.leftovers = new LeftoversGc(this);
     this.resources = new Resources(this);
     this.shifts.primeRecall = (identity, query) => this.ingest.primeRecall(identity, query);
     this.inbox.setNotifier((item) => this.store.bg(this.pusher.notify(item), 'push.notify'));
@@ -467,6 +470,8 @@ export class Hq {
       this.every(10 * 60_000, 'codemagic-minutes', () => this.codemagicWatch.sweep());
       // task-382: the disk at 85% → scripts/disk-clean.mjs now; at 92% after it → one urgent item with the biggest consumers.
       this.every(5 * 60_000, 'disk-watch', () => this.diskWatch.sweep());
+      // task-1531: worktrees no task holds (workers open their own), a task's close that keeps failing, copies of hq.db.
+      this.every(60 * 60_000, 'leftovers-gc', () => this.leftovers.sweep());
       // resources stage 1: disk, memory, cgroups and docker of each machine, by project (reads a node only while its poll says it is up).
       this.every(SAMPLE_EVERY_MS, 'resources', () => this.resources.sample());
       this.every(T.backupMs, 'backup', async () => {
