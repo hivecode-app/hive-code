@@ -77,7 +77,9 @@ export function overlap(spans: { from: number; to: number }[], t0: number, t1: n
 export function seqAt(store: Store, ts: number): number {
   const db = store.db;
   const tsOf = db.prepare('SELECT ts FROM events WHERE seq >= ? ORDER BY seq LIMIT 1');
-  const b = db.prepare('SELECT MIN(seq) AS lo, MAX(seq) AS hi FROM events').get() as { lo: number | null; hi: number | null };
+  // Two statements: MIN and MAX together in one are a scan of all of it; each alone is one step down the rowid tree.
+  const b = { lo: (db.prepare('SELECT MIN(seq) s FROM events').get() as { s: number | null }).s,
+    hi: (db.prepare('SELECT MAX(seq) s FROM events').get() as { s: number | null }).s };
   if (b.lo == null || b.hi == null) return 0;
   let lo = b.lo;
   let hi = b.hi + 1;
@@ -89,16 +91,76 @@ export function seqAt(store: Store, ts: number): number {
   return lo;
 }
 
+/** The events usage is made of, and only what it reads of them: a day of them, and a day before it for the bases. */
+export const USAGE_TYPES = ['engine.result', 'message.state', 'account.changed', 'shift.state'] as const;
+const USAGE_TYPE = new Set<string>(USAGE_TYPES);
+export interface UsageRow { seq: number; ts: number; type: string; identity: string | null; data: Record<string, unknown> }
+
+/** An event as usage keeps it: its result's text and the rest of a turn are dropped, a message.state that is not `seen` is not kept. */
+function compact(seq: number, ts: number, type: string, identity: string | null, raw: unknown): UsageRow | null {
+  const d = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const pick = (...keys: string[]) => Object.fromEntries(keys.filter((k) => d[k] !== undefined).map((k) => [k, d[k]]));
+  if (type === 'message.state') return d.state === 'seen' ? { seq, ts, type, identity, data: pick('state', 'from') } : null;
+  if (type === 'account.changed') return { seq, ts, type, identity, data: pick('name', 'seven_day_pct', 'snapshot_at') };
+  if (type === 'shift.state') return { seq, ts, type, identity, data: pick('shift', 'state') };
+  const ev = (d.ev && typeof d.ev === 'object' ? d.ev : {}) as { costUsd?: unknown };
+  return { seq, ts, type, identity, data: { shift: d.shift, ev: { costUsd: ev.costUsd } } };
+}
+
+/** One read of the log from `since`, through events_type (v44): only the four types, never the rest of the day. */
+function readRows(store: Store, since: number): UsageRow[] {
+  const from = seqAt(store, since);
+  const rows = store.db.prepare(`SELECT seq, ts, type, identity, data FROM events WHERE type IN (${USAGE_TYPES.map(() => '?').join(', ')})
+    AND seq >= ? ORDER BY seq`).all(...USAGE_TYPES, from) as { seq: number; ts: number; type: string; identity: string | null; data: string }[];
+  // Cheap first: a message.state that is not `seen` is most of them, and says nothing here.
+  return rows.flatMap((r) => (r.type === 'message.state' && !r.data.includes('"seen"') ? []
+    : [compact(r.seq, r.ts, r.type, r.identity, JSON.parse(r.data))].filter((x): x is UsageRow => !!x)));
+}
+
+/**
+ * usage() for GET /api/home, without reading the log on the event loop (task 1505). On 08/11 the read of two days of
+ * events, once a minute, was 11 minutes of a frozen hq: with memory short, its pages came from disk. The feed reads
+ * the log once, at its first use, and from then on keeps the events as hq writes them (store.onEvent), compacted:
+ * 10k small rows for two days, where the log held 170k rows and 220MB.
+ */
+export class UsageFeed {
+  private rows: UsageRow[] | null = null;
+  private last = 0;
+  private readonly store: Store;
+  constructor(store: Store) {
+    this.store = store;
+    store.onEvent((e) => {
+      // Before the first read nothing is kept: that read gets it. A live-only event (seq 0) is never one of these.
+      if (!this.rows || e.seq <= this.last || !USAGE_TYPE.has(e.type)) return;
+      this.last = e.seq;
+      const r = compact(e.seq, e.ts, e.type, e.identity, e.data);
+      if (r) this.rows.push(r);
+    });
+  }
+
+  usage(accounts: string[], names: (id: string) => string): Usage {
+    const since = this.store.now() - 2 * USAGE_WINDOW_MS;
+    if (!this.rows) {
+      this.last = (this.store.db.prepare('SELECT COALESCE(MAX(seq), 0) s FROM events').get() as { s: number }).s;
+      this.rows = readRows(this.store, since);
+    } else {
+      const old = this.rows.findIndex((r) => r.ts >= since);
+      if (old !== 0) this.rows.splice(0, old < 0 ? this.rows.length : old);
+    }
+    return usageOf(this.store, this.rows, accounts, names);
+  }
+}
+
 export function usage(store: Store, accounts: string[], names: (id: string) => string): Usage {
+  // One read of the window, and a day before it: the bases of the first steps (a quota read, a run's running total,
+  // a task shift's start).
+  return usageOf(store, readRows(store, store.now() - 2 * USAGE_WINDOW_MS), accounts, names);
+}
+
+export function usageOf(store: Store, rows: UsageRow[], accounts: string[], names: (id: string) => string): Usage {
   const now = store.now();
   const t0 = now - USAGE_WINDOW_MS;
   const db = store.db;
-  // One read of the window, and a day before it: the bases of the first steps (a quota read, a run's running total,
-  // a task shift's start).
-  const from = seqAt(store, t0 - USAGE_WINDOW_MS);
-  const rows = db.prepare(`SELECT ts, type, identity, data FROM events WHERE seq >= ?
-    AND type IN ('engine.result', 'message.state', 'account.changed', 'shift.state') ORDER BY seq`).all(from) as
-    { ts: number; type: string; identity: string | null; data: string }[];
   const shifts = new Map((db.prepare(`SELECT id, identity, task_id FROM shifts WHERE ended_at IS NULL OR ended_at >= ?`).all(t0 - USAGE_WINDOW_MS) as
     { id: string; identity: string; task_id: number | null }[]).map((s) => [s.id, s]));
 
@@ -114,21 +176,20 @@ export function usage(store: Store, accounts: string[], names: (id: string) => s
   let total = 0;
   for (const r of rows) {
     if (r.type === 'message.state') {
-      // Cheap first: only a `seen` says what started the next turn.
-      if (!r.data.includes('"seen"')) continue;
-      const d = JSON.parse(r.data) as { state?: string; from?: string };
+      // Only a `seen` says what started the next turn.
+      const d = r.data as { state?: string; from?: string };
       if (d.state === 'seen' && r.identity && d.from) lastFrom.set(r.identity, d.from);
       continue;
     }
     if (r.type === 'account.changed') {
-      const d = JSON.parse(r.data) as { name?: unknown; seven_day_pct?: unknown; snapshot_at?: unknown };
+      const d = r.data as { name?: unknown; seven_day_pct?: unknown; snapshot_at?: unknown };
       if (typeof d.name === 'string' && want.has(d.name) && typeof d.seven_day_pct === 'number') {
         snaps.push({ name: d.name, at: typeof d.snapshot_at === 'number' ? d.snapshot_at : r.ts, pct: d.seven_day_pct });
       }
       continue;
     }
     if (r.type === 'shift.state') {
-      const d = JSON.parse(r.data) as { shift?: string; state?: string };
+      const d = r.data as { shift?: string; state?: string };
       if (!d.shift) continue;
       // A new run (a resume) counts its costUsd from zero again.
       if (d.state === 'starting') lastCost.delete(d.shift);
@@ -139,7 +200,7 @@ export function usage(store: Store, accounts: string[], names: (id: string) => s
       continue;
     }
     // Spend: costUsd is the run's running total, so a turn costs the step from the run's previous result.
-    const d = JSON.parse(r.data) as { shift?: string; ev?: { costUsd?: unknown } };
+    const d = r.data as { shift?: string; ev?: { costUsd?: unknown } };
     const c = typeof d.ev?.costUsd === 'number' ? d.ev.costUsd : null;
     if (!d.shift || c == null) continue;
     const prev = lastCost.get(d.shift);

@@ -23,6 +23,11 @@ RestartSec=1
 # 75 = another host holds this shift; 76 = session id in use / spawn failed (needs hq);
 # 2 = bad arguments. A requested stop exits 0. None of these may loop.
 RestartPreventExitStatus=75 76 2
+# hq first when the machine runs out (task 1505: 08/11, load 107 on 8 cores, swap full, hq frozen 11 minutes). Everything
+# a shift runs (claude, its tests and builds) inherits these: less CPU than hq (Nice 0) when both want it, the same
+# when it is free; and the OOM killer takes a shift (500) before hq (200, the user manager's).
+Nice=5
+OOMScoreAdjust=500
 # mixed: SIGTERM to the host only (it closes claude's stdin gracefully), SIGKILL to the rest on timeout
 KillMode=mixed
 TimeoutStopSec=20

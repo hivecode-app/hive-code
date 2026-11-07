@@ -655,6 +655,14 @@ const MIGRATIONS: string[] = [
      checked_at INTEGER NOT NULL,
      PRIMARY KEY (project, part)
    );`,
+
+  // v44, task 1505: on 08/11 hq froze for 11 minutes (01:50-02:01). GET /api/home ran usage.ts, which read every event
+  // of two days (~170k rows, 220MB of a 2.6GB log) to keep 10k of four types; with memory short and swap full the
+  // pages came from a disk at 60% io pressure, on the event loop. Every `type = ?` read of the log scanned all of it
+  // (access, merged, markCancelled, night, company-day), and `identity = ? AND type = ?` walked all of an identity's
+  // events. Built once, at the first start after deploy (a full read of the log).
+  `CREATE INDEX IF NOT EXISTS events_type ON events(type, seq);
+   CREATE INDEX IF NOT EXISTS events_identity_type ON events(identity, type, seq);`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */
@@ -750,7 +758,10 @@ export class Store {
   pruneEvents(deltaMaxAgeMs = 86_400_000, maxAgeMs = 30 * 86_400_000): void {
     const now = this.now();
     this.db.prepare(`DELETE FROM events WHERE type = 'engine.delta' AND ts < ?`).run(now - deltaMaxAgeMs);
-    this.db.prepare('DELETE FROM events WHERE ts < ?').run(now - maxAgeMs);
+    // seq and ts grow together, so the old ones are the first ones: read up to the first one that is not old, never all
+    // of `ts` (no index; every hour on the event loop, a read of the whole 2.6GB log, task 1505).
+    const keep = this.db.prepare('SELECT seq FROM events WHERE ts >= ? ORDER BY seq LIMIT 1').get(now - maxAgeMs) as { seq: number } | undefined;
+    this.db.prepare('DELETE FROM events WHERE seq < ?').run(keep ? keep.seq : Number.MAX_SAFE_INTEGER);
   }
 
   // ── toggles ───────────────────────────────────────────────────────────────

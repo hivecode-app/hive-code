@@ -50,8 +50,10 @@ import { TabHandoffs } from './tab/handoffs.ts';
 import { CdpTabBrowser, type TabBrowser } from './tab/browser.ts';
 import { startTabServer, type TabServer } from './tab/server.ts';
 import { PasskeyVault } from './tab/passkeys.ts';
-import { clockOf, readTimeZone } from './timezone.ts';
+import { clockOf, hhmm, readTimeZone } from './timezone.ts';
 import { LoopWatch } from './loop-watch.ts';
+import { UsageFeed } from './usage.ts';
+import { AUTOMATION as FREEZE_AUTOMATION, FREEZE_COUNT, FREEZE_REF, FreezeWatch, freezeItem } from './freeze-watch.ts';
 import { CodexQuota, type CodexLimitsReader } from './codex-quota.ts';
 import { LOCAL, Nodes, RoutingLauncher, nodeToggle, type RemoteNode, type SshRun } from './nodes.ts';
 
@@ -136,6 +138,8 @@ export class Hq {
   readonly tab: TabHandoffs;
   passkeys?: PasskeyVault;
   readonly home: Home;
+  /** The usage card's events, kept in memory (usage.ts, task 1505): GET /api/home never reads the log. */
+  readonly usageFeed: UsageFeed;
   readonly memoryFiles: MemoryFiles;
   readonly stallWatch: StallWatch;
   readonly errorWatch: ErrorWatch;
@@ -146,7 +150,9 @@ export class Hq {
   readonly resources: Resources;
   readonly nodes: Nodes;
   /** hq's own event loop, frozen (loop-watch.ts): `hq.event_loop_stall`. */
-  readonly loopWatch = new LoopWatch((r) => this.store.emit('hq.event_loop_stall', null, r));
+  readonly loopWatch = new LoopWatch((r) => this.store.emit('hq.event_loop_stall', null, r), { onBegin: (w) => this.freezeWatch.mark(w) });
+  /** hq frozen for 45 seconds: a worker thread kills it for systemd to restart, and the next one tells him (freeze-watch.ts). */
+  readonly freezeWatch: FreezeWatch;
   private tabServer: TabServer | null = null;
   private ingestServer: Server | null = null;
   private timers: NodeJS.Timeout[] = [];
@@ -194,6 +200,8 @@ export class Hq {
     // The CDP connection is opened on first use, so an hq with no handoff never touches Chrome.
     this.tab = new TabHandoffs(this.store, this.inbox, this.mailbox, cfg.tab, deps.tabBrowser ?? new CdpTabBrowser(cfg.tab.cdpUrl, tabLog));
     this.ingest = new Ingest(this, deps.ticketer);
+    this.usageFeed = new UsageFeed(this.store);
+    this.freezeWatch = new FreezeWatch(join(cfg.stateDir, 'freeze.json'));
     this.home = new Home(this);
     this.memoryFiles = new MemoryFiles(this, deps.memoryRun);
     this.stallWatch = new StallWatch(this, deps.openFiles);
@@ -396,11 +404,14 @@ export class Hq {
     this.awaiting.sweep();
     this.awaiting.backfillPrRepos();
     this.store.emit('hq.started', null, { pid: process.pid });
+    this.reportFreeze();
     // task 986: a fault caught while the card was still his goes to the manager, as a new one does.
     this.mailbox.caughtFaultsToManager();
     if (opts.timers !== false) {
       const T = this.cfg.timers;
       this.loopWatch.start();
+      // Armed only from here: the start above (migrations, reattaching shifts) may be long, and it is not a freeze.
+      this.freezeWatch.start(() => this.freezeArmed());
       this.every(1_000, 'conversation-alerts', () => this.conversations.flush());
       this.every(60_000, 'artifact-expiry', () => this.artifacts.sweep());
       this.every(30_000, 'owner-completions', () => ownerCompletions(this.store, this.mailbox));
@@ -561,7 +572,41 @@ export class Hq {
     }
   }
 
+  /** The identity whose org.yaml automations hold `freeze-watch`; null = no such automation. */
+  private freezeOwner(): string | null {
+    const r = this.store.db.prepare(`SELECT key FROM toggles WHERE key LIKE ? ORDER BY key LIMIT 1`).get(`%/${FREEZE_AUTOMATION}`) as { key: string } | undefined;
+    return r ? r.key.slice(0, -(FREEZE_AUTOMATION.length + 1)) : null;
+  }
+
+  private freezeArmed(): boolean {
+    const o = this.freezeOwner();
+    return !!o && this.store.toggle(`${o}/${FREEZE_AUTOMATION}`);
+  }
+
+  /** The last hq froze and was killed (freeze-watch.ts): one urgent item for him, from the automation's owner. Freezing again
+   *  while it is open (a machine still thrashing) updates it with the count: one item, not one per restart. */
+  private reportFreeze(): void {
+    const r = this.freezeWatch.takeReport();
+    if (!r) return;
+    this.store.emit('hq.freeze', null, r);
+    const owner = this.freezeOwner();
+    if (!owner) return;
+    const tz = this.timeZone();
+    // The count is kept, not derived from timestamps: the item and the first event are written a moment apart.
+    const open = this.store.db.prepare(`SELECT 1 FROM inbox WHERE kind = 'incident' AND ref = ? AND state = 'open' LIMIT 1`).get(FREEZE_REF);
+    if (open) {
+      const times = Math.max(1, Number(this.store.getMeta(FREEZE_COUNT) ?? 1)) + 1;
+      this.store.setMeta(FREEZE_COUNT, String(times));
+      this.inbox.updateByRef('incident', FREEZE_REF, freezeItem(r, (ms) => hhmm(ms, tz), times));
+      return;
+    }
+    this.store.setMeta(FREEZE_COUNT, '1');
+    const { title, body } = freezeItem(r, (ms) => hhmm(ms, tz));
+    this.inbox.add({ kind: 'incident', urgency: 'urgent', from_identity: owner, ref: FREEZE_REF, dedupe_key: `freeze-${r.at}`, title, body });
+  }
+
   async stop(): Promise<void> {
+    await this.freezeWatch.stop();
     this.loopWatch.stop();
     this.pusher.stop();
     for (const t of this.timers) clearInterval(t);

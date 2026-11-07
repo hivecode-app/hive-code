@@ -31,9 +31,11 @@ export class LoopWatch {
   private readonly report: (r: StallReport) => void;
   private readonly stallMs: number;
   private readonly checkMs: number;
+  private readonly onBegin: ((what: string) => void) | null;
 
-  constructor(report: (r: StallReport) => void, opts: { stallMs?: number; checkMs?: number } = {}) {
+  constructor(report: (r: StallReport) => void, opts: { stallMs?: number; checkMs?: number; onBegin?: (what: string) => void } = {}) {
     this.report = report;
+    this.onBegin = opts.onBegin ?? null;
     this.stallMs = opts.stallMs ?? STALL_MS;
     this.checkMs = opts.checkMs ?? CHECK_MS;
   }
@@ -41,6 +43,7 @@ export class LoopWatch {
   /** Marks the start of `what`; call the returned function when it ends. Cheap enough for every API call. */
   begin(what: string): () => void {
     const a: Activity = { what, start: performance.now(), end: null };
+    this.onBegin?.(what);
     this.recent.push(a);
     if (this.recent.length > RECENT_MAX) {
       // Finished ones go first; an open one (a loop awaiting) stays, it may be the one a stall lands on.

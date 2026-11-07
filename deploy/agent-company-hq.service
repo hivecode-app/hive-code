@@ -18,6 +18,7 @@ EnvironmentFile=-%h/.config/agent-company/hq.env
 # Everything hq writes (db, backups, tokens, sockets) is owner-only.
 UMask=0077
 # State lives under ~/.local/state/agent-company (B.11), never /tmp.
+# Always, including SIGKILL: a frozen hq is killed by its own freeze-watch thread (packages/hq/src/freeze-watch.ts) and comes back here.
 Restart=always
 RestartSec=2
 TimeoutStopSec=20

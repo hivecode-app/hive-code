@@ -9,7 +9,7 @@ import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
 import type { Caller } from './auth.ts';
 import { AuthError } from './auth.ts';
-import { usage, sufficientUntil } from './usage.ts';
+import { sufficientUntil } from './usage.ts';
 
 export const CONSENT_VERSION = '2026-11-04';
 export function setupPending(companyDir: string): boolean {
@@ -143,7 +143,7 @@ export function onboardingRoutes(hq: Hq, route: Route): void {
   route('POST', '/api/settings/work', async ({ body }) => workSettingsResponse(saveWorkSettings(hq.store, hq.cfg, await body())));
   route('GET', '/api/usage/forecast', () => {
     const accounts = hq.accounts.capacity();
-    const u = usage(hq.store, accounts.map(a => a.name), id => hq.mailbox.label(id));
+    const u = hq.usageFeed.usage(accounts.map(a => a.name), id => hq.mailbox.label(id));
     const remaining = accounts.length ? accounts.reduce((n, a) => n + (100 - (a.seven_day_pct ?? 0)), 0) / accounts.length : null;
     const resets = accounts.map(a => a.seven_day_resets_at).filter((v): v is number => v != null);
     return { sufficient_until: sufficientUntil(hq.store.now(), u.day_pct, remaining, resets.length ? Math.min(...resets) : null), measured_at: u.measured_at, day_pct: u.day_pct };

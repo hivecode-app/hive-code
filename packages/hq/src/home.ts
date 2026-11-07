@@ -11,7 +11,7 @@ import { OWNER, pre, type HqEvent } from '@company/shared';
 import type { Hq } from './hq.ts';
 import { CANCELLED_SQL } from './scheduler.ts';
 import { askedList, type AskedItem } from './asked.ts';
-import { usage, sufficientUntil, type Usage } from './usage.ts';
+import { sufficientUntil, type Usage } from './usage.ts';
 
 export const BLOCK_TYPES = ['headline', 'alert', 'waiting', 'asked', 'awaiting', 'tasks', 'lanes', 'project', 'quiet', 'people', 'since', 'note'] as const;
 export type BlockType = (typeof BLOCK_TYPES)[number];
@@ -360,13 +360,13 @@ export class Home {
     return [...this.hq.accounts.quota(), ...(codex ? [codex] : [])];
   }
 
-  /** usage.ts reads a day of events: once a minute is enough for a card that moves with the 10-minute quota read. */
+  /** usage.ts (UsageFeed, from memory): once a minute is enough for a card that moves with the 10-minute quota read. */
   private usageMemo: Usage | null = null;
   private usage(): Usage {
     const now = this.hq.store.now();
     if (this.usageMemo && now - this.usageMemo.measured_at < 60_000) return this.usageMemo;
     const accounts = this.hq.accounts.quota().filter((q) => q.usable).map((q) => q.name);
-    this.usageMemo = usage(this.hq.store, accounts, (id) => this.hq.mailbox.label(id));
+    this.usageMemo = this.hq.usageFeed.usage(accounts, (id) => this.hq.mailbox.label(id));
     const snapshots = this.hq.accounts.capacity();
     const known = snapshots.filter(a => a.seven_day_pct != null && a.seven_day_resets_at != null);
     const remaining = known.length ? known.reduce((n, a) => n + 100 - a.seven_day_pct!, 0) / known.length : null;

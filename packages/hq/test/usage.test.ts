@@ -52,3 +52,42 @@ test('usage: the day\'s spend by what started each turn, by worker, and tasks in
     assert.ok(hq.home.current().usage, 'GET /api/home carries it');
   } finally { await env.cleanup(); }
 });
+
+test('UsageFeed (task 1505): the same answer as a read of the log, and after its first use it never reads the log', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, clock } = env;
+    const db = hq.store.db;
+    const t = clock.now();
+    db.prepare(`INSERT INTO shifts (id, identity, shift_no, state, kind, started_at, task_id) VALUES (?, ?, 1, ?, 'work', ?, ?)`).run('eli-1', 'eli', 'live', t, null);
+    db.prepare(`INSERT INTO shifts (id, identity, shift_no, state, kind, started_at, task_id) VALUES (?, ?, 1, ?, 'work', ?, ?)`).run('amit-1', 'amit', 'live', t, 7);
+    const names = (id: string) => hq.mailbox.label(id);
+    hq.store.emit('shift.state', 'amit', { shift: 'amit-1', state: 'starting' });
+    hq.store.emit('engine.result', 'eli', { shift: 'eli-1', ev: { kind: 'result', costUsd: 1, text: 'x'.repeat(5000) } });
+    hq.store.emit('account.changed', null, { name: 'claude', snapshot_at: t - 30 * 60_000, seven_day_pct: 10 });
+    clock.advance(60_000);
+    assert.deepEqual(hq.usageFeed.usage(['claude'], names), usage(hq.store, ['claude'], names), 'its first read');
+
+    // From here on it keeps what hq writes, and the log is not read.
+    hq.store.emit('message.state', 'eli', { id: 'x', state: 'delivered', from: 'owner', to: 'eli' });
+    hq.store.emit('message.state', 'eli', { id: 'x', state: 'seen', from: 'owner', to: 'eli' });
+    hq.store.emit('engine.result', 'eli', { shift: 'eli-1', ev: { kind: 'result', costUsd: 4 } });
+    hq.store.emit('engine.result', 'amit', { shift: 'amit-1', ev: { kind: 'result', costUsd: 2 } });
+    hq.store.emit('engine.tool_use', 'amit', { shift: 'amit-1', ev: { kind: 'tool_use' } });
+    hq.store.emit('account.changed', null, { name: 'claude', snapshot_at: t, seven_day_pct: 13 });
+    clock.advance(60_000);
+    const read: string[] = [];
+    const prepare = db.prepare.bind(db);
+    db.prepare = ((sql: string) => { read.push(sql); return prepare(sql); }) as typeof db.prepare;
+    let fed;
+    try { fed = hq.usageFeed.usage(['claude'], names); } finally { db.prepare = prepare as typeof db.prepare; }
+    assert.deepEqual(read.filter((s) => /FROM events/.test(s)), [], 'no read of the event log');
+    assert.deepEqual(fed, usage(hq.store, ['claude'], names));
+    assert.equal(fed.kinds.find((k) => k.kind === 'leads_owner')!.share, 0.5, 'eli: 3 of 6, after his message');
+
+    // Two days on, what fell out of the window is gone from memory too, and the answer still matches the log.
+    clock.advance(3 * 24 * 60 * 60_000);
+    hq.store.emit('engine.result', 'eli', { shift: 'eli-1', ev: { kind: 'result', costUsd: 5 } });
+    assert.deepEqual(hq.usageFeed.usage(['claude'], names), usage(hq.store, ['claude'], names));
+  } finally { await env.cleanup(); }
+});
