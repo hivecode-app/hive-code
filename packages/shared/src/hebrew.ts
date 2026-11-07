@@ -1,5 +1,5 @@
-// Hebrew everywhere (dir-0002, issue #51): one check shared by the per-shift Stop hook and the
-// company MCP tools. Code, paths and URLs are stripped first; technical terms inside a Hebrew
+// Hebrew everywhere (dir-0002, issue #51): the check behind the company MCP tools (`tell`, titles).
+// The per-shift Stop hook no longer blocks on it (owner, 07/11: the block made duplicate replies). Code, paths and URLs are stripped first; technical terms inside a Hebrew
 // sentence are fine. Port of ~/.claude/hooks/hebrew-reply-guard.mjs, which shifts do not load
 // (they run with --setting-sources project,local).
 

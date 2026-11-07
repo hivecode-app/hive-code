@@ -169,42 +169,12 @@ test('CLI latency (spool only)', async () => {
   assert.ok(median(ss) < budget, `SessionStart median ${median(ss).toFixed(0)}ms, budget ${budget.toFixed(0)}ms`);
 });
 
-test('Stop: English in an earlier text block of the turn is blocked too, not only the last block', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'hk-'));
-  const tp = join(root, 't.jsonl');
-  const a = (content: unknown[]) => JSON.stringify({ type: 'assistant', message: { content } });
-  writeFileSync(tp, [
-    JSON.stringify({ type: 'user', message: { content: 'היי' } }),
-    a([{ type: 'text', text: 'Good — the check is built in. Deploying the new version now.' }, { type: 'tool_use', id: 't', name: 'Bash', input: {} }]),
-    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }] } }),
-    a([{ type: 'text', text: 'סיימתי, הכול עלה.' }]),
-  ].join('\n'));
-  const r = await runCli(['hook', 'Stop'], JSON.stringify({ hook_event_name: 'Stop', transcript_path: tp, last_assistant_message: 'סיימתי, הכול עלה.' }), { COMPANY_STATE_DIR: root });
-  assert.equal(JSON.parse(r.stdout).decision, 'block');
-});
-
-test('Stop: an English reply is blocked once, Hebrew and code pass (#51)', async () => {
+test('Stop: an English reply is not blocked, only spooled (owner, 07/11: the block made duplicate replies)', async () => {
   const root = tmpState();
   const env = { COMPANY_STATE_DIR: root, COMPANY_SHIFT: 'dana-1' };
   const english = 'I merged the pull request and the deploy finished without any problems.';
   const r = await runCli(['hook', 'Stop'], JSON.stringify({ hook_event_name: 'Stop', last_assistant_message: english }), env);
   assert.equal(r.code, 0);
-  const out = JSON.parse(r.stdout) as { decision: string; reason: string };
-  assert.equal(out.decision, 'block');
-  assert.match(out.reason, /בעברית/);
-  assert.match(out.reason, /I merged the pull request/);
-  // the rewrite is not blocked again (no loop)
-  const again = await runCli(['hook', 'Stop'], JSON.stringify({ hook_event_name: 'Stop', stop_hook_active: true, last_assistant_message: english }), env);
-  assert.equal(again.stdout, '');
-  for (const ok of [
-    'PR #17 מוזג, ה-CI ירוק, והבדיקה company-ci עברה על ה-commit האחרון',
-    'הנה הפלט:\n```\nError: something went wrong in the build pipeline step\n```',
-    '`npm run check:contract && npm test && npm run typecheck`',
-    'ZEBRA-1A2B3C',
-  ]) {
-    const p = await runCli(['hook', 'Stop'], JSON.stringify({ hook_event_name: 'Stop', last_assistant_message: ok }), env);
-    assert.equal(p.stdout, '', ok);
-  }
-  // still spooled
+  assert.equal(r.stdout, '');
   assert.ok(spoolLines(root, 'dana-1').every((l) => l.event === 'Stop'));
 });
