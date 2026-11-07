@@ -74,12 +74,16 @@ class TaskProgress {
     this.awaiting,
     this.requests = const [],
     this.prs = const [],
+    this.op,
     this.about,
     this.createdAt,
     this.startedAt,
     this.updatedAt,
   });
   final int id;
+
+  /// The open_team call that opened it (hq ops id): the conversation's card for a call that heard only {queued, id}.
+  final String? op;
   final String title, body, state;
   final String? project,
       worker,
@@ -111,6 +115,7 @@ class TaskProgress {
     awaiting: j['awaiting'] as String?,
     requests: taskRows(j['requests']).map(TaskRequest.fromJson).toList(),
     prs: taskRows(j['prs']).map(TaskPr.fromJson).toList(),
+    op: j['op'] as String?,
     about: j['about'] as String?,
     createdAt: _ms(j['created_at']),
     startedAt: _ms(j['started_at']),
@@ -132,6 +137,12 @@ class OrgPerson {
   final String? manager, project;
   final bool active;
   final List<({int id, String title, String state})> tasks;
+
+  /// The task states that are over in hq: `done`, and `closed` (cancelled is a label on a closed task).
+  static const over = {'done', 'closed'};
+
+  /// At work now: still in the org, and a task of theirs is not over (a permanent worker with no tasks counts).
+  bool get atWork => active && (tasks.isEmpty || tasks.any((t) => !over.contains(t.state)));
   factory OrgPerson.fromJson(Map<String, dynamic> j) => OrgPerson(
     id: j['id'] as String,
     name: j['name'] as String,

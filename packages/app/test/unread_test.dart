@@ -39,11 +39,11 @@ void main() {
     expect(store.data!.conversation('ido')!.muted, isFalse);
   });
 
-  testWidgets('opening a conversation reads it; the chat menu mutes it', (tester) async {
+  testWidgets('opening a conversation reads it; the sheet behind "i" mutes it', (tester) async {
     final store = await pumpApp(tester, home: const ChatScreen(identityId: 'ido'));
     await tester.pumpAndSettle();
     expect(store.data!.conversation('ido')!.unread, 0);
-    await tester.tap(find.byTooltip('עוד'));
+    await tester.tap(find.byTooltip('תפקיד'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('השתקה'));
     await tester.pumpAndSettle();

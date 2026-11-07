@@ -19,6 +19,7 @@ const Map<String, IconData> kIcons = {
   'search': Symbols.search_rounded,
   'do_not_disturb_on': Symbols.do_not_disturb_on_rounded,
   'more_vert': Symbols.more_vert_rounded,
+  'more_horiz': Symbols.more_horiz_rounded,
   'warning': Symbols.warning_rounded,
   'home': Symbols.home_rounded,
   'chat': Symbols.chat_rounded,

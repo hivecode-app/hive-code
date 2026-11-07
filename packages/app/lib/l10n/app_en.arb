@@ -3564,5 +3564,33 @@
   "@offlineSince": {"placeholders": {"time": {"type": "String"}}},
   "offlineNow": "No connection to the server",
   "offlineBody": "New messages will be sent when the connection is back. Retrying every few seconds.",
-  "troubleshoot": "Troubleshooting"
+  "troubleshoot": "Troubleshooting",
+  "chatTab": "Chat",
+  "chatTasksTab": "Tasks · {count}",
+  "@chatTasksTab": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "chatNotesTab": "Notes · {count}",
+  "@chatNotesTab": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "chatWorkersCount": "{count, plural, =1{1 worker} other{{count} workers}}",
+  "@chatWorkersCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "chatNoTasks": "No tasks in this conversation",
+  "chatNoNotes": "No notes or documents in this conversation yet",
+  "chatTasksFailed": "Tasks didn't load"
 }

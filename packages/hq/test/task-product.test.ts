@@ -258,3 +258,24 @@ test('file search reads names only; the old-message context filters system and p
     assert.equal(search(hq, 'file-id').results.filter((h) => h.kind === 'message').length, 0);
   } finally { await env.cleanup(); }
 });
+
+test('a task carries the open_team call that opened it, for its card in the conversation', async () => {
+  const env = await makeEnv({ noStart: true });
+  try {
+    const { hq } = env; await hq.start({ timers: false }); hq.store.setToggle('scheduler', false);
+    const opened = hq.scheduler.addTask({ title: 'Opened in a chat', project: 'agent-company', state: 'queued' });
+    const other = hq.scheduler.addTask({ title: 'From the board', project: 'agent-company', state: 'queued' });
+    const op = (id: string, ack: unknown) => hq.store.db.prepare('INSERT INTO ops (id, identity, op, args, received_at, ack) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, 'eli', 'open_team', '{}', env.clock.t, JSON.stringify(ack));
+    op('eli-1:aa', { ok: true, id: 'eli-1:aa', ref: `task-${opened.id}`, result: { task: opened.id, state: 'queued' } });
+    op('eli-1:bb', { ok: false, error: 'rejected' });
+    const catalog = new TaskCatalog(hq);
+    assert.equal((await catalog.item(opened)).op, 'eli-1:aa');
+    assert.equal((await catalog.item(other)).op, null);
+    assert.equal((await catalog.list()).pipeline.find((t) => t.id === opened.id)!.op, 'eli-1:aa');
+    // A call that comes in later is read too (only the rows since the last read).
+    op('eli-2:cc', { ok: true, id: 'eli-2:cc', ref: `task-${other.id}`, result: { task: other.id, state: 'queued' } });
+    assert.equal((await catalog.item(other)).op, 'eli-2:cc');
+    assert.equal((await catalog.item(opened)).op, 'eli-1:aa');
+  } finally { await env.cleanup(); }
+});

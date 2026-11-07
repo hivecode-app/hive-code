@@ -1,4 +1,3 @@
-import '../tasks/organization.dart';
 import '../../l10n/app_localizations.dart';
 import '../product/product_theme.dart';
 import 'package:agent_company/l10n/ui_copy.dart';
@@ -11,12 +10,14 @@ import '../../data/backend.dart';
 import '../../data/error_report.dart';
 import '../../data/store.dart';
 import '../../model/models.dart';
+import '../../model/task_progress.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import '../selection.dart';
 import '../convs/conversations_screen.dart';
 import 'chat_scroll.dart';
 import 'composer.dart';
+import 'conversation_tasks.dart';
 import 'items.dart';
 import '../media/files_screen.dart';
 import 'markdown.dart';
@@ -55,9 +56,17 @@ class _ChatScreenState extends State<ChatScreen> {
   bool searching = false;
   String query = '';
   int match = 0;
-  bool openAllTools = false;
   bool showJump = false;
   int seenCount = 0;
+
+  /// The desktop's tabs over the conversation (a-he-chat-desktop): 0 the chat, 1 its tasks, 2 its notes.
+  int _tab = 0;
+
+  /// Beside the list: the conversation's panel (320) instead of its task column (280).
+  bool _info = false;
+
+  /// Task refs in the conversation the task list did not have when last read: read again once for them.
+  Set<Object> _askedFor = const {};
 
   @override
   void initState() {
@@ -248,6 +257,7 @@ class _ChatScreenState extends State<ChatScreen> {
       quote = ChatScreen.pendingQuote.remove(widget.identityId);
       selected = null;
       searching = false;
+      _tab = 0;
       _scrolledToHit = null;
       _rowCache.clear();
       _rowKeys.clear();
@@ -363,7 +373,9 @@ class _ChatScreenState extends State<ChatScreen> {
   String _textOf(ChatItem it) => switch (it) { UserMsg() => it.text, TextMsg() => it.text, AskCard() => it.question, InternalMsg() => it.body, _ => '' };
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ChatTasksBuilder(builder: (context, tasks, _) => _build(context, tasks));
+
+  Widget _build(BuildContext context, List<TaskProgress>? allTasks) {
     UiCopy.watch(context);
     final store = StoreScope.of(context);
     final d = store.data;
@@ -409,10 +421,12 @@ class _ChatScreenState extends State<ChatScreen> {
     _cardLooks = looks;
     final split = _split(rows);
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateJump());
-    _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, openAllTools, _targetId, Localizations.localeOf(context)]);
+    final convTasks = allTasks == null ? null : conversationTasks(allTasks, widget.identityId);
+    _taskCards = _resolveCards(chat, allTasks);
+    _checkRowDeps([Theme.of(context), MediaQuery.textScalerOf(context), chat, d, _targetId, Localizations.localeOf(context)]);
     final selectedItem = selected == null ? null : chat.items.where((i) => i.id == selected).firstOrNull;
 
-    final header = selectedItem != null
+    Widget header({bool wide = false, bool besideList = false}) => selectedItem != null
         ? _SelectionBar(
             onClose: () => setState(() => selected = null),
             onQuote: () => _quoteItem(selectedItem, d),
@@ -447,16 +461,28 @@ class _ChatScreenState extends State<ChatScreen> {
                 chat: chat,
                 team: d.teamOf(widget.identityId),
                 embedded: widget.embedded,
+                wide: wide,
+                tab: _tab,
+                openTasks: convTasks?.where(isOpenTask).length,
+                onTab: (t) => setState(() => _tab = t),
+                onInfo: besideList ? () => setState(() => _info = !_info) : null,
+                infoOpen: _info,
                 onStop: () => _stop(chat, who),
-                onSearch: () => setState(() => searching = true),
+                onSearch: () => setState(() {
+                  searching = true;
+                  _tab = 0;
+                }),
                 onMenu: (v) {
                   switch (v) {
                     case 'search':
-                      setState(() => searching = true);
+                      setState(() {
+                        searching = true;
+                        _tab = 0;
+                      });
+                    case 'files':
+                      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => FilesScreen(chat: widget.identityId)));
                     case 'stop':
                       _stop(chat, who);
-                    case 'tools':
-                      setState(() => openAllTools = true);
                     case 'mute':
                       pickMute(context, widget.identityId);
                     default:
@@ -489,9 +515,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return KeyedSubtree(key: ValueKey(e.key), child: w);
     }
 
-    Widget body({bool teamLink = true}) => Column(children: [
-      header,
-      if (teamLink) ConversationHierarchy(key: ValueKey('team-${widget.identityId}'), identity: widget.identityId),
+    List<Widget> conversation() => [
       if (_sourceMissing) Semantics(liveRegion: true, child: Padding(padding: const EdgeInsets.all(12), child: Text(AppLocalizations.of(context).progressSourceMissing))),
       if (open.isNotEmpty && selectedItem == null) _PinBar(open: open, onTap: () => _toAsk(open.first)),
       Expanded(
@@ -554,14 +578,82 @@ class _ChatScreenState extends State<ChatScreen> {
           if (scroll.hasClients) _toBottom();
         },
       ),
+    ];
+
+    // The phone: the title, the chips of what the conversation is about (a-he-chat), the conversation.
+    Widget body() => Column(children: [
+      header(),
+      if (selectedItem == null && !searching) ConversationChips(key: ValueKey('chips-${widget.identityId}'), identityId: widget.identityId, tasks: convTasks),
+      ...conversation(),
     ]);
 
+    // A desktop: the title with its tabs over the chat (or its tasks, or its notes) and the panel beside it.
+    Widget wideBody() => Column(children: [
+      header(wide: true),
+      Expanded(
+        child: Row(children: [
+          Expanded(
+            child: switch (_tab) {
+              1 => Container(color: p.chatBg, child: ConversationTaskList(tasks: convTasks, failed: ChatTaskFeed.failed.value, onOpen: (t) => openTask(context, t))),
+              2 => Container(color: p.chatBg, child: ConversationNotes(identityId: widget.identityId)),
+              _ => Column(children: conversation()),
+            },
+          ),
+          SizedBox(width: ConversationTasksPanel.width, child: ConversationTasksPanel(key: ValueKey('panel-${widget.identityId}'), identityId: widget.identityId)),
+        ]),
+      ),
+    ]);
+
+    // Beside the conversation list (a-he-home-desktop): the chat and its tasks in a 280 column; `info` puts
+    // the conversation's panel (320) there instead.
+    Widget besideListBody() => Column(children: [
+      header(besideList: true),
+      Expanded(
+        child: Row(children: [
+          Expanded(child: Column(children: conversation())),
+          if (_info)
+            SizedBox(width: ConversationTasksPanel.width, child: ConversationTasksPanel(key: ValueKey('panel-${widget.identityId}'), identityId: widget.identityId))
+          else
+            SizedBox(width: ConversationTaskColumn.width, child: ConversationTaskColumn(key: ValueKey('column-${widget.identityId}'), tasks: convTasks, failed: ChatTaskFeed.failed.value)),
+        ]),
+      ),
+    ]);
+
+    // Only the shell has the list beside the chat; a chat on its own needs the room for the tabs and the full panel.
+    final besideList = widget.embedded;
     Widget layout() => LayoutBuilder(builder: (context, c) {
-      if (c.maxWidth < 650 || (c.maxHeight < 560 && c.maxWidth < 1100) || MediaQuery.textScalerOf(context).scale(1) >= 1.5) return body();
-      return Row(children: [Expanded(child: body(teamLink: false)), SizedBox(width: 230, child: ConversationHierarchy(key: ValueKey('sidebar-${widget.identityId}'), identity: widget.identityId, sidebar: true))]);
+      if (c.maxWidth < (besideList ? kChatPanelFrom : kChatTabsFrom) || (c.maxHeight < 560 && c.maxWidth < 1100) || MediaQuery.textScalerOf(context).scale(1) >= 1.5) return body();
+      return besideList && c.maxWidth < kChatTabsFrom ? besideListBody() : wideBody();
     });
     if (widget.embedded) return layout();
     return Scaffold(backgroundColor: p.surface, body: SafeArea(child: layout()));
+  }
+
+  /// The task cards under messages (a-he-chat `.tref`): item id → the tasks opened in that turn.
+  Map<String, List<TaskProgress>> _taskCards = const {};
+
+  Map<String, List<TaskProgress>> _resolveCards(Conversation chat, List<TaskProgress>? tasks) {
+    final refs = taskCardsByItem(chat.items);
+    if (refs.isEmpty || tasks == null) return const {};
+    final out = <String, List<TaskProgress>>{};
+    final missing = <Object>{};
+    for (final MapEntry(:key, :value) in refs.entries) {
+      for (final r in value) {
+        final t = resolveTaskRef(tasks, r);
+        if (t == null) {
+          missing.add(r);
+        } else if (!(out[key] ??= []).any((x) => x.id == t.id)) {
+          out[key]!.add(t);
+        }
+      }
+    }
+    // A task opened a moment ago is not in the list yet: read it again, once for each new one.
+    if (missing.isNotEmpty && !missing.every(_askedFor.contains)) {
+      _askedFor = {..._askedFor, ...missing};
+      final backend = StoreScope.read(context).backend;
+      WidgetsBinding.instance.addPostFrameCallback((_) => ChatTaskFeed.load(backend));
+    }
+    return out;
   }
 
   // Day separators, items, then the live line at the bottom. Cheap: no widgets, and recomputed only
@@ -641,7 +733,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Object? _rowSig(ChatItem it, String? hitId) => switch (it) {
-        TextMsg() => (it.text, it.streaming, it.author, it.attachments.length, selected == it.id, hitId == it.id, _flash == it.id),
+        TextMsg() => (it.text, it.streaming, it.author, it.attachments.length, selected == it.id, hitId == it.id, _flash == it.id, Object.hashAll([for (final t in _taskCards[it.id] ?? const <TaskProgress>[]) (t.id, t.title, t.stage)])),
         UserMsg() => (it.text, it.delivery, it.priority, it.waitingOn, it.replyTo?.text, selected == it.id, hitId == it.id, _flash == it.id),
         _ => null,
       };
@@ -738,8 +830,12 @@ class _ChatScreenState extends State<ChatScreen> {
           onStopNow: () => _stop(chat, d.who(widget.identityId)),
           onRetry: () => store.resend(widget.identityId, it),
         ),
-      TextMsg() => TextBubble(msg: it),
-      ToolGroup() => ToolGroupRow(group: it, forceOpen: openAllTools, identityId: widget.identityId),
+      TextMsg() => TextBubble(msg: it, from: widget.identityId, footer: [for (final t in _taskCards[it.id] ?? const <TaskProgress>[]) TaskRefCard(task: t)]),
+      ToolGroup() when _taskCards[it.id] != null => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          ToolGroupRow(group: it, identityId: widget.identityId),
+          Bubble(out: false, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [for (final t in _taskCards[it.id]!) TaskRefCard(task: t)])),
+        ]),
+      ToolGroup() => ToolGroupRow(group: it, identityId: widget.identityId),
       DiffCard() => DiffCardView(card: it),
       TestResultCard() => TestCardView(card: it),
       TerminalCard() => TerminalCardView(card: it),
@@ -790,6 +886,12 @@ class _ChatBar extends StatelessWidget {
     required this.onStop,
     required this.onSearch,
     required this.onMenu,
+    this.wide = false,
+    this.tab = 0,
+    this.openTasks,
+    this.onTab,
+    this.onInfo,
+    this.infoOpen = false,
   });
   final Identity who;
   final Presence presence;
@@ -799,6 +901,26 @@ class _ChatBar extends StatelessWidget {
   final VoidCallback onStop;
   final VoidCallback onSearch;
   final void Function(String) onMenu;
+
+  /// A desktop: the tabs in the title and the panel beside (a-he-chat-desktop).
+  final bool wide;
+  final int tab;
+
+  /// The conversation's open tasks, for the tab; null while they load.
+  final int? openTasks;
+  final void Function(int)? onTab;
+
+  /// Beside the list (a-he-home-desktop): `info` swaps the task column for the conversation's panel, and the
+  /// title has the search and the menu the phone keeps in the worker sheet. Null on a phone.
+  final VoidCallback? onInfo;
+  final bool infoOpen;
+
+  /// What the mockup has no room for in the title: the files, mute and stop.
+  Widget _menu(BuildContext context, CompanyData d, AppLocalizations l) => PopupMenuButton<String>(tooltip: l.more, onSelected: onMenu, icon: Ic('more_horiz', color: context.p.text2), itemBuilder: (_) => [
+    PopupMenuItem(value: 'files', child: Text(l.mediaFiles)),
+    PopupMenuItem(value: 'stop', child: Text(l.stop)),
+    PopupMenuItem(value: 'mute', child: Text(d.conversation(who.id)?.muted == true ? l.unmute : l.mute)),
+  ]);
 
   @override
   Widget build(BuildContext context) {
@@ -828,24 +950,70 @@ class _ChatBar extends StatelessWidget {
       status = StatusWord.of(presence, who.gender, size: 12);
     }
 
-    final l = AppLocalizations.of(context);
-    return Container(decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
-      padding: EdgeInsetsDirectional.fromSTEB(embedded ? 20 : 4, 6, 8, 6), child: Row(children: [
-        if (!embedded) IBtn(backIcon(context), tip: l.back, onTap: () => Navigator.maybePop(context)),
-        ProjectMonogram.person(d, who.id, size: 28), const SizedBox(width: 10),
-        Expanded(child: InkWell(onTap: () => _workerSheet(context, d), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          ProductContentText(who.name, style: T.name.copyWith(color: p.text, fontSize: 16)),
-          ProductContentText(d.roleLine(who.id), style: T.meta.copyWith(color: p.text2)),
-          status,
-        ]))),
-        IBtn('folder', tip: l.mediaFiles, onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => FilesScreen(chat: who.id)))),
-          IBtn('search', tip: l.searchChat, onTap: onSearch),
-        IBtn('info', tip: l.role, onTap: () => _workerSheet(context, d)),
-        PopupMenuButton<String>(tooltip: l.more, onSelected: onMenu, icon: Ic('more_vert', color: p.text2), itemBuilder: (_) => [
-          PopupMenuItem(value: 'stop', child: Text(l.stop)),
-          PopupMenuItem(value: 'mute', child: Text(d.conversation(who.id)?.muted == true ? l.unmute : l.mute)),
+    {
+      final l = AppLocalizations.of(context);
+      // The status line only when it says something he acts on (working, with "עצירה"; stopped; offline). The
+      // mockup has none: a deviation, so that stopping a worker never hides behind a menu.
+      final showStatus = linkDown || stopped || busy;
+      final title = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        ProductContentText(who.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.name.copyWith(color: p.text, fontSize: 16)),
+        ProductContentText(d.roleLine(who.id), maxLines: 1, overflow: TextOverflow.ellipsis, style: T.meta.copyWith(color: p.text2)),
+        if (showStatus) status,
+      ]);
+      if (wide) {
+        Widget tabChip(int i, String text) => Padding(
+          padding: const EdgeInsetsDirectional.only(end: 8),
+          child: Material(
+            color: tab == i ? p.accentSoft : p.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: tab == i ? Colors.transparent : p.line)),
+            child: InkWell(
+              key: ValueKey('chat-tab-$i'),
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => onTab?.call(i),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                child: Semantics(selected: tab == i, button: true, child: Text(text, style: T.small.copyWith(color: p.text, fontWeight: tab == i ? FontWeight.w600 : FontWeight.w400))),
+              ),
+            ),
+          ),
+        );
+        return Container(
+          decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
+          padding: const EdgeInsetsDirectional.fromSTEB(20, 10, 12, 10),
+          child: Row(children: [
+            ProjectMonogram.person(d, who.id, size: 36),
+            const SizedBox(width: 10),
+            Flexible(child: InkWell(onTap: () => _workerSheet(context, d), child: title)),
+            const SizedBox(width: 20),
+            tabChip(0, l.chatTab),
+            tabChip(1, openTasks == null ? l.tasks : l.chatTasksTab(openTasks!)),
+            FutureBuilder<List<Map<String, dynamic>>>(
+              future: ChatNotes.of(store.backend, who.id),
+              builder: (context, snap) => tabChip(2, snap.data == null ? l.notes : l.chatNotesTab(snap.data!.length)),
+            ),
+            const Spacer(),
+            IBtn('search', tip: l.searchChat, onTap: onSearch),
+            _menu(context, d, l),
+          ]),
+        );
+      }
+      return Container(
+        decoration: BoxDecoration(color: p.surface),
+        padding: EdgeInsetsDirectional.fromSTEB(embedded ? 16 : 4, 6, 8, 6),
+        child: Row(children: [
+          if (!embedded) IBtn(backIcon(context), tip: l.back, onTap: () => Navigator.maybePop(context)),
+          ProjectMonogram.person(d, who.id, size: 36),
+          const SizedBox(width: 10),
+          Expanded(child: InkWell(onTap: onInfo ?? () => _workerSheet(context, d), child: title)),
+          if (onInfo != null) ...[
+            IBtn('search', tip: l.searchChat, onTap: onSearch),
+            _menu(context, d, l),
+            IBtn('info', key: const Key('chat-info'), tip: l.role, fill: infoOpen, onTap: onInfo),
+          ] else
+            IBtn('info', tip: l.role, onTap: () => _workerSheet(context, d)),
         ]),
-      ]));
+      );
+    }
   }
 
   void _workerSheet(BuildContext context, CompanyData d) {
@@ -886,11 +1054,36 @@ class _ChatBar extends StatelessWidget {
                 ]),
               ),
           ]),
+          // The phone's title has only "i" (a-he-chat): what was in its icons is here.
+          if (!wide) Builder(builder: (sheet) {
+            final l = AppLocalizations.of(sheet);
+            Widget action(String icon, String text, VoidCallback onTap) => ListTile(
+              leading: Ic(icon, color: p.text2),
+              title: Text(text, style: T.row2.copyWith(color: p.text)),
+              onTap: () {
+                Navigator.pop(sheet);
+                onTap();
+              },
+            );
+            return Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                action('search', l.searchChat, onSearch),
+                action('folder', l.mediaFiles, () => onMenu('files')),
+                action(d.conversation(who.id)?.muted == true ? 'notifications' : 'notifications_off', d.conversation(who.id)?.muted == true ? l.unmute : l.mute, () => onMenu('mute')),
+                if (chat.live.busy) action('stop_circle', l.stop, onStop),
+              ]),
+            );
+          }),
         ]),
       ),
     );
   }
 }
+
+/// From this width the conversation has its task column beside it (a-he-home-desktop, 280), and from the
+/// second one its tabs and full panel (a-he-chat-desktop, 320).
+const kChatPanelFrom = 560.0, kChatTabsFrom = 1000.0;
 
 /// The ids of GO cards with a newer one open from the same worker: only the newest asks him (#258).
 Set<String> supersededGos(List<ChatItem> items) {
@@ -1114,7 +1307,7 @@ class _Entry {
   final DateTime? day;
 }
 
-/// System transport details are not product copy. Task and message IDs remain available in advanced tools.
+/// System transport details are not product copy. Task and message IDs stay in each tool's details.
 String cleanSystemText(String text, AppLocalizations l) {
   final cleaned = text.replaceAll(RegExp(r'\b(?:[a-z][a-z0-9-]*-t\d+(?:-[a-z0-9:.-]+)?|t\d+|msg_id|hq-host|ci-host|hq|lease-\d+)\b', caseSensitive: false), '').replaceAll('``', '').replaceAll(RegExp(r'\s+'), ' ').trim();
   return cleaned.isEmpty ? l.systemUpdates(1) : cleaned;

@@ -236,7 +236,21 @@ export class TaskCatalog {
     const charters = new Map([...new Set(tasks.map((t) => t.project).filter((p): p is string => !!p))]
       .map((p) => [p, { charter: readCharter(this.hq.cfg.companyDir, p), lead: projectLead(this.hq.store, p) }]));
     const deployed = new Set((this.hq.store.db.prepare('SELECT tasks FROM deploys').all() as { tasks: string }[]).flatMap((r) => JSON.parse(r.tasks) as number[]));
-    return { people, charters, deployed, requests: taskRequests(this.hq) };
+    return { people, charters, deployed, ops: this.openOps(), requests: taskRequests(this.hq) };
+  }
+  private opsByTask = new Map<number, string>();
+  private opsRowid = 0;
+  /** The open_team call that opened each task: the conversation puts the task's card under the message it was opened in,
+   *  also when the worker's tool heard only {queued, id} from hq (rpc.ts SYNC_OPS timeout). An open_team's ack is written
+   *  with its row (ingest.ts op), so only the rows added since the last read are read. */
+  private openOps() {
+    const rows = this.hq.store.db.prepare(`SELECT rowid, id, json_extract(ack, '$.result.task') AS task FROM ops WHERE rowid > ? AND op = 'open_team'`)
+      .all(this.opsRowid) as { rowid: number; id: string; task: number | null }[];
+    for (const r of rows) {
+      if (typeof r.task === 'number') this.opsByTask.set(r.task, r.id);
+      this.opsRowid = Math.max(this.opsRowid, r.rowid);
+    }
+    return this.opsByTask;
   }
   async item(task: TaskRow, context = this.context([task]), refresh = true, urls?: string[]) {
     const { info, check, urls: own } = this.prSource(task, context);
@@ -244,7 +258,7 @@ export class TaskCatalog {
     const prs = await Promise.all(urls.map((url) => refresh ? this.pr(url, check) : this.knownOrPending(url, check)));
     const stage = this.readStage(task, urls, prs, context, info?.charter);
     return { id: task.id, title: task.title, body: task.body, project: task.project, worker: task.identity,
-      opened_by: openedBy(task) ?? info?.lead ?? null,
+      opened_by: openedBy(task) ?? info?.lead ?? null, op: context.ops.get(task.id) ?? null,
       state: task.state, stage,
       outcome: task.state === 'closed' || JSON.parse(task.labels).includes('cancelled') ? 'cancelled' : task.state === 'done' ? 'completed' : null,
       summary: task.summary ?? null, about: this.hq.store.getMeta(`task-about:${task.id}`) ?? null, awaiting: task.awaiting ?? null, worker_status: context.people.get(task.identity ?? '')?.status ?? null,

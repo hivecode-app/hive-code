@@ -32,10 +32,10 @@ Future<void> pumpScreen(WidgetTester tester, AppStore store, Widget home) async 
   expect(tester.takeException(), isNull);
 }
 
-ScrollPosition _position(WidgetTester tester) => tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+ScrollPosition _position(WidgetTester tester) => tester.state<ScrollableState>(_listFinder).position;
 
-/// The conversation's list (the composer's field scrolls too, below it).
-final _listFinder = find.byType(Scrollable).first;
+/// The conversation's list (the chips above it and the composer's field below it scroll too).
+final _listFinder = find.descendant(of: find.byType(CustomScrollView), matching: find.byType(Scrollable)).first;
 
 Rect _list(WidgetTester tester) => tester.getRect(_listFinder);
 
@@ -118,7 +118,7 @@ void main() {
     final store = await pumpApp(tester, home: const SizedBox());
     final chat = _chat(store, after: 60);
     await pumpScreen(tester, store, const ChatScreen(identityId: 'dana'));
-    await tester.drag(_listFinder, const Offset(0, 500));
+    await tester.drag(_listFinder, const Offset(0, 600));
     await tester.pumpAndSettle();
     final line = findShown('שורה 50');
     expect(line, findsOneWidget);

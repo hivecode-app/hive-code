@@ -1687,5 +1687,12 @@
   "offlineSince": "אין חיבור לשרת מאז {time}",
   "offlineNow": "אין חיבור לשרת",
   "offlineBody": "הודעות חדשות יישלחו כשהחיבור יחזור. ניסיון חוזר כל כמה שניות.",
-  "troubleshoot": "פתרון בעיות"
+  "troubleshoot": "פתרון בעיות",
+  "chatTab": "צ'אט",
+  "chatTasksTab": "משימות · {count}",
+  "chatNotesTab": "הערות · {count}",
+  "chatWorkersCount": "{count, plural, =1{עובד אחד} other{{count} עובדים}}",
+  "chatNoTasks": "אין משימות בשיחה הזו",
+  "chatNoNotes": "אין עדיין הערות או מסמכים בשיחה הזו",
+  "chatTasksFailed": "המשימות לא נטענו"
 }

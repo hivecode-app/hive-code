@@ -11,10 +11,13 @@ import 'package:agent_company/data/search.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/model/task_progress.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
+import 'package:agent_company/ui/chat/conversation_tasks.dart';
+import 'package:agent_company/ui/chat/items.dart';
 import 'package:agent_company/ui/product/search_screen.dart';
 import 'package:agent_company/ui/tasks/task_screen.dart';
 import 'package:agent_company/ui/tasks/tasks_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:agent_company/l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -295,6 +298,100 @@ Future<void> showTask(WidgetTester tester, int id) => tester.scrollUntilVisible(
 );
 
 void main() {
+  test('a turn\'s open_team puts its task under the message after it; a queued call is found by its id', () {
+    final at = kDemoNow;
+    ToolGroup opened(String id, String preview) => ToolGroup(id: id, ts: at, summary: '', tools: [
+      ToolLine(icon: 'group_add', label: '', name: 'mcp__company__open_team', call: ToolCall(name: 'mcp__company__open_team', started: at, preview: preview)),
+    ]);
+    final items = <ChatItem>[
+      opened('g1', '{"ok":true,"id":"dana-1:aa","ref":"task-7","result":{"task":7,"state":"queued"}}'),
+      TextMsg(id: 'm1', ts: at, text: 'Opened a task for Ido.'),
+      opened('g2', '{"queued":true,"id":"dana-1:bb"}'),
+      UserMsg(id: 'u1', ts: at, text: 'ok'),
+      opened('g3', '`open_team` נדחה ב-hq: no'),
+    ];
+    final cards = taskCardsByItem(items);
+    expect(cards, {'m1': [7], 'g2': ['dana-1:bb']});
+    const tasks = [TaskProgress(id: 7, title: 'Seven'), TaskProgress(id: 8, title: 'Eight', op: 'dana-1:bb')];
+    expect(resolveTaskRef(tasks, 7)!.id, 7);
+    expect(resolveTaskRef(tasks, 'dana-1:bb')!.id, 8);
+    expect(resolveTaskRef(tasks, 9), isNull);
+  });
+
+  test('the team counts who is at work now, not everyone who ever worked for the lead', () {
+    OrgPerson worker(String id, List<String> states) => OrgPerson(id: id, name: id, title: 'מפתח', manager: 'dana', tasks: [for (final (i, s) in states.indexed) (id: i, title: 't', state: s)]);
+    final org = [
+      const OrgPerson(id: 'dana', name: 'דנה', title: 'מנכ"לית'),
+      worker('a', ['done', 'running']),
+      worker('b', ['done', 'done']),
+      worker('c', ['closed']),
+      worker('d', ['resting']),
+    ];
+    final team = conversationTeam(org, 'dana');
+    expect([for (final p in team.people) if (p.atWork) p.id], ['a', 'd']);
+    expect(team.people.map((p) => p.id), ['a', 'd', 'b', 'c'], reason: 'the ones at work first');
+    expect(const OrgPerson(id: 'yoav', name: 'יואב', title: 'מנהל').atWork, isTrue, reason: 'a permanent worker with no task');
+  });
+
+  test('the conversation\'s tasks: what waits for him first, cancelled and finished out, three released last', () {
+    const tasks = [
+      TaskProgress(id: 1, title: 'dev', stage: TaskStage.development, openedBy: 'dana'),
+      TaskProgress(id: 2, title: 'approval', stage: TaskStage.approval, worker: 'dana'),
+      TaskProgress(id: 3, title: 'cancelled', stage: TaskStage.development, openedBy: 'dana', outcome: 'cancelled'),
+      TaskProgress(id: 4, title: 'released', stage: TaskStage.released, openedBy: 'dana', outcome: 'completed'),
+      TaskProgress(id: 5, title: 'finished', stage: TaskStage.development, openedBy: 'dana', outcome: 'completed'),
+      TaskProgress(id: 6, title: 'deploy', stage: TaskStage.approval, openedBy: 'dana', outcome: 'completed', awaiting: 'deploy'),
+      TaskProgress(id: 7, title: 'other', stage: TaskStage.approval, openedBy: 'yoav'),
+      TaskProgress(id: 8, title: 'review', stage: TaskStage.review, openedBy: 'dana'),
+    ];
+    expect([for (final t in conversationTasks(tasks, 'dana')) t.id], [2, 6, 8, 1, 4]);
+    expect(conversationTasks(tasks, 'dana').where(isOpenTask).length, 4);
+  });
+
+  test('a task with no stage: a finished report is "completed", an open one is "being checked", as on the board', () async {
+    final l = await AppLocalizations.delegate.load(const Locale('he'));
+    const report = TaskProgress(id: 1, title: 'report', state: 'done', outcome: 'completed');
+    const open = TaskProgress(id: 2, title: 'open', state: 'working');
+    const dev = TaskProgress(id: 3, title: 'dev', stage: TaskStage.development);
+    expect(taskStageLook(l, report), ('check_circle', l.progressCompleted));
+    expect(taskStageLook(l, open), ('progress_activity', l.progressUnknown));
+    final groups = taskStageGroups(l, const [report, open, dev]);
+    expect([for (final g in groups) g.$2], [l.progressDevelopment, l.progressUnknown, l.progressCompleted]);
+    expect([for (final g in groups) g.$4.single.id], [3, 2, 1]);
+  });
+
+  testWidgets('a task opened in the conversation is a card in the message, and a tap opens its page', (tester) async {
+    final backend = TaskBackend();
+    final store = await productApp(tester, backend: backend, home: const ChatScreen(identityId: 'dana'));
+    final chat = store.data!.chats['dana']!;
+    chat.items.addAll([
+      ToolGroup(id: 'g-open', ts: kDemoNow, summary: '', tools: [
+        ToolLine(icon: 'group_add', label: '', name: 'mcp__company__open_team',
+          call: ToolCall(name: 'mcp__company__open_team', started: kDemoNow, preview: '{"ok":true,"id":"dana-1:aa","ref":"task-2","result":{"task":2}}')),
+      ]),
+      TextMsg(id: 't-open', ts: kDemoNow, text: 'Opened a task for Ido.'),
+    ]);
+    store.touch();
+    await tester.pumpAndSettle();
+    final card = find.byKey(const ValueKey('task-card-2'));
+    expect(find.descendant(of: find.byType(TextBubble), matching: card), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('Improve map loading')), findsOneWidget);
+    await tester.tap(card);
+    await tester.pumpAndSettle();
+    expect(find.byType(ProductTaskScreen), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the phone title has the project, the team and the open tasks as chips', (tester) async {
+    await productApp(tester, backend: TaskBackend(), home: const ChatScreen(identityId: 'dana'));
+    expect(find.byKey(const Key('conversation-team')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('chat-chip-tasks')), matching: find.text('1 open task')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('chat-chip-tasks')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('chat-task-1')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'Tasks destination opens the task, back preserves project and selection; report is not Released',
     (tester) async {
@@ -785,40 +882,34 @@ void main() {
   );
 
   testWidgets(
-    'the hierarchy reserves its phone height and periodic refresh never moves the conversation',
+    'the team chip stays put while the tree refreshes, and a failed refresh keeps what was shown',
     (tester) async {
       final backend = TaskBackend();
-      final people = await backend.organization();
-      backend.treeLoads = 0;
-      backend.treeReply = Completer<List<OrgPerson>>();
       await productApp(
         tester,
         backend: backend,
         home: const ChatScreen(identityId: 'dana'),
       );
-      final hierarchy = find.byType(ConversationHierarchy);
-      final height = tester.getSize(hierarchy).height;
-      backend.treeReply!.complete(people);
-      await tester.pumpAndSettle();
-      expect(tester.getSize(hierarchy).height, height);
-      backend.treeReply = Completer<List<OrgPerson>>();
+      final chip = find.byKey(const Key('conversation-team'));
+      expect(chip, findsOneWidget);
+      final rect = tester.getRect(chip);
+      final loads = backend.treeLoads;
       await tester.pump(const Duration(seconds: 30));
-      expect(backend.treeLoads, 2);
-      expect(tester.getSize(hierarchy).height, height);
-      expect(find.text('Updating team'), findsNothing);
-      backend.treeReply!.complete(people);
       await tester.pumpAndSettle();
-      expect(tester.getSize(hierarchy).height, height);
-      backend.treeReply = null;
+      expect(backend.treeLoads, greaterThan(loads));
+      expect(tester.getRect(chip), rect);
       backend.failedTree = true;
       await tester.pump(const Duration(seconds: 30));
       await tester.pumpAndSettle();
-      expect(tester.getSize(hierarchy).height, height);
-      expect(find.byKey(const Key('conversation-team')), findsOneWidget);
-      expect(
-        find.byTooltip('Team refresh failed. Showing saved information.'),
-        findsOneWidget,
-      );
+      expect(tester.getRect(chip), rect);
+      // What is shown is saved, and says so, with a retry.
+      expect(find.byTooltip('Team refresh failed. Showing saved information.'), findsOneWidget);
+      backend.failedTree = false;
+      await tester.ensureVisible(find.byKey(const Key('chat-chip-stale')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('chat-chip-stale')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('chat-chip-stale')), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
@@ -841,7 +932,7 @@ void main() {
     expect(find.text('No team members to show.'), findsOneWidget);
   });
   testWidgets(
-    'a known conversation without a team has no empty hierarchy strip',
+    'a known conversation without a team has no team chip',
     (tester) async {
       final backend = TaskBackend()
         ..customPeople = [
@@ -852,27 +943,18 @@ void main() {
         backend: backend,
         home: const ChatScreen(identityId: 'ido'),
       );
-      expect(tester.getSize(find.byType(ConversationHierarchy)).height, 0);
-      backend.failedTree = true;
-      backend.customPeople = null;
-      await tester.pump(const Duration(seconds: 30));
-      await tester.pumpAndSettle();
-      expect(tester.getSize(find.byType(ConversationHierarchy)).height, 0);
+      expect(find.byKey(const Key('conversation-team')), findsNothing);
     },
   );
   testWidgets(
-    'a long team label stays inside its reserved strip at 200 percent',
+    'a long team label stays on one line at 200 percent',
     (tester) async {
       final backend = TaskBackend()
         ..customPeople = [
+          const OrgPerson(id: 'dana', name: 'Dana', title: 'Lead'),
           OrgPerson(
-            id: 'dana',
-            name: 'Long team lead name ' * 10,
-            title: 'Lead',
-          ),
-          const OrgPerson(
             id: 'ido',
-            name: 'Ido',
+            name: 'Long worker name ' * 10,
             title: 'Developer',
             manager: 'dana',
           ),
@@ -885,15 +967,9 @@ void main() {
       );
       final label = find.descendant(
         of: find.byKey(const Key('conversation-team')),
-        matching: find.byType(Text),
+        matching: find.textContaining('Long worker name'),
       );
       expect(tester.widget<Text>(label).maxLines, 1);
-      expect(
-        tester.getRect(label).height,
-        lessThanOrEqualTo(
-          tester.getRect(find.byType(ConversationHierarchy)).height,
-        ),
-      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -920,34 +996,71 @@ void main() {
   });
 
   testWidgets(
-    'wide chat shows the tree once, and at 200 percent uses a full-width team entry',
+    'a chat beside the list has its task column, info its panel, and at 200 percent the phone chips',
     (tester) async {
       final store = await productApp(
         tester,
         backend: TaskBackend(),
-        size: const Size(1280, 900),
+        size: const Size(1440, 900),
         prepare: (s) => s.selectedConversation = 'dana',
       );
-      expect(find.byType(ConversationHierarchy), findsOneWidget);
-      expect(
-        tester
-            .widget<ConversationHierarchy>(find.byType(ConversationHierarchy))
-            .sidebar,
-        true,
-      );
+      // Beside the list (a-he-home-desktop): the task column, 280.
+      expect(find.byType(ConversationTaskColumn), findsOneWidget);
+      expect(tester.getSize(find.byType(ConversationTaskColumn)).width, 280);
+      expect(find.byKey(const ValueKey('chat-task-1')), findsOneWidget);
+      // `info` puts the conversation's panel there: four of the team in lines, "משימות" in view without scrolling.
+      await tester.tap(find.byKey(const Key('chat-info')));
+      await tester.pumpAndSettle();
+      expect(find.byType(ConversationTasksPanel), findsOneWidget);
+      expect(find.byType(ConversationTaskColumn), findsNothing);
+      expect(find.byType(PersonRow), findsNWidgets(4));
+      expect(find.byKey(const ValueKey('chat-person-ido')), findsOneWidget);
+      expect(find.byKey(const Key('conversation-team')), findsOneWidget);
+      final heading = find.descendant(of: find.byType(ConversationTasksPanel), matching: find.text('Tasks'));
+      expect(heading.hitTestable(), findsOneWidget);
+      expect(tester.getBottomLeft(heading).dy, lessThan(900 * 0.6), reason: 'the tasks start high on the screen, not at its bottom');
+      expect(find.byKey(const ValueKey('chat-task-1')).hitTestable(), findsOneWidget);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('golden/tasks/chat-info-panel.png'));
+      await tester.tap(find.byKey(const Key('chat-info')));
+      await tester.pumpAndSettle();
+      expect(find.byType(ConversationTaskColumn), findsOneWidget);
       tester.platformDispatcher.textScaleFactorTestValue = 2;
       store.touch();
       await tester.pumpAndSettle();
-      expect(find.byType(ConversationHierarchy), findsOneWidget);
-      expect(
-        tester
-            .widget<ConversationHierarchy>(find.byType(ConversationHierarchy))
-            .sidebar,
-        false,
-      );
+      expect(find.byType(ConversationTasksPanel), findsNothing);
+      expect(find.byType(ConversationChips), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('a chat with the whole width has its tabs and the full panel', (tester) async {
+    await productApp(tester, backend: TaskBackend(), size: const Size(1440, 900), home: const ChatScreen(identityId: 'dana'));
+    expect(find.byKey(const ValueKey('chat-tab-1')), findsOneWidget);
+    expect(find.byType(ConversationTasksPanel), findsOneWidget);
+    expect(tester.getSize(find.byType(ConversationTasksPanel)).width, 320);
+    expect(find.byType(ConversationTaskColumn), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('chat-tab-1')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ConversationTaskList), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a chat on its own, not beside the list, has no task column', (tester) async {
+    await productApp(tester, backend: TaskBackend(), size: const Size(800, 900), home: const ChatScreen(identityId: 'dana'));
+    expect(find.byType(ConversationTaskColumn), findsNothing);
+    expect(find.byType(ConversationChips), findsOneWidget);
+  });
+
+  testWidgets('the team link has no count: the tree it opens has everyone who ever worked there', (tester) async {
+    await productApp(tester, backend: TaskBackend(), size: const Size(1440, 900), home: const ChatScreen(identityId: 'dana'));
+    expect(find.text('Dana’s team'), findsOneWidget);
+  });
+
+  testWidgets('the team chip: a face for one at work, the group icon for more', (tester) async {
+    await productApp(tester, backend: TaskBackend(), home: const ChatScreen(identityId: 'dana'));
+    final chip = find.byKey(const Key('conversation-team'));
+    expect(find.descendant(of: chip, matching: find.byWidgetPredicate((w) => w is Ic && w.name == 'group')), findsOneWidget);
+  });
 
   testWidgets(
     'keyboard and semantics expose activity and the completed worker at 200 percent',
@@ -1175,7 +1288,7 @@ void main() {
           size: const Size(1280, 900),
           home: const ChatScreen(identityId: 'dana'),
         );
-        expect(find.byKey(const Key('org-task-2')), findsOneWidget);
+        expect(find.byKey(const ValueKey('chat-task-1')), findsOneWidget);
         expect(tester.takeException(), isNull);
         await expectLater(
           find.byType(MaterialApp),

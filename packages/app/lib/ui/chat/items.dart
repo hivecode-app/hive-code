@@ -372,8 +372,14 @@ class QuoteStrip extends StatelessWidget {
 }
 
 class TextBubble extends StatefulWidget {
-  const TextBubble({super.key, required this.msg});
+  const TextBubble({super.key, required this.msg, this.from, this.footer = const []});
   final TextMsg msg;
+
+  /// The worker whose conversation it is: its name and role head the bubble (a-he-chat `.who`). Null: no head.
+  final String? from;
+
+  /// Under the text: the cards of the tasks opened in this turn (a-he-chat `.tref`).
+  final List<Widget> footer;
 
   /// Builds since the last reset, counted in debug and test builds only (test/perf_bench_test.dart).
   static int debugBuilds = 0;
@@ -425,7 +431,24 @@ class _TextBubbleState extends State<TextBubble> {
           Text(
             m.author!,
             style: TextStyle(fontFamily: kFont, fontSize: 13, fontWeight: FontWeight.w700, color: p.text),
-          ),
+          )
+        else if (widget.from != null)
+          Builder(builder: (context) {
+            final d = StoreScope.of(context).data;
+            if (d == null) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text.rich(
+                TextSpan(children: [
+                  TextSpan(text: d.who(widget.from!).name, style: TextStyle(fontWeight: FontWeight.w600, color: p.text)),
+                  TextSpan(text: '  ${d.roleLine(widget.from!)}'),
+                ]),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: T.small.copyWith(color: p.text2),
+              ),
+            );
+          }),
         if (images.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
@@ -446,11 +469,13 @@ class _TextBubbleState extends State<TextBubble> {
               ),
             ),
           ),
+        ...widget.footer,
+        if (widget.footer.isNotEmpty) const SizedBox(height: 14),
       ],
     );
     return Bubble(
       out: false,
-      wide: wide,
+      wide: wide || widget.footer.isNotEmpty,
       child: _WithMeta(
         meta: Meta(time: hm(m.ts)),
         // Folded: the bottom row is the "continue reading" link on the right, so the time stays left.
