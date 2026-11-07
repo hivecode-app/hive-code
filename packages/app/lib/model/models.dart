@@ -392,6 +392,7 @@ class UserMsg extends ChatItem {
     this.delivery = Delivery.delivered,
     this.priority = Priority.next,
     this.replyTo,
+    this.ref,
     this.attachments = const [],
     this.waitingOn,
     this.submitted = false,
@@ -403,6 +404,9 @@ class UserMsg extends ChatItem {
   Delivery delivery;
   Priority priority;
   final Quote? replyTo;
+
+  /// What it is about, for hq (`task-<id>`): sent from a task's page, it belongs to that task, not to whatever the worker does now.
+  final String? ref;
 
   /// His `now` waits for this running tool (one that is not safe to stop), until the worker reads it.
   WaitingOn? waitingOn;

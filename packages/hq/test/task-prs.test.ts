@@ -169,7 +169,7 @@ test('a queued task assigned to a busy standing worker cannot take the running t
     const catalog = new TaskCatalog(hq);
     const item = await catalog.item(active);
     assert(item.requests.some((r) => r.id === ask.id));
-    assert(catalog.activity(active).messages.some((m) => m.id === 'during-active'));
+    assert((await catalog.activity(active)).messages.some((m) => m.id === 'during-active'));
   } finally { await env.cleanup(); }
 });
 
@@ -182,7 +182,7 @@ test('an owner-visible note explicitly attached by the lead keeps its own source
     const file = JSON.stringify([{ id: 'lead-file', name: 'notes.pdf', mime: 'application/pdf', bytes: 10 }]);
     put.run('lead-note', 'yoav', 'owner', 'Proposed approach', `task-${proposal.id}`, file, env.clock.t);
     put.run('private-note', 'yoav', 'eli', 'Private discussion', `task-${proposal.id}`, null, env.clock.t);
-    const activity = new TaskCatalog(hq).activity(proposal);
+    const activity = await new TaskCatalog(hq).activity(proposal);
     assert.deepEqual(activity.messages.map((m) => [m.id, m.identity]), [['lead-note', 'yoav']]);
     assert.equal(activity.files[0]?.identity, 'yoav');
     assert.equal(activity.files[0]?.message, 'lead-note');

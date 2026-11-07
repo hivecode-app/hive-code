@@ -343,7 +343,9 @@ void main() {
   testWidgets('task files preserve task scope and open documents in the viewer', (tester) async {
     final backend = FilesBackend();
     await productApp(tester, backend: backend, home: const ProductTaskScreen(id: 77));
-    await tester.tap(find.byTooltip('Files'));
+    await tester.tap(find.byKey(const Key('task-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Files'));
     await tester.pumpAndSettle();
     expect(find.byType(FilesScreen), findsOneWidget);
     expect(backend.calls.last.task, 77);

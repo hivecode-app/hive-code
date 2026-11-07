@@ -741,7 +741,7 @@ class _Column extends StatelessWidget {
               if (i == shown) {
                 return Align(
                   alignment: AlignmentDirectional.centerStart,
-                  child: TextButton(key: Key('more-${stage.name}'), onPressed: onMore, child: Text(l.progressMore(more))),
+                  child: TextButton.icon(key: Key('more-${stage.name}'), onPressed: onMore, icon: const Ic('expand_more', size: 18), label: Text(l.progressMore(more))),
                 );
               }
               final t = tasks[i];

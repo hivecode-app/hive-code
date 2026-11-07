@@ -2942,7 +2942,13 @@
   "progressNoneReleased": "Nothing released this week",
   "progressNoneHere": "No tasks here",
   "progressMore": "{count} more",
-  "@progressMore": {"placeholders": {"count": {"type": "int"}}},
+  "@progressMore": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "progressProposalBy": "Proposed by {name}",
   "progressDetailAsk": "Waiting for your answer",
   "progressDetailGo": "Waiting for your approval",
@@ -2956,7 +2962,13 @@
   "progressDetailApproved": "Approved in review",
   "progressView": "View",
   "progressOptions": "Options",
-  "@progressProposalBy": {"placeholders": {"name": {"type": "String"}}},
+  "@progressProposalBy": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "progressAllProjects": "All projects",
   "progressNewTask": "New task",
   "progressChooseProject": "Choose a project",
@@ -2972,34 +2984,18 @@
   "progressCompleted": "Completed",
   "progressCancelled": "Cancelled",
   "progressShowCompleted": "Include completed tasks",
-  "progressActivity": "Activity",
   "progressActivityFailed": "Activity could not be loaded. Try again.",
   "progressNoActivity": "No activity for this stage yet.",
   "progressPullRequests": "Pull requests",
-  "progressFiles": "Files",
   "progressNoFiles": "No files attached yet.",
-  "progressSource": "Open source message",
   "progressSourceMissing": "The source message is unavailable. You can continue in this conversation.",
-  "progressStale": "Could not verify the latest review and checks.",
-  "progressApproved": "Review approved",
-  "progressChanges": "Changes requested",
-  "progressPendingReview": "Review pending",
   "progressCiPassed": "Checks passed",
   "progressCiFailed": "Checks failed",
   "progressCiPending": "Checks pending",
-  "progressCiUnknown": "Checks unavailable",
   "progressTeamFailed": "The team could not be loaded. The conversation is still available.",
   "progressNoTeam": "No team members to show.",
   "progressDraft": "Task description: ",
   "progressRefresh": "Refresh",
-  "progressRequestedBy": "Requested by {name}",
-  "@progressRequestedBy": {
-    "placeholders": {
-      "name": {
-        "type": "String"
-      }
-    }
-  },
   "progressTeamOf": "{name}’s team",
   "@progressTeamOf": {
     "placeholders": {
@@ -3008,18 +3004,9 @@
       }
     }
   },
-  "progressStageActivity": "Activity: {stage}",
-  "@progressStageActivity": {
-    "placeholders": {
-      "stage": {
-        "type": "String"
-      }
-    }
-  },
   "progressUnknown": "Progress is being verified",
   "progressLeadMissing": "This project has no team lead yet. Choose another project.",
   "progressWorkCompleted": "Work completed",
-  "progressViewActivity": "View activity",
   "progressStageCount": "Stage {current} of {total}",
   "@progressStageCount": {
     "placeholders": {
@@ -3031,13 +3018,6 @@
       }
     }
   },
-  "progressTaskCreated": "Task created",
-  "progressWorkStarted": "Work started",
-  "progressQueued": "Added to the queue",
-  "progressWorkPaused": "Work paused",
-  "progressWorkResumed": "Work resumed",
-  "progressWorkInterrupted": "Work interrupted",
-  "progressDecisionPending": "Waiting for a decision",
   "setupContinue": "Continue",
   "setupAlmostReady": "Almost ready",
   "setupServer": "Server connected",
@@ -3592,5 +3572,103 @@
   },
   "chatNoTasks": "No tasks in this conversation",
   "chatNoNotes": "No notes or documents in this conversation yet",
-  "chatTasksFailed": "Tasks didn't load"
+  "chatTasksFailed": "Tasks didn't load",
+  "taskOwner": "Owner",
+  "taskOpenedBy": "Opened by",
+  "taskCode": "Code",
+  "taskStage": "Stage",
+  "taskSource": "Source",
+  "taskChecks": "Checks",
+  "taskNext": "Next",
+  "taskActivity": "Activity",
+  "taskNotesFiles": "Notes and files",
+  "taskNote": "Note",
+  "taskFile": "File",
+  "taskSourceYours": "Your message, {time}",
+  "@taskSourceYours": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "taskMore": "More",
+  "evOpened": "The task was opened",
+  "evOpenedBy": "{name} opened the task",
+  "@evOpenedBy": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "evOpenedByYou": "You opened the task",
+  "evAssigned": "assigned to {name}",
+  "@evAssigned": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "evStarted": "Work started",
+  "evPr": "PR opened",
+  "evChecksPassed": "Automated checks passed",
+  "evChecksFailed": "Automated checks failed",
+  "evReviewApproved": "Review approved",
+  "evReviewChanges": "Review asked for fixes",
+  "evMerged": "Merged",
+  "evGo": "Approval request: {title}",
+  "@evGo": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "evAsk": "Question for you: {title}",
+  "@evAsk": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "evLogin": "Sign-in request: {title}",
+  "@evLogin": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "evDeployed": "Released",
+  "evFileYours": "You sent {name}",
+  "@evFileYours": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "evFileFrom": "File from {who}: {name}",
+  "@evFileFrom": {
+    "placeholders": {
+      "who": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "evDone": "The task finished",
+  "nextStart": "Start",
+  "nextReview": "Review and checks",
+  "nextRelease": "Release",
+  "nextYourGo": "Your approval to release",
+  "nextYourCheck": "Your check",
+  "nextNothing": "Nothing",
+  "taskMessageFailed": "The message was not sent. It waits in the chat to be sent again.",
+  "evUnread": "GitHub could not be read just now. Showing what was known."
 }

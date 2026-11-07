@@ -36,9 +36,30 @@ class TaskBackend extends FakeBackend {
   List<OrgPerson>? customPeople;
   Completer<CommandResult>? startReply;
   List<Map<String, dynamic>> eventLog = [];
+  List<Map<String, dynamic>>? timeline;
+  static const pr12 = 'https://github.com/example/project/pull/12';
+  List<Map<String, dynamic>> get demoTimeline {
+    int at(int minutes) => kDemoNow.subtract(Duration(minutes: minutes)).millisecondsSinceEpoch;
+    return [
+      {'kind': 'opened', 'at': at(60), 'by': 'dana', 'worker': 'maya'},
+      {'kind': 'pr', 'at': at(40), 'url': pr12, 'number': 12, 'by': 'maya'},
+      {'kind': 'checks', 'at': at(30), 'url': pr12, 'ci': 'passed'},
+      {'kind': 'review', 'at': at(20), 'url': pr12, 'review': 'approved', 'quote': he ? 'בדקתי ש-`upload.resume() != null` ב-`upload_io.dart` אחרי ניתוק. **אושר.**' : 'Verified `upload.resume() != null` after disconnecting. Approved.'},
+    ];
+  }
   bool accepted = false;
   int released = 0;
   bool orphanGo = false;
+  final sent = <UserMsg>[];
+  bool failSend = false;
+  @override
+  Future<CommandResult> send(String identityId, UserMsg msg) async {
+    sent.add(msg);
+    if (failSend) return const CommandResult.fail('refused');
+    msg.delivery = Delivery.delivered;
+    return const CommandResult.ok();
+  }
+
   List<TaskProgress> get tasks => [
     if (orphanGo)
       const TaskProgress(id: 201, title: 'A finished report', project: 'lumo', state: 'done', outcome: 'completed'),
@@ -170,6 +191,9 @@ class TaskBackend extends FakeBackend {
       ],
       files: const [],
       events: eventLog,
+      timeline: [
+        for (final e in timeline ?? (id == 3 ? demoTimeline : <Map<String, dynamic>>[])) ?TaskEvent.fromJson(e),
+      ],
     );
   }
 
@@ -452,8 +476,7 @@ void main() {
         home: const ProductTaskScreen(id: 3),
       );
       expect(find.text('Upload a file from the phone'), findsOneWidget);
-      expect(find.text('Pull requests'), findsOneWidget);
-      expect(find.text('Review approved'), findsOneWidget);
+      expect(find.text('PR #12'), findsOneWidget, reason: 'the code link comes with the task, not its activity');
       backend.failedActivity = false;
       await tester.ensureVisible(find.byKey(const Key('retry-task-activity')));
       await tester.tap(find.byKey(const Key('retry-task-activity')));
@@ -628,7 +651,7 @@ void main() {
     await tester.tap(find.byKey(const Key('task-3')));
     await tester.pumpAndSettle();
     expect(find.text('Progress is being verified'), findsOneWidget);
-    expect(find.text('Pull requests'), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-pr-${TaskBackend.pr12}')), findsOneWidget);
   });
 
   testWidgets(
@@ -651,51 +674,49 @@ void main() {
   );
 
   testWidgets(
-    'stage activity shows actual transitions and excludes label or priority edits',
+    'the activity says what happened, in order, and leaves out what it does not know',
     (tester) async {
+      int at(int m) => kDemoNow.subtract(Duration(minutes: m)).millisecondsSinceEpoch;
       final backend = TaskBackend()
-        ..eventLog = [
-          {
-            'type': 'task.labels',
-            'data': '{}',
-            'ts': kDemoNow.millisecondsSinceEpoch,
-          },
-          {
-            'type': 'task.priority',
-            'data': '{}',
-            'ts': kDemoNow.millisecondsSinceEpoch,
-          },
-          {
-            'type': 'task.state',
-            'data': '{"state":"running"}',
-            'ts': kDemoNow.millisecondsSinceEpoch,
-          },
-          {
-            'type': 'task.state',
-            'data': '{"state":"done"}',
-            'ts': kDemoNow.millisecondsSinceEpoch,
-          },
+        ..timeline = [
+          {'kind': 'opened', 'at': at(90), 'by': 'owner', 'worker': 'ido'},
+          {'kind': 'started', 'at': at(80), 'worker': 'ido'},
+          {'kind': 'pr', 'at': at(60), 'url': TaskBackend.pr12, 'number': 12},
+          {'kind': 'checks', 'at': at(50), 'url': TaskBackend.pr12, 'ci': 'failed'},
+          {'kind': 'review', 'at': at(40), 'url': TaskBackend.pr12, 'review': 'changes', 'quote': 'The retry loses the file name.'},
+          {'kind': 'merged', 'at': at(20), 'url': TaskBackend.pr12, 'number': 12},
+          {'kind': 'a-newer-kind', 'at': at(10)},
+          {'kind': 'deployed', 'at': at(5)},
         ];
       await productApp(
         tester,
         backend: backend,
         home: const ProductTaskScreen(id: 2),
       );
-      expect(find.text('Work started'), findsOneWidget);
-      expect(find.text('Work completed'), findsOneWidget);
-      expect(
-        find.text('In development'),
-        findsOneWidget,
-        reason: 'the timeline label is not duplicated for admin events',
-      );
+      final lines = [
+        'You opened the task, assigned to $kFSIעידו$kPDI',
+        'Work started',
+        'PR opened',
+        'Automated checks failed',
+        'Review asked for fixes. "${kFSI}The retry loses the file name.$kPDI"',
+        'Merged',
+        'Released',
+      ];
+      for (final line in lines) {
+        expect(find.text(line, skipOffstage: false), findsWidgets, reason: line);
+      }
+      // "Released" is also the stages' last word: the activity's is the last one on the page.
+      final ys = [for (final line in lines) tester.getTopLeft(find.text(line, skipOffstage: false).last).dy];
+      expect(ys, [...ys]..sort(), reason: 'oldest first');
+      expect(find.text('PR #12', skipOffstage: false), findsNWidgets(2), reason: 'the PR and the merge');
     },
   );
 
   testWidgets(
-    'timeline sequence at 200 percent remains read-only and saves selected activity',
+    'the stages at 200 percent are the current one and its place, read-only',
     (tester) async {
       final backend = TaskBackend();
-      final store = await productApp(
+      await productApp(
         tester,
         backend: backend,
         scale: 2,
@@ -703,11 +724,7 @@ void main() {
       );
       expect(find.text('Stage 3 of 5'), findsOneWidget);
       expect(find.byType(ChoiceChip), findsNothing);
-      await tester.tap(find.byKey(const Key('choose-stage-activity')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('stage-proposal')));
-      await tester.pumpAndSettle();
-      expect(store.taskActivityStages[3], 'proposal');
+      expect(find.byKey(const Key('stage-proposal')), findsNothing);
       expect(
         tester.widget<TaskTimeline>(find.byType(TaskTimeline)).current,
         TaskStage.review,
@@ -763,7 +780,9 @@ void main() {
       backend: backend,
       home: ProductTaskScreen(id: 3, initial: backend.tasks[2]),
     );
-    await tester.tap(find.byTooltip('Refresh'));
+    await tester.tap(find.byKey(const Key('task-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Refresh'));
     await tester.pump();
     expect(backend.replies.length, 2);
     backend.replies[1].complete(
@@ -786,7 +805,7 @@ void main() {
     expect(find.text('Stale details'), findsNothing);
   });
 
-  testWidgets('request navigation points into the detail direction in RTL', (
+  testWidgets('a request on the task is a card with its own action, its kind in its symbol', (
     tester,
   ) async {
     await productApp(
@@ -795,15 +814,9 @@ void main() {
       language: 'he',
       home: const ProductTaskScreen(id: 2),
     );
-    final request = tester.widget<ListTile>(
-      find.byWidgetPredicate(
-        (w) =>
-            w is ListTile &&
-            w.leading is Ic &&
-            (w.leading as Ic).name == 'front_hand',
-      ),
-    );
-    expect((request.trailing as Ic).name, 'chevron_left');
+    final card = find.ancestor(of: find.byKey(const ValueKey('task-request-55')), matching: find.byType(Row)).first;
+    expect(find.descendant(of: card, matching: find.byWidgetPredicate((w) => w is Ic && w.name == 'help')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('צפייה')), findsOneWidget);
   });
 
   testWidgets(
@@ -1062,23 +1075,92 @@ void main() {
     expect(find.descendant(of: chip, matching: find.byWidgetPredicate((w) => w is Ic && w.name == 'group')), findsOneWidget);
   });
 
+  testWidgets('a message from the task page is about the task, stays as a draft, and says when it did not get there', (tester) async {
+    final backend = TaskBackend();
+    await productApp(
+      tester,
+      backend: backend,
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: TextButton(
+            key: const Key('open'),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ProductTaskScreen(id: 3))),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('open')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('task-message')), 'half written');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('open')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(const Key('task-message'))).controller!.text, 'half written');
+    await tester.tap(find.byKey(const Key('task-send')));
+    await tester.pumpAndSettle();
+    expect(backend.sent.last.text, 'half written');
+    expect(backend.sent.last.ref, 'task-3', reason: 'it belongs to this task, not to whatever the worker does now');
+    expect(find.byKey(const Key('task-message-failed')), findsNothing);
+    backend.failSend = true;
+    await tester.enterText(find.byKey(const Key('task-message')), 'again');
+    await tester.pump();
+    expect(tester.widget<IconButton>(find.byKey(const Key('task-send'))).onPressed, isNotNull);
+    await tester.tap(find.byKey(const Key('task-send')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('task-message-failed')), findsOneWidget);
+    expect(tester.widget<TextField>(find.byKey(const Key('task-message'))).controller!.text, '');
+  });
+
+  testWidgets('the keyboard lifts the message line with the page instead of covering it', (tester) async {
+    await productApp(tester, backend: TaskBackend(), home: const ProductTaskScreen(id: 3));
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    addTearDown(tester.view.resetViewInsets);
+    await tester.pumpAndSettle();
+    expect(tester.getBottomLeft(find.byKey(const Key('task-send'))).dy, lessThanOrEqualTo(844 - 300));
+  });
+
+  testWidgets('on a computer the facts are a side panel and the message opens the chat', (tester) async {
+    await productApp(tester, backend: TaskBackend(), size: const Size(1440, 900), home: const ProductTaskScreen(id: 3));
+    expect(find.byKey(const Key('task-message')), findsNothing);
+    for (final label in ['Stage', 'Owner', 'Checks', 'Next']) {
+      expect(find.text(label), findsOneWidget, reason: label);
+    }
+    expect(tester.getTopLeft(find.text('Next')).dx, greaterThan(1440 - 340), reason: 'in the side panel, not under the activity');
+    await tester.tap(find.byKey(const Key('task-message-wide')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ChatScreen), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('in English, Hebrew names and code in a quote keep their own direction inside the line', (tester) async {
+    await productApp(tester, backend: TaskBackend(he: true), home: const ProductTaskScreen(id: 3));
+    final lines = tester.widgetList<Text>(find.byType(Text)).map((t) => t.data ?? '').toList();
+    final opened = lines.firstWhere((l) => l.contains('assigned to'));
+    expect(opened, contains(kFSI), reason: 'a name is isolated, so the line does not turn around');
+    final review = lines.firstWhere((l) => l.contains('upload.resume()'));
+    expect(review, contains('${kLRI}upload.resume()\u00A0!=\u00A0null$kPDI'), reason: 'code keeps left-to-right inside a Hebrew quote, in one piece');
+    expect(review, isNot(contains('`')));
+    expect(review, contains('upload_io.dart'), reason: 'emphasis marks go, a name in code keeps its underscore');
+    expect(review, isNot(contains('**')));
+  });
+
   testWidgets(
-    'keyboard and semantics expose activity and the completed worker at 200 percent',
+    'semantics say each stage and where the task is in it',
     (tester) async {
-      final store = await productApp(
+      await productApp(
         tester,
         backend: TaskBackend(),
-        scale: 2,
         home: const ProductTaskScreen(id: 3),
       );
       final semantics = tester.ensureSemantics();
-      await openByKeyboard(tester, const Key('choose-stage-activity'));
-      expect(
-        tester.getSemantics(find.byKey(const Key('stage-proposal'))).label,
-        contains('Stage complete'),
-      );
-      await openByKeyboard(tester, const Key('stage-proposal'));
-      expect(store.taskActivityStages[3], 'proposal');
+      final proposal = tester.getSemantics(find.byKey(const Key('stage-proposal')));
+      expect(proposal.label, 'Proposal');
+      expect(proposal.value, 'Stage complete');
+      expect(tester.getSemantics(find.byKey(const Key('stage-review'))).value, 'Current stage');
+      final link = find.byKey(const ValueKey('task-pr-${TaskBackend.pr12}'));
+      expect(tester.getSemantics(find.ancestor(of: link, matching: find.byType(Semantics)).first).flagsCollection.isLink, isTrue);
       expect(tester.takeException(), isNull);
       semantics.dispose();
     },
@@ -1177,7 +1259,7 @@ void main() {
       backend: TaskBackend(),
       home: const ProductTaskScreen(id: 3),
     );
-    await tester.tap(find.text('Pull requests'));
+    await tester.tap(find.byKey(const ValueKey('task-pr-${TaskBackend.pr12}')));
     await tester.pumpAndSettle();
     expect(opened, 'https://github.com/example/project/pull/12');
   });

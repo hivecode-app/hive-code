@@ -166,11 +166,31 @@ class TaskActivity {
     this.messages = const [],
     this.files = const [],
     this.events = const [],
+    this.timeline = const [],
   });
   final List<Map<String, dynamic>> messages, files, events;
+
+  /// What happened, in order, from hq: facts the page says in his words.
+  final List<TaskEvent> timeline;
   factory TaskActivity.fromJson(Map<String, dynamic> j) => TaskActivity(
     messages: taskRows(j['messages']),
     files: taskRows(j['files']),
     events: taskRows(j['events']),
+    timeline: taskRows(j['timeline']).map(TaskEvent.fromJson).whereType<TaskEvent>().toList(),
   );
+}
+
+/// One line of a task's activity (hq `TaskEvent`). An unknown kind from a newer hq is left out, not guessed.
+class TaskEvent {
+  const TaskEvent({required this.kind, required this.at, this.data = const {}});
+  static const kinds = {'opened', 'started', 'pr', 'checks', 'review', 'merged', 'request', 'awaiting', 'deployed', 'file', 'unread', 'done', 'cancelled'};
+  final String kind;
+  final DateTime at;
+  final Map<String, dynamic> data;
+  String? str(String key) => data[key] as String?;
+  static TaskEvent? fromJson(Map<String, dynamic> j) {
+    final kind = j['kind'], at = _ms(j['at']);
+    if (kind is! String || !kinds.contains(kind) || at == null) return null;
+    return TaskEvent(kind: kind, at: at, data: j);
+  }
 }

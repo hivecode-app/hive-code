@@ -156,4 +156,7 @@ const Map<String, IconData> kIcons = {
   'rate_review': Symbols.rate_review_rounded,
   'contact_support': Symbols.contact_support_rounded,
   'hourglass_top': Symbols.hourglass_top_rounded,
+  'arrow_upward': Symbols.arrow_upward_rounded,
+  'add_task': Symbols.add_task_rounded,
+  'merge': Symbols.merge_rounded,
 };

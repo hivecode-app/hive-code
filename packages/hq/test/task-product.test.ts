@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { charter, makeEnv } from './helpers.ts';
 import { ensureRuntimeIdentity } from '../src/org.ts';
-import { TaskCatalog, orgTree, prEvidence, sourceTask, taskRequests, taskStage, type PrEvidence } from '../src/task-product.ts';
+import { TaskCatalog, orgTree, prEvidence, sourceTask, taskRequests, taskStage, taskTimeline, type PrEvidence } from '../src/task-product.ts';
 import { search } from '../src/search.ts';
 import { readCharter } from '../src/workspace.ts';
 
@@ -62,6 +62,63 @@ test('only what waits on him is "approval": an approved PR is still in review, a
     assert.equal(taskStage(done, [{ ...pr, state: 'CLOSED' }], [], false), null, 'a closed PR released nothing');
     assert.equal(taskStage({ ...done, awaiting: 'check' }, [], [], false), 'approval');
     assert.equal(taskStage({ ...done, awaiting: 'deploy' }, [], [], true), 'released');
+  } finally { await env.cleanup(); }
+});
+
+test('the activity is what happened, in order: opened, the PR and its checks and review on GitHub, the merge, the deploy', async () => {
+  const env = await makeEnv({ noStart: true });
+  try {
+    const { hq } = env; await hq.start({ timers: false }); hq.store.setToggle('scheduler', false);
+    const at = (iso: string) => Date.parse(iso);
+    const j = { url: pr.url, number: 7, headRefOid: pr.head, state: 'MERGED', createdAt: '2026-11-01T10:31:00Z', mergedAt: '2026-11-01T10:50:00Z',
+      comments: [{ body: `reviewed: ${pr.head}\n**החלטה: approve**`, createdAt: '2026-11-01T10:41:00Z' }],
+      statusCheckRollup: [{ name: 'company-ci', conclusion: 'SUCCESS', startedAt: '2026-11-01T10:32:00Z', completedAt: '2026-11-01T10:38:00Z' }] };
+    const e = prEvidence(j, 1, 'company-ci');
+    assert.deepEqual([e.number, e.opened_at, e.checks_at, e.reviewed_at, e.merged_at],
+      [7, at('2026-11-01T10:31:00Z'), at('2026-11-01T10:38:00Z'), at('2026-11-01T10:41:00Z'), at('2026-11-01T10:50:00Z')]);
+    assert.equal(prEvidence({ ...j, comments: [] }, 1, 'company-ci').reviewed_at, null, 'no decision, no review time');
+    const t = hq.scheduler.addTask({ title: 'Work', project: 'agent-company', state: 'done' });
+    hq.store.db.prepare('INSERT INTO deploys (project, sha, tasks, created_at) VALUES (?, ?, ?, ?)').run('agent-company', 'abc', JSON.stringify([t.id]), at('2026-11-01T11:00:00Z'));
+    const kinds = taskTimeline(hq, { ...t, created_at: at('2026-11-01T10:05:00Z'), updated_at: at('2026-11-01T11:05:00Z') }, [e, { ...pr, url: 'x', error: true, checked_at: at('2026-11-01T11:10:00Z') }], [], [], [])
+      .map((x) => x.kind);
+    assert.deepEqual(kinds, ['opened', 'pr', 'checks', 'review', 'merged', 'deployed', 'done', 'unread'], 'a PR that could not be read is said, not skipped');
+  } finally { await env.cleanup(); }
+});
+
+test('the activity keeps what happened: a review on an earlier head, an answered GO, a failed read; it says nothing twice', async () => {
+  const env = await makeEnv({ noStart: true });
+  try {
+    const { hq } = env; await hq.start({ timers: false }); hq.store.setToggle('scheduler', false);
+    const at = (iso: string) => Date.parse(iso);
+    const j = { url: pr.url, number: 7, headRefOid: 'b'.repeat(40), state: 'OPEN', createdAt: '2026-11-01T10:31:00Z',
+      comments: [
+        { body: `## סקירה בלתי תלויה\nreviewed: ${pr.head}\n**החלטה: changes**\n\n1. **[בינוני]** \`a.ts:3\` שובר`, createdAt: '2026-11-01T10:41:00Z' },
+        { body: `## סקירה מצומצמת\nreviewed: ${'b'.repeat(40)}\n> מכסה גם סירוב וגם \`רק הפעם\`\n**החלטה: approve**`, createdAt: '2026-11-01T10:55:00Z' },
+      ],
+      reviews: [{ state: 'COMMENTED', body: 'nit', submittedAt: '2026-11-01T10:45:00Z', commit: { oid: pr.head } }] };
+    const e = prEvidence(j, 1, null);
+    assert.deepEqual(e.reviews, [
+      { at: at('2026-11-01T10:41:00Z'), review: 'changes', quote: null },
+      { at: at('2026-11-01T10:55:00Z'), review: 'approved', quote: 'מכסה גם סירוב וגם `רק הפעם`' },
+    ], 'every decision on any head; only its own summary line is quoted, never a finding');
+    assert.equal(e.quote, 'מכסה גם סירוב וגם `רק הפעם`');
+    const t = hq.scheduler.addTask({ title: 'Work', identity: 'eli', project: 'agent-company', state: 'running' });
+    const go = hq.inbox.add({ kind: 'go', title: 'Release?', from_identity: 'eli', ref: `task-${t.id}` });
+    hq.store.db.prepare("UPDATE inbox SET state = 'done' WHERE id = ?").run(go.id);
+    hq.store.db.prepare('INSERT INTO deploys (project, sha, tasks, created_at) VALUES (?, ?, ?, ?)').run('agent-company', 'bad', 'not json', 1);
+    const awaiting = (ts: number, a: string) => ({ ts, type: 'task.awaiting', data: JSON.stringify({ id: t.id, awaiting: a }) });
+    const row = hq.scheduler.task(t.id)!;
+    const catalog = new TaskCatalog(hq);
+    catalog.readPr = async () => { throw new Error('gh: down'); };
+    for (const check of ['', 'company-ci']) hq.store.setMeta(`task-pr:${pr.url}:${check}`, JSON.stringify({ ...e, checked_at: hq.store.now() - 120_000 }));
+    hq.store.db.prepare('UPDATE tasks SET pr = ? WHERE id = ?').run(pr.url, t.id);
+    const activity = await catalog.activity(hq.scheduler.task(t.id)!);
+    const kinds = activity.timeline.map((x) => x.kind);
+    assert(kinds.includes('pr') && kinds.filter((k) => k === 'review').length === 2, 'what was known stays when GitHub cannot be read');
+    assert(kinds.includes('unread'), 'and the activity says it was not read now');
+    assert(activity.timeline.some((x) => x.kind === 'request' && x.request === 'go'), 'a GO he already gave stays in the activity');
+    const twice = taskTimeline(hq, row, [], [], [awaiting(10, 'deploy'), awaiting(20, 'deploy'), awaiting(30, 'check')], []);
+    assert.deepEqual(twice.filter((x) => x.kind === 'awaiting').map((x) => x.kind === 'awaiting' && x.awaiting), ['deploy', 'check'], 'a new note on the same wait is not a new line');
   } finally { await env.cleanup(); }
 });
 
@@ -144,7 +201,7 @@ test('tree includes completed workers and their tasks; task notes and files rema
     const tree = orgTree(hq);
     assert(tree.people.find((p) => p.id === 'finished-worker')?.tasks.some((x) => x.id === t.id));
     assert(tree.tree.some((p) => JSON.stringify(p).includes('finished-worker')));
-    const activity = new TaskCatalog(hq).activity(t);
+    const activity = await new TaskCatalog(hq).activity(t);
     assert.deepEqual(activity.messages.map((m) => m.id), ['note']);
     assert.equal(activity.files[0]?.message, 'note');
     const hits = search(hq, 'Unique review sentence').results;

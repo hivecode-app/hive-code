@@ -15,7 +15,26 @@ export interface PrEvidence {
   url: string; head: string; state: string; draft: boolean; merged: boolean;
   review: 'approved' | 'changes' | 'pending'; ci: 'passed' | 'failed' | 'pending' | 'unknown';
   quote: string | null; checked_at: number; error?: boolean;
+  /** When it happened on GitHub, for the task's activity; absent in what was read before them. */
+  number?: number; opened_at?: number | null; merged_at?: number | null; reviewed_at?: number | null; checks_at?: number | null;
+  /** Every decision a review said on it, on any head: the activity keeps "asked for fixes" after the fix was pushed. */
+  reviews?: { at: number; review: 'approved' | 'changes'; quote: string | null }[];
 }
+/** One line of the task's activity, in the order it happened. Facts only: the app says them in his words. */
+export type TaskEvent = { at: number } & (
+  | { kind: 'opened'; by: string | null; worker: string | null }
+  | { kind: 'started'; worker: string | null }
+  | { kind: 'pr'; url: string; number: number | null; by: string | null }
+  | { kind: 'checks'; url: string; ci: PrEvidence['ci'] }
+  | { kind: 'review'; url: string; review: 'approved' | 'changes'; quote: string | null }
+  | { kind: 'merged'; url: string; number: number | null }
+  | { kind: 'request'; request: 'ask' | 'go' | 'login'; title: string; by: string | null }
+  | { kind: 'awaiting'; awaiting: string }
+  | { kind: 'deployed' }
+  | { kind: 'file'; name: string; mime: string; mine: boolean; identity: string | null }
+  | { kind: 'unread'; url: string }
+  | { kind: 'done' }
+  | { kind: 'cancelled' });
 interface Message { id: string; body: string; from_identity: string; to_identity: string; ref: string | null; shift_id: string | null; created_at: number; attachments: string | null }
 export interface TaskRequest { id: number; kind: string; title: string; asked_by: string | null; task: number | null; ref: string | null; created_at: number }
 
@@ -42,6 +61,17 @@ export function taskRequests(hq: Hq): TaskRequest[] {
     id: i.id, kind: i.kind, title: i.headline ?? i.title, asked_by: i.from_identity,
     task: sourceTask(hq, i.from_identity, i.created_at, i.ref), ref: i.ref, created_at: i.created_at,
   }));
+}
+
+/** Everything the task's worker asked him about it, answered or not: the activity keeps a GO after it was given. */
+export function taskRequestHistory(hq: Hq, task: TaskRow): TaskRequest[] {
+  if (!task.identity) return [];
+  // Only what could be its own: named for it, or asked since it was opened (the worker's earlier tasks are not read).
+  const rows = hq.store.db.prepare(`SELECT id, kind, title, headline, from_identity, ref, created_at FROM inbox WHERE from_identity = ? AND kind IN ('ask', 'go', 'login')
+    AND (ref IN (?, ?) OR created_at >= ?) ORDER BY created_at, id`)
+    .all(task.identity, `task-${task.id}`, `task:${task.id}`, task.created_at) as { id: number; kind: string; title: string; headline: string | null; from_identity: string; ref: string | null; created_at: number }[];
+  return rows.map((i) => ({ id: i.id, kind: i.kind, title: i.headline ?? i.title, asked_by: i.from_identity, task: sourceTask(hq, i.from_identity, i.created_at, i.ref), ref: i.ref, created_at: i.created_at }))
+    .filter((r) => r.task === task.id);
 }
 
 export function taskMessages(hq: Hq, task: TaskRow): Message[] {
@@ -83,9 +113,14 @@ export function branchPrUrls(task: TaskRow, prs: { url: string; head: string }[]
 /** error: the last read failed, and prs is what was known before it (maybe nothing). */
 interface BranchPrs { at: number; prs: { url: string; head: string }[]; error?: boolean }
 
+/** The tasks a deploy row names: one bad row does not take every task's page down with it. */
+function deployTasks(d: { tasks: string }): number[] {
+  try { const v = JSON.parse(d.tasks); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+
 export function wasReleased(hq: Hq, task: TaskRow): boolean {
   return (hq.store.db.prepare('SELECT tasks FROM deploys WHERE project = ?').all(task.project) as { tasks: string }[])
-    .some((r) => (JSON.parse(r.tasks) as number[]).includes(task.id));
+    .some((r) => deployTasks(r).includes(task.id));
 }
 
 /** The stage he reads: what the task waits for, not who is at the keyboard. Anything that waits on him (a GO, a
@@ -104,10 +139,17 @@ export function taskStage(task: TaskRow, prs: PrEvidence[], requests: TaskReques
   return 'development';
 }
 
+/** What a review says to him in one line: its own summary line (a markdown quote, "> …"), never its findings or
+ * its markers. A review without one is not quoted. */
+export function reviewQuote(body: string | null | undefined): string | null {
+  const line = (body ?? '').split('\n').map((l) => l.trim()).find((l) => /^>\s*\S/.test(l));
+  return line ? line.replace(/^>\s*/, '').trim().slice(0, 300) : null;
+}
+
 /** Parse GitHub facts. A review comment approves only the exact head it names. A green check for a
  * different head, a stale approve, an empty rollup or a failed read never becomes "passed". */
 export function prEvidence(j: Record<string, any>, now: number, requiredCheck: string | null): PrEvidence {
-  const comments = (j.comments ?? []) as { body: string }[];
+  const comments = (j.comments ?? []) as { body: string; createdAt?: string }[];
   const current = comments.filter((c) => c.body.split('\n').some((line) => line.trim() === `reviewed: ${j.headRefOid}`)).at(-1)?.body;
   const formal = (j.reviews ?? []).filter((r: any) => r.commit?.oid === j.headRefOid).at(-1);
   const review = current?.includes('**החלטה: changes**') || formal?.state === 'CHANGES_REQUESTED' ? 'changes'
@@ -116,8 +158,22 @@ export function prEvidence(j: Record<string, any>, now: number, requiredCheck: s
   const states = checks.map((c: any) => c.conclusion || c.state || c.status);
   const ci = !states.length ? 'unknown' : states.some((s: string) => ['FAILURE','ERROR','CANCELLED','TIMED_OUT','ACTION_REQUIRED'].includes(s)) ? 'failed'
     : states.every((s: string) => ['SUCCESS','NEUTRAL','SKIPPED'].includes(s)) ? 'passed' : 'pending';
+  const ms = (v: unknown) => typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? Date.parse(v) : null;
+  const decided = review === 'pending' ? null : current
+    ? ms(comments.filter((c) => c.body === current).at(-1)?.createdAt) : ms(formal?.submittedAt);
+  const decision = (body: string) => body.includes('**החלטה: changes**') ? 'changes' as const : body.includes('**החלטה: approve**') ? 'approved' as const : null;
+  const reviews = [
+    ...comments.flatMap((c) => { const r = decision(c.body), at = ms(c.createdAt); return r && at != null ? [{ at, review: r, quote: reviewQuote(c.body) }] : []; }),
+    ...(j.reviews ?? []).flatMap((r: any) => {
+      const review = r.state === 'APPROVED' ? 'approved' as const : r.state === 'CHANGES_REQUESTED' ? 'changes' as const : null, at = ms(r.submittedAt);
+      return review && at != null ? [{ at, review, quote: reviewQuote(r.body) }] : [];
+    }),
+  ].sort((a, b) => a.at - b.at);
+  const done = ci === 'passed' || ci === 'failed' ? checks.map((c: any) => ms(c.completedAt) ?? ms(c.startedAt)).filter((v: number | null): v is number => v != null) : [];
   return { url: j.url, head: j.headRefOid, state: j.state, draft: j.isDraft === true, merged: !!j.mergedAt,
-    review, ci, quote: current ?? formal?.body ?? null, checked_at: now };
+    review, ci, quote: reviewQuote(current ?? formal?.body), checked_at: now, reviews,
+    number: typeof j.number === 'number' ? j.number : undefined, opened_at: ms(j.createdAt), merged_at: ms(j.mergedAt),
+    reviewed_at: decided, checks_at: done.length ? Math.max(...done) : null };
 }
 
 const exec = promisify(execFile);
@@ -179,7 +235,7 @@ export class TaskCatalog {
   }
   // Read-only GitHub lookup, independent of scheduler/board. No writes to GitHub, tasks or worker state.
   readPr = async (url: string, check: string | null): Promise<PrEvidence> => {
-    const { stdout } = await exec('gh', ['pr', 'view', url, '--json', 'url,state,isDraft,headRefOid,mergedAt,reviews,comments,statusCheckRollup'], { timeout: 4000, maxBuffer: 1024 * 1024 });
+    const { stdout } = await exec('gh', ['pr', 'view', url, '--json', 'url,number,createdAt,state,isDraft,headRefOid,mergedAt,reviews,comments,statusCheckRollup'], { timeout: 4000, maxBuffer: 1024 * 1024 });
     return prEvidence(JSON.parse(stdout), this.hq.store.now(), check);
   };
   private known(url: string, check: string | null): PrEvidence | undefined {
@@ -192,8 +248,9 @@ export class TaskCatalog {
     if (cached && this.hq.store.now() - cached.checked_at < 60_000) return cached;
     const pending = this.pending.get(key);
     if (pending) return pending;
+    // A failed read keeps what was known (the activity still shows it), marked as not read now.
     const read = this.limitedRead(url, check).catch((): PrEvidence => ({
-      url, head: cached?.head ?? '', state: '', draft: false, merged: false, review: 'pending', ci: 'unknown', quote: cached?.quote ?? null,
+      url, head: '', state: '', draft: false, merged: false, review: 'pending', ci: 'unknown', quote: null, ...cached,
       error: true, checked_at: this.hq.store.now(),
     })).then((p) => { this.cache.set(key, p); this.hq.store.setMeta(`task-pr:${key}`, JSON.stringify(p)); return p; }).finally(() => this.pending.delete(key));
     this.pending.set(key, read);
@@ -235,7 +292,7 @@ export class TaskCatalog {
     const people = new Map(this.hq.board().map((p) => [p.id, p]));
     const charters = new Map([...new Set(tasks.map((t) => t.project).filter((p): p is string => !!p))]
       .map((p) => [p, { charter: readCharter(this.hq.cfg.companyDir, p), lead: projectLead(this.hq.store, p) }]));
-    const deployed = new Set((this.hq.store.db.prepare('SELECT tasks FROM deploys').all() as { tasks: string }[]).flatMap((r) => JSON.parse(r.tasks) as number[]));
+    const deployed = new Set((this.hq.store.db.prepare('SELECT tasks FROM deploys').all() as { tasks: string }[]).flatMap(deployTasks));
     return { people, charters, deployed, ops: this.openOps(), requests: taskRequests(this.hq) };
   }
   private opsByTask = new Map<number, string>();
@@ -302,15 +359,52 @@ export class TaskCatalog {
     return result;
   }
 
-  activity(task: TaskRow) {
+  async activity(task: TaskRow) {
     const messages = taskMessages(this.hq, task);
-    const files = new Map<string, { id: string; name: string; mime: string; bytes: number; message: string; identity: string | null }>();
+    const files = new Map<string, { id: string; name: string; mime: string; bytes: number; message: string; identity: string | null; mine: boolean; created_at: number }>();
     for (const m of messages) for (const f of JSON.parse(m.attachments ?? '[]')) {
-      files.set(f.id, { id: f.id, name: f.name, mime: f.mime, bytes: f.bytes, message: m.id, identity: m.from_identity === OWNER ? m.to_identity : m.from_identity });
+      files.set(f.id, { id: f.id, name: f.name, mime: f.mime, bytes: f.bytes, message: m.id, identity: m.from_identity === OWNER ? m.to_identity : m.from_identity, mine: m.from_identity === OWNER, created_at: m.created_at });
     }
-    const events = this.hq.store.db.prepare(`SELECT seq, ts, type, data FROM events WHERE type IN ('task.new','task.state','task.awaiting','task.labels','task.priority') AND json_extract(data, '$.id') = ? ORDER BY seq DESC LIMIT 500`).all(task.id).reverse();
-    return { messages: messages.map((m) => ({ id: m.id, body: m.body, identity: m.from_identity === OWNER ? m.to_identity : m.from_identity, mine: m.from_identity === OWNER, created_at: m.created_at })), files: [...files.values()], events };
+    const events = this.hq.store.db.prepare(`SELECT seq, ts, type, data FROM events WHERE type IN ('task.new','task.state','task.awaiting','task.labels','task.priority') AND json_extract(data, '$.id') = ? ORDER BY seq DESC LIMIT 500`).all(task.id).reverse() as { seq: number; ts: number; type: string; data: string }[];
+    const item = await this.item(task);
+    return { messages: messages.map((m) => ({ id: m.id, body: m.body, identity: m.from_identity === OWNER ? m.to_identity : m.from_identity, mine: m.from_identity === OWNER, created_at: m.created_at })),
+      files: [...files.values()], events, timeline: taskTimeline(this.hq, task, item.prs, taskRequestHistory(this.hq, task), events, [...files.values()]) };
   }
+}
+
+/** What happened to the task, in order: opened, started, its PRs on GitHub, what waited on him, the deploy, the end. */
+export function taskTimeline(hq: Hq, task: TaskRow, prs: PrEvidence[], requests: TaskRequest[],
+  events: { ts: number; type: string; data: string }[], files: { name: string; mime: string; mine: boolean; identity: string | null; created_at: number }[]): TaskEvent[] {
+  const out: TaskEvent[] = [{ kind: 'opened', at: task.created_at, by: openedBy(task), worker: task.identity }];
+  const data = (e: { data: string }) => { try { return JSON.parse(e.data) as Record<string, unknown>; } catch { return {}; } };
+  const states = events.filter((e) => e.type === 'task.state').map((e) => ({ at: e.ts, state: data(e).state }));
+  const started = task.started_at ?? states.find((e) => e.state === 'running')?.at;
+  if (started != null) out.push({ kind: 'started', at: started, worker: task.identity });
+  for (const p of prs) {
+    if (!p.checked_at) continue;
+    // Not read now: what was known stays, and the line says GitHub could not be read, instead of a silent gap.
+    if (p.error) out.push({ kind: 'unread', at: p.checked_at, url: p.url });
+    if (p.opened_at) out.push({ kind: 'pr', at: p.opened_at, url: p.url, number: p.number ?? null, by: task.identity });
+    if (p.checks_at && (p.ci === 'passed' || p.ci === 'failed')) out.push({ kind: 'checks', at: p.checks_at, url: p.url, ci: p.ci });
+    if (p.reviews) for (const r of p.reviews) out.push({ kind: 'review', at: r.at, url: p.url, review: r.review, quote: r.quote });
+    else if (p.reviewed_at && p.review !== 'pending') out.push({ kind: 'review', at: p.reviewed_at, url: p.url, review: p.review, quote: p.quote });
+    if (p.merged_at) out.push({ kind: 'merged', at: p.merged_at, url: p.url, number: p.number ?? null });
+  }
+  for (const r of requests) if (r.kind === 'ask' || r.kind === 'go' || r.kind === 'login') out.push({ kind: 'request', at: r.created_at, request: r.kind, title: r.title, by: r.asked_by });
+  // A change of its note only says the same thing again: one line per change of what it waits for.
+  let waits: unknown = null;
+  for (const e of events) if (e.type === 'task.awaiting') {
+    const a = data(e).awaiting;
+    if (a !== waits && (a === 'deploy' || a === 'verify' || a === 'check')) out.push({ kind: 'awaiting', at: e.ts, awaiting: a });
+    waits = a;
+  }
+  const deploy = (hq.store.db.prepare('SELECT tasks, created_at FROM deploys WHERE project = ? ORDER BY created_at').all(task.project) as { tasks: string; created_at: number }[])
+    .find((d) => deployTasks(d).includes(task.id));
+  if (deploy) out.push({ kind: 'deployed', at: deploy.created_at });
+  for (const f of files) out.push({ kind: 'file', at: f.created_at, name: f.name, mime: f.mime, mine: f.mine, identity: f.identity });
+  const end = states.filter((e) => e.state === 'done' || e.state === 'closed').at(-1);
+  if (task.state === 'done' || task.state === 'closed') out.push({ kind: task.state === 'closed' ? 'cancelled' : 'done', at: end?.at ?? task.updated_at });
+  return out.sort((a, b) => a.at - b.at);
 }
 
 export interface TaskList {

@@ -28,12 +28,8 @@ String projectName(CompanyData d, String? project) => project == null
     ? ''
     : d.projects.where((p) => p.id == project).firstOrNull?.name ?? d.teams[project]?.name ?? project;
 
-/// The project's tone, for its dot: the tone of its standing team.
-String? projectTone(CompanyData d, String? project) {
-  if (project == null) return null;
-  final team = d.projects.where((p) => p.id == project).firstOrNull?.teamId ?? project;
-  return d.teams[team]?.tone;
-}
+/// The project's tone, for its dot: the same as in the sidebar.
+String? projectTone(CompanyData d, String? project) => project == null ? null : d.projectTone(project);
 
 /// "פרויקט · עובד": who is on it, where. A proposal says whose idea it is instead.
 String taskWhere(CompanyData d, AppLocalizations l, TaskProgress t) => [

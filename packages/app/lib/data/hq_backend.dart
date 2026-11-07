@@ -1540,6 +1540,7 @@ class HqBackend extends Backend {
       'to': identityId,
       'body': msg.replyTo == null ? msg.text : '> ${msg.replyTo!.text}\n\n${msg.text}',
       'priority': msg.priority.name,
+      if (msg.ref != null) 'ref': msg.ref,
       if (up.isNotEmpty) 'attachments': [for (final a in up) a.id],
     });
     if (!r.ok) {

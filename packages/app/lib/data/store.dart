@@ -198,7 +198,6 @@ class AppStore extends ChangeNotifier {
   String? taskProject;
   bool taskBoard = false;
   bool taskIncludeCompleted = false;
-  final Map<int, String> taskActivityStages = {};
   int? selectedTask;
 
   /// Desktop: the main column shows the home (the app opens on it); opening a conversation closes it.
@@ -579,13 +578,14 @@ class AppStore extends ChangeNotifier {
     _mediaChanged();
   }
 
-  Future<UserMsg> send(String identityId, String text, Priority priority, {Quote? quote, List<Attachment> attachments = const [], bool clearDraft = true}) async {
+  Future<UserMsg> send(String identityId, String text, Priority priority, {Quote? quote, String? ref, List<Attachment> attachments = const [], bool clearDraft = true}) async {
     final msg = UserMsg(
       id: 'm-${company_time.CompanyTime.now().millisecondsSinceEpoch}-${_n++}',
       ts: company_time.CompanyTime.now(),
       text: text,
       priority: priority,
       replyTo: quote,
+      ref: ref,
       delivery: Delivery.queued,
       attachments: [...attachments],
     );
@@ -941,6 +941,7 @@ class AppStore extends ChangeNotifier {
             replyTo: e['quote'] is Map
                 ? Quote(author: e['quote']['author'], text: e['quote']['text'], itemId: e['quote']['itemId'], askId: e['quote']['askId'], go: e['quote']['go'] == true)
                 : null,
+            ref: e['ref'] as String?,
             attachments: [for (final a in (e['attachments'] as List? ?? const []).cast<Map<String, dynamic>>()) uploads.restore(a)],
           ),
         );
@@ -979,6 +980,7 @@ class AppStore extends ChangeNotifier {
       'priority': m.priority.name,
       if (m.delivery == Delivery.failed) 'failed': true,
       if (m.submitted) 'submitted': true,
+      if (m.ref != null) 'ref': m.ref,
       if (m.replyTo != null) 'quote': {'author': m.replyTo!.author, 'text': m.replyTo!.text, 'itemId': m.replyTo!.itemId, 'askId': m.replyTo!.askId, 'go': m.replyTo!.go},
       if (m.attachments.isNotEmpty) 'attachments': [for (final a in m.attachments) a.toJson()],
     };
