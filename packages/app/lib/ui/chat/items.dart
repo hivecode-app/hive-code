@@ -42,30 +42,21 @@ class Bubble extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, c) {
         final maxW = c.maxWidth;
-        final product = StoreScope.maybeOf(context)?.preferences.newInterface == true;
         return Align(
           alignment: out ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart,
           child: Container(
-            margin: EdgeInsets.symmetric(horizontal: product ? 16 : 12, vertical: product ? 5 : 3),
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
             constraints: BoxConstraints(maxWidth: maxW * (wide ? 0.92 : 0.88), minWidth: wide ? maxW * 0.92 : 0),
-            padding: product ? const EdgeInsets.symmetric(horizontal: 13, vertical: 9) : const EdgeInsets.fromLTRB(10, 6, 10, 6),
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
             decoration: BoxDecoration(
               color: out ? p.bubbleOut : p.bubbleIn,
-              boxShadow: product ? null : p.hairShadow,
-              border: product && !out ? Border.all(color: p.line) : null,
-              borderRadius: product
-                  ? BorderRadiusDirectional.only(
-                      topStart: const Radius.circular(14),
-                      topEnd: const Radius.circular(14),
-                      bottomStart: Radius.circular(out ? 14 : 4),
-                      bottomEnd: Radius.circular(out ? 4 : 14),
-                    )
-                  : BorderRadiusDirectional.only(
-                      topStart: Radius.circular(out ? 10 : 3),
-                      topEnd: Radius.circular(out ? 3 : 10),
-                      bottomStart: const Radius.circular(10),
-                      bottomEnd: const Radius.circular(10),
-                    ),
+              border: !out ? Border.all(color: p.line) : null,
+              borderRadius: BorderRadiusDirectional.only(
+                topStart: const Radius.circular(14),
+                topEnd: const Radius.circular(14),
+                bottomStart: Radius.circular(out ? 14 : 4),
+                bottomEnd: Radius.circular(out ? 4 : 14),
+              ),
             ),
             child: child,
           ),
@@ -1439,7 +1430,7 @@ class _AskCardViewState extends State<AskCardView> {
         ? UiCopy.text(283, [from])
         : UiCopy.text(284, [from]);
 
-    if (go && store.preferences.newInterface && wait != null && !closed && pending == null) {
+    if (go && wait != null && !closed && pending == null) {
       final l = AppLocalizations.of(context);
       return Bubble(
         out: false,

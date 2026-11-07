@@ -65,7 +65,9 @@ ThemeData buildTheme(Palette p, {bool product = false}) {
     navigationBarTheme: product
         ? NavigationBarThemeData(
             iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(color: states.contains(WidgetState.selected) ? p.text : p.text2, size: 24)),
-            labelTextStyle: WidgetStateProperty.resolveWith((states) => T.small.copyWith(color: states.contains(WidgetState.selected) ? p.text : p.text2)),
+            labelTextStyle: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.selected) ? T.small.copyWith(color: p.text, fontWeight: FontWeight.w600) : T.small.copyWith(color: p.text2),
+            ),
           )
         : null,
     textTheme: TextTheme(

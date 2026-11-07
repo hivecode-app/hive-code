@@ -55,12 +55,12 @@ class AppStore extends ChangeNotifier {
     preferences.addListener(_languageChanged);
   }
 
-  (String, bool)? _lastLanguage;
+  String? _lastLanguage;
   void _languageChanged() {
-    final current = (preferences.newInterface ? preferences.language : 'he', preferences.newInterface);
+    final current = preferences.language;
     if (_lastLanguage != current) {
       _lastLanguage = current;
-      UiCopy.configure(current.$1, current.$2);
+      UiCopy.configure(current);
       backend.relocalize();
     }
     notifyListeners();
@@ -214,7 +214,7 @@ class AppStore extends ChangeNotifier {
     final chats = _prefs?.getInt(kChatsSeenKey);
     _chatsSeenLocal ??= chats == null ? null : DateTime.fromMillisecondsSinceEpoch(chats);
     await preferences.load(_prefs);
-    UiCopy.configure(preferences.newInterface ? preferences.language : 'he', preferences.newInterface);
+    UiCopy.configure(preferences.language);
     await backend.start();
     if (data case final d?) preferences.defaults(d.ownerLanguage);
     await uploads.load(_prefs);

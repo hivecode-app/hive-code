@@ -10,6 +10,7 @@ import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/blocks/blocks.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
 import 'package:agent_company/ui/convs/conversations_screen.dart';
+import 'package:agent_company/ui/product/chats.dart';
 import 'package:agent_company/ui/status/status_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -105,19 +106,19 @@ void main() {
     await tester.tap(find.byWidgetPredicate((w) => w is OpenTasksLine && w.identityId == 'yoav'));
     await tester.pumpAndSettle();
     expect(find.text('מה פתוח אצל יואב'), findsOneWidget);
-    expect(find.text('בתור, מקום 1 · מחכה למשבצת · מ-13:30'), findsOneWidget);
-    expect(find.text('רצה · נועה · מ-13:30'), findsOneWidget);
+    expect(find.text('בתור, מקום 1 · מחכה למשבצת · מ-\u206013:30'), findsOneWidget);
+    expect(find.text('רצה · נועה · מ-\u206013:30'), findsOneWidget);
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/blocks/open-tasks-sheet.png'));
 
     // Running: its worker (queued: nobody on it yet, so whoever opened it, as everywhere).
-    await tester.tap(find.text('רצה · נועה · מ-13:30'));
+    await tester.tap(find.text('רצה · נועה · מ-\u206013:30'));
     await tester.pumpAndSettle();
     expect(find.text('מה פתוח אצל יואב'), findsNothing);
     expect(tester.widget<ChatScreen>(find.byType(ChatScreen)).identityId, 'noa');
   });
 
   testWidgets('a task a task worker opened (open_team) goes under the one who opened that worker\'s task', (tester) async {
-    final store = await pumpApp(tester, home: const Scaffold(body: ConversationsScreen(compact: true)), size: const Size(342, 1100));
+    final store = await pumpApp(tester, home: const Scaffold(body: ProductChats(compact: true)), size: const Size(342, 1100));
     final d = store.data!;
     final temp = d.identities.values.firstWhere((i) => i.temp).id;
     d.openTasks = [
@@ -137,12 +138,12 @@ void main() {
     final top = tester.getTopLeft(find.text('בעבודה ובתור')).dy;
     expect(top, lessThan(tester.getTopLeft(find.text('מחכה לך').first).dy));
     expect(find.byType(OpenTaskRow), findsNWidgets(4));
-    expect(find.text('בתור, מקום 1 · מחכה למשבצת · פתח יואב · מ-13:30'), findsOneWidget);
-    expect(find.text('חסומה · מחכה להחלטה · פתחה דנה · מ-13:30'), findsOneWidget);
+    expect(find.text('בתור, מקום 1 · מחכה למשבצת · פתח יואב · מ-\u206013:30'), findsOneWidget);
+    expect(find.text('חסומה · מחכה להחלטה · פתחה דנה · מ-\u206013:30'), findsOneWidget);
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/blocks/open-tasks-status.png'));
 
     // Nobody on it yet: whoever opened it.
-    await tester.tap(find.text('בתור, מקום 1 · מחכה למשבצת · פתח יואב · מ-13:30'));
+    await tester.tap(find.text('בתור, מקום 1 · מחכה למשבצת · פתח יואב · מ-\u206013:30'));
     await tester.pumpAndSettle();
     expect(tester.widget<ChatScreen>(find.byType(ChatScreen)).identityId, 'yoav');
     Navigator.of(tester.element(find.byType(ChatScreen))).pop();

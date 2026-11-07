@@ -13,7 +13,6 @@ import '../nav.dart';
 import 'chats.dart';
 import 'product_theme.dart';
 import 'search_screen.dart';
-import 'settings.dart';
 import 'team.dart';
 
 /// Phase B owns this shell. Phase C can add its Tasks destination here without changing routing.
@@ -36,11 +35,21 @@ class ProductShell extends StatelessWidget {
             nav.wide = constraints.maxWidth >= 840 && (constraints.maxHeight >= 560 || constraints.maxWidth >= 1100);
             if (nav.wide) store.homeOpen = false;
             final selectedChat = store.selectedConversation ?? (store.data?.conversations.isNotEmpty == true ? store.currentConversation : null);
+            Widget chatIcon(bool selected) => SizedBox(
+              width: 32,
+              height: 28,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Align(alignment: Alignment.center, child: Ic('chat', fill: selected)),
+                  if ((store.data?.unreadCount ?? 0) > 0)
+                    PositionedDirectional(top: -5, end: -8, child: ProductUnreadBadge(store.data!.unreadCount)),
+                ],
+              ),
+            );
             Widget page() => switch (nav.tab) {
-              AppTab.chats => ProductChats(onSettings: () => nav.go(AppTab.settings)),
+              AppTab.chats => const ProductChats(),
               AppTab.status => const ProductTeam(),
-              AppTab.projects => const ProductDirectory(),
-              AppTab.settings => const ProductSettings(embedded: true),
               AppTab.tasks => const ProductTasks(),
             };
             final body = store.data == null
@@ -61,7 +70,7 @@ class ProductShell extends StatelessWidget {
                           decoration: BoxDecoration(
                             border: BorderDirectional(end: BorderSide(color: p.line)),
                           ),
-                          child: ProductChats(compact: true, onSettings: () => nav.go(AppTab.settings)),
+                          child: const ProductChats(compact: true),
                         ),
                         Expanded(
                           child: selectedChat != null && store.data!.identities.containsKey(selectedChat)
@@ -84,25 +93,9 @@ class ProductShell extends StatelessWidget {
                         selectedIndex: nav.tab.index,
                         onDestinationSelected: (i) => nav.go(AppTab.values[i]),
                         destinations: [
-                          NavigationDestination(
-                            icon: SizedBox(
-                              width: 32,
-                              height: 28,
-                              child: Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                                  const Align(alignment: Alignment.center, child: Ic('chat')),
-                                  if ((store.data?.unreadCount ?? 0) > 0)
-                                    PositionedDirectional(top: -5, end: -8, child: ProductUnreadBadge(store.data!.unreadCount)),
-                                ],
-                              ),
-                            ),
-                            label: l.chats,
-                          ),
-                          NavigationDestination(icon: const Ic('group'), label: l.team),
-                          NavigationDestination(icon: const Ic('folder'), label: l.projects),
-                          NavigationDestination(icon: const Ic('settings'), label: l.settings),
-                          NavigationDestination(icon: const Ic('task_alt'), label: l.tasks),
+                          NavigationDestination(icon: chatIcon(false), selectedIcon: chatIcon(true), label: l.chats),
+                          NavigationDestination(icon: const Ic('view_kanban'), selectedIcon: const Ic('view_kanban', fill: true), label: l.tasks),
+                          NavigationDestination(icon: const Ic('group'), selectedIcon: const Ic('group', fill: true), label: l.team),
                         ],
                       ),
                     ],
@@ -126,7 +119,14 @@ class ProductShell extends StatelessWidget {
                               children: [
                                 Ic('error', size: 20, color: p.text2),
                                 const SizedBox(width: 8),
-                                Expanded(child: Text(store.error!)),
+                                // Under an error that went to hq, "נשלח לטיפול" (error_report.dart), as before.
+                                Expanded(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [Text(store.error!), if (store.errorReported) const SentNote()],
+                                  ),
+                                ),
                                 TextButton(onPressed: store.clearError, child: Text(l.acknowledge)),
                               ],
                             ),
@@ -199,9 +199,8 @@ class _Sidebar extends StatelessWidget {
               ),
             const SizedBox(height: 8),
             item('chat', l.chats, () => nav.go(AppTab.chats), selected: nav.tab == AppTab.chats, count: d.unreadCount > 0 ? '${d.unreadCount}' : null),
-            item('task_alt', l.tasks, () => nav.go(AppTab.tasks), selected: nav.tab == AppTab.tasks),
+            item('view_kanban', l.tasks, () => nav.go(AppTab.tasks), selected: nav.tab == AppTab.tasks, count: d.openTasks.isEmpty ? null : '${d.openTasks.length}'),
             item('group', l.team, () => nav.go(AppTab.status), selected: nav.tab == AppTab.status),
-            item('folder', l.projects, () => nav.go(AppTab.projects), selected: nav.tab == AppTab.projects),
             item('search', l.search, () => openProductSearch(context), count: 'Ctrl K'),
             if (expanded) ...[
               Padding(
@@ -209,9 +208,14 @@ class _Sidebar extends StatelessWidget {
                 child: Text(l.projects, style: T.small.copyWith(color: p.text2)),
               ),
               Expanded(child: _SidebarProjects(d: d)),
-            ] else
+            ] else ...[
+              // Folded, the projects list does not fit: one item opens it as a page.
+              item('folder', l.projects, () => Nav.projects(context)),
               const Spacer(),
-            item('settings', l.settings, () => nav.go(AppTab.settings), selected: nav.tab == AppTab.settings),
+            ],
+            // His account at the foot, as in the mockup: settings, and his name that opens them too.
+            item('settings', l.settings, () => Nav.settings(context)),
+            item('account_circle', d.ownerName.isEmpty ? l.account : d.ownerName, () => Nav.settings(context)),
             const SizedBox(height: 12),
           ],
         ),

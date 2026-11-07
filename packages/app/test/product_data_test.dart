@@ -16,8 +16,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 Map<String, dynamic> event(int seq, String kind, Map<String, dynamic> body) => {'seq': seq, 'ts': seq * 1000, 'type': 'engine.$kind', 'identity': 'worker', 'data': {'shift': 'worker-1', 'seq': seq, 'ev': {'kind': kind, ...body}}};
 void main() {
-  setUp(() => UiCopy.configure('en', true));
-  tearDown(() { UiCopy.configure('he', false); companyNames = CompanyNames.fallback; });
+  setUp(() => UiCopy.configure('en'));
+  tearDown(() { UiCopy.configure('he'); companyNames = CompanyNames.fallback; });
   test('authentication failure is English for a new installation', () async {
     final client = AuthClient('https://server.example', client: MockClient((_) async => http.Response('{"error":"pairing code is wrong, used or expired"}', 400)));
     addTearDown(client.close);
@@ -29,21 +29,21 @@ void main() {
     model.apply(event(1, 'tool_use', {'toolUseId': 'r', 'name': 'Read', 'input': {'file_path': 'file.dart'}}));
     final group = items.single as ToolGroup;
     expect(group.liveLabel, 'Reading');
-    UiCopy.configure('he', true); expect(group.liveLabel, 'קוראת');
+    UiCopy.configure('he'); expect(group.liveLabel, 'קוראת');
     model.apply(event(2, 'tool_result', {'toolUseId': 'r', 'isError': false}));
     expect(group.summary, contains('קראה'));
-    UiCopy.configure('en', true); expect(group.summary, contains('Read'));
+    UiCopy.configure('en'); expect(group.summary, contains('Read'));
     model.apply(event(3, 'result', {'subtype': 'error_during_execution', 'isError': true}));
     final error = items.last as ErrorLine;
     expect(error.text, contains('error'));
-    UiCopy.configure('he', true); expect(error.text, contains('שגיאה'));
+    UiCopy.configure('he'); expect(error.text, contains('שגיאה'));
   });
   test('command and dictation errors retain their identity and change their copy', () {
     const command = CommandResult.localized(882);
     final speech = kNoSpeech;
     expect(command.error, startsWith('No connection'));
     expect(speech.message, contains('No speech'));
-    UiCopy.configure('he', true);
+    UiCopy.configure('he');
     expect(command.error, startsWith('אין חיבור'));
     expect(speech.message, contains('לא נשמע'));
     expect(identical(speech, kNoSpeech), isTrue);
@@ -56,7 +56,7 @@ void main() {
   });
   test('manager failures are identified by server kind in both languages', () {
     for (final language in ['en', 'he']) {
-      UiCopy.configure(language, true);
+      UiCopy.configure(language);
       final d = mapSnapshot(board: [], asks: [], toggles: [], manager: 'yoav', inbox: [
         for (final (id, kind) in ['delivery_failure', 'shift_failure', 'escalation_note'].indexed)
           {'id': id, 'kind': kind, 'state': 'open', 'from_identity': 'yoav', 'created_at': 1000, 'title': 'Fault'},
@@ -67,7 +67,7 @@ void main() {
   });
   test('tool recognition, agent details and incident status use stable data', () {
     for (final language in ['en', 'he']) {
-      UiCopy.configure(language, true);
+      UiCopy.configure(language);
       expect(toolKnown('Read'), isTrue);
       expect(toolKnown('unknown'), isFalse);
       expect(toolHasAgentDescription(ToolLine(icon: 'person', label: toolDetail('Agent', {}), name: 'Agent')), isFalse);

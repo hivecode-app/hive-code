@@ -68,7 +68,7 @@ Future<void> until(bool Function() ok, {int ms = 5000}) async {
 
 void main() {
   setUp(() {
-    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+    SharedPreferences.setMockInitialValues({'language': 'he'});
     ErrorReports.instance.reset();
   });
   tearDown(ErrorReports.instance.reset);

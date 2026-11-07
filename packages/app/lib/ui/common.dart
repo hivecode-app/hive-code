@@ -9,11 +9,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../data/backend.dart';
-import '../data/store.dart';
 import '../data/error_report.dart';
 import '../model/models.dart';
 import '../native/open_url.dart';
 import '../theme/icons.dart';
+import '../theme/motion.dart';
 import '../theme/tokens.dart';
 import 'bidi.dart';
 import 'system_bar.dart';
@@ -129,7 +129,7 @@ class Monogram extends StatelessWidget {
   Widget build(BuildContext context) {
     UiCopy.watch(context);
     final p = context.p;
-    if (StoreScope.maybeOf(context)?.preferences.newInterface == true && symbol == null) {
+    if (symbol == null) {
       return ProjectMonogram(name: displayName ?? letter, tone: tone, size: switch(size) {AvSize.md => 36, AvSize.sm => 28, AvSize.xs => 22});
     }
     final (dim, font) = switch (size) { AvSize.md => (42.0, 17.0), AvSize.sm => (34.0, 14.5), AvSize.xs => (22.0, 11.0) };
@@ -875,4 +875,32 @@ class _LoadingWatchState extends State<LoadingWatch> {
 
   @override
   Widget build(BuildContext context) { UiCopy.watch(context); return !stuck ? widget.child : Column(mainAxisSize: MainAxisSize.min, children: [widget.child, const SizedBox(height: 6), const SentNote()]); }
+}
+
+/// A folded group ("סיימו היום · N"): its chevron points down while folded and turns up once open.
+class FoldTile extends StatefulWidget {
+  const FoldTile({super.key, required this.title, required this.children, this.tilePadding, this.color});
+  final Widget title;
+  final List<Widget> children;
+  final EdgeInsetsGeometry? tilePadding;
+  final Color? color;
+  @override
+  State<FoldTile> createState() => _FoldTileState();
+}
+
+class _FoldTileState extends State<FoldTile> {
+  late bool open = PageStorage.maybeOf(context)?.readState(context, identifier: widget.key) as bool? ?? false;
+  @override
+  Widget build(BuildContext context) => ExpansionTile(
+        initiallyExpanded: open,
+        tilePadding: widget.tilePadding,
+        expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+        onExpansionChanged: (v) {
+          setState(() => open = v);
+          PageStorage.maybeOf(context)?.writeState(context, v, identifier: widget.key);
+        },
+        trailing: AnimatedRotation(turns: open ? 0.5 : 0, duration: Mo.off(context) ? Duration.zero : Mo.sm, child: Ic('expand_more', color: widget.color)),
+        title: widget.title,
+        children: widget.children,
+      );
 }

@@ -16,7 +16,6 @@ String startLanguage(SharedPreferences? prefs, {String? device}) {
 class AppPreferences extends ChangeNotifier {
   SharedPreferences? _prefs;
   String language = 'en';
-  bool newInterface = true;
   ThemeMode themeMode = ThemeMode.system;
   bool _languageChosen = false;
 
@@ -24,7 +23,8 @@ class AppPreferences extends ChangeNotifier {
     _prefs = prefs;
     _languageChosen = prefs?.containsKey('language') ?? false;
     language = startLanguage(prefs);
-    newInterface = prefs?.getBool('new_interface') ?? true;
+    // The old interface and its switch are gone; forget the choice a device may still hold.
+    if (prefs?.containsKey('new_interface') ?? false) await prefs!.remove('new_interface');
     themeMode = ThemeMode.values.asNameMap()[prefs?.getString('appearance')] ?? ThemeMode.system;
     notifyListeners();
   }
@@ -44,12 +44,6 @@ class AppPreferences extends ChangeNotifier {
     language = value == 'he' ? 'he' : 'en';
     notifyListeners();
     await _prefs?.setString('language', language);
-  }
-
-  Future<void> setNewInterface(bool value) async {
-    newInterface = value;
-    notifyListeners();
-    await _prefs?.setBool('new_interface', value);
   }
 
   Future<void> setAppearance(ThemeMode value) async {

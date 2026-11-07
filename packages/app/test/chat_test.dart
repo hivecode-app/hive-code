@@ -2,7 +2,7 @@ import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
 import 'package:agent_company/ui/chat/composer.dart';
 import 'package:agent_company/ui/chat/items.dart';
-import 'package:agent_company/ui/convs/conversations_screen.dart';
+import 'package:agent_company/ui/product/approval.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -11,10 +11,6 @@ import 'helpers.dart';
 void main() {
   for (final dark in [false, true]) {
     final t = dark ? 'dark' : 'light';
-    testWidgets('conversations golden ($t)', (tester) async {
-      await pumpApp(tester, dark: dark, home: const Scaffold(body: ConversationsScreen()));
-      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/convs_$t.png'));
-    });
     // Tall frames show every message kind at once (the gallery view of chat.md §2).
     testWidgets('chat with Ido, all kinds ($t)', (tester) async {
       await pumpApp(tester, dark: dark, size: const Size(342, 2300), home: const ChatScreen(identityId: 'ido'));
@@ -214,18 +210,19 @@ void main() {
     expect(store.data!.waiting.firstWhere((w) => w.from == 'ido').state, WaitState.answered);
   });
 
-  testWidgets('an open GO: the headline first, details folded, buttons in it; typing is a message, not an answer (#258)', (tester) async {
+  testWidgets('an open GO: its title and one button that opens the approval; typing is a message, not an answer (#258)', (tester) async {
     final store = await pumpApp(tester, size: const Size(342, 1500), home: const ChatScreen(identityId: 'dana'));
     final chat = store.data!.chats['dana']!;
     final go = chat.items.whereType<GoCard>().single;
-    expect(find.text('עדכון ללומו: הטקסט בטלפון מתוקן'), findsWidgets);
-    expect(find.text('אישור'), findsOneWidget);
-    expect(find.text('לא עכשיו'), findsOneWidget);
-    // Details are folded until asked for; a tap on the card opens them.
+    // In the chat the GO is a short card; its details and the decision are in the approval sheet.
+    final open = find.widgetWithText(FilledButton, 'אישור');
+    expect(open, findsOneWidget);
     expect(find.textContaining('deploy.sh rollback'), findsNothing);
-    await tester.tap(find.text('עדכון ללומו: הטקסט בטלפון מתוקן').last);
+    await tester.tap(open);
     await tester.pumpAndSettle();
-    expect(find.textContaining('deploy.sh rollback'), findsOneWidget);
+    expect(find.byType(ApprovalSheet), findsOneWidget);
+    Navigator.of(tester.element(find.byType(ApprovalSheet))).pop();
+    await tester.pumpAndSettle();
     // Nothing tags what he writes as an answer to it.
     expect(find.text('תשובה לבקשת GO של דנה'), findsNothing);
     expect(find.descendant(of: find.byType(Composer), matching: find.byType(QuoteStrip)), findsNothing);
@@ -235,7 +232,7 @@ void main() {
     expect(sent.text, 'ושגם ה-web יקבל את התיקון');
     expect(sent.replyTo, isNull);
     expect(go.state, AskState.open);
-    expect(find.text('אישור'), findsOneWidget);
+    expect(open, findsOneWidget);
   });
 
   testWidgets('his button answer is "מאשר" under a small quote of the question, no internal id', (tester) async {

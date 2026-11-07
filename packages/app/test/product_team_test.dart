@@ -76,4 +76,16 @@ void main() {
     final shown = [for (final g in ProductTeam.groups(many)) ...g.$2];
     expect(ProductTeam.summary(AppLocalizationsHe(), many, shown), '2 מחכים לך · 2 פנויים');
   });
+
+  test('blocked and stuck are counted apart', () {
+    final two = mapSnapshot(
+      board: [
+        _id('yoav', 'יואב', 'management', 'permanent', 'resident', 'blocked'),
+        _id('eli', 'אלי', 'personal', 'permanent', 'lead', 'stuck'),
+      ],
+      inbox: const [], asks: const [], toggles: const [], tasks: const [], projects: projects, now: now,
+    );
+    final shown = [for (final g in ProductTeam.groups(two)) ...g.$2];
+    expect(ProductTeam.summary(AppLocalizationsHe(), two, shown), '1 חסום · 1 תקוע');
+  });
 }

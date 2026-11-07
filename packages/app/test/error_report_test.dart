@@ -55,7 +55,7 @@ Future<void> _settle(WidgetTester tester) async {
 
 void main() {
   setUp(() {
-    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+    SharedPreferences.setMockInitialValues({'language': 'he'});
     r.reset();
     r.appVersion = 'android 42';
   });

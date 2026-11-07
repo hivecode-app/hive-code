@@ -190,10 +190,8 @@ class _ConversationHierarchyState extends State<ConversationHierarchy>
                       child: _branch(context, person, list, {heading.id}),
                     ),
                   if (finished.isNotEmpty)
-                    ExpansionTile(
+                    FoldTile(
                       key: PageStorageKey('org-finished-${heading.id}'),
-                      expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
-                      trailing: const Ic('expand_more'),
                       title: Text(l.finishedFold(finished.length), style: T.section.copyWith(color: p.text2)),
                       children: [
                         for (final person in finished)

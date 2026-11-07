@@ -214,7 +214,7 @@ void main() {
     testWidgets('the project screen shows the team with what each one does, then the open tasks', (tester) async {
       await loadFonts();
       Motion.frozen = true;
-      SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+      SharedPreferences.setMockInitialValues({'language': 'he'});
       tester.view.physicalSize = const Size(342, 1400) * 2;
       tester.view.devicePixelRatio = 2;
       addTearDown(tester.view.reset);

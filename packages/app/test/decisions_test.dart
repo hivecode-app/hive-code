@@ -9,6 +9,7 @@ import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
 import 'package:agent_company/ui/decisions/decisions_screen.dart';
 import 'package:agent_company/ui/home/home_screen.dart';
+import 'package:agent_company/ui/product/approval.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -77,35 +78,54 @@ void main() {
       final store = await pumpApp(tester, dark: dark, textScale: scale, home: const SizedBox());
       _danaWithHistory(store);
       await pumpScreen(tester, store, const ChatScreen(identityId: 'dana'), dark: dark);
-      expect(findShown('אישרת ב-11:58'), findsOneWidget);
-      expect(findShown('הוחלפה בבקשה חדשה'), findsOneWidget);
+      // At 130% the two folded lines are above the screen, not built.
+      if (scale == 1) {
+        expect(findShown('אישרת ב-11:58'), findsOneWidget);
+        expect(findShown('הוחלפה בבקשה חדשה'), findsOneWidget);
+      }
       expect(find.text('אישור'), findsOneWidget, reason: 'only the newest GO asks');
       await _shot(tester, 'a-open-$look');
     });
-
-    testWidgets('(b) the moment after "אישור", with "ביטול" ($look)', (tester) async {
-      final store = await pumpApp(tester, dark: dark, textScale: scale, home: const SizedBox());
-      _danaWithHistory(store);
-      await pumpScreen(tester, store, const ChatScreen(identityId: 'dana'), dark: dark);
-      await tester.tap(find.text('אישור'));
-      await tester.pump();
-      expect(findShown('אישרת · 14:06'), findsOneWidget);
-      expect(find.text('ביטול'), findsOneWidget);
-      expect(find.text('אישור'), findsNothing);
-      await _shot(tester, 'b-approved-$look');
-      await tester.pump(const Duration(seconds: 6));
-    });
   }
 
-  testWidgets('a tap on the card opens its details and never starts an answer', (tester) async {
+  // The GO's button opens the approval (product/approval.dart): its facts, and there one tap decides with
+  // "ביטול" for 5 seconds; the card in the chat agrees.
+  Future<void> openApproval(WidgetTester tester) async {
+    await tester.tap(find.widgetWithText(FilledButton, 'אישור'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ApprovalSheet), findsOneWidget);
+  }
+
+  Finder inSheet(Finder f) => find.descendant(of: find.byType(ApprovalSheet), matching: f);
+
+  testWidgets('the moment after "אישור", with "ביטול"; the card in the chat agrees', (tester) async {
     final store = await pumpApp(tester, home: const SizedBox());
     _danaWithHistory(store);
     await pumpScreen(tester, store, const ChatScreen(identityId: 'dana'));
-    expect(find.textContaining('deploy.sh rollback'), findsNothing);
-    await tester.tap(findShown('עדכון ללומו: הטקסט בטלפון מתוקן'));
+    await openApproval(tester);
+    await tester.tap(inSheet(find.widgetWithText(FilledButton, 'אישור')));
+    await tester.pump();
+    expect(inSheet(findShown('אישרת · 14:06')), findsOneWidget);
+    expect(inSheet(find.text('ביטול')), findsOneWidget);
+    Navigator.of(tester.element(find.byType(ApprovalSheet))).pop();
     await tester.pumpAndSettle();
-    expect(find.textContaining('rollback', findRichText: true), findsWidgets);
-    expect(find.byIcon(Icons.close), findsNothing);
+    expect(findShown('אישרת · 14:06'), findsOneWidget);
+    expect(find.text('ביטול'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'אישור'), findsNothing);
+    await tester.pump(const Duration(seconds: 6));
+  });
+
+  testWidgets('the GO\'s details are in the approval, and opening it never starts an answer', (tester) async {
+    final store = await pumpApp(tester, home: const SizedBox());
+    _danaWithHistory(store);
+    await pumpScreen(tester, store, const ChatScreen(identityId: 'dana'));
+    expect(find.textContaining('deploy.sh rollback', findRichText: true), findsNothing);
+    expect(find.textContaining('חזרה לגרסה הקודמת', findRichText: true), findsNothing);
+    await openApproval(tester);
+    // The facts are hq's (the wait item's body), not the card's text.
+    expect(inSheet(find.textContaining('חזרה לגרסה הקודמת לוקחת כדקה', findRichText: true)), findsWidgets);
+    Navigator.of(tester.element(find.byType(ApprovalSheet))).pop();
+    await tester.pumpAndSettle();
     expect(findShown('תשובה ל'), findsNothing, reason: 'no answer strip over the composer');
   });
 
@@ -113,16 +133,21 @@ void main() {
     final store = await pumpApp(tester, home: const SizedBox());
     _danaWithHistory(store);
     await pumpScreen(tester, store, const ChatScreen(identityId: 'dana'));
-    await tester.tap(find.text('אישור'));
+    await openApproval(tester);
+    await tester.tap(inSheet(find.widgetWithText(FilledButton, 'אישור')));
     await tester.pump(const Duration(seconds: 4));
-    await tester.tap(find.text('ביטול'));
+    await tester.tap(inSheet(find.text('ביטול')));
     await tester.pump();
-    expect(find.text('אישור'), findsOneWidget);
-    await tester.tap(find.text('אישור'));
+    expect(inSheet(find.text('ביטול')), findsNothing);
+    await tester.tap(inSheet(find.widgetWithText(FilledButton, 'אישור')));
     await tester.pump(const Duration(seconds: 6));
     await tester.pump();
     final card = store.data!.chats['dana']!.items.whereType<GoCard>().last;
     expect(card.state, AskState.answered);
+    if (find.byType(ApprovalSheet).evaluate().isNotEmpty) {
+      Navigator.of(tester.element(find.byType(ApprovalSheet))).pop();
+      await tester.pumpAndSettle();
+    }
     expect(findShown('אישרת ב-14:06'), findsOneWidget);
     expect(find.text('ביטול'), findsNothing);
   });

@@ -46,7 +46,7 @@ void main() {
     await loadFonts();
     Motion.frozen = true;
     pinClock(kDemoNow);
-    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+    SharedPreferences.setMockInitialValues({'language': 'he'});
     tester.view.physicalSize = const Size(390, 900) * 2;
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);

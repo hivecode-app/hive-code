@@ -1,6 +1,6 @@
 import 'package:agent_company/l10n/ui_copy.dart';
-// Conversations (APP-SPEC §4.3, mockup screen 2): WhatsApp-like list, one name per worker,
-// Yoav pinned first, status as icon + word, open code changes as +N −M.
+// The conversation list's actions that outlived the old list screen: a new chat, its order, muting, and the open
+// tasks under whoever opened them. The list itself is product/chats.dart.
 import 'package:flutter/material.dart';
 
 import '../../data/backend.dart';
@@ -9,78 +9,12 @@ import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import '../nav.dart';
-import 'convs_v2.dart';
-import '../decisions/decisions_screen.dart' show WaitingRow;
-import 'home_v2.dart';
-import 'kbd.dart';
 
 export 'convs_v2.dart';
 export 'head.dart';
 export 'home_blocks.dart';
 export 'home_v2.dart';
 export 'kbd.dart';
-
-class ConversationsScreen extends StatefulWidget {
-  const ConversationsScreen({super.key, this.compact = false});
-
-  /// Desktop list column (mockup screen 10): smaller rows, quick-switch field.
-  final bool compact;
-
-  /// Builds since the last reset, counted in debug and test builds only (test/perf_bench_test.dart).
-  static int debugBuilds = 0;
-
-  @override
-  State<ConversationsScreen> createState() => _ConversationsScreenState();
-}
-
-class _ConversationsScreenState extends State<ConversationsScreen> {
-  String q = '';
-
-  bool _match(CompanyData d, ConversationSummary c) {
-    if (q.isEmpty) return true;
-    final who = d.who(c.identityId);
-    return '${who.name} ${who.title} ${d.teamOf(c.identityId)?.name ?? ''} ${c.lastLine} ${d.isDone(c.identityId) ? d.presence[c.identityId]?.activity ?? '' : ''}'.contains(q);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    UiCopy.watch(context);
-    // The phone: one list by latest activity, the home its first item (convs_v2.dart, task 205).
-    if (!widget.compact) return const ConversationsV2();
-    assert(() {
-      ConversationsScreen.debugBuilds++;
-      return true;
-    }());
-    final store = StoreScope.of(context);
-    final d = store.data;
-    final p = context.p;
-    if (d == null) return const SizedBox.shrink();
-    final now = CompanyTime.now();
-    final ordered = sortConversations(d, d.conversations, store.convSort).where((c) => _match(d, c));
-    // Finished task workers go below every live conversation, whatever order the list came in (#40):
-    // the order above is the data's, and this split is the last step, so any sort keeps them at the end.
-    final list = [...ordered.where((c) => !d.isDone(c.identityId)), ...ordered.where((c) => d.isDone(c.identityId))];
-    return Container(
-      color: p.surface,
-      child: Column(children: [
-        TopBar(title: UiCopy.text(471), actions: [IBtn('sort', tip: UiCopy.text(472), onTap: () => pickConvSort(context))]),
-        _QuickSwitch(onChanged: (v) => setState(() => q = v)),
-        const WaitingRow(),
-        Expanded(
-          child: ListView(padding: EdgeInsets.zero, children: [
-            // The home is the first row; it opens in the main column (desktop.dart).
-            if (q.isEmpty) ...[HomeEntryRow(selected: store.homeOpen), Container(height: 1, color: p.line)],
-            for (final (i, c) in list.indexed) ...[
-              if (i > 0) Padding(padding: const EdgeInsetsDirectional.only(start: 72), child: Container(height: 1, color: p.line)),
-              // The phone's row (convs_v2.dart): the same two lines, the same ticks, the same spacing.
-              ConversationRowV2(c: c, now: now, pinned: c.identityId == d.managerId, selected: !store.homeOpen && store.currentConversation == c.identityId),
-            ],
-          ]),
-        ),
-      ]),
-    );
-  }
-}
 
 /// "שיחה חדשה": every worker and team, as a sheet.
 void newChat(BuildContext context, CompanyData d) {
@@ -205,93 +139,6 @@ void pickConvSort(BuildContext context) {
       ]),
     ),
   );
-}
-
-class _QuickSwitch extends StatelessWidget {
-  const _QuickSwitch({required this.onChanged});
-  final ValueChanged<String> onChanged;
-  @override
-  Widget build(BuildContext context) {
-    UiCopy.watch(context);
-    final p = context.p;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-      height: 38,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(color: p.surface2, borderRadius: BorderRadius.circular(19)),
-      child: Row(children: [
-        Ic('search', size: 20, color: p.text3),
-        const SizedBox(width: 8),
-        Expanded(
-          child: TextField(
-            onChanged: onChanged,
-            style: T.secondary.copyWith(color: p.text, fontSize: 14),
-            decoration: InputDecoration(isCollapsed: true, border: InputBorder.none, hintText: UiCopy.text(483), hintStyle: T.secondary.copyWith(color: p.text3, fontSize: 14)),
-          ),
-        ),
-        const Kbd('Ctrl K'),
-      ]),
-    );
-  }
-}
-
-/// `.fab`: extended, quiet surface button (not a coloured blob).
-class Fab extends StatelessWidget {
-  const Fab({super.key, required this.icon, required this.label, this.onTap});
-  final String icon;
-  final String label;
-  final VoidCallback? onTap;
-  @override
-  Widget build(BuildContext context) {
-    UiCopy.watch(context);
-    final p = context.p;
-    return DecoratedBox(
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Color(0x1A000000), offset: Offset(0, 1), blurRadius: 3)]),
-      child: Material(
-      // The one primary action carries the brand (M3 FAB on primary container, language-v2 §2).
-      color: p.accentSoft,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap ?? () {},
-        child: SizedBox(
-          height: 52,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Ic(icon, size: 22, color: p.dark ? p.text : p.accent),
-              const SizedBox(width: 8),
-              Text(label, style: TextStyle(fontFamily: kFont, fontSize: 14.5, fontWeight: FontWeight.w700, color: p.text)),
-            ]),
-          ),
-        ),
-      ),
-    ),
-    );
-  }
-}
-
-/// The unread count on a row: dark on light like the count on "בית"; a muted conversation's is quieter.
-class UnreadPill extends StatelessWidget {
-  const UnreadPill(this.count, {super.key, this.muted = false});
-  final int count;
-  final bool muted;
-  @override
-  Widget build(BuildContext context) {
-    UiCopy.watch(context);
-    final p = context.p;
-    return ExcludeSemantics(
-      child: Container(
-        constraints: const BoxConstraints(minWidth: 20),
-        height: 20,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
-        decoration: BoxDecoration(color: muted ? p.surface2 : p.text, borderRadius: BorderRadius.circular(10)),
-        alignment: Alignment.center,
-        child: Text(count > 99 ? '99+' : '$count',
-            style: TextStyle(fontFamily: kFont, fontSize: 11.5, height: 1, fontWeight: FontWeight.w700, color: muted ? p.text2 : p.surface)),
-      ),
-    );
-  }
 }
 
 /// "מה פתוח אצלי" (#128): the open tasks under each one who opened them (a lead, Yoav, a standing worker), queued

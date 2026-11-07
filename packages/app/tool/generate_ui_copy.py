@@ -17,8 +17,8 @@ import 'legacy_copy.dart';
 class UiCopy {
   static AppLocalizations copy = lookupAppLocalizations(const Locale('en'));
   static bool legacy = true;
-  static void configure(String language, bool newInterface) {
-    legacy = !newInterface;
+  static void configure(String language) {
+    legacy = false;
     copy = lookupAppLocalizations(Locale(language));
   }
   static void watch(BuildContext context) {

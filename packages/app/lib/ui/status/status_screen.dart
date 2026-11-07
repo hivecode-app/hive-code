@@ -73,7 +73,11 @@ class StatusScreen extends StatelessWidget {
             else for (final t in done.take(kDoneShown)) _DoneLine(t: t),
           ]),
           if (done.length > kDoneShown)
-            MoreRow(icon: 'history', bold: UiCopy.text(625, [done.length - kDoneShown]), rest: UiCopy.text(747), top: false, onTap: () => NavScope.read(context).go(AppTab.projects)),
+            MoreRow(icon: 'history', bold: UiCopy.text(625, [done.length - kDoneShown]), rest: UiCopy.text(747), top: false, onTap: () {
+              // This screen is pushed over settings: back to the tabs first, so the tasks tab is what he sees.
+              Navigator.of(context).popUntil((r) => r.isFirst);
+              NavScope.read(context).go(AppTab.tasks);
+            }),
            Section(UiCopy.text(748)),
           ListBlock(inset: 16, children: [for (final proj in d.projects.where((x) => x.active)) _ProjectNow(proj: proj)]),
           const SizedBox(height: 24),

@@ -84,10 +84,9 @@ class RequestsSheet extends StatelessWidget {
 }
 
 class ProductChats extends StatefulWidget {
-  const ProductChats({super.key, this.compact = false, this.project, this.onSettings});
+  const ProductChats({super.key, this.compact = false, this.project});
   final bool compact;
   final String? project;
-  final VoidCallback? onSettings;
   @override
   State<ProductChats> createState() => _ProductChatsState();
 }
@@ -119,8 +118,10 @@ class _ProductChatsState extends State<ProductChats> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                IBtn('edit_square', tip: l.newChat, onTap: () => newChat(context, d)),
                 IBtn('sort', tip: UiCopy.copy.ui472, onTap: () => pickConvSort(context)),
+                IBtn('edit_square', tip: l.newChat, onTap: () => newChat(context, d)),
+                // Settings sit behind his account, at the top of the chats (mockup a-he-home-phone).
+                IBtn('account_circle', tip: l.settings, onTap: () => Nav.settings(context)),
                 const SizedBox(width: 8),
               ],
             ),
@@ -134,7 +135,7 @@ class _ProductChatsState extends State<ProductChats> {
                     style: TextStyle(fontFamily: kFont, fontSize: widget.compact ? 18 : 30, fontWeight: FontWeight.w600, height: 1.2, color: p.text),
                   ),
                 ),
-                if (widget.compact) ...[IBtn('sort', tip: UiCopy.copy.ui472, onTap: () => pickConvSort(context)), IBtn('edit_square', tip: l.newChat, onTap: () => newChat(context, d)), IBtn('settings', tip: l.settings, onTap: widget.onSettings ?? () => Nav.settings(context))],
+                if (widget.compact) ...[IBtn('sort', tip: UiCopy.copy.ui472, onTap: () => pickConvSort(context)), IBtn('edit_square', tip: l.newChat, onTap: () => newChat(context, d))],
               ],
             ),
           ),

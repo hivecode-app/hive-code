@@ -27,10 +27,4 @@ void main() {
     expect(find.text('תודה. עמית ממשיך.'), findsOneWidget);
     await tester.pump(const Duration(seconds: 2));
   });
-
-  testWidgets('settings golden', (tester) async {
-    await pumpApp(tester, home: const SettingsScreen());
-    await tester.pump();
-    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/settings_light.png'));
-  });
 }

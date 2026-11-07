@@ -1,4 +1,5 @@
 import 'product/settings.dart';
+import 'product/shell.dart' show ProductDirectory;
 // Navigation in one place: phone pushes full screens; desktop (≥800px) swaps the main column.
 import 'package:flutter/material.dart';
 
@@ -9,24 +10,17 @@ import '../native/open_url.dart';
 import 'handoff/handoff_screen.dart';
 import 'home/wait_item_screen.dart';
 import 'projects/project_screen.dart';
-import 'settings/settings_screen.dart';
 
-/// The bottom tabs (#53): chats is the main screen; status, projects and settings are secondary. What waits for him
-/// is not a tab (task 986): a row pinned on top of the chats opens it (decisions_screen.dart).
-enum AppTab { chats, status, projects, settings, tasks }
+/// The three tabs (mockup a-he-home): chats, tasks and the team, in that order. Settings open from his account (the
+/// icon atop the chats on the phone, the foot of the sidebar on a desktop); projects live in the sidebar and the chips.
+/// What waits for him is not a tab (task 986): a row pinned on top of the chats opens it (decisions_screen.dart).
+enum AppTab { chats, tasks, status }
 
 class AppNav extends ChangeNotifier {
   AppTab tab = AppTab.chats;
   bool wide = false;
 
   void go(AppTab t) {
-    // Leaving a tab closes what its back handler would have closed (an open search), so it can't
-    // be found still open, with nothing behind back, on return.
-    final h = backHandler;
-    if (t != tab && h != null) {
-      backHandler = null;
-      h();
-    }
     // Leaving "סטטוס", by any way (a tab, back, a link, a shortcut), is his visit there.
     if (tab == AppTab.status && t != AppTab.status) onLeaveStatus?.call();
     if (tab == AppTab.chats && t != AppTab.chats) onLeaveChats?.call();
@@ -39,14 +33,6 @@ class AppNav extends ChangeNotifier {
 
   /// Set by the shell: what finishes after this is "מאז שהיית פה" on the chats screen next time.
   VoidCallback? onLeaveChats;
-
-  /// Something on the current tab that Android back should close first (an open search).
-  VoidCallback? backHandler;
-  void setBackHandler(VoidCallback? h) {
-    if (backHandler == h) return;
-    backHandler = h;
-    notifyListeners();
-  }
 }
 
 class NavScope extends InheritedNotifier<AppNav> {
@@ -103,5 +89,10 @@ class Nav {
 
   static void team(BuildContext context, String teamId) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProjectScreen(teamId: teamId)));
 
-  static void settings(BuildContext context) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => StoreScope.read(context).preferences.newInterface ? const ProductSettings() : const SettingsScreen()));
+  /// Every project and standing team, as a page: the folded desktop sidebar has no room for the list.
+  static void projects(BuildContext context) => Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(), body: const SafeArea(top: false, child: ProductDirectory()))),
+  );
+
+  static void settings(BuildContext context) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProductSettings()));
 }

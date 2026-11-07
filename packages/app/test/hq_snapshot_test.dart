@@ -36,7 +36,7 @@ void main() {
     testWidgets('hq snapshot renders on every tab (${size.width.toInt()}px)', (tester) async {
       await loadFonts();
       Motion.frozen = true;
-      SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+      SharedPreferences.setMockInitialValues({'language': 'he'});
       tester.view.physicalSize = size * 2;
       tester.view.devicePixelRatio = 2;
       addTearDown(tester.view.reset);
@@ -53,7 +53,7 @@ void main() {
         expect(tester.takeException(), isNull, reason: 'tab $t');
       }
       // Projects come from hq (org.yaml), by the owner's names, never from names written in the code.
-      NavScope.read(ctx).go(AppTab.projects);
+      NavScope.read(ctx).go(AppTab.status);
       await tester.pump();
       expect(find.text('טיקיבוט'), findsNothing);
       store.selectedConversation = 'yoav';

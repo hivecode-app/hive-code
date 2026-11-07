@@ -50,7 +50,7 @@ Future<void> until(bool Function() ok, {int ms = 5000}) async {
 
 void main() {
   test('the second start shows the last snapshot before the server answers', () async {
-    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+    SharedPreferences.setMockInitialValues({'language': 'he'});
     final hq = _Hq();
     await hq.start();
     addTearDown(() => hq.server.close(force: true));
@@ -77,7 +77,7 @@ void main() {
   }, timeout: const Timeout(Duration(seconds: 20)));
 
   test('a reload keeps the conversation order (no board-order flash)', () async {
-    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+    SharedPreferences.setMockInitialValues({'language': 'he'});
     final hq = _Hq();
     await hq.start();
     addTearDown(() => hq.server.close(force: true));

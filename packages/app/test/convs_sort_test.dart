@@ -6,6 +6,7 @@ import 'package:agent_company/data/store.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/common.dart';
 import 'package:agent_company/ui/convs/conversations_screen.dart';
+import 'package:agent_company/ui/product/chats.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,13 +34,13 @@ void main() {
   }
 
   testWidgets('the default is the newest message, as before', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen(compact: true)));
+    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ProductChats(compact: true)));
     expect(store.convSort, ConvSort.recent);
     expect(order(tester), shown);
   });
 
   testWidgets('"עובדים עכשיו למעלה": working ones first, each group by newest message, Yoav pinned', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen(compact: true)));
+    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ProductChats(compact: true)));
     await pick(tester, 'עובדים עכשיו למעלה');
     expect(store.convSort, ConvSort.working);
     expect(order(tester), ['יואב', 'דנה', 'נועה', 'נגה', 'עידו', 'רותם', 'איתי', 'עמית', 'אלי']);
@@ -51,7 +52,7 @@ void main() {
   });
 
   testWidgets('"מחכה לך למעלה" and "לפי שם"', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen(compact: true)));
+    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ProductChats(compact: true)));
     await pick(tester, 'מחכה לך למעלה');
     expect(order(tester), ['יואב', 'עידו', 'רותם', 'עמית', 'דנה', 'נועה', 'איתי', 'נגה', 'אלי']);
     await pick(tester, 'לפי שם');
@@ -60,7 +61,7 @@ void main() {
   });
 
   testWidgets('a finished one stays last under any order', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen(compact: true)));
+    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ProductChats(compact: true)));
     store.data!.presence['noa'] = const Presence(status: WorkerStatus.done, activity: 'נגן ב-web');
     await pick(tester, 'לפי שם');
     final ys = {for (final n in shown) n: tester.getTopLeft(find.text(n).first).dy};
@@ -70,7 +71,7 @@ void main() {
   });
 
   testWidgets('the sheet marks the current choice with a check, and the choice is saved', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen(compact: true)));
+    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ProductChats(compact: true)));
     await pick(tester, 'עובדים עכשיו למעלה');
     expect((await SharedPreferences.getInstance()).getString(AppStore.kConvSortKey), 'working');
     await tester.tap(find.byTooltip('מיון'));

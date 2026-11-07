@@ -58,8 +58,6 @@
   "deviceSetting": "לפי המכשיר",
   "light": "בהיר",
   "dark": "כהה",
-  "newInterface": "ממשק חדש",
-  "newInterfaceHint": "כיבוי מחזיר לממשק הקודם.",
   "companyMap": "מפת החברה",
   "resources": "משאבים",
   "automations": "אוטומציות",
@@ -973,7 +971,7 @@
   "ui744": "מה לבדוק",
   "ui745": "מאז הביקור הקודם",
   "ui746": "לא הסתיים כלום מאז",
-  "ui747": "בפרויקטים",
+  "ui747": "במשימות",
   "ui748": "בפרויקטים עכשיו",
   "ui749": "שקט, אין משימה שרצה",
   "ui750": "הדגמה · השרת עוד לא מחובר, והתוכן לדוגמה",
@@ -1669,8 +1667,6 @@
   "notifBadgeBody": "מה שמחכה לך: בקשות אישור ושאלות. בדפדפן נספרות בו גם הודעות של עובדים שעוד לא קראת, בלי שיחות מושתקות.",
   "notifTogetherTitle": "כמה ברצף",
   "notifTogetherBody": "הודעה רגילה מחכה 20 שניות לפני הצלצול, כך שכמה הודעות ברצף מצלצלות פעם אחת. הודעה דחופה מצלצלת מיד.",
-  "advancedMode": "מצב מתקדם",
-  "advancedHint": "מפת החברה, משאבים ואוטומציות",
   "finishedToday": "סיימו היום · {count}",
   "teamColName": "שם",
   "teamColRole": "תפקיד",
@@ -1683,5 +1679,6 @@
   "teamSumWorking": "{count} בעבודה",
   "teamSumFree": "{count, plural, =1{1 פנוי} other{{count} פנויים}}",
   "teamSumResting": "{count} במנוחה",
-  "teamChatWith": "צ'אט עם {name}"
+  "teamChatWith": "צ'אט עם {name}",
+  "teamSumStuck": "{count, plural, =1{1 תקוע} other{{count} תקועים}}"
 }

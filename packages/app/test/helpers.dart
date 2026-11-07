@@ -50,7 +50,7 @@ Future<AppStore> pumpApp(WidgetTester tester, {Widget? home, bool dark = false, 
   await loadFonts();
   Motion.frozen = true;
   pinClock(kDemoNow);
-  SharedPreferences.setMockInitialValues({'new_interface': false, 'language': 'he'});
+  SharedPreferences.setMockInitialValues({ 'language': 'he'});
   tester.view.physicalSize = size * 2;
   tester.view.devicePixelRatio = 2;
   tester.platformDispatcher.textScaleFactorTestValue = textScale;
@@ -82,9 +82,8 @@ class _HomeAlone extends StatelessWidget {
   }
 }
 
-/// Existing behavior and goldens cover the previous interface. Product A has a separate matrix.
+/// A store in Hebrew, the language most of the older tests and goldens were written in.
 AppStore legacyStore(AppStore store) {
-  store.preferences.setNewInterface(false);
   store.preferences.setLanguage('he');
   return store;
 }

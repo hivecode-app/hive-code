@@ -1,4 +1,4 @@
-// What waits on him (task 986): the pinned row over the chats, the stack of cards it opens, its swipes and buttons,
+// What waits on him (task 986): the stack of cards, its swipes and buttons,
 // and that only an ask or a GO is his. The queue's order and a GO's text are the same as the tab's were (task 306).
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,7 +10,6 @@ import 'package:agent_company/data/store.dart';
 import 'package:agent_company/main.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/decisions/decisions_screen.dart';
-import 'package:agent_company/ui/nav.dart';
 
 import 'helpers.dart';
 
@@ -250,30 +249,6 @@ void main() {
     expect(tester.getTopLeft(card('לפרוס').first), before);
   });
 
-  testWidgets('the pinned row: how many, on top of the chats; a tap opens the stack; gone when nothing waits', (tester) async {
-    final store = await pumpApp(tester);
-    final n = store.data!.waitingCount;
-    expect(n, greaterThan(0));
-    expect(find.text(waitingLine(n)), findsOneWidget);
-    await tester.tap(find.text(waitingLine(n)));
-    await tester.pumpAndSettle();
-    expect(find.byType(DecisionStack), findsOneWidget);
-    expect(find.text('1 מתוך $n'), findsOneWidget);
-    await tester.tap(find.bySemanticsLabel('סגירה'));
-    await tester.pumpAndSettle();
-    expect(find.byType(DecisionStack), findsNothing);
-    store.data!.waiting.clear();
-    store.touch();
-    await tester.pumpAndSettle();
-    expect(find.text(waitingLine(n)), findsNothing);
-    expect(find.byType(WaitingRow), findsOneWidget);
-    expect(tester.getSize(find.byType(WaitingRow)).height, 0);
-  });
-
-  test('the row in words', () {
-    expect([for (final n in [1, 2, 3, 12]) waitingLine(n)], ['אחת מחכה לך', 'שתיים מחכות לך', '3 מחכות לך', '12 מחכות לך']);
-  });
-
   testWidgets('one card at a time, its title and who asks; "GO" sends it and brings the next', (tester) async {
     final store = await stack(tester, [go(), ask(blocking: false)]);
     expect(find.text('1 מתוך 2'), findsOneWidget);
@@ -433,7 +408,7 @@ void main() {
     await tester.tap(find.text('כל הפרטים'));
     await tester.pumpAndSettle();
     expect(find.text('הדוח המלא'), findsOneWidget);
-    expect(find.text('ה-PR'), findsOneWidget);
+    expect(find.text('ה-\u2060PR'), findsOneWidget);
     expect(find.textContaining('השיחה עם'), findsOneWidget);
   });
 
@@ -466,24 +441,5 @@ void main() {
       expect(find.text('שום דבר לא מחכה לך.'), findsOneWidget);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/decisions_stack/phone-empty-$look.png'));
     });
-    testWidgets('phone: the pinned row over the chats ($look)', (tester) async {
-      final store = await pumpApp(tester, dark: dark, textScale: scale);
-      store.touch();
-      await tester.pumpAndSettle();
-      expect(NavScope.read(tester.element(find.byType(Scaffold).first)).tab, AppTab.chats);
-      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/decisions_stack/phone-row-$look.png'));
-    });
   }
-
-  testWidgets('desktop: G D opens the stack in the middle', (tester) async {
-    await pumpApp(tester, size: const Size(1440, 860));
-    await tester.pumpAndSettle();
-    resetQueue();
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyG);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    await tester.pumpAndSettle();
-    expect(find.byType(DecisionStack), findsOneWidget);
-    expect(tester.takeException(), isNull);
-    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/decisions_stack/desktop-light.png'));
-  });
 }

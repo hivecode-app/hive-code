@@ -2,9 +2,8 @@
 // out, shown quieter with notifications_off), long press and the chat menu mute, opening a chat reads it.
 import 'package:agent_company/ui/chat/chat_screen.dart';
 import 'package:agent_company/ui/common.dart';
-import 'package:agent_company/ui/convs/conversations_screen.dart';
-import 'package:agent_company/ui/nav.dart';
-import 'package:agent_company/ui/shell.dart';
+import 'package:agent_company/ui/product/chats.dart';
+import 'package:agent_company/ui/product/product_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -12,17 +11,18 @@ import 'helpers.dart';
 
 void main() {
   testWidgets('rows show their count, muted ones quieter with notifications_off; "שיחות" counts the rest', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen(), bottomNavigationBar: BottomNav()));
-    expect(find.descendant(of: find.byType(UnreadPill), matching: find.text('2')), findsOneWidget, reason: 'Ido');
-    expect(find.descendant(of: find.byType(UnreadPill), matching: find.text('3')), findsOneWidget, reason: 'Noga, muted');
+    final store = await pumpApp(tester, size: const Size(342, 1600));
+    final badge = find.byType(ProductUnreadBadge);
+    expect(find.descendant(of: find.byType(ListView), matching: find.descendant(of: badge, matching: find.text('2'))), findsOneWidget, reason: 'Ido');
+    expect(find.descendant(of: badge, matching: find.text('3')), findsOneWidget, reason: 'Noga, muted');
     expect(find.byWidgetPredicate((w) => w is Ic && w.name == 'notifications_off'), findsOneWidget);
     expect(store.data!.unreadCount, 2);
-    final tab = tester.widget<NavItem>(find.byWidgetPredicate((w) => w is NavItem && w.dest.tab == AppTab.chats));
-    expect(tab.count, 2);
+    // The chats tab counts the rest: 2, not 5.
+    expect(find.descendant(of: find.byType(NavigationBar), matching: find.descendant(of: badge, matching: find.text('2'))), findsOneWidget);
   });
 
   testWidgets('long press mutes for a week; the total drops; long press again offers "ביטול השתקה"', (tester) async {
-    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ConversationsScreen()));
+    final store = await pumpApp(tester, size: const Size(342, 1600), home: const Scaffold(body: ProductChats()));
     await tester.longPress(find.text('עידו'));
     await tester.pumpAndSettle();
     expect(find.text('8 שעות'), findsOneWidget);

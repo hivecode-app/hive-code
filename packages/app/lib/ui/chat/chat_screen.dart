@@ -491,7 +491,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     Widget body({bool teamLink = true}) => Column(children: [
       header,
-      if (store.preferences.newInterface && teamLink) ConversationHierarchy(key: ValueKey('team-${widget.identityId}'), identity: widget.identityId),
+      if (teamLink) ConversationHierarchy(key: ValueKey('team-${widget.identityId}'), identity: widget.identityId),
       if (_sourceMissing) Semantics(liveRegion: true, child: Padding(padding: const EdgeInsets.all(12), child: Text(AppLocalizations.of(context).progressSourceMissing))),
       if (open.isNotEmpty && selectedItem == null) _PinBar(open: open, onTap: () => _toAsk(open.first)),
       Expanded(
@@ -557,7 +557,7 @@ class _ChatScreenState extends State<ChatScreen> {
     ]);
 
     Widget layout() => LayoutBuilder(builder: (context, c) {
-      if (!store.preferences.newInterface || c.maxWidth < 650 || (c.maxHeight < 560 && c.maxWidth < 1100) || MediaQuery.textScalerOf(context).scale(1) >= 1.5) return body();
+      if (c.maxWidth < 650 || (c.maxHeight < 560 && c.maxWidth < 1100) || MediaQuery.textScalerOf(context).scale(1) >= 1.5) return body();
       return Row(children: [Expanded(child: body(teamLink: false)), SizedBox(width: 230, child: ConversationHierarchy(key: ValueKey('sidebar-${widget.identityId}'), identity: widget.identityId, sidebar: true))]);
     });
     if (widget.embedded) return layout();
@@ -569,7 +569,7 @@ class _ChatScreenState extends State<ChatScreen> {
   List<_Entry> _entries(Conversation chat) {
     final items = chat.items;
     // The zone too: day separators follow org.yaml's `timezone` once hq sends it (#121).
-    final sig = (items.length, items.firstOrNull?.id, items.lastOrNull?.id, CompanyTime.offset, StoreScope.read(context).preferences.newInterface);
+    final sig = (items.length, items.firstOrNull?.id, items.lastOrNull?.id, CompanyTime.offset);
     if (identical(items, _entryItems) && _entrySig == sig && _entryCache != null) return _entryCache!;
     final out = <_Entry>[];
     // Row keys of our own start with \u0000, so they can never equal an item id.
@@ -582,7 +582,7 @@ class _ChatScreenState extends State<ChatScreen> {
         // Unique even when items arrive out of order and a day shows up twice.
         out.add(_Entry('\u0000day:${dd.millisecondsSinceEpoch}:${it.id}', day: dd));
       }
-      if (StoreScope.read(context).preferences.newInterface && (it is ShiftMarker || it is EventLine && !it.strong)) {
+      if (it is ShiftMarker || it is EventLine && !it.strong) {
         final run = out.lastOrNull;
         if (run?.system != null) { run!.system!.add(it); continue; }
         out.add(_Entry('\u0000system:${it.id}', system: [it]));
@@ -758,7 +758,7 @@ class _ChatScreenState extends State<ChatScreen> {
       FileMsg() => FileBubble(msg: it),
       ShiftMarker() => ServiceLine(
           icon: 'autorenew',
-          text: store.preferences.newInterface ? AppLocalizations.of(context).systemUpdates(1) : UiCopy.text(148, [it.shift, it.from, hm(it.ts)]),
+          text: AppLocalizations.of(context).systemUpdates(1),
         ),
       EventLine() => ServiceLine(text: it.text, icon: it.icon, strong: it.strong),
       InternalMsg() => InternalMsgRow(msg: it),
@@ -828,75 +828,24 @@ class _ChatBar extends StatelessWidget {
       status = StatusWord.of(presence, who.gender, size: 12);
     }
 
-    if (store.preferences.newInterface) {
-      final l = AppLocalizations.of(context);
-      return Container(decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
-        padding: EdgeInsetsDirectional.fromSTEB(embedded ? 20 : 4, 6, 8, 6), child: Row(children: [
-          if (!embedded) IBtn(backIcon(context), tip: l.back, onTap: () => Navigator.maybePop(context)),
-          ProjectMonogram.person(d, who.id, size: 28), const SizedBox(width: 10),
-          Expanded(child: InkWell(onTap: () => _workerSheet(context, d), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            ProductContentText(who.name, style: T.name.copyWith(color: p.text, fontSize: 16)),
-            ProductContentText(d.roleLine(who.id), style: T.meta.copyWith(color: p.text2)),
-            status,
-          ]))),
-          IBtn('folder', tip: l.mediaFiles, onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => FilesScreen(chat: who.id)))),
-            IBtn('search', tip: l.searchChat, onTap: onSearch),
-          IBtn('info', tip: l.role, onTap: () => _workerSheet(context, d)),
-          PopupMenuButton<String>(tooltip: l.more, onSelected: onMenu, icon: Ic('more_vert', color: p.text2), itemBuilder: (_) => [
-            PopupMenuItem(value: 'stop', child: Text(l.stop)),
-            PopupMenuItem(value: 'mute', child: Text(d.conversation(who.id)?.muted == true ? l.unmute : l.mute)),
-          ]),
-        ]));
-    }
-    return Container(
-      decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
-      padding: EdgeInsetsDirectional.fromSTEB(embedded ? 16 : 6, 4, 4, 4),
-      child: Row(children: [
-        if (!embedded) IBtn(backIcon(context), tip: UiCopy.text(161), onTap: () => Navigator.of(context).maybePop()),
-        Expanded(
-          child: InkWell(
-            onTap: () => _workerSheet(context, d),
-            child: Row(children: [
-              Monogram.of(d, who.id, size: AvSize.sm),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text.rich(
-                    TextSpan(children: [
-                      TextSpan(text: who.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                      TextSpan(
-                        text: ' · ${d.roleLine(who.id)}',
-                        style: TextStyle(fontWeight: FontWeight.w400, color: p.text2, fontSize: 13.5),
-                      ),
-                    ]),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontFamily: kFont, fontSize: 16, height: 1.25, color: p.text),
-                  ),
-                  status,
-                ]),
-              ),
-            ]),
-          ),
-        ),
-        IBtn('search', tip: UiCopy.text(162), onTap: onSearch),
-        PopupMenuButton<String>(
-          tooltip: UiCopy.text(163),
-          color: p.surface,
-          icon: Ic('more_vert', color: p.text2),
-          onSelected: onMenu,
-          itemBuilder: (_) => [
-            for (final (v, t) in [
-              ('search', UiCopy.text(162)),
-              ('stop', UiCopy.text(145)),
-              ('tools', UiCopy.text(164)),
-              ('mute', d.conversation(who.id)?.muted ?? false ? UiCopy.text(165) : UiCopy.text(166)),
-            ])
-              PopupMenuItem(value: v, child: Text(t, style: T.body.copyWith(color: p.text))),
-          ],
-        ),
-      ]),
-    );
+    final l = AppLocalizations.of(context);
+    return Container(decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
+      padding: EdgeInsetsDirectional.fromSTEB(embedded ? 20 : 4, 6, 8, 6), child: Row(children: [
+        if (!embedded) IBtn(backIcon(context), tip: l.back, onTap: () => Navigator.maybePop(context)),
+        ProjectMonogram.person(d, who.id, size: 28), const SizedBox(width: 10),
+        Expanded(child: InkWell(onTap: () => _workerSheet(context, d), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          ProductContentText(who.name, style: T.name.copyWith(color: p.text, fontSize: 16)),
+          ProductContentText(d.roleLine(who.id), style: T.meta.copyWith(color: p.text2)),
+          status,
+        ]))),
+        IBtn('folder', tip: l.mediaFiles, onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => FilesScreen(chat: who.id)))),
+          IBtn('search', tip: l.searchChat, onTap: onSearch),
+        IBtn('info', tip: l.role, onTap: () => _workerSheet(context, d)),
+        PopupMenuButton<String>(tooltip: l.more, onSelected: onMenu, icon: Ic('more_vert', color: p.text2), itemBuilder: (_) => [
+          PopupMenuItem(value: 'stop', child: Text(l.stop)),
+          PopupMenuItem(value: 'mute', child: Text(d.conversation(who.id)?.muted == true ? l.unmute : l.mute)),
+        ]),
+      ]));
   }
 
   void _workerSheet(BuildContext context, CompanyData d) {
@@ -937,10 +886,6 @@ class _ChatBar extends StatelessWidget {
                 ]),
               ),
           ]),
-          if (!StoreScope.read(context).preferences.newInterface) Padding(
-            padding: const EdgeInsets.all(16),
-            child: Wrap(spacing: 8, children:  [Btn('VS Code', icon: 'open_in_new'), Btn(UiCopy.text(174))]),
-          ),
         ]),
       ),
     );
@@ -972,7 +917,7 @@ class _PinBar extends StatelessWidget {
     final (what, link) = many
         ? (UiCopy.text(175, [open.length]), UiCopy.text(176))
         : ask is GoCard
-            ? (StoreScope.read(context).preferences.newInterface ? AppLocalizations.of(context).approve : UiCopy.text(177, [ltr('GO')]), UiCopy.text(178))
+            ? (AppLocalizations.of(context).approve, UiCopy.text(178))
             : (ask.blocking ? UiCopy.text(179) : UiCopy.text(180), UiCopy.text(181));
     return Semantics(
       button: true,

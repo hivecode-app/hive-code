@@ -9,7 +9,6 @@ import 'package:agent_company/theme/tokens.dart';
 import 'package:agent_company/ui/blocks/blocks.dart';
 import 'package:agent_company/ui/common.dart';
 import 'package:agent_company/ui/convs/home_v2.dart';
-import 'package:agent_company/ui/decisions/decisions_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -27,7 +26,6 @@ void main() {
     expect(homeSentence(_data(tasks: run.take(1).toList()), stuck: 0, decisions: 1), 'בינתיים משימה אחת רצה.');
     expect(homeSentence(_data(), stuck: 0, decisions: 2), 'אין משימות שרצות עכשיו.', reason: 'never "שום דבר לא מחכה לך" while something does');
     expect(homeSentence(_data(tasks: run), stuck: 1, decisions: 2), 'תקלה אחת צריכה אותך עכשיו.');
-    expect([for (final n in [1, 2, 3, 12]) waitingLine(n)], ['אחת מחכה לך', 'שתיים מחכות לך', '3 מחכות לך', '12 מחכות לך']);
   });
 
   test("the composer's headline while it is fresh, else the live sentence", () {
@@ -82,18 +80,6 @@ void main() {
     // None, or a name this app doesn't know: slate.
     expect(Palette.lightV2.identity(null), Palette.lightV2.identity('slate'));
     expect(Palette.lightV2.identity('purple'), Palette.lightV2.identity('slate'));
-  });
-
-  testWidgets('the pinned row leads the chats with the live count and opens the stack; the home has no count of its own', (tester) async {
-    final store = await pumpApp(tester, size: const Size(412, 2400));
-    final n = store.data!.waitingCount;
-    expect(n, greaterThan(0), reason: 'the demo data has something waiting');
-    expect(find.text(waitingLine(n)), findsOneWidget);
-    expect(find.textContaining('החלטות מחכות'), findsNothing, reason: 'the home sentence does not repeat it');
-    await tester.tap(find.text(waitingLine(n)));
-    await tester.pumpAndSettle();
-    expect(find.byType(DecisionStack), findsOneWidget);
-    expect(tester.takeException(), isNull);
   });
 
   // The seven projects of org.yaml with the tones decided on 21/10, by the icons the app draws for them today, so

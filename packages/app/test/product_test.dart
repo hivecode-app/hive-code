@@ -9,7 +9,7 @@ import 'package:agent_company/main.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
 import 'package:agent_company/ui/common.dart';
-import 'package:agent_company/ui/convs/conversations_screen.dart';
+import 'package:agent_company/ui/convs/home_v2.dart' show HomeV2;
 import 'package:agent_company/ui/product/approval.dart';
 import 'package:agent_company/ui/product/chats.dart';
 import 'package:agent_company/ui/product/product_theme.dart';
@@ -115,21 +115,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Language'), findsOneWidget);
     expect(Directionality.of(tester.element(find.byType(ProductSettings))), TextDirection.ltr);
-  });
-
-  testWidgets('rollback switch returns to old surface and restores the new one', (tester) async {
-    final store = await productApp(tester);
-    expect(find.byType(ProductShell), findsOneWidget);
-    await store.preferences.setNewInterface(false);
-    await tester.pumpAndSettle();
-    expect(find.byType(ConversationsScreen), findsOneWidget);
-    expect(find.byType(ProductShell), findsNothing);
-    expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).locale, const Locale('he'));
-    expect(store.preferences.language, 'en');
-    expect((await SharedPreferences.getInstance()).getBool('new_interface'), false);
-    await store.preferences.setNewInterface(true);
-    await tester.pumpAndSettle();
-    expect(find.byType(ProductShell), findsOneWidget);
   });
 
   testWidgets('one needs-you entry and project filtering; opening a chat keeps the existing behavior', (tester) async {
@@ -467,15 +452,15 @@ void main() {
 
   testWidgets('saved interface is never flashed before backend startup completes', (tester) async {
     await loadFonts();
-    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+    SharedPreferences.setMockInitialValues({'language': 'he'});
     final ready = Completer<void>();
-    await tester.pumpWidget(AuthGate(initial: SlowBackend(ready), hqUrl: '', locale: const Locale('he'), newInterface: false));
+    await tester.pumpWidget(AuthGate(initial: SlowBackend(ready), hqUrl: '', locale: const Locale('he')));
     await tester.pump();
     expect(find.byType(ProductShell), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     ready.complete();
     await tester.pumpAndSettle();
-    expect(find.byType(ConversationsScreen), findsOneWidget);
+    expect(find.byType(ProductShell), findsOneWidget);
     expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).locale, const Locale('he'));
     await tester.pumpWidget(const SizedBox.shrink());
   });

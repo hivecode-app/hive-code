@@ -25,7 +25,7 @@ class _LinkBackend extends FakeBackend {
 void main() {
   testWidgets('connecting shows next to the title and nothing below it moves', (tester) async {
     await loadFonts();
-    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+    SharedPreferences.setMockInitialValues({'language': 'he'});
     tester.view.physicalSize = kPhone * 2;
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);

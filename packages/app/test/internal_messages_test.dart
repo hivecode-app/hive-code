@@ -91,7 +91,7 @@ void main() {
     expect(noa, findsOneWidget);
     final lit = find.descendant(
       of: noa,
-      matching: find.byWidgetPredicate((w) => w is Container && w.color == Palette.of(Brightness.light).accentSoft),
+      matching: find.byWidgetPredicate((w) => w is Container && w.color == productPalette(Brightness.light).accentSoft),
     );
     expect(lit, findsOneWidget);
     expect(find.descendant(of: lit, matching: find.byType(InternalMsgRow)), findsOneWidget);

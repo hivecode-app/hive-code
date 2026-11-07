@@ -58,8 +58,6 @@
   "deviceSetting": "Device setting",
   "light": "Light",
   "dark": "Dark",
-  "newInterface": "New interface",
-  "newInterfaceHint": "Turn off to return to the previous interface.",
   "companyMap": "Company map",
   "resources": "Resources",
   "automations": "Automations",
@@ -2518,7 +2516,7 @@
   "ui744": "What to check",
   "ui745": "Since your last visit",
   "ui746": "Nothing completed since then",
-  "ui747": "In projects",
+  "ui747": "In tasks",
   "ui748": "In projects now",
   "ui749": "Quiet, no task running",
   "ui750": "Demo · Server not connected, showing sample content",
@@ -3480,8 +3478,6 @@
   "notifBadgeBody": "What waits for you: approval requests and questions. In the browser it also counts worker messages you haven't read yet, without muted chats.",
   "notifTogetherTitle": "A few in a row",
   "notifTogetherBody": "A regular message waits 20 seconds before it rings, so a few in a row ring once. An urgent one rings right away.",
-  "advancedMode": "Advanced mode",
-  "advancedHint": "Company map, resources and automations",
   "finishedToday": "Finished today · {count}",
   "@finishedToday": {
     "placeholders": {
@@ -3548,6 +3544,14 @@
     "placeholders": {
       "name": {
         "type": "String"
+      }
+    }
+  },
+  "teamSumStuck": "{count} stuck",
+  "@teamSumStuck": {
+    "placeholders": {
+      "count": {
+        "type": "int"
       }
     }
   }

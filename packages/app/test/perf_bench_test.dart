@@ -5,7 +5,6 @@ import 'package:agent_company/data/store.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
 import 'package:agent_company/ui/chat/items.dart';
-import 'package:agent_company/ui/convs/conversations_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -92,31 +91,33 @@ void main() {
     final nav = tester.state<NavigatorState>(find.byType(Navigator).first);
     nav.push(MaterialPageRoute(builder: (_) => const ChatScreen(identityId: 'dana')));
     await tester.pumpAndSettle();
-    ConversationsScreen.debugBuilds = 0;
+    _shellBuilds.clear();
     for (var i = 0; i < 10; i++) {
       store.touch();
       await tester.pump();
     }
-    expect(ConversationsScreen.debugBuilds, 0, reason: 'the chats tab is covered by the chat');
+    expect(_shellBuilds, isEmpty, reason: 'the chats tab is covered by the chat');
     nav.pop();
     await tester.pumpAndSettle();
-    expect(ConversationsScreen.debugBuilds, greaterThanOrEqualTo(1), reason: 'the chats tab caught up when shown again');
+    expect(_shellBuilds.length, greaterThanOrEqualTo(1), reason: 'the chats tab caught up when shown again');
   });
 
   testWidgets('a dialog does not freeze the screen behind it', (tester) async {
     final store = await pumpApp(tester, home: const StoreGate(child: _ShellLike()));
-    showDialog<void>(context: tester.element(find.byType(ConversationsScreen)), builder: (_) => const AlertDialog(content: Text('דיאלוג')));
+    showDialog<void>(context: tester.element(find.byType(_Probe)), builder: (_) => const AlertDialog(content: Text('דיאלוג')));
     await tester.pumpAndSettle();
-    ConversationsScreen.debugBuilds = 0;
+    _shellBuilds.clear();
     store.touch();
     await tester.pump();
-    expect(ConversationsScreen.debugBuilds, 1, reason: 'what is behind a dialog stays visible, so it stays live');
+    expect(_shellBuilds.length, 1, reason: 'what is behind a dialog stays visible, so it stays live');
   });
 }
 
-/// The phone shell's main tab, as the app wraps it (main.dart: StoreGate(child: Shell())).
+/// The shell's main tab as the app wraps it (main.dart: StoreGate(child: ProductShell())), counting its builds.
+final _shellBuilds = <int>[];
+
 class _ShellLike extends StatelessWidget {
   const _ShellLike();
   @override
-  Widget build(BuildContext context) => const Scaffold(body: ConversationsScreen());
+  Widget build(BuildContext context) => Scaffold(body: _Probe(_shellBuilds));
 }

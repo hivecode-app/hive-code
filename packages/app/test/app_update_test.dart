@@ -4,6 +4,7 @@ import 'package:agent_company/data/backend_select.dart';
 import 'package:agent_company/native/app_update.dart';
 import 'package:agent_company/native/native_bridge.dart';
 import 'package:agent_company/ui/system_bar.dart';
+import 'package:agent_company/l10n/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -77,7 +78,7 @@ void main() {
   });
 
   test('fetchLatestRelease asks the signed-in hq with the device token', () async {
-    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+    SharedPreferences.setMockInitialValues({'language': 'he'});
     expect(await fetchLatestRelease(client: MockClient((_) async => fail('no call when signed out'))), isNull);
 
     SharedPreferences.setMockInitialValues({kHqUrl: 'https://app.hq.example.com/hq', kHqToken: 'dev-tok'});
@@ -195,7 +196,10 @@ void main() {
     await tester.runAsync(() => u.check(force: true));
     await tester.pumpWidget(MaterialApp(
       theme: Theme.of(tester.element(find.byType(Scaffold))),
-      home: Scaffold(body: Directionality(textDirection: TextDirection.rtl, child: UpdateStrip(update: u))),
+      locale: const Locale('he'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(body: UpdateStrip(update: u)),
     ));
     expect(find.text('יש גרסה חדשה של האפליקציה.'), findsOneWidget);
 

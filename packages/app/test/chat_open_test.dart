@@ -21,7 +21,7 @@ class _CountingBackend extends FakeBackend {
 void main() {
   testWidgets('opening a chat fetches it once, not on every change', (tester) async {
     await loadFonts();
-    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+    SharedPreferences.setMockInitialValues({'language': 'he'});
     tester.view.physicalSize = kPhone * 2;
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
@@ -39,7 +39,7 @@ void main() {
 
   testWidgets('switching the conversation in place (desktop) opens the new one', (tester) async {
     await loadFonts();
-    SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+    SharedPreferences.setMockInitialValues({'language': 'he'});
     tester.view.physicalSize = kPhone * 2;
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);

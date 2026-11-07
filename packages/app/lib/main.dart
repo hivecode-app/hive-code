@@ -25,7 +25,6 @@ import 'theme/theme.dart';
 import 'theme/tokens.dart';
 import 'ui/auth/sign_in_screen.dart';
 import 'ui/nav.dart';
-import 'ui/shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,13 +34,11 @@ Future<void> main() async {
     if (v != null) ErrorReports.instance.appVersion = 'android $v';
   }, onError: (_) {}));
   var locale = const Locale('en');
-  var newInterface = true;
   try {
     final prefs = await SharedPreferences.getInstance();
     locale = Locale(startLanguage(prefs));
-    newInterface = prefs.getBool('new_interface') ?? true;
   } catch (_) { /* A first start can continue with English defaults. */ }
-  runApp(AuthGate(locale: newInterface ? locale : const Locale('he'), newInterface: newInterface, initial: await selectBackend(), hqUrl: await initialServer(), pairLink: await NativeBridge.instance.getPairLink()));
+  runApp(AuthGate(locale: locale, initial: await selectBackend(), hqUrl: await initialServer(), pairLink: await NativeBridge.instance.getPairLink()));
 }
 
 /// Sign-in or the app (#23). A device without a token signs in; a device whose token hq refuses
@@ -49,12 +46,11 @@ Future<void> main() async {
 /// pairing link for another server) shows the sign-in screen while the current session stays, and
 /// drops that session only once the new server let this device in.
 class AuthGate extends StatefulWidget {
-  const AuthGate({super.key, required this.initial, required this.hqUrl, this.client, this.pairLink, this.askServer = !kIsWeb, this.locale = const Locale('en'), this.newInterface = true});
+  const AuthGate({super.key, required this.initial, required this.hqUrl, this.client, this.pairLink, this.askServer = !kIsWeb, this.locale = const Locale('en')});
 
   /// null: sign in first.
   final Backend? initial;
   final Locale locale;
-  final bool newInterface;
 
   /// The server sign-in starts with ('' = none yet: the app asks for it).
   final String hqUrl;
@@ -76,7 +72,6 @@ class _AuthGateState extends State<AuthGate> {
   late final client = widget.client ?? AuthClient(widget.hqUrl);
   AppStore? store;
   late String _language = widget.locale.languageCode;
-  late bool _newInterface = widget.newInterface;
   String? note;
 
   /// Shown instead of the app while switching servers; the session of [store] stays meanwhile.
@@ -137,7 +132,7 @@ class _AuthGateState extends State<AuthGate> {
       if (mounted && identical(store, s)) startupFailed = true;
     }).whenComplete(() {
       if (mounted && identical(store, s)) {
-        setState(() { starting = false; _language = s.preferences.language; _newInterface = s.preferences.newInterface; });
+        setState(() { starting = false; _language = s.preferences.language; });
       }
     }));
   }
@@ -158,8 +153,7 @@ class _AuthGateState extends State<AuthGate> {
 
   Future<void> _signOut([String? note]) async {
     final s = store!;
-    _language = s.preferences.newInterface ? s.preferences.language : 'he';
-    _newInterface = s.preferences.newInterface;
+    _language = s.preferences.language;
     setState(() {
       store = null;
       switching = false;
@@ -227,17 +221,16 @@ class _AuthGateState extends State<AuthGate> {
   Widget build(BuildContext context) {
     final s = store;
     if (s != null && !switching && startupFailed) {
-      return _Frame(locale: Locale(s.preferences.newInterface ? s.preferences.language : 'he'), newInterface: s.preferences.newInterface,
+      return _Frame(locale: Locale(s.preferences.language),
         home: Scaffold(body: Center(child: Builder(builder: (context) => Column(mainAxisSize: MainAxisSize.min, children: [
           Padding(padding: const EdgeInsets.all(24), child: Text(UiCopy.text(882))),
           FilledButton(onPressed: () => setState(() => _startStore(s)), child: Text(AppLocalizations.of(context).retry)),
         ])))));
     }
     if (s != null && !switching && !starting) return CompanyApp(key: ObjectKey(s), store: s);
-    if (s != null && !switching && starting) return _Frame(locale: Locale(_language), newInterface: _newInterface, home: const Scaffold(body: Center(child: CircularProgressIndicator())));
+    if (s != null && !switching && starting) return _Frame(locale: Locale(_language), home: const Scaffold(body: Center(child: CircularProgressIndicator())));
     return _Frame(
       locale: Locale(s?.preferences.language ?? _language),
-      newInterface: s?.preferences.newInterface ?? _newInterface,
       home: SignInScreen(
         key: ValueKey(_screen),
         client: client,
@@ -255,16 +248,15 @@ class _AuthGateState extends State<AuthGate> {
 
 /// MaterialApp with the app's theme and locale, for the sign-in screen.
 class _Frame extends StatelessWidget {
-  const _Frame({required this.home, this.locale = const Locale('en'), this.newInterface = true});
+  const _Frame({required this.home, this.locale = const Locale('en')});
   final Locale locale;
-  final bool newInterface;
   final Widget home;
   @override
   Widget build(BuildContext context) => MaterialApp(
         onGenerateTitle: (context) => AppLocalizations.of(context).company,
         debugShowCheckedModeBanner: false,
-        theme: buildTheme(newInterface ? productPalette(Brightness.light) : Palette.of(Brightness.light), product: newInterface),
-        darkTheme: buildTheme(newInterface ? productPalette(Brightness.dark) : Palette.of(Brightness.dark), product: newInterface),
+        theme: buildTheme(productPalette(Brightness.light), product: true),
+        darkTheme: buildTheme(productPalette(Brightness.dark), product: true),
         locale: locale,
         supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: const [
@@ -273,7 +265,7 @@ class _Frame extends StatelessWidget {
           GlobalWidgetsLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,
         ],
-        builder: (context, child) { UiCopy.configure(locale.languageCode, newInterface); return child!; },
+        builder: (context, child) { UiCopy.configure(locale.languageCode); return child!; },
         home: home,
       );
 }
@@ -309,7 +301,10 @@ class _CompanyAppState extends State<CompanyApp> {
     // Where he was when an error showed: the tab, or on a desktop the conversation open in the main column.
     // In his words: hq writes it on the card ("שגיאה באפליקציה במסך שיחות").
     ErrorReports.instance.screenOf = () {
-      if (!nav.wide) return kDests.firstWhere((d) => d.tab == nav.tab).label;
+      if (!nav.wide) {
+        final l = lookupAppLocalizations(Locale(widget.store.preferences.language));
+        return switch (nav.tab) { AppTab.chats => l.chats, AppTab.tasks => l.tasks, AppTab.status => l.team };
+      }
       final id = widget.store.selectedConversation;
       final name = id == null ? null : widget.store.data?.identities[id]?.name;
       return widget.store.homeOpen || name == null ? UiCopy.text(486) : UiCopy.text(395, [name]);
@@ -361,10 +356,10 @@ class _CompanyAppState extends State<CompanyApp> {
           navigatorKey: navigatorKey,
           onGenerateTitle: (context) => AppLocalizations.of(context).company,
           debugShowCheckedModeBanner: false,
-          theme: buildTheme(widget.store.preferences.newInterface ? productPalette(Brightness.light) : Palette.of(Brightness.light), product: widget.store.preferences.newInterface),
-          darkTheme: buildTheme(widget.store.preferences.newInterface ? productPalette(Brightness.dark) : Palette.of(Brightness.dark), product: widget.store.preferences.newInterface),
+          theme: buildTheme(productPalette(Brightness.light), product: true),
+          darkTheme: buildTheme(productPalette(Brightness.dark), product: true),
           themeMode: widget.themeMode == ThemeMode.system ? widget.store.preferences.themeMode : widget.themeMode,
-          locale: Locale(widget.store.preferences.newInterface ? widget.store.preferences.language : 'he'),
+          locale: Locale(widget.store.preferences.language),
           supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: const [
           AppLocalizations.delegate,
@@ -373,15 +368,12 @@ class _CompanyAppState extends State<CompanyApp> {
             GlobalCupertinoLocalizations.delegate,
           ],
           builder: (context, child) {
-            // Android font size is honoured up to 130% (APP-SPEC §7.3).
-            UiCopy.configure(widget.store.preferences.newInterface ? widget.store.preferences.language : 'he', widget.store.preferences.newInterface);
-            final mq = MediaQuery.of(context);
-            final scale = widget.store.preferences.newInterface ? mq.textScaler : mq.textScaler.clamp(maxScaleFactor: 1.3);
-            final app = MediaQuery(data: mq.copyWith(textScaler: scale), child: child!);
+            UiCopy.configure(widget.store.preferences.language);
+            final app = child!;
             // v2: the background a screen fades through between two screens (lib/theme/motion.dart).
             return kDesignV2 ? ColoredBox(color: Theme.of(context).scaffoldBackgroundColor, child: app) : app;
           },
-          home: widget.home ?? StoreGate(child: widget.store.backend is HqBackend ? SetupGate(child: widget.store.preferences.newInterface ? const ProductShell() : const Shell()) : widget.store.preferences.newInterface ? const ProductShell() : const Shell()),
+          home: widget.home ?? StoreGate(child: widget.store.backend is HqBackend ? const SetupGate(child: ProductShell()) : const ProductShell()),
         )),
       ),
     );

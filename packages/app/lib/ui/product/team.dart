@@ -63,7 +63,8 @@ class ProductTeam extends StatelessWidget {
     int count(bool Function(WorkerStatus) f) => shown.where((who) => f(st(who))).length;
     return [
       (count((s) => s == WorkerStatus.waiting), l.teamSumWaiting),
-      (count((s) => s == WorkerStatus.blocked || s == WorkerStatus.stuck), l.teamSumBlocked),
+      (count((s) => s == WorkerStatus.blocked), l.teamSumBlocked),
+      (count((s) => s == WorkerStatus.stuck), l.teamSumStuck),
       (count((s) => s == WorkerStatus.working || s == WorkerStatus.restarting), l.teamSumWorking),
       (count((s) => s == WorkerStatus.free), l.teamSumFree),
       (count((s) => s == WorkerStatus.resting), l.teamSumResting),
@@ -137,17 +138,17 @@ class ProductTeam extends StatelessWidget {
                 children: [
                   if (wide) const _TableHead(),
                   for (final g in shown) ...[
-                    _GroupHead(g.$1, wide: wide),
+                    _GroupHead(g.$1, wide: wide, onTap: _open(context, d, g.$2.first)),
                     for (final who in g.$2) wide ? ProductPersonTableRow(id: who.id) : ProductPersonRow(id: who.id),
                   ],
                   if (finished.isNotEmpty)
                     Theme(
                       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                      child: ExpansionTile(
+                      child: FoldTile(
                         key: const PageStorageKey('team-finished'),
                         tilePadding: const EdgeInsetsDirectional.symmetric(horizontal: 20),
+                        color: p.text2,
                         title: Text(l.finishedToday(finished.length), style: T.section.copyWith(color: p.text2)),
-                        trailing: Ic('expand_more', color: p.text2),
                         children: [
                           for (final e in finished.entries)
                             wide ? ProductPersonTableRow(id: e.key, line: plainTitle(e.value.title)) : ProductPersonRow(id: e.key, line: plainTitle(e.value.title)),
@@ -165,19 +166,42 @@ class ProductTeam extends StatelessWidget {
   }
 }
 
+/// The page of the group a person is in: its project, else its standing team. The groups are built the same way
+/// (`ProductDirectory.teamGroups`), so the first person tells which page the heading opens.
+VoidCallback? _open(BuildContext context, CompanyData d, Identity who) {
+  final project = d.projectOf(who.id), team = who.host ?? who.teamId;
+  if (project != null) return () => Nav.project(context, project);
+  // A team org.yaml does not know has no page to open.
+  return d.teams[team] == null ? null : () => Nav.team(context, team);
+}
+
 class _GroupHead extends StatelessWidget {
-  const _GroupHead(this.title, {required this.wide});
+  const _GroupHead(this.title, {required this.wide, this.onTap});
   final String title;
   final bool wide;
+  final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    // A grey band across the whole width, on the phone and in the table alike.
-    return Container(
-      margin: EdgeInsets.only(top: wide ? 8 : 0),
-      decoration: BoxDecoration(color: wide ? p.surface2 : p.bg, border: Border(bottom: BorderSide(color: p.line))),
-      padding: EdgeInsetsDirectional.fromSTEB(20, wide ? 10 : 18, 20, wide ? 10 : 8),
-      child: Text(title, style: T.section.copyWith(color: p.text2)),
+    // A grey band across the whole width, on the phone and in the table alike; it opens the group's page.
+    return Padding(
+      padding: EdgeInsets.only(top: wide ? 8 : 0),
+      child: Material(
+        color: wide ? p.surface2 : p.bg,
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+            padding: EdgeInsetsDirectional.fromSTEB(20, wide ? 10 : 18, 12, wide ? 10 : 8),
+            child: Row(
+              children: [
+                Expanded(child: Text(title, style: T.section.copyWith(color: p.text2))),
+                if (onTap != null) Ic(chevronIcon(context), size: 18, color: p.text3),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -203,10 +227,13 @@ class _TableHead extends StatelessWidget {
   }
 }
 
-/// What it does now, in words: the task its shift is on, else its open task, else its last activity.
+/// What it does now, in words: the task its shift is on, else its open task (the latest started), else its last
+/// activity.
 String? _now(CompanyData d, String id, String? line) {
   final presence = d.presence[id];
-  final now = line ?? presence?.currentTask ?? d.openTasks.where((t) => t.worker == id).firstOrNull?.title ?? presence?.activity;
+  final open = d.openTasks.where((t) => t.worker == id).toList()
+    ..sort((a, b) => (b.since ?? DateTime(0)).compareTo(a.since ?? DateTime(0)));
+  final now = line ?? presence?.currentTask ?? open.firstOrNull?.title ?? presence?.activity;
   return now == null || now.trim().isEmpty ? null : plainTitle(now);
 }
 
@@ -329,15 +356,11 @@ class ProductPersonTableRow extends StatelessWidget {
             width: 120,
             child: Align(
               alignment: AlignmentDirectional.centerEnd,
-              child: Semantics(
-                label: l.teamChatWith(who.name),
-                excludeSemantics: true,
-                button: true,
-                child: OutlinedButton.icon(
-                  onPressed: () => Nav.chat(context, id),
-                  icon: const Ic('chat', size: 18),
-                  label: Text(l.teamChat),
-                ),
+              // A screen reader hears whose chat it opens, not "צ'אט" on every row.
+              child: OutlinedButton.icon(
+                onPressed: () => Nav.chat(context, id),
+                icon: const Ic('chat', size: 18),
+                label: Text(l.teamChat, semanticsLabel: l.teamChatWith(who.name)),
               ),
             ),
           ),

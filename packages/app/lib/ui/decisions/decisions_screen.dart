@@ -227,55 +227,6 @@ class DecisionText {
   }
 }
 
-
-// ───────────────────────────── the pinned row ─────────────────────────────
-
-/// "3 מחכות לך": how many wait for him, in words up to two.
-String waitingLine(int n) => switch (n) { 1 => UiCopy.text(131), 2 => UiCopy.text(573), _ => UiCopy.text(132, [n]) };
-
-/// The row pinned on top of the conversations: how many wait for him, and a tap opens the pile. Not there when none do.
-class WaitingRow extends StatelessWidget {
-  const WaitingRow({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    UiCopy.watch(context);
-    final p = context.p;
-    final n = StoreScope.of(context).data?.waitingCount ?? 0;
-    return AnimatedSize(
-      duration: Mo.off(context) ? Duration.zero : Mo.sm,
-      curve: Mo.standard,
-      alignment: Alignment.topCenter,
-      child: n <= 0
-          ? const SizedBox(width: double.infinity)
-          : Semantics(
-              button: true,
-              label: waitingLine(n),
-              hint: UiCopy.text(574),
-              excludeSemantics: true,
-              onTap: () => openDecisions(context),
-              child: Material(
-                color: p.surface,
-                child: InkWell(
-                  onTap: () => openDecisions(context),
-                  child: Container(
-                    constraints: const BoxConstraints(minHeight: 52),
-                    padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 10, 8),
-                    decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
-                    child: Row(children: [
-                      Ic('front_hand', size: 20, fill: true, color: p.text),
-                      const SizedBox(width: 12),
-                      Expanded(child: Text(waitingLine(n), style: T.row2.copyWith(color: p.text, fontWeight: FontWeight.w700, fontFeatures: kTabular))),
-                      Ic(chevronIcon(context), size: 22, color: p.text2),
-                    ]),
-                  ),
-                ),
-              ),
-            ),
-    );
-  }
-}
-
 /// Opens the pile, on [at] (`inbox:<n>`) when given: a notification's item comes up first.
 void openDecisions(BuildContext context, {String? at}) {
   // Already open (a second tap on a notification): the new one comes up on top of it.

@@ -1,7 +1,6 @@
 import 'package:agent_company/data/store.dart';
 import 'package:agent_company/ui/nav.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'helpers.dart';
@@ -22,12 +21,4 @@ void main() {
     });
   }
 
-  testWidgets('desktop: G then P opens the projects, by physical key', (tester) async {
-    await pumpApp(tester, size: const Size(1440, 860));
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyG, physicalKey: PhysicalKeyboardKey.keyG);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyP, physicalKey: PhysicalKeyboardKey.keyP);
-    await tester.pump();
-    final ctx = tester.element(find.byType(Scaffold).first);
-    expect(NavScope.read(ctx).tab, AppTab.projects);
-  });
 }

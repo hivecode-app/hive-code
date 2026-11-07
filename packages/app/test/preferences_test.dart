@@ -10,7 +10,6 @@ void main() {
     final prefs = AppPreferences();
     await prefs.load(disk);
     expect(prefs.language, 'en');
-    expect(prefs.newInterface, isTrue);
     prefs.defaults('he');
     expect(prefs.language, 'he');
     // Signed out, before any data: the sign-in screen speaks the server's language, not English.
@@ -33,13 +32,11 @@ void main() {
     final prefs = AppPreferences();
     await prefs.load(disk);
     await prefs.setLanguage('he');
-    await prefs.setNewInterface(false);
     await prefs.setAppearance(ThemeMode.dark);
     final reloaded = AppPreferences();
     await reloaded.load(disk);
     reloaded.defaults('en');
     expect(reloaded.language, 'he');
-    expect(reloaded.newInterface, isFalse);
     expect(reloaded.themeMode, ThemeMode.dark);
   });
 }

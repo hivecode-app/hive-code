@@ -3,6 +3,7 @@
 // /api/messages?identity=owner and /api/accounts, in the shape of a real day of hq, with invented
 // projects, titles and messages), with the project names of org.yaml (agent-company is "החברה").
 // These goldens are the screens of the approved mockup (#53), as built.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -19,11 +20,11 @@ import 'package:agent_company/ui/chat/chat_screen.dart';
 import 'package:agent_company/ui/common.dart';
 import 'package:agent_company/ui/convs/conversations_screen.dart';
 import 'package:agent_company/ui/nav.dart';
-import 'package:agent_company/ui/projects/projects_screen.dart';
 import 'package:agent_company/ui/settings/settings_screen.dart';
 import 'package:agent_company/ui/entity_link.dart';
 import 'package:agent_company/ui/projects/project_screen.dart';
 import 'package:agent_company/ui/status/status_screen.dart';
+import 'package:agent_company/ui/tasks/tasks_screen.dart' show ProductTasks;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -151,7 +152,7 @@ Future<BuildContext> _pump(WidgetTester tester,
     {Size size = kPhone, bool earlierWaiting = false, bool burning = false, bool summaries = false, DateTime? chatsSeen, bool dark = false, double textScale = 1, bool head = false}) async {
   await loadFonts();
   Motion.frozen = true;
-  SharedPreferences.setMockInitialValues({'language': 'he', 'new_interface': false});
+  SharedPreferences.setMockInitialValues({'language': 'he'});
   tester.view.physicalSize = size * 2;
   tester.view.devicePixelRatio = 2;
   tester.platformDispatcher.textScaleFactorTestValue = textScale;
@@ -178,19 +179,28 @@ Future<void> _shot(WidgetTester tester, String name) async {
 
 const _tall = Size(342, 1500);
 
+/// "סטטוס" is a page from the settings now (product/settings.dart), not a tab.
+Future<void> _status(BuildContext ctx) =>
+    Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const Scaffold(body: SafeArea(child: StatusScreen()))));
+
 void main() {
   testWidgets('status: what waits, what finished since the last visit, a line per project', (tester) async {
     final ctx = await _pump(tester, size: _tall, earlierWaiting: true);
-    NavScope.read(ctx).go(AppTab.status);
-    await tester.pump();
-    expect(find.text('מ-18:00'), findsOneWidget);
+    unawaited(_status(ctx));
+    await tester.pumpAndSettle();
+    expect(findShown('מ-18:00'), findsOneWidget);
     // Since 18:00: 14 finished with a worker on them (the one closed into another task has none, and is left out).
-    expect(findShown('עוד 8 · בפרויקטים'), findsOneWidget);
+    expect(findShown('עוד 8 · במשימות'), findsOneWidget);
     expect(findShown('עובדת קבועה חדשה, מיכל, תפעול עסקי'), findsOneWidget, reason: 'the title without "בוט ההזמנות: "');
     expect(findShown('החברה · תומר · 19:56'), findsOneWidget, reason: 'the project by its name, never agent-company');
     expect(findShown('שקט, אין משימה שרצה'), findsNWidgets(3));
     expect(findShown('קרן: שעת משלוח'), findsOneWidget);
     await _shot(tester, '03-status');
+    // "עוד 8" leaves the pushed pages for the tasks tab, not a tab switch hidden under them.
+    await tester.tap(findShown('עוד 8 · במשימות'));
+    await tester.pumpAndSettle();
+    expect(find.byType(StatusScreen), findsNothing);
+    expect(find.byType(ProductTasks), findsOneWidget);
   });
 
   testWidgets('status: a task\'s summary is its line, in his words', (tester) async {
@@ -201,8 +211,8 @@ void main() {
     d.tickets[i] = Ticket(number: t.number, title: t.title, project: t.project, projectName: t.projectName, group: t.group, assignee: t.assignee,
         status: t.status, assigneeId: t.assigneeId, doneAt: t.doneAt, summary: 'מיכל בצוות של בוט ההזמנות');
     StoreScope.read(ctx).touch();
-    NavScope.read(ctx).go(AppTab.status);
-    await tester.pump();
+    unawaited(_status(ctx));
+    await tester.pumpAndSettle();
     expect(findShown('מיכל בצוות של בוט ההזמנות'), findsOneWidget);
     expect(findShown('עובדת קבועה חדשה'), findsNothing);
   });
@@ -217,7 +227,7 @@ void main() {
     }
 
     // On status: a finished task of a task worker opens who opened it, not the project.
-    NavScope.read(ctx).go(AppTab.status);
+    unawaited(_status(ctx));
     await tester.pumpAndSettle();
     final since = DateTime(2026, 10, 20, 18, 0);
     final done = [for (final t in d.tickets) if (t.doneAt != null && t.assigneeId != null && t.doneAt!.isAfter(since)) t]..sort((a, b) => b.doneAt!.compareTo(a.doneAt!));
@@ -236,26 +246,11 @@ void main() {
     expect(open(), 'keren');
   });
 
-  testWidgets('projects: by his names, each with its lead and open tasks; then the standing teams', (tester) async {
-    final ctx = await _pump(tester, size: _tall);
-    NavScope.read(ctx).go(AppTab.projects);
-    await tester.pump();
-    for (final name in ['החברה', 'החנות', 'בוט ההזמנות', 'בוט התמיכה', 'המוקד הקולי', 'צוותים קבועים']) {
-      expect(findShown(name), findsWidgets, reason: name);
-    }
-    expect(find.text('agent-company'), findsNothing);
-    expect(find.text('2 משימות פתוחות'), findsOneWidget);
-    expect(find.text('משימה פתוחה אחת'), findsOneWidget);
-    await _shot(tester, '04-projects');
-  });
-
   testWidgets('project: the team, the open tasks and what finished today, task workers too', (tester) async {
     final ctx = await _pump(tester, size: _tall);
-    NavScope.read(ctx).go(AppTab.projects);
-    await tester.pump();
     Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => const ProjectScreen(projectId: 'agent-company')));
     await tester.pumpAndSettle();
-    expect(findShown('שני (זמני) · עובדת מ-19:40'), findsOneWidget);
+    expect(findShown('שני (זמני) · בעבודה מ-19:40'), findsOneWidget);
     expect(find.text('עוד 29'), findsOneWidget);
     await _shot(tester, '05-project-agent-company');
     await tester.tap(find.text('עוד 29'));
@@ -268,19 +263,6 @@ void main() {
     Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => const ProjectScreen(projectId: 'voice')));
     await _shot(tester, '06-project-voice');
     expect(findShown('שעת משלוח "לא ידוע" לא נאמרת ללקוח'), findsNWidgets(2), reason: 'under Keren, and as the open task');
-  });
-
-  testWidgets('settings: automations, accounts, devices', (tester) async {
-    final ctx = await _pump(tester, size: const Size(342, 900));
-    NavScope.read(ctx).go(AppTab.settings);
-    await tester.pumpAndSettle();
-    expect(findShown('9 פועלות · מתוך 18'), findsOneWidget);
-    expect(find.text('חשבון שני'), findsOneWidget);
-    await _shot(tester, '07-settings');
-    await tester.tap(findShown('9 פועלות'));
-    await tester.pumpAndSettle();
-    expect(find.byType(AutomationsScreen), findsOneWidget);
-    expect(find.text('נגה · ראש מחלקת השיפור'), findsOneWidget, reason: 'grouped by who runs them');
   });
 
   testWidgets('automations', (tester) async {
@@ -335,7 +317,7 @@ void main() {
     store.data!.presence['keren'] = Presence(status: WorkerStatus.stuck, currentTask: keren.currentTask, activity: keren.activity);
     store.touch();
     await tester.pumpAndSettle();
-    expect(findShown('תקועה · קרן'), findsOneWidget);
+    expect(findShown('תקוע · קרן'), findsOneWidget);
     expect(findShown('שעת משלוח "לא ידוע" לא נאמרת ללקוח'), findsWidgets);
   });
 
@@ -465,7 +447,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
     await headShot(tester, 'lanes');
-    await tester.tap(find.bySemanticsLabel(RegExp(r'^קרן עובדת על זה מ-19:46\. ')));
+    await tester.tap(find.bySemanticsLabel(RegExp('^קרן עובדת על זה מ-\u206019:46\\. ')));
     await tester.pumpAndSettle();
     expect(findShown('קרן · מ-19:46'), findsOneWidget);
     await headShot(tester, 'lanes-picked');
