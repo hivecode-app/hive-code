@@ -223,7 +223,7 @@ class _AuthGateState extends State<AuthGate> {
     if (s != null && !switching && startupFailed) {
       return _Frame(locale: Locale(s.preferences.language),
         home: Scaffold(body: Center(child: Builder(builder: (context) => Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(padding: const EdgeInsets.all(24), child: Text(UiCopy.text(882))),
+          Padding(padding: const EdgeInsets.all(24), child: Text(UiCopy.copy.noConnectionServerAction)),
           FilledButton(onPressed: () => setState(() => _startStore(s)), child: Text(AppLocalizations.of(context).retry)),
         ])))));
     }
@@ -307,7 +307,7 @@ class _CompanyAppState extends State<CompanyApp> {
       }
       final id = widget.store.selectedConversation;
       final name = id == null ? null : widget.store.data?.identities[id]?.name;
-      return widget.store.homeOpen || name == null ? UiCopy.text(486) : UiCopy.text(395, [name]);
+      return widget.store.homeOpen || name == null ? UiCopy.copy.home : UiCopy.copy.chat2(name);
     };
     // An open conversation is read, and doesn't alert, only while the app is in front and has focus: a desktop
     // window left open behind another one (inactive) must not read his messages or keep them from alerting.

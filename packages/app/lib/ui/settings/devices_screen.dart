@@ -97,7 +97,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
         backgroundColor: p.surface,
         content: Text(question, style: T.body.copyWith(color: p.text)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(UiCopy.text(674), style: T.button.copyWith(color: p.text2))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(UiCopy.copy.keep, style: T.button.copyWith(color: p.text2))),
           TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(yes, style: T.button.copyWith(color: p.urgent, fontWeight: FontWeight.w700))),
         ],
       ),
@@ -106,16 +106,16 @@ class _DevicesScreenState extends State<DevicesScreen> {
   }
 
   Future<void> _revoke(DeviceInfo d) async {
-    final q = d.current ? UiCopy.text(675) : UiCopy.text(676, [d.name]);
-    if (!await _confirm(q, d.current ? UiCopy.text(677) : UiCopy.text(678))) return;
+    final q = d.current ? UiCopy.copy.signOutThis : UiCopy.copy.revokeWillDisconnect(d.name);
+    if (!await _confirm(q, d.current ? UiCopy.copy.signOut2 : UiCopy.copy.revokeDevice)) return;
     // Signing out this device: hq refuses the token from now on, and the app returns to sign-in.
     await _act(() => client!.revokeDevice(session!.token, d.id));
   }
 
   Future<void> _removePasskey(PasskeyInfo k) async {
     final n = devices?.where((d) => d.passkeyId == k.id).length ?? 0;
-    final q = UiCopy.text(680, [k.name, n > 0 ? UiCopy.text(679, [n]) : '']);
-    if (!await _confirm(q, UiCopy.text(219))) return;
+    final q = UiCopy.copy.removePasskey(k.name, n > 0 ? UiCopy.copy.devicesUsingThis(n) : '');
+    if (!await _confirm(q, UiCopy.copy.remove)) return;
     await _act(() => client!.revokePasskey(session!.token, k.id));
   }
 
@@ -136,9 +136,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
   String _when(DateTime t) => '${dm(t)} ${hm(t)}';
 
   String _via(DeviceInfo d) => switch (d.via) {
-        'passkey' => UiCopy.text(681),
-        'register' => UiCopy.text(682),
-        _ => UiCopy.text(683),
+        'passkey' => UiCopy.copy.signedPasskey,
+        'register' => UiCopy.copy.pairedCodePasskey,
+        _ => UiCopy.copy.pairedCode,
       };
 
   @override
@@ -150,27 +150,27 @@ class _DevicesScreenState extends State<DevicesScreen> {
       backgroundColor: p.bg,
       body: SafeArea(
         child: Column(children: [
-          TopBar(title: UiCopy.text(684), leading: IBtn(backIcon(context), tip: UiCopy.text(161), onTap: () => Navigator.of(context).maybePop())),
+          TopBar(title: UiCopy.copy.devices2, leading: IBtn(backIcon(context), tip: UiCopy.copy.back2, onTap: () => Navigator.of(context).maybePop())),
           Expanded(
             child: ListView(padding: EdgeInsets.zero, children: [
               if (loading)
-                Padding(padding: const EdgeInsets.all(24), child: Center(child: LoadingWatch(screen: UiCopy.text(685), child: Spin(child: Ic('progress_activity', color: p.text2)))))
+                Padding(padding: const EdgeInsets.all(24), child: Center(child: LoadingWatch(screen: UiCopy.copy.settingsDevices, child: Spin(child: Ic('progress_activity', color: p.text2)))))
               else if (session == null)
                 Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Text(UiCopy.text(686), style: T.secondary.copyWith(color: p.text2)),
+                  child: Text(UiCopy.copy.thisDeviceNot, style: T.secondary.copyWith(color: p.text2)),
                 )
               else ...[
-                if (error != null) ShownError(error!, screen: UiCopy.text(685), padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), report: errorFault),
-                Section(UiCopy.text(684), top: 8, count: devices == null ? null : '${devices!.length}'),
+                if (error != null) ShownError(error!, screen: UiCopy.copy.settingsDevices, padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), report: errorFault),
+                Section(UiCopy.copy.devices2, top: 8, count: devices == null ? null : '${devices!.length}'),
                 ListBlock(inset: 16, children: [
                   for (final d in devices ?? const <DeviceInfo>[])
                     _Row(
                       icon: 'devices',
                       title: d.name,
-                      tag: d.current ? UiCopy.text(687) : null,
-                      sub: '${_via(d)} · ${d.lastSeenAt == null ? UiCopy.text(688) : UiCopy.text(689, [_when(d.lastSeenAt!)])}',
-                      action: Btn(d.current ? UiCopy.text(677) : UiCopy.text(18), height: 32, onTap: () => _revoke(d)),
+                      tag: d.current ? UiCopy.copy.thisDevice2 : null,
+                      sub: '${_via(d)} · ${d.lastSeenAt == null ? UiCopy.copy.neverSeen : UiCopy.copy.seen(_when(d.lastSeenAt!))}',
+                      action: Btn(d.current ? UiCopy.copy.signOut2 : UiCopy.copy.cancel, height: 32, onTap: () => _revoke(d)),
                     ),
                 ]),
                 const Section('passkeys'),
@@ -178,35 +178,35 @@ class _DevicesScreenState extends State<DevicesScreen> {
                   if (passkeys.isEmpty)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                      child: Text(UiCopy.text(690), style: T.small.copyWith(color: p.text2)),
+                      child: Text(UiCopy.copy.noRegisteredPasskeys, style: T.small.copyWith(color: p.text2)),
                     ),
                   for (final k in passkeys)
                     _Row(
                       icon: 'passkey',
                       title: k.name,
-                      sub: UiCopy.text(692, [_when(k.createdAt), k.lastUsedAt == null ? '' : UiCopy.text(691, [_when(k.lastUsedAt!)])]),
-                      action: Btn(UiCopy.text(219), height: 32, onTap: () => _removePasskey(k)),
+                      sub: UiCopy.copy.created(_when(k.createdAt), k.lastUsedAt == null ? '' : UiCopy.copy.lastUsed(_when(k.lastUsedAt!))),
+                      action: Btn(UiCopy.copy.remove, height: 32, onTap: () => _removePasskey(k)),
                     ),
                 ]),
-                 Section(UiCopy.text(693)),
+                 Section(UiCopy.copy.pairNewDevice),
                 ListBlock(inset: 16, children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(UiCopy.text(694),
+                      Text(UiCopy.copy.singleUseCode,
                           style: T.small.copyWith(color: p.text2)),
                       const SizedBox(height: 10),
                       if (pc != null) ...[
                         SelectableText(pc.code, key: const Key('pair-code-shown'), textDirection: TextDirection.ltr,
                             style: T.mono(24, w: FontWeight.w700).copyWith(color: p.text, letterSpacing: 3)),
                         const SizedBox(height: 2),
-                        Text(UiCopy.text(695, [hm(pc.expiresAt)]), style: T.meta.copyWith(color: p.text2)),
+                        Text(UiCopy.copy.validUntil(hm(pc.expiresAt)), style: T.meta.copyWith(color: p.text2)),
                         const SizedBox(height: 10),
                       ],
                       Wrap(spacing: 8, runSpacing: 8, children: [
-                        Btn(pc == null ? UiCopy.text(696) : UiCopy.text(697), icon: 'link', onTap: _newCode),
+                        Btn(pc == null ? UiCopy.copy.pairingCode : UiCopy.copy.newCode, icon: 'link', onTap: _newCode),
                         if (pc?.link != null)
-                          Btn(UiCopy.text(698), icon: 'content_copy', onTap: () => Clipboard.setData(ClipboardData(text: pc!.link!))),
+                          Btn(UiCopy.copy.copyLink2, icon: 'content_copy', onTap: () => Clipboard.setData(ClipboardData(text: pc!.link!))),
                       ]),
                     ]),
                   ),

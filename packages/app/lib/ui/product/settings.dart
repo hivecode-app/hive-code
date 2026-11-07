@@ -42,8 +42,7 @@ String? claudeWeek(AppLocalizations l, List<QuotaLine> quota, DateTime now) {
 }
 
 class ProductSettings extends StatefulWidget {
-  const ProductSettings({super.key, this.embedded = false});
-  final bool embedded;
+  const ProductSettings({super.key});
   @override
   State<ProductSettings> createState() => _ProductSettingsState();
 }
@@ -99,12 +98,10 @@ class _ProductSettingsState extends State<ProductSettings> {
       ];
 
       final title = Padding(
-        padding: EdgeInsets.fromLTRB(wide ? 24 : 20, widget.embedded ? 20 : 0, wide ? 24 : 20, 16),
+        padding: EdgeInsets.fromLTRB(wide ? 24 : 20, 0, wide ? 24 : 20, 16),
         child: Text(l.settings, style: (wide ? T.bar : T.big).copyWith(color: p.text)),
       );
-      final back = widget.embedded
-          ? null
-          : Padding(padding: const EdgeInsets.fromLTRB(8, 4, 8, 4), child: Align(alignment: AlignmentDirectional.centerStart, child: IBtn(backIcon(context), tip: l.back, onTap: () => Navigator.pop(context))));
+      final back = Padding(padding: const EdgeInsets.fromLTRB(8, 4, 8, 4), child: Align(alignment: AlignmentDirectional.centerStart, child: IBtn(backIcon(context), tip: l.back, onTap: () => Navigator.pop(context))));
 
       final Widget body;
       if (wide) {
@@ -113,7 +110,7 @@ class _ProductSettingsState extends State<ProductSettings> {
             width: 260,
             child: Container(
               decoration: BoxDecoration(color: p.bg, border: BorderDirectional(end: BorderSide(color: p.line))),
-              child: ListView(padding: const EdgeInsets.only(bottom: 24), children: [?back, title, for (final w in items) Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: w)]),
+              child: ListView(padding: const EdgeInsets.only(bottom: 24), children: [back, title, for (final w in items) Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: w)]),
             ),
           ),
           Expanded(child: ColoredBox(color: p.surface, child: SettingsPageView(key: ValueKey(open), page: open, inline: true))),
@@ -130,14 +127,14 @@ class _ProductSettingsState extends State<ProductSettings> {
           }
         }
         body = ListView(children: [
-          ?back,
+          back,
           title,
           for (final g in groups)
             if (g.length == 1 && (g.first is Section || g.first is SizedBox)) g.first else if (g.isNotEmpty) ListBlock(inset: 56, children: g),
           const SizedBox(height: 24),
         ]);
       }
-      return widget.embedded ? ColoredBox(color: p.bg, child: body) : Scaffold(backgroundColor: p.bg, body: SafeArea(child: body));
+      return Scaffold(backgroundColor: p.bg, body: SafeArea(child: body));
     });
   }
 }

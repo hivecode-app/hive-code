@@ -59,7 +59,7 @@ class _LanesBlockState extends State<LanesBlock> {
     final nameStyle = T.meta.copyWith(fontWeight: FontWeight.w500);
     return Semantics(
       container: true,
-      label: UiCopy.text(83, [hm(data.from), hm(data.now)]),
+      label: UiCopy.copy.dayTimeline(hm(data.from), hm(data.now)),
       explicitChildNodes: true,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -127,14 +127,14 @@ class _Detail extends StatelessWidget {
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(child: EntityLink(identity: pick.to, label: [pick.text, pick.meta].where((s) => s.isNotEmpty).join('. '), borderRadius: BorderRadius.circular(8), child: story)),
           const SizedBox(width: 4),
-          IBtn('close', tip: UiCopy.text(84), onTap: onTap),
+          IBtn('close', tip: UiCopy.copy.close2, onTap: onTap),
         ]),
       );
     }
     return Semantics(
       liveRegion: true,
       button: true,
-      hint: UiCopy.text(84),
+      hint: UiCopy.copy.close2,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
@@ -230,7 +230,7 @@ class _LaneRow extends StatelessWidget {
     final p = context.p;
     final d = StoreScope.of(context).data;
     String name(String? id) => id == null || d == null ? '' : d.who(id).name;
-    String works(String? id) => id != null && d?.who(id).gender == Gender.f ? UiCopy.text(85) : UiCopy.text(86);
+    String works(String? id) => id != null && d?.who(id).gender == Gender.f ? UiCopy.copy.working2 : UiCopy.copy.working3;
     // A date when it is not today (an incident from yesterday sits at the axis' edge).
     String when(DateTime t) => daysAgo(t, data.now) == 0 ? hm(t) : '${dm(t)} ${hm(t)}';
     final runs = lane.running.length;
@@ -251,7 +251,7 @@ class _LaneRow extends StatelessWidget {
     for (final (i, r) in lane.running.indexed) {
       final top = _kRow - _kBarGap + i * (_kBar + _kBarGap);
       final len = math.max(x(r.from) - nowX, _kBar + 8);
-      final story = [name(r.who), UiCopy.text(36, [hm(r.from)])].where((s) => s.isNotEmpty).join(' · ');
+      final story = [name(r.who), UiCopy.copy.since(hm(r.from))].where((s) => s.isNotEmpty).join(' · ');
       final pick = target(nowX, nowX + len, top, top + _kBar, nowX + _kBar / 2, top + _kBar / 2, r.text, story, d == null ? null : chatTargetOf(d, worker: r.who));
       marks.add(Positioned(
         left: nowX,
@@ -259,7 +259,7 @@ class _LaneRow extends StatelessWidget {
         width: len,
         height: _kBar,
         child: _Mark(
-          spoken: UiCopy.text(89, [name(r.who).isEmpty ? UiCopy.text(87) : UiCopy.text(88, [name(r.who), works(r.who)]), hm(r.from)]),
+          spoken: UiCopy.copy.since2(name(r.who).isEmpty ? UiCopy.copy.running : UiCopy.copy.this2(name(r.who), works(r.who)), hm(r.from)),
           text: r.text,
           onTap: pick,
           child: DecoratedBox(
@@ -282,10 +282,10 @@ class _LaneRow extends StatelessWidget {
       final at = x(c.first.at);
       final n = c.items.length;
       final newest = c.items.last;
-      final text = n == 1 ? newest.text : [for (final x in c.items.reversed.take(3)) x.text, if (n > 3) UiCopy.text(90, [n - 3])].join('\n');
+      final text = n == 1 ? newest.text : [for (final x in c.items.reversed.take(3)) x.text, if (n > 3) UiCopy.copy.more2(n - 3)].join('\n');
       final meta = n == 1
           ? [name(newest.who), hm(newest.at)].where((s) => s.isNotEmpty).join(' · ')
-          : UiCopy.text(91, [n, hm(c.items.first.at), hm(newest.at)]);
+          : UiCopy.copy.done4(n, hm(c.items.first.at), hm(newest.at));
       final size = n == 1 ? 7.0 : 15.0;
       final pick = target(at - size / 2, at + size / 2, mid - 8, mid + 8, at, mid, text, meta,
           n == 1 && d != null ? chatTargetOf(d, worker: newest.who, openedBy: newest.opener, done: true) : null);
@@ -295,7 +295,7 @@ class _LaneRow extends StatelessWidget {
         width: size,
         height: size,
         child: _Mark(
-          spoken: n == 1 ? UiCopy.text(92, [hm(newest.at)]) : UiCopy.text(93, [n, hm(c.items.first.at), hm(newest.at)]),
+          spoken: n == 1 ? UiCopy.copy.done5(hm(newest.at)) : UiCopy.copy.done6(n, hm(c.items.first.at), hm(newest.at)),
           text: text,
           onTap: pick,
           child: Container(
@@ -316,11 +316,11 @@ class _LaneRow extends StatelessWidget {
         top: mid - 9,
         width: 18,
         height: 18,
-        child: _Mark(spoken: UiCopy.text(94, [when(al.at)]), text: al.text, onTap: pick, child: Center(child: Ic('warning', size: 16, fill: true, color: p.text))),
+        child: _Mark(spoken: UiCopy.copy.issue(when(al.at)), text: al.text, onTap: pick, child: Center(child: Ic('warning', size: 16, fill: true, color: p.text))),
       ));
     }
     if (lane.waiting > 0) {
-      final text = lane.waiting == 1 ? UiCopy.text(95) : UiCopy.text(96, [lane.waiting]);
+      final text = lane.waiting == 1 ? UiCopy.copy.oneRequestNeeds : UiCopy.copy.requestsNeedYou(lane.waiting);
       final pick = target(2, 18, mid - 8, mid + 8, 10, mid, text, '');
       marks.add(Positioned(
         left: 2,
@@ -328,7 +328,7 @@ class _LaneRow extends StatelessWidget {
         width: 16,
         height: 16,
         child: _Mark(
-          spoken: UiCopy.text(97),
+          spoken: UiCopy.copy.needsYou2,
           text: text,
           onTap: pick,
           child: Container(
@@ -342,8 +342,8 @@ class _LaneRow extends StatelessWidget {
     if (lane.queued.isNotEmpty) {
       final n = lane.queued.length;
       final top = _kRow - _kBarGap + runs * (_kBar + _kBarGap) + (_kBar - 16) / 2;
-      final text = [for (final q in lane.queued.take(3)) q, if (n > 3) UiCopy.text(90, [n - 3])].join('\n');
-      final meta = n == 1 ? UiCopy.text(98) : UiCopy.text(99, [n]);
+      final text = [for (final q in lane.queued.take(3)) q, if (n > 3) UiCopy.copy.more2(n - 3)].join('\n');
+      final meta = n == 1 ? UiCopy.copy.queued : UiCopy.copy.queued2(n);
       final pick = target(2, 18, top, top + 16, 10, top + 8, text, meta);
       marks.add(Positioned(
         left: 2,
@@ -351,7 +351,7 @@ class _LaneRow extends StatelessWidget {
         width: 16,
         height: 16,
         child: _Mark(
-          spoken: n == 1 ? UiCopy.text(100) : UiCopy.text(101, [n]),
+          spoken: n == 1 ? UiCopy.copy.oneTaskQueued : UiCopy.copy.tasksQueued(n),
           text: text,
           onTap: pick,
           child: Container(
@@ -373,11 +373,11 @@ class _LaneRow extends StatelessWidget {
     }
     final spoken = [
       lane.name,
-      if (runs > 0) runs == 1 ? UiCopy.text(102) : UiCopy.text(103, [runs]),
-      UiCopy.text(104, [lane.done.length]),
-      if (lane.waiting > 0) lane.waiting == 1 ? UiCopy.text(95) : UiCopy.text(96, [lane.waiting]),
-      if (lane.queued.isNotEmpty) lane.queued.length == 1 ? UiCopy.text(100) : UiCopy.text(101, [lane.queued.length]),
-      if (lane.alerts.isNotEmpty) UiCopy.text(105),
+      if (runs > 0) runs == 1 ? UiCopy.copy.oneTaskRunning : UiCopy.copy.running2(runs),
+      UiCopy.copy.doneToday(lane.done.length),
+      if (lane.waiting > 0) lane.waiting == 1 ? UiCopy.copy.oneRequestNeeds : UiCopy.copy.requestsNeedYou(lane.waiting),
+      if (lane.queued.isNotEmpty) lane.queued.length == 1 ? UiCopy.copy.oneTaskQueued : UiCopy.copy.tasksQueued(lane.queued.length),
+      if (lane.alerts.isNotEmpty) UiCopy.copy.issue2,
     ].join(', ');
     return Semantics(
       label: spoken,
@@ -387,7 +387,7 @@ class _LaneRow extends StatelessWidget {
           // The name opens the project.
           Semantics(
             button: true,
-            label: UiCopy.text(106, [lane.name]),
+            label: UiCopy.copy.open(lane.name),
             excludeSemantics: true,
             child: InkWell(
               onTap: () => Nav.project(context, lane.id),
@@ -531,7 +531,7 @@ class _Axis extends StatelessWidget {
       }
       h = h.add(const Duration(hours: 1));
     }
-    labels.add(Positioned(left: nowX - 22, width: 44, top: 0, child: Text(UiCopy.text(107), textAlign: TextAlign.center, style: style.copyWith(color: p.text2), textScaler: TextScaler.noScaling)));
+    labels.add(Positioned(left: nowX - 22, width: 44, top: 0, child: Text(UiCopy.copy.now, textAlign: TextAlign.center, style: style.copyWith(color: p.text2), textScaler: TextScaler.noScaling)));
     return ExcludeSemantics(
       child: Row(children: [
         SizedBox(width: label),
@@ -552,8 +552,8 @@ class _Legend extends StatelessWidget {
     Widget item(Widget mark, String text) => Row(mainAxisSize: MainAxisSize.min, children: [mark, const SizedBox(width: 5), Text(text, style: style)]);
     return ExcludeSemantics(
       child: Wrap(spacing: 14, runSpacing: 6, children: [
-        item(Container(width: 18, height: 9, decoration: BoxDecoration(color: p.text, borderRadius: BorderRadius.circular(4.5))), UiCopy.text(87)),
-        item(Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: p.text)), UiCopy.text(108)),
+        item(Container(width: 18, height: 9, decoration: BoxDecoration(color: p.text, borderRadius: BorderRadius.circular(4.5))), UiCopy.copy.running),
+        item(Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: p.text)), UiCopy.copy.done7),
         item(
           Container(
             width: 13,
@@ -562,7 +562,7 @@ class _Legend extends StatelessWidget {
             decoration: BoxDecoration(shape: BoxShape.circle, color: p.text),
             child: Text('3', textScaler: TextScaler.noScaling, style: TextStyle(fontFamily: kFont, fontSize: 8, height: 1, fontWeight: FontWeight.w700, color: p.surface)),
           ),
-          UiCopy.text(109),
+          UiCopy.copy.concurrentWork,
         ),
         item(
           Container(
@@ -572,7 +572,7 @@ class _Legend extends StatelessWidget {
             decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: p.text, width: 1.5)),
             child: Ic('front_hand', size: 9, color: p.text),
           ),
-          UiCopy.text(97),
+          UiCopy.copy.needsYou2,
         ),
         item(
           Container(
@@ -582,9 +582,9 @@ class _Legend extends StatelessWidget {
             decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: p.text, width: 1.5)),
             child: Ic('schedule', size: 9, color: p.text),
           ),
-          UiCopy.text(98),
+          UiCopy.copy.queued,
         ),
-        item(Ic('warning', size: 13, fill: true, color: p.text), UiCopy.text(105)),
+        item(Ic('warning', size: 13, fill: true, color: p.text), UiCopy.copy.issue2),
       ]),
     );
   }

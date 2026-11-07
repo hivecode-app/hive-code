@@ -112,14 +112,14 @@ class _Row extends StatelessWidget {
     final store = StoreScope.of(context);
     final d = store.data;
     final deploy = x.kind == AwaitingKind.deploy;
-    final word = deploy ? UiCopy.text(30) : UiCopy.text(31);
-    final action = deploy ? UiCopy.text(32) : UiCopy.text(33);
+    final word = deploy ? UiCopy.copy.waitingRelease : UiCopy.copy.check;
+    final action = deploy ? UiCopy.copy.released : UiCopy.copy.checked2;
     final who = x.who == null || d == null ? null : d.who(x.who!).name;
     final ago = daysAgo(x.at, now);
     final when = ago <= 0
         ? hm(x.at)
         : ago == 1
-            ? UiCopy.text(34)
+            ? UiCopy.copy.yesterday2
             : dm(x.at);
     final second = T.small.copyWith(color: p.text2);
     final to = d == null ? null : awaitingTarget(d, x);
@@ -127,8 +127,8 @@ class _Row extends StatelessWidget {
     void done() => store.checked(x.task);
     return Semantics(
       button: canOpen,
-      label: [word, x.text, ?x.note, ?who, ago == 1 ? UiCopy.text(35) : UiCopy.text(36, [when])].join('. '),
-      hint: canOpen ? UiCopy.text(28) : null,
+      label: [word, x.text, ?x.note, ?who, ago == 1 ? UiCopy.copy.sinceYesterday : UiCopy.copy.since(when)].join('. '),
+      hint: canOpen ? UiCopy.copy.openChat : null,
       excludeSemantics: true,
       customSemanticsActions: {CustomSemanticsAction(label: action): done},
       child: InkWell(

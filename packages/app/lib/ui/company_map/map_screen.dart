@@ -259,16 +259,16 @@ class _Waiting extends StatelessWidget {
     return Center(
       child: failed
           ? Column(mainAxisSize: MainAxisSize.min, children: [
-              Text(UiCopy.text(409), style: T.row2.copyWith(color: p.text)),
+              Text(UiCopy.copy.thisDayCould, style: T.row2.copyWith(color: p.text)),
               const SizedBox(height: 4),
-              InkWell(onTap: onRetry, child: Padding(padding: const EdgeInsets.all(8), child: Text(UiCopy.text(217), style: T.row2.copyWith(color: p.accent)))),
+              InkWell(onTap: onRetry, child: Padding(padding: const EdgeInsets.all(8), child: Text(UiCopy.copy.tryAgain, style: T.row2.copyWith(color: p.accent)))),
             ])
-          : Text(UiCopy.text(410), style: T.row2.copyWith(color: p.text2)),
+          : Text(UiCopy.copy.loadingDay, style: T.row2.copyWith(color: p.text2)),
     );
   }
 }
 
-List<String> get _weekdays => [UiCopy.text(411), UiCopy.text(412), UiCopy.text(413), UiCopy.text(414), UiCopy.text(415), UiCopy.text(416), UiCopy.text(417)];
+List<String> get _weekdays => [UiCopy.copy.monday, UiCopy.copy.tuesday, UiCopy.copy.wednesday, UiCopy.copy.thursday, UiCopy.copy.friday, UiCopy.copy.saturday, UiCopy.copy.sunday];
 
 class _Header extends StatelessWidget {
   const _Header({required this.date, required this.day, required this.compact, required this.canNext, required this.onPrev, required this.onNext});
@@ -282,13 +282,13 @@ class _Header extends StatelessWidget {
     UiCopy.watch(context);
     final p = context.p;
     final d = DateTime.parse(date);
-    final when = UiCopy.text(418, [_weekdays[d.weekday - 1], d.day, d.month]);
-    final count = day == null ? null : (day!.messages.isEmpty ? UiCopy.text(419) : plural(day!.messages.length, UiCopy.text(420), UiCopy.text(421)));
+    final when = UiCopy.copy.text2(_weekdays[d.weekday - 1], d.day, d.month);
+    final count = day == null ? null : (day!.messages.isEmpty ? UiCopy.copy.noMessages : plural(day!.messages.length, UiCopy.copy.oneMessage, UiCopy.copy.messages3));
     final sub = count == null ? when : '$when · $count';
-    final back = Navigator.of(context).canPop() ? IBtn(backIcon(context), tip: UiCopy.text(161), onTap: () => Navigator.of(context).maybePop()) : const SizedBox(width: 12);
+    final back = Navigator.of(context).canPop() ? IBtn(backIcon(context), tip: UiCopy.copy.back2, onTap: () => Navigator.of(context).maybePop()) : const SizedBox(width: 12);
     final nav = [
-      IBtn('chevron_right', tip: UiCopy.text(422), onTap: onPrev),
-      if (canNext) IBtn('chevron_left', tip: UiCopy.text(423), onTap: onNext) else const SizedBox(width: 44),
+      IBtn('chevron_right', tip: UiCopy.copy.previousDay, onTap: onPrev),
+      if (canNext) IBtn('chevron_left', tip: UiCopy.copy.nextDay, onTap: onNext) else const SizedBox(width: 44),
     ];
     final tab = T.secondary.copyWith(color: p.text2, fontFeatures: const [FontFeature.tabularFigures()]);
     if (compact) {
@@ -296,7 +296,7 @@ class _Header extends StatelessWidget {
         height: 44,
         child: Row(children: [
           back,
-          Expanded(child: Text.rich(TextSpan(children: [TextSpan(text: UiCopy.text(424), style: T.name.copyWith(color: p.text)), TextSpan(text: '  $sub', style: tab)]), maxLines: 1, overflow: TextOverflow.ellipsis)),
+          Expanded(child: Text.rich(TextSpan(children: [TextSpan(text: UiCopy.copy.companyMap2, style: T.name.copyWith(color: p.text)), TextSpan(text: '  $sub', style: tab)]), maxLines: 1, overflow: TextOverflow.ellipsis)),
           ...nav,
         ]),
       );
@@ -308,7 +308,7 @@ class _Header extends StatelessWidget {
         const SizedBox(width: 4),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(UiCopy.text(424), style: T.bar.copyWith(color: p.text)),
+            Text(UiCopy.copy.companyMap2, style: T.bar.copyWith(color: p.text)),
             const SizedBox(height: 2),
             Text(sub, style: tab),
           ]),
@@ -495,7 +495,7 @@ class _MapState extends State<_Map> {
     final halo = [for (final (dx, dy) in const [(1, 0), (-1, 0), (0, 1), (0, -1), (.7, .7), (-.7, .7), (.7, -.7), (-.7, -.7)]) Shadow(color: p.bg, offset: Offset(dx * 1.6 * ui, dy * 1.6 * ui))];
     final style = T.meta.copyWith(color: p.text2, fontSize: 12.5 * ui, height: 1.2, shadows: halo);
     if (team.id == 'management') {
-      for (final (id, name) in [('owner', UiCopy.text(425)), ('yoav', UiCopy.text(426)), ('hq', 'hq')]) {
+      for (final (id, name) in [('owner', UiCopy.copy.ran), ('yoav', UiCopy.copy.yoav), ('hq', 'hq')]) {
         final at = layout.pos[id]!;
         yield _label(at + Offset(0, _dim(d.people[id]!.role) * g / 2 + 4), Text(name, style: style), ui);
       }
@@ -668,19 +668,19 @@ class _MessageCard extends StatelessWidget {
           Flexible(child: Text(who(m.to).name, style: T.chip.copyWith(color: p.text, fontSize: 13.5))),
           const Spacer(),
           Text(hhmm(m.t), style: T.meta.copyWith(color: p.text3, fontFeatures: const [FontFeature.tabularFigures()])),
-          IBtn('close', tip: UiCopy.text(84), onTap: onClose),
+          IBtn('close', tip: UiCopy.copy.close2, onTap: onClose),
         ]),
         const SizedBox(height: 4),
         if (body != null)
           Flexible(child: SingleChildScrollView(child: Text(body!.body, style: T.small.copyWith(color: p.text))))
         else if (failed)
           Row(children: [
-            Text(UiCopy.text(427), style: T.small.copyWith(color: p.text2)),
+            Text(UiCopy.copy.thisMessageCould, style: T.small.copyWith(color: p.text2)),
             const SizedBox(width: 8),
-            InkWell(onTap: onRetry, child: Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text(UiCopy.text(217), style: T.small.copyWith(color: p.accent)))),
+            InkWell(onTap: onRetry, child: Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text(UiCopy.copy.tryAgain, style: T.small.copyWith(color: p.accent)))),
           ])
         else
-          Text(UiCopy.text(428), style: T.small.copyWith(color: p.text3)),
+          Text(UiCopy.copy.loading2, style: T.small.copyWith(color: p.text3)),
       ]),
     );
   }
@@ -724,8 +724,8 @@ class _TimelineState extends State<_Timeline> {
         final (tasks, merges, deploys) = widget.day.countsAt(t);
         final end = t >= widget.day.upTo;
         // A time right before a colon flips sides in RTL: the running line puts the time last.
-        final counts = '${plural(tasks, UiCopy.text(429), UiCopy.text(430))}, ${plural(merges, UiCopy.text(431), UiCopy.text(432))}, ${plural(deploys, UiCopy.text(433), UiCopy.text(434))}';
-        final sum = end ? '${widget.today ? UiCopy.text(150) : UiCopy.text(435)}: $counts' : UiCopy.text(436, [counts, hhmm(t)]);
+        final counts = '${plural(tasks, UiCopy.copy.oneTask, UiCopy.copy.tasks3)}, ${plural(merges, UiCopy.copy.oneMerge, UiCopy.copy.merges)}, ${plural(deploys, UiCopy.copy.oneRelease, UiCopy.copy.releases)}';
+        final sum = end ? '${widget.today ? UiCopy.copy.today2 : UiCopy.copy.fullDay}: $counts' : UiCopy.copy.until(counts, hhmm(t));
         return Padding(
           padding: EdgeInsets.symmetric(horizontal: widget.compact ? 12 : 24),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -784,7 +784,7 @@ class _TimelineState extends State<_Timeline> {
                       decoration: BoxDecoration(color: p.text, borderRadius: BorderRadius.circular(6)),
                       child: Directionality(
                         textDirection: TextDirection.rtl,
-                        child: Text('${hhmm(h * kDayMs ~/ bins)} · ${plural(counts[h], UiCopy.text(420), UiCopy.text(421))}',
+                        child: Text('${hhmm(h * kDayMs ~/ bins)} · ${plural(counts[h], UiCopy.copy.oneMessage, UiCopy.copy.messages3)}',
                             style: T.meta.copyWith(color: p.bg, fontSize: 12, fontFeatures: const [FontFeature.tabularFigures()])),
                       ),
                     ),
@@ -841,7 +841,7 @@ class _PlayButton extends StatelessWidget {
     UiCopy.watch(context);
     final p = context.p;
     return Tooltip(
-      message: playing ? UiCopy.text(437) : UiCopy.text(438),
+      message: playing ? UiCopy.copy.pause : UiCopy.copy.play,
       child: Material(
         color: p.accent,
         shape: const CircleBorder(),

@@ -421,7 +421,7 @@ class _CodeBlockState extends State<CodeBlock> {
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 child: Directionality(
                   textDirection: Directionality.of(context),
-                  child: Text(open ? UiCopy.text(125) : UiCopy.text(311, [lines.length - 20]),
+                  child: Text(open ? UiCopy.copy.collapse : UiCopy.copy.moreLines(lines.length - 20),
                       style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
                 ),
               ),
@@ -442,5 +442,5 @@ class _CopyButton extends StatefulWidget {
 class _CopyButtonState extends State<_CopyButton> {
   bool done = false;
   @override
-  Widget build(BuildContext context) { UiCopy.watch(context); return IconButton(tooltip: done ? UiCopy.text(312) : UiCopy.text(183), visualDensity: VisualDensity.compact, iconSize: 16, onPressed: () async {await Clipboard.setData(ClipboardData(text: widget.text)); if (mounted) setState(() => done = true);}, icon: Ic(done ? 'check' : 'content_copy', size: 16, color: context.p.text2)); }
+  Widget build(BuildContext context) { UiCopy.watch(context); return IconButton(tooltip: done ? UiCopy.copy.copied : UiCopy.copy.copy, visualDensity: VisualDensity.compact, iconSize: 16, onPressed: () async {await Clipboard.setData(ClipboardData(text: widget.text)); if (mounted) setState(() => done = true);}, icon: Ic(done ? 'check' : 'content_copy', size: 16, color: context.p.text2)); }
 }

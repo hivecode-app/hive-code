@@ -77,10 +77,9 @@ class _ProductChatsState extends State<ProductChats> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                IBtn('sort', tip: UiCopy.copy.ui472, onTap: () => pickConvSort(context)),
                 IBtn('edit_square', tip: l.newChat, onTap: () => newChat(context, d)),
-                // Settings sit behind his account, at the top of the chats (mockup a-he-home-phone).
-                IBtn('account_circle', tip: l.settings, onTap: () => Nav.settings(context)),
+                // Two icons, as in the mockup (a-he-home-phone): settings and the sort sit behind his account.
+                const _AccountMenu(),
                 const SizedBox(width: 8),
               ],
             ),
@@ -94,7 +93,7 @@ class _ProductChatsState extends State<ProductChats> {
                     style: TextStyle(fontFamily: kFont, fontSize: widget.compact ? 18 : 30, fontWeight: FontWeight.w600, height: 1.2, color: p.text),
                   ),
                 ),
-                if (widget.compact) ...[IBtn('sort', tip: UiCopy.copy.ui472, onTap: () => pickConvSort(context)), IBtn('edit_square', tip: l.newChat, onTap: () => newChat(context, d))],
+                if (widget.compact) ...[IBtn('sort', tip: UiCopy.copy.sort, onTap: () => pickConvSort(context)), IBtn('edit_square', tip: l.newChat, onTap: () => newChat(context, d))],
               ],
             ),
           ),
@@ -263,7 +262,7 @@ class ProductChatRow extends StatelessWidget {
                       children: [
                         Expanded(
                           child: ProductContentText(
-                            c.text ?? c.lastLine,
+                            previewLine(c.text ?? c.lastLine),
                             maxLines: MediaQuery.textScalerOf(context).scale(1) > 1 ? 2 : 1,
                             overflow: TextOverflow.ellipsis,
                             style: T.small.copyWith(color: p.text2),
@@ -302,6 +301,28 @@ class ProductChatRow extends StatelessWidget {
   }
 }
 
+/// His account at the top of the chats: a menu with the settings and the chats' sort, as WhatsApp keeps them.
+class _AccountMenu extends StatelessWidget {
+  const _AccountMenu();
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context), p = context.p;
+    Widget item(String icon, String text) => Row(children: [Ic(icon, size: 20, color: p.text2), const SizedBox(width: 12), Text(text, style: T.body.copyWith(color: p.text))]);
+    return PopupMenuButton<String>(
+      key: const Key('chats-account'),
+      tooltip: l.accountMenu,
+      color: p.surface,
+      // The same 44 as the IBtn beside it, so the top row keeps its height.
+      child: SizedBox(width: 44, height: 44, child: Center(child: Ic('account_circle', color: p.text2))),
+      onSelected: (v) => v == 'sort' ? pickConvSort(context) : Nav.settings(context),
+      itemBuilder: (_) => [
+        PopupMenuItem(value: 'settings', child: item('settings', l.settings)),
+        PopupMenuItem(value: 'sort', child: item('sort', UiCopy.copy.sortChats)),
+      ],
+    );
+  }
+}
+
 /// He answered "לא עכשיו" to something of its, and it still waits.
 bool putOff(CompanyData d, String id) => d.waiting.any((w) => w.from == id && w.state == WaitState.notNow && !d.superseded(w));
 
@@ -319,7 +340,14 @@ bool putOff(CompanyData d, String id) => d.waiting.any((w) => w.from == id && w.
   // "מחכה לך" comes only from what asks him (above, the chip's source). Stuck says so first; one he put off says
   // "לא עכשיו", unfilled; a presence that says waiting with nothing of its open (the ask went back to the manager) is
   // blocked on someone.
-  if (status == WorkerStatus.stuck) return ('warning', title == null ? l.stuck : l.stuckTask(title), false);
+  if (status == WorkerStatus.stuck) {
+    // For how long, as in the mockup ("תקועה 40 דקות · …"), when hq says since when.
+    final since = presence?.stuckSince;
+    if (since == null) return ('warning', title == null ? l.stuck : l.stuckTask(title), false);
+    final minutes = CompanyTime.now().difference(since).inMinutes.clamp(1, 1 << 30);
+    final duration = minutes < 60 ? l.minutesCount(minutes) : l.hoursCount(minutes ~/ 60);
+    return ('warning', [l.stuckFor(d.who(id).gender.name, duration), ?title].join(' · '), false);
+  }
   if (putOff(d, id)) return ('front_hand', l.notNow, false);
   if (status == WorkerStatus.waiting) return ('block', title == null ? l.blocked : '${l.blocked} · $title', false);
   // Approval waits on someone, not done: front_hand and check marks are kept for "מחכה לך" and what finished.

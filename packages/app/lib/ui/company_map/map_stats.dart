@@ -10,13 +10,13 @@ import '../../model/map_day.dart';
 const _tab = [FontFeature.tabularFigures()];
 
 Map<String, String> get _kindName => {
-  'small-fix': UiCopy.text(439),
-  'feature': UiCopy.text(440),
-  'investigation': UiCopy.text(441),
-  'report': UiCopy.text(442),
-  'build': UiCopy.text(443),
-  'deploy': UiCopy.text(444),
-  'release': UiCopy.text(445),
+  'small-fix': UiCopy.copy.smallFix,
+  'feature': UiCopy.copy.feature,
+  'investigation': UiCopy.copy.investigation,
+  'report': UiCopy.copy.report,
+  'build': UiCopy.copy.build,
+  'deploy': UiCopy.copy.release2,
+  'release': UiCopy.copy.storeRelease,
 };
 
 class MapStats extends StatelessWidget {
@@ -61,11 +61,11 @@ class MapStats extends StatelessWidget {
   Widget _projects(BuildContext context) {
     final rows = [...day.projects.where((r) => r.opened + r.done + r.open > 0)]..sort((a, b) => b.done.compareTo(a.done));
     return QuietTable(
-      title: UiCopy.text(446),
-      head:  [UiCopy.text(382), UiCopy.text(447), UiCopy.text(448), UiCopy.text(449)],
+      title: UiCopy.copy.tasksProject,
+      head:  [UiCopy.copy.project, UiCopy.copy.opened3, UiCopy.copy.completed2, UiCopy.copy.openEndDay],
       flex: const [5, 2, 2, 3],
       rows: [for (final r in rows) [_project(context, r.project), _num(context, r.opened), _num(context, r.done), _num(context, r.open)]],
-      total: [UiCopy.text(450), _sum(rows.map((r) => r.opened)), _sum(rows.map((r) => r.done)), _sum(rows.map((r) => r.open))],
+      total: [UiCopy.copy.total, _sum(rows.map((r) => r.opened)), _sum(rows.map((r) => r.done)), _sum(rows.map((r) => r.open))],
     );
   }
 
@@ -82,19 +82,19 @@ class MapStats extends StatelessWidget {
     final other = keys.where((k) => !known.contains(k)).toList();
     final otherM = other.fold(0, (s, k) => s + (merges[k] ?? 0));
     return QuietTable(
-      title: UiCopy.text(451),
-      head:  [UiCopy.text(382), UiCopy.text(432), UiCopy.text(434)],
+      title: UiCopy.copy.mergedReleased,
+      head:  [UiCopy.copy.project, UiCopy.copy.merges, UiCopy.copy.releases],
       flex: const [5, 2, 2],
       rows: [
         for (final k in known) [_project(context, k), _num(context, merges[k] ?? 0), _num(context, deploys[k] ?? 0)],
         if (other.isNotEmpty)
           [
-            Text(UiCopy.text(452), style: T.row2.copyWith(color: context.p.text2)),
+            Text(UiCopy.copy.noProject, style: T.row2.copyWith(color: context.p.text2)),
             _num(context, otherM),
             _num(context, other.fold(0, (s, k) => s + (deploys[k] ?? 0))),
           ],
       ],
-      total: [UiCopy.text(450), '${merges.values.fold(0, (a, b) => a + b)}', '${deploys.values.fold(0, (a, b) => a + b)}'],
+      total: [UiCopy.copy.total, '${merges.values.fold(0, (a, b) => a + b)}', '${deploys.values.fold(0, (a, b) => a + b)}'],
     );
   }
 
@@ -102,9 +102,9 @@ class MapStats extends StatelessWidget {
     final rows = [...day.estimates]..sort((a, b) => b.n.compareTo(a.n));
     String ratio(double? r) => r == null ? '' : '${(r * 100).round()}%';
     return QuietTable(
-      title: UiCopy.text(453),
-      note: UiCopy.text(454),
-      head:  [UiCopy.text(316), UiCopy.text(455), UiCopy.text(456), UiCopy.text(457), UiCopy.text(458), UiCopy.text(459)],
+      title: UiCopy.copy.estimateAccuracy,
+      note: UiCopy.copy.allRecordedEstimates,
+      head:  [UiCopy.copy.type2, UiCopy.copy.given, UiCopy.copy.time, UiCopy.copy.late3, UiCopy.copy.open4, UiCopy.copy.actual],
       flex: const [4, 2, 2, 2, 2, 2],
       rows: [
         for (final r in rows)
@@ -183,15 +183,15 @@ class _WorkersState extends State<_Workers> {
 
   /// How long it took, as he reads it: "40 שנ'", "3 דק'", "1.5 שע'".
   static String took(int ms) {
-    if (ms < 60000) return UiCopy.text(272, [(ms / 1000).round()]);
-    if (ms < 3600000) return UiCopy.text(460, [(ms / 60000).round()]);
-    return UiCopy.text(461, [(ms / 3600000).toStringAsFixed(1)]);
+    if (ms < 60000) return UiCopy.copy.s((ms / 1000).round());
+    if (ms < 3600000) return UiCopy.copy.min3((ms / 60000).round());
+    return UiCopy.copy.h2((ms / 3600000).toStringAsFixed(1));
   }
 
   /// His messages to this worker and what came back: the time to the first answer (median), or that none came.
   static String answer(WorkerStat w) {
     if (w.answerMs != null) return took(w.answerMs!);
-    return w.asked > 0 ? UiCopy.text(462) : '';
+    return w.asked > 0 ? UiCopy.copy.noAnswer : '';
   }
 
   @override
@@ -217,9 +217,9 @@ class _WorkersState extends State<_Workers> {
     return LayoutBuilder(builder: (context, c) {
       final narrow = c.maxWidth < 520;
       return QuietTable(
-        title: UiCopy.text(463),
-        note: UiCopy.text(465, [narrow ? '' : UiCopy.text(464)]),
-        head: narrow ?  [UiCopy.text(86), UiCopy.text(421), UiCopy.text(466)] :  [UiCopy.text(86), UiCopy.text(467), UiCopy.text(421), UiCopy.text(466), UiCopy.text(468)],
+        title: UiCopy.copy.workers,
+        note: UiCopy.copy.sortedHoursWorked(narrow ? '' : UiCopy.copy.timelineHoursWorked),
+        head: narrow ?  [UiCopy.copy.working3, UiCopy.copy.messages3, UiCopy.copy.responseTime] :  [UiCopy.copy.working3, UiCopy.copy.hoursWorked, UiCopy.copy.messages3, UiCopy.copy.responseTime, UiCopy.copy.duringDay],
         flex: narrow ? const [7, 3, 5] : const [7, 2, 3, 4, 6],
         rows: [
           for (final w in shown)
@@ -233,7 +233,7 @@ class _WorkersState extends State<_Workers> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Row(children: [
-                    Text(all ? UiCopy.text(469) : UiCopy.text(470, [ws.length - 12]), style: T.row2.copyWith(color: p.accent)),
+                    Text(all ? UiCopy.copy.less : UiCopy.copy.moreWorkers(ws.length - 12), style: T.row2.copyWith(color: p.accent)),
                     Ic(all ? 'expand_less' : 'expand_more', size: 20, color: p.accent),
                   ]),
                 ),

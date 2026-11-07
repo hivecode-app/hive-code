@@ -60,7 +60,7 @@ class EntityLink extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
-      hint: UiCopy.text(395, [name]),
+      hint: UiCopy.copy.chat2(name),
       excludeSemantics: label != null,
       child: InkWell(
         borderRadius: borderRadius,

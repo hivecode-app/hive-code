@@ -222,7 +222,7 @@ class _ComposerState extends State<Composer> {
     if (transcribing || _starting) return;
     final dict = Dictation.instance;
     if (recording) return _stopAndTranscribe();
-    if (dict.client == null) return _fail(UiCopy.text(191), fault: false);
+    if (dict.client == null) return _fail(UiCopy.copy.dictationUnavailableThis, fault: false);
     // Starting waits on the permission prompt; taps meanwhile must not start a second recording.
     _starting = true;
     try {
@@ -262,7 +262,7 @@ class _ComposerState extends State<Composer> {
     try {
       final pcm = await dict.recorder.stop();
       if (pcm.length < kDictateRate * 2 ~/ 4) {
-        throw DictationError(UiCopy.text(192), fault: false);
+        throw DictationError(UiCopy.copy.recordingTooShort, fault: false);
       }
       job = await _jobs.add(id, pcm);
     } on DictationError catch (e) {
@@ -300,19 +300,19 @@ class _ComposerState extends State<Composer> {
       builder: (ctx) => AlertDialog(
         backgroundColor: p.surface,
         title: Text(
-          UiCopy.text(193),
+          UiCopy.copy.deleteThisRecording,
           style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w700),
         ),
-        content: Text(UiCopy.text(194), style: T.body.copyWith(color: p.text2)),
+        content: Text(UiCopy.copy.hasNotBeen, style: T.body.copyWith(color: p.text2)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text(UiCopy.text(18), style: T.secondary.copyWith(color: p.accent)),
+            child: Text(UiCopy.copy.cancel, style: T.secondary.copyWith(color: p.accent)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(
-              UiCopy.text(195),
+              UiCopy.copy.delete,
               style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700),
             ),
           ),
@@ -573,7 +573,7 @@ class _ComposerState extends State<Composer> {
   /// Android keyboards (Gboard's clipboard chip, a copied screenshot) hand images over this way.
   void _inserted(KeyboardInsertedContent c) {
     final data = c.data;
-    if (data == null || data.isEmpty) return _fail(UiCopy.text(202));
+    if (data == null || data.isEmpty) return _fail(UiCopy.copy.keyboardDidNot);
     _addImage(data, c.uri.split('/').last, mime: c.mimeType);
   }
 
@@ -612,7 +612,7 @@ class _ComposerState extends State<Composer> {
                   TextButton(
                     onPressed: _cancelRecording,
                     child: Text(
-                      UiCopy.text(18),
+                      UiCopy.copy.cancel,
                       style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700),
                     ),
                   ),
@@ -628,12 +628,12 @@ class _ComposerState extends State<Composer> {
                           key: ValueKey(widget.identityId),
                           controller: widget.controller,
                           focus: widget.focus,
-                          hint: UiCopy.text(203, [who.name]),
+                          hint: UiCopy.copy.message(who.name),
                           style: T.body.copyWith(color: p.text, height: 1.45),
                           hintColor: p.text3,
                           accent: p.accent,
                           onImage: (bytes, name, mime) => _addImage(bytes, name, mime: mime),
-                          onImageFailed: () => _fail(UiCopy.text(204)),
+                          onImageFailed: () => _fail(UiCopy.copy.thisImageCould),
                         )
                       : CallbackShortcuts(
                           bindings: {
@@ -656,14 +656,14 @@ class _ComposerState extends State<Composer> {
                               isCollapsed: true,
                               border: InputBorder.none,
                               contentPadding: const EdgeInsets.fromLTRB(4, 12, 4, 12),
-                              hintText: UiCopy.text(203, [who.name]),
+                              hintText: UiCopy.copy.message(who.name),
                               hintStyle: T.body.copyWith(color: p.text3),
                             ),
                           ),
                         ),
                 ),
-                _FieldBtn(icon: 'attach_file', tip: UiCopy.text(205), onTap: _attach),
-                if (MediaQuery.sizeOf(context).width < 800) _FieldBtn(icon: 'photo_camera', tip: UiCopy.text(200), onTap: () => _pick(ImageSource.camera)),
+                _FieldBtn(icon: 'attach_file', tip: UiCopy.copy.attach2, onTap: _attach),
+                if (MediaQuery.sizeOf(context).width < 800) _FieldBtn(icon: 'photo_camera', tip: UiCopy.copy.camera, onTap: () => _pick(ImageSource.camera)),
               ],
             ),
     );
@@ -673,8 +673,8 @@ class _ComposerState extends State<Composer> {
       label: staging
           ? AppLocalizations.of(context).mediaLoading
           : hasText
-          ? UiCopy.text(206)
-          : (recording ? UiCopy.text(207) : (transcribing ? UiCopy.text(208) : UiCopy.text(209))),
+          ? UiCopy.copy.send2
+          : (recording ? UiCopy.copy.stopRecording : (transcribing ? UiCopy.copy.transcribing : UiCopy.copy.dictation)),
       child: GestureDetector(
         onLongPress: hasText && busy ? _openMenu : null,
         child: Material(
@@ -781,8 +781,8 @@ class _Transcribing extends StatelessWidget {
   Widget build(BuildContext context) {
     UiCopy.watch(context);
     final p = context.p;
-    final piece = job.pieces > 1 ? UiCopy.text(210, [job.piece + 1, job.pieces]) : '';
-    final step = job.sent < 1 ? UiCopy.text(211, [(job.sent * 100).floor()]) : UiCopy.text(208);
+    final piece = job.pieces > 1 ? UiCopy.copy.part2(job.piece + 1, job.pieces) : '';
+    final step = job.sent < 1 ? UiCopy.copy.sending((job.sent * 100).floor()) : UiCopy.copy.transcribing;
     // Of the whole recording: pieces done, plus the share of this one that has gone out.
     final done = job.texts.where((t) => t != null).length;
     final share = ((done + job.sent * 0.9) / job.pieces).clamp(0.0, 1.0);
@@ -828,8 +828,8 @@ class _KeptRecording extends StatelessWidget {
     final p = context.p;
     final now = CompanyTime.now();
     final ago = daysAgo(job.at, now);
-    final at = ago == 0 ? '-${hm(job.at)}' : (ago == 1 ? UiCopy.text(212, [hm(job.at)]) : '-${dm(job.at)}, ${hm(job.at)}');
-    final kept = job.onDisk ? UiCopy.text(213) : UiCopy.text(214);
+    final at = ago == 0 ? '-${hm(job.at)}' : (ago == 1 ? UiCopy.copy.yesterday3(hm(job.at)) : '-${dm(job.at)}, ${hm(job.at)}');
+    final kept = job.onDisk ? UiCopy.copy.savedThisDevice : UiCopy.copy.savedUntilApp;
     const tab = TextStyle(fontFeatures: [FontFeature.tabularFigures()]);
     return Container(
       decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(12), boxShadow: p.hairShadow),
@@ -850,10 +850,10 @@ class _KeptRecording extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      UiCopy.text(215, [at, _clock(job.seconds)]),
+                      UiCopy.copy.recordingFromWas(at, _clock(job.seconds)),
                       style: T.body.copyWith(color: p.text, fontWeight: FontWeight.w500).merge(tab),
                     ),
-                    Text(UiCopy.text(216, [kept]), style: T.secondary.copyWith(color: p.text2)),
+                    Text(UiCopy.copy.tryAgainDelete(kept), style: T.secondary.copyWith(color: p.text2)),
                   ],
                 ),
               ),
@@ -867,7 +867,7 @@ class _KeptRecording extends StatelessWidget {
                 TextButton(
                   onPressed: onDiscard,
                   style: TextButton.styleFrom(foregroundColor: p.text2, textStyle: T.secondary),
-                  child: Text(UiCopy.text(195)),
+                  child: Text(UiCopy.copy.delete),
                 ),
                 TextButton(
                   onPressed: onRetry,
@@ -876,7 +876,7 @@ class _KeptRecording extends StatelessWidget {
                     disabledForegroundColor: p.text3,
                     textStyle: T.secondary.copyWith(fontWeight: FontWeight.w700),
                   ),
-                  child: Text(UiCopy.text(217)),
+                  child: Text(UiCopy.copy.tryAgain),
                 ),
               ],
             ),
@@ -964,13 +964,13 @@ class _PriorityMenu extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
             child: Text(
-              UiCopy.text(221, [name]),
+              UiCopy.copy.workingWhenShould(name),
               style: TextStyle(fontFamily: kFont, fontSize: 12.5, color: p.text2),
             ),
           ),
-          opt(Priority.now, UiCopy.text(107), UiCopy.text(224, [female ? UiCopy.text(222) : UiCopy.text(223)]), sel: true),
-          opt(Priority.next, UiCopy.text(225), UiCopy.text(229, [female ? UiCopy.text(226) : UiCopy.text(227), female ? UiCopy.text(228) : ''])),
-          opt(Priority.later, UiCopy.text(230), UiCopy.text(233, [female ? UiCopy.text(231) : UiCopy.text(232)])),
+          opt(Priority.now, UiCopy.copy.now, UiCopy.copy.interruptsWhenSafe(female ? UiCopy.copy.them : UiCopy.copy.them2), sel: true),
+          opt(Priority.next, UiCopy.copy.afterCurrentStep, UiCopy.copy.stepThenReads(female ? UiCopy.copy.finishes : UiCopy.copy.finishes2, female ? UiCopy.copy.text : '')),
+          opt(Priority.later, UiCopy.copy.endQueue, UiCopy.copy.afterEverythingAlready(female ? UiCopy.copy.them3 : UiCopy.copy.them4)),
         ],
       ),
     );

@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../common.dart';
 
 /// "14:02" today, "אתמול", else "20/10", as in WhatsApp.
-String whenV2(DateTime t, DateTime now) => switch (daysAgo(t, now)) { 0 => hm(t), 1 => UiCopy.text(34), _ => dm(t) };
+String whenV2(DateTime t, DateTime now) => switch (daysAgo(t, now)) { 0 => hm(t), 1 => UiCopy.copy.yesterday2, _ => dm(t) };
 
 final _letter = RegExp(r'[\p{L}\p{N}]', unicode: true);
 

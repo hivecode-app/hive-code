@@ -1,6 +1,7 @@
 import 'package:agent_company/data/fake_backend.dart';
 import 'package:agent_company/data/store.dart';
 import 'package:agent_company/l10n/app_localizations.dart';
+import 'package:agent_company/model/company_time.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/model/task_progress.dart';
 import 'package:agent_company/ui/product/chats.dart';
@@ -142,6 +143,19 @@ void main() {
     expect(line(tester, 'ido'), ('contact_support', t.questionForYou, false));
     d.waiting.add(_ask('g1', 'ido', WaitKind.go));
     expect(line(tester, 'ido'), ('front_hand', t.needsYou, true));
+  });
+
+  testWidgets('stuck says for how long when hq sends since when, in the worker\'s gender (mockup "תקועה 40 דקות")', (tester) async {
+    final store = await productApp(tester, language: 'he', backend: _StagedBackend({'dana': TaskStage.development}));
+    final d = store.data!;
+    d.waiting.clear();
+    final now = CompanyTime.now();
+    d.presence['dana'] = Presence(status: WorkerStatus.stuck, stuckSince: now.subtract(const Duration(minutes: 40)));
+    d.presence['ido'] = Presence(status: WorkerStatus.stuck, stuckSince: now.subtract(const Duration(minutes: 130)));
+    store.touch();
+    await tester.pumpAndSettle();
+    expect(line(tester, 'dana'), ('warning', 'תקועה 40 דקות · משימה של dana', false));
+    expect(line(tester, 'ido')!.$2, startsWith('תקוע שעתיים'));
   });
 
   testWidgets('approval waits on someone: an hourglass, not a check mark', (tester) async {

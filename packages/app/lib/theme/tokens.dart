@@ -7,9 +7,6 @@ import 'package:flutter/material.dart';
 /// The rest of the v2 proposal (docs/design/language-v2.md): the desktop home, the tabs' motion. Off in every normal build.
 const kDesignV2 = bool.fromEnvironment('DESIGN_V2');
 
-/// v2 with plain grey surfaces instead of the warm paper, to show the two side by side (language-v2 §2).
-const kDesignV2Grey = bool.fromEnvironment('DESIGN_V2_GREY');
-
 @immutable
 class Palette extends ThemeExtension<Palette> {
   const Palette({
@@ -145,60 +142,6 @@ class Palette extends ThemeExtension<Palette> {
     dark: true,
   );
 
-  /// v2 on grey (HCT chroma 0): the same roles and tones, without the paper's warmth.
-  static const lightV2Grey = Palette(
-    bg: Color(0xFFF1F1F1),
-    surface: Color(0xFFFFFFFF),
-    surface2: Color(0xFFEEEEEE),
-    surface3: Color(0xFFE2E2E2),
-    line: Color(0xFFDADADA),
-    text: Color(0xFF1B1B1B),
-    text2: Color(0xFF474747),
-    text3: Color(0xFF6A6A6A),
-    chatBg: Color(0xFFEEEEEE),
-    bubbleIn: Color(0xFFFFFFFF),
-    bubbleOut: Color(0xFFE9EDFF),
-    codeBg: Color(0xFFEEEEEE),
-    addBg: Color(0xFFD4F0CC),
-    delBg: Color(0xFFFFE2DE),
-    urgent: Color(0xFFBA1A1A),
-    accent: Color(0xFF1259C3),
-    onAccent: Color(0xFFFFFFFF),
-    accentSoft: Color(0xFFE1E8FF),
-    read: Color(0xFF1259C3),
-    toolBg: Color(0xFFEEEEEE),
-    dark: false,
-  );
-  static const darkV2Grey = Palette(
-    bg: Color(0xFF131313),
-    surface: Color(0xFF1B1B1B),
-    surface2: Color(0xFF2A2A2A),
-    surface3: Color(0xFF353535),
-    line: Color(0xFF353535),
-    text: Color(0xFFE2E2E2),
-    text2: Color(0xFFC6C6C6),
-    text3: Color(0xFF919191),
-    chatBg: Color(0xFF131313),
-    bubbleIn: Color(0xFF2A2A2A),
-    bubbleOut: Color(0xFF00357E),
-    codeBg: Color(0xFF1F1F1F),
-    addBg: Color(0xFF2A4127),
-    delBg: Color(0xFF5C0004),
-    urgent: Color(0xFFFFB4AB),
-    accent: Color(0xFFAFC6FF),
-    onAccent: Color(0xFF002D6D),
-    accentSoft: Color(0xFF00357E),
-    read: Color(0xFFAFC6FF),
-    toolBg: Color(0xFF1F1F1F),
-    dark: true,
-  );
-
-  /// The palette this build uses.
-  static Palette of(Brightness b) {
-    if (kDesignV2Grey) return b == Brightness.dark ? darkV2Grey : lightV2Grey;
-    return b == Brightness.dark ? darkV2 : lightV2;
-  }
-
   /// Identity tone for a team or project (language-v2 §3): a muted container and the letter on it,
   /// 7.6:1 or more in both modes. [tone] is org.yaml's `teams[].tone` (hq sends it on the board); none,
   /// or one this app doesn't know, is slate. Identity only: a state is never told by these.
@@ -267,10 +210,10 @@ extension PaletteX on BuildContext {
 /// Unicode isolates around an LTR run (chat.md §5): first-strong-isolate does not flip `#3712` or a path.
 String ltr(String s) => '\u2066$s\u2069';
 
-/// Values from design-v2/a.css. This palette is selected only by the runtime interface switch.
+/// Values from design-v2/a.css: the palette of every build. Code, diff and urgent colours come from v2.
 Palette productPalette(Brightness brightness) {
   final dark = brightness == Brightness.dark;
-  final old = Palette.of(brightness);
+  final old = dark ? Palette.darkV2 : Palette.lightV2;
   return Palette(
     bg: Color(dark ? 0xFF141517 : 0xFFF7F7F5), surface: Color(dark ? 0xFF1C1D20 : 0xFFFFFFFF),
     surface2: Color(dark ? 0xFF111214 : 0xFFF0F0ED), surface3: Color(dark ? 0xFF26272B : 0xFFECECE8),

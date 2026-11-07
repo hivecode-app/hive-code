@@ -12,11 +12,11 @@ import '../blocks/blocks.dart';
 import '../common.dart';
 
 Map<String, String> get kUsageKinds => {
-  'tasks': UiCopy.text(430),
-  'leads_workers': UiCopy.text(516),
-  'leads_owner': UiCopy.text(517),
-  'leads_hq': UiCopy.text(518),
-  'leads_other': UiCopy.text(519),
+  'tasks': UiCopy.copy.tasks3,
+  'leads_workers': UiCopy.copy.messagesFromWorkers,
+  'leads_owner': UiCopy.copy.yourMessages,
+  'leads_hq': UiCopy.copy.systemReminders,
+  'leads_other': UiCopy.copy.repeatedWork,
 };
 
 /// The day's spend as the card lists it: tasks, then the leads with their sum and, under it, what woke them (noa 24/10:
@@ -26,7 +26,7 @@ List<(String, num, bool)> kindRows(List<(String, num)> kinds) {
   final sum = leads.fold<num>(0, (a, k) => a + k.$2);
   final tasks = [for (final k in kinds) if (!k.$1.startsWith('leads_')) (kUsageKinds[k.$1] ?? k.$1, k.$2, false)];
   final lead = [
-    if (leads.isNotEmpty) (UiCopy.text(520), sum, false),
+    if (leads.isNotEmpty) (UiCopy.copy.teamLeads, sum, false),
     for (final (k, s) in leads) (kUsageKinds[k] ?? k, s, true),
   ];
   // Whichever went on more comes first.
@@ -44,14 +44,14 @@ String _num(num v) => '$kLRI${v == v.roundToDouble() ? v.toInt() : v.toStringAsF
 
 /// The rate and parallel rows, in reading order (also their screen reader labels).
 List<String> rateLines(UsageData u) => [
-      if (u.hourPct != null) UiCopy.text(521, [_rate(u.hourPct!)]),
-      if (u.dayPct != null) UiCopy.text(522, [_rate(u.dayPct!)]),
-      if (u.hourPct == null && u.dayPct == null) UiCopy.text(523),
+      if (u.hourPct != null) UiCopy.copy.lastHour(_rate(u.hourPct!)),
+      if (u.dayPct != null) UiCopy.copy.last24Hours(_rate(u.dayPct!)),
+      if (u.hourPct == null && u.dayPct == null) UiCopy.copy.usageHasNot,
     ];
 
 List<String> parallelLines(UsageData u) => [
-      u.parallelNow == 0 ? UiCopy.text(524) : u.parallelNow == 1 ? UiCopy.text(525) : UiCopy.text(526, [u.parallelNow]),
-      UiCopy.text(527, [_num(u.parallelAvg), _num(u.parallelPeak)]),
+      u.parallelNow == 0 ? UiCopy.copy.noTaskRunning : u.parallelNow == 1 ? UiCopy.copy.oneTaskRunningNow : UiCopy.copy.tasksRunningNow(u.parallelNow),
+      UiCopy.copy.dailyAverageBusiest(_num(u.parallelAvg), _num(u.parallelPeak)),
     ];
 
 class UsageCard extends StatelessWidget {
@@ -64,12 +64,12 @@ class UsageCard extends StatelessWidget {
     final p = context.p;
     final u = usage;
     final rows = <Widget>[
-      _Row(icon: 'schedule', title: UiCopy.text(528), lines: [...rateLines(u), if (u.sufficientUntil != null) AppLocalizations.of(context).workForecast(DateFormat.EEEE(Localizations.localeOf(context).languageCode).format(wall(u.sufficientUntil!)))]),
-      _Row(icon: 'play_arrow', title: UiCopy.text(529), lines: parallelLines(u)),
+      _Row(icon: 'schedule', title: UiCopy.copy.rateWeeklyUsage, lines: [...rateLines(u), if (u.sufficientUntil != null) AppLocalizations.of(context).workForecast(DateFormat.EEEE(Localizations.localeOf(context).languageCode).format(wall(u.sufficientUntil!)))]),
+      _Row(icon: 'play_arrow', title: UiCopy.copy.concurrent, lines: parallelLines(u)),
       if (u.kinds.isNotEmpty)
-        _Row(icon: 'data_usage', title: UiCopy.text(530), bars: kindRows(u.kinds)),
+        _Row(icon: 'data_usage', title: UiCopy.copy.workLast24, bars: kindRows(u.kinds)),
       if (u.people.isNotEmpty)
-        _Row(icon: 'group', title: UiCopy.text(531), bars: [for (final (n, s, task) in u.people) (task ? UiCopy.text(532, [n]) : n, s, false)]),
+        _Row(icon: 'group', title: UiCopy.copy.peopleLast24, bars: [for (final (n, s, task) in u.people) (task ? UiCopy.copy.task(n) : n, s, false)]),
     ];
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),

@@ -59,7 +59,7 @@ void main() {
     expect([s.phase, s.icon, _plain(s.strong), _plain(s.text)], [EstimatePhase.overdue, 'running_with_errors', "באיחור של 15 דק'", "באיחור של 15 דק' · הערכה 20"]);
 
     s = estimateShown(_est(1, _at(13, 30), 20, closed: _at(13, 48)), now)!;
-    expect([s.phase, s.icon, _plain(s.text)], [EstimatePhase.done, 'check_circle', "הסתיים ב-18 דק' מתוך 20"]);
+    expect([s.phase, s.icon, _plain(s.text)], [EstimatePhase.done, 'check_circle', "הסתיים ב-\u206018 דק' מתוך 20"]);
   });
 
   test('near: the smaller of 20% and 5 minutes', () {

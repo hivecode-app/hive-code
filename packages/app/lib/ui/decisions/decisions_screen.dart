@@ -209,7 +209,7 @@ class DecisionText {
       if (m != null) {
         prUrl = m.group(1);
       } else if (r != null) {
-        risk =  {'low': UiCopy.text(570), 'medium': UiCopy.text(571), 'high': UiCopy.text(572)}[r.group(1)];
+        risk =  {'low': UiCopy.copy.lowRisk, 'medium': UiCopy.copy.mediumRisk, 'high': UiCopy.copy.highRisk}[r.group(1)];
       } else {
         lines.add(l);
       }
@@ -274,19 +274,19 @@ StackActs actsOf(BuildContext context, WaitItem item) {
     case WaitKind.go:
       return (
         yes: opt(item.options.first, primary: true),
-        no: StackAct(UiCopy.text(575), 'close', () {
+        no: StackAct(UiCopy.copy.no, 'close', () {
           store.dismiss(item);
-          decisionQueue.decided(item, UiCopy.text(576), icon: 'do_not_disturb_on', undo: () => store.cancelUndo(item.id));
+          decisionQueue.decided(item, UiCopy.copy.deferred3, icon: 'do_not_disturb_on', undo: () => store.cancelUndo(item.id));
         }),
         more: const [],
       );
     case WaitKind.blockingAsk || WaitKind.softAsk when item.askId != null:
       final opts = item.options.where((o) => o.id != 'q' && o.id != 'not_now').toList();
-      final words = [if (!isCaughtFault(item.from, item.askId)) StackAct(opts.isEmpty ? UiCopy.text(558) : UiCopy.text(559), 'reply', other)];
+      final words = [if (!isCaughtFault(item.from, item.askId)) StackAct(opts.isEmpty ? UiCopy.copy.answer3 : UiCopy.copy.otherAnswer, 'reply', other)];
       if (yesNo(opts) case (final y, final n)) return (yes: opt(y, primary: true), no: opt(n, icon: 'close', primary: false), more: words);
       return (yes: null, no: null, more: [for (final o in opts) opt(o, primary: opts.length == 1 ? true : null), ...words]);
     default:
-      return (yes: null, no: null, more: [StackAct(UiCopy.text(126), 'open_in_new', () => openWait(context, item), primary: true)]);
+      return (yes: null, no: null, more: [StackAct(UiCopy.copy.open2, 'open_in_new', () => openWait(context, item), primary: true)]);
   }
 }
 
@@ -388,7 +388,7 @@ class _DecisionStackState extends State<DecisionStack> {
                     if (acts != null) ...{
                       const SingleActivator(LogicalKeyboardKey.arrowRight): () => _act(acts.yes, AxisDirection.right),
                       const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _act(acts.no, AxisDirection.left),
-                      const SingleActivator(LogicalKeyboardKey.arrowDown): () => _act(StackAct(UiCopy.text(577), 'schedule', decisionQueue.later), AxisDirection.down),
+                      const SingleActivator(LogicalKeyboardKey.arrowDown): () => _act(StackAct(UiCopy.copy.later, 'schedule', decisionQueue.later), AxisDirection.down),
                     },
                   };
                   return CallbackShortcuts(
@@ -437,14 +437,14 @@ class _Top extends StatelessWidget {
       height: 56,
       child: Row(children: [
         const SizedBox(width: 4),
-        IBtn('close', tip: UiCopy.text(84), onTap: () => Navigator.of(context).maybePop()),
+        IBtn('close', tip: UiCopy.copy.close2, onTap: () => Navigator.of(context).maybePop()),
         const SizedBox(width: 4),
-        Expanded(child: Semantics(header: true, child: Text(UiCopy.text(578), style: T.name.copyWith(color: p.text)))),
+        Expanded(child: Semantics(header: true, child: Text(UiCopy.copy.needYou3, style: T.name.copyWith(color: p.text)))),
         if (pos != null)
           Semantics(
-            label: UiCopy.text(187, [pos.$1, pos.$2]),
+            label: UiCopy.copy.of2(pos.$1, pos.$2),
             excludeSemantics: true,
-            child: Text(UiCopy.text(187, [pos.$1, pos.$2]), style: T.secondary.copyWith(color: p.text2, fontFeatures: kTabular)),
+            child: Text(UiCopy.copy.of2(pos.$1, pos.$2), style: T.secondary.copyWith(color: p.text2, fontFeatures: kTabular)),
           ),
         const SizedBox(width: 16),
       ]),
@@ -465,9 +465,9 @@ class _Empty extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Ic('check_circle', size: 32, color: p.text2),
           const SizedBox(height: 12),
-          Text(UiCopy.text(579), style: T.body.copyWith(color: p.text2)),
+          Text(UiCopy.copy.nothingNeedsYou3, style: T.body.copyWith(color: p.text2)),
           const SizedBox(height: 16),
-          Btn(UiCopy.text(580), onTap: () => Navigator.of(context).maybePop()),
+          Btn(UiCopy.copy.backChats, onTap: () => Navigator.of(context).maybePop()),
         ]),
       ),
     );
@@ -538,7 +538,7 @@ class _PileState extends State<_Pile> with SingleTickerProviderStateMixin {
   StackAct? _actFor(AxisDirection? w) => switch (w) {
         AxisDirection.right => widget.acts.yes,
         AxisDirection.left => widget.acts.no,
-        AxisDirection.down => StackAct(UiCopy.text(577), 'schedule', decisionQueue.later),
+        AxisDirection.down => StackAct(UiCopy.copy.later, 'schedule', decisionQueue.later),
         _ => null,
       };
 
@@ -703,7 +703,7 @@ class _Card extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: T.secondary.copyWith(color: p.text2),
             ),
-            Text([caught ? UiCopy.text(105) : item.kicker, when, ?t.risk].join(' · '), style: T.small.copyWith(color: p.text2, fontFeatures: kTabular)),
+            Text([caught ? UiCopy.copy.issue2 : item.kicker, when, ?t.risk].join(' · '), style: T.small.copyWith(color: p.text2, fontFeatures: kTabular)),
           ]),
         ),
       ]),
@@ -751,7 +751,7 @@ class _Card extends StatelessWidget {
             onPressed: () => _details(context, item),
             style: TextButton.styleFrom(minimumSize: const Size(64, 44), padding: const EdgeInsets.symmetric(horizontal: 8)),
             icon: Ic('description', size: 18, color: p.accent),
-            label: Text(UiCopy.text(581), style: T.button.copyWith(color: p.accent)),
+            label: Text(UiCopy.copy.allDetails, style: T.button.copyWith(color: p.accent)),
           ),
         ),
       ]),
@@ -782,10 +782,10 @@ void _details(BuildContext context, WaitItem item) {
         if (t.details.isNotEmpty) ...[const SizedBox(height: 12), CopySelectionArea(child: Markdown(t.details))],
         const SizedBox(height: 20),
         Wrap(spacing: 8, runSpacing: 8, children: [
-          if (report != null) Btn(UiCopy.text(582), icon: 'description', height: 40, fontSize: 13.5, hpad: 14, onTap: () => openExternalUrl(report)),
-          if (pr != null) Btn(UiCopy.text(583), icon: 'call_merge', height: 40, fontSize: 13.5, hpad: 14, onTap: () => openExternalUrl(pr)),
+          if (report != null) Btn(UiCopy.copy.fullReport, icon: 'description', height: 40, fontSize: 13.5, hpad: 14, onTap: () => openExternalUrl(report)),
+          if (pr != null) Btn(UiCopy.copy.pullRequest, icon: 'call_merge', height: 40, fontSize: 13.5, hpad: 14, onTap: () => openExternalUrl(pr)),
           if (d.canChat(item.from))
-            Btn(UiCopy.text(584, [d.who(item.from).name]), icon: 'chat', height: 40, fontSize: 13.5, hpad: 14, onTap: () {
+            Btn(UiCopy.copy.chat3(d.who(item.from).name), icon: 'chat', height: 40, fontSize: 13.5, hpad: 14, onTap: () {
               Navigator.of(sheet).pop();
               final nav = Navigator.of(context);
               if (nav.canPop()) nav.pop();
@@ -828,14 +828,14 @@ class _Foot extends StatelessWidget {
         const SizedBox(height: 2),
         Row(children: [
           TextButton.icon(
-            onPressed: () => onAct(StackAct(UiCopy.text(577), 'schedule', decisionQueue.later), AxisDirection.down),
+            onPressed: () => onAct(StackAct(UiCopy.copy.later, 'schedule', decisionQueue.later), AxisDirection.down),
             style: TextButton.styleFrom(minimumSize: const Size(64, 44), foregroundColor: p.text2),
             icon: Ic('schedule', size: 18, color: p.text2),
-            label: Text(UiCopy.text(577), style: T.button.copyWith(color: p.text2)),
+            label: Text(UiCopy.copy.later, style: T.button.copyWith(color: p.text2)),
           ),
           const Spacer(),
           if (decisionQueue.remaining > 1)
-            Text(UiCopy.text(585, [decisionQueue.remaining - 1]), style: T.meta.copyWith(color: p.text3, fontFeatures: kTabular)),
+            Text(UiCopy.copy.moreAfterThis(decisionQueue.remaining - 1), style: T.meta.copyWith(color: p.text3, fontFeatures: kTabular)),
         ]),
       ]),
     );

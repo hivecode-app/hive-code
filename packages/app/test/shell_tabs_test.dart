@@ -7,6 +7,7 @@ import 'package:agent_company/ui/product/shell.dart';
 import 'package:agent_company/ui/product/team.dart';
 import 'package:agent_company/ui/projects/project_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -63,11 +64,22 @@ void main() {
     expect(icons.firstWhere((x) => x.name == 'view_kanban').fill, isFalse);
   });
 
-  testWidgets('the account icon on the chats opens settings', (tester) async {
+  testWidgets('the account icon on the chats is a menu: settings, and the sort (two icons, as in the mockup)', (tester) async {
     await productApp(tester);
+    final top = find.byWidgetPredicate((w) => w is Ic && (w.name == 'sort' || w.name == 'edit_square' || w.name == 'account_circle'));
+    expect(tester.widgetList<Ic>(top).map((x) => x.name).toSet(), {'edit_square', 'account_circle'});
     await tester.tap(find.byWidgetPredicate((w) => w is Ic && w.name == 'account_circle'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text(l(tester).settings).last);
+    await tester.pumpAndSettle();
     expect(find.byType(ProductSettings), findsOneWidget);
+    Navigator.of(tester.element(find.byType(ProductSettings))).pop();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byWidgetPredicate((w) => w is Ic && w.name == 'account_circle'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byWidgetPredicate((w) => w is Ic && w.name == 'sort').last);
+    await tester.pumpAndSettle();
+    expect(find.text(UiCopy.copy.sortChats), findsWidgets, reason: 'the sort sheet');
   });
 
   testWidgets('the sidebar counts open tasks, and settings and his name at its foot open settings', (tester) async {

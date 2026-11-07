@@ -36,10 +36,10 @@ String homeSentence(CompanyData d, {required int stuck, int decisions = 0}) {
   final projects = {for (final t in running) t.project}.length;
   final work = running.isEmpty
       ? ''
-      : '${_count(running.length, UiCopy.text(102), UiCopy.text(533), UiCopy.text(534))}${projects > 1 ? (projects == 2 ? UiCopy.text(535) : UiCopy.text(536, [projects])) : ''}.';
-  if (stuck > 0) return UiCopy.text(540, [_count(stuck, UiCopy.text(537), UiCopy.text(538), UiCopy.text(539))]);
-  if (decisions > 0) return work.isEmpty ? UiCopy.text(541) : UiCopy.text(542, [work]);
-  return work.isEmpty ? UiCopy.text(543) : UiCopy.text(544, [work]);
+      : '${_count(running.length, UiCopy.copy.oneTaskRunning, UiCopy.copy.twoTasksRunning, UiCopy.copy.tasksRunning)}${projects > 1 ? (projects == 2 ? UiCopy.copy.twoProjects : UiCopy.copy.projects2(projects)) : ''}.';
+  if (stuck > 0) return UiCopy.copy.youNow(_count(stuck, UiCopy.copy.oneIssueNeeds, UiCopy.copy.twoIssuesNeed, UiCopy.copy.issuesNeed));
+  if (decisions > 0) return work.isEmpty ? UiCopy.copy.noTasksRunning : UiCopy.copy.meanwhile(work);
+  return work.isEmpty ? UiCopy.copy.nothingNeedsYou : UiCopy.copy.nothingNeedsYou2(work);
 }
 
 /// Workers who are stuck: a fault with no decision, the only thing the home still raises by itself.
@@ -123,7 +123,7 @@ class HomeV2 extends StatelessWidget {
     // Codex's row is not an account the company runs on: all Claude accounts full is what stops the work.
     final usable = [for (final q in quota) if (q.usable && !q.isCodex) q];
     final allFull = usable.isNotEmpty && usable.every((q) => q.full);
-    final quotaCard = BlockCard(label: UiCopy.text(545), child: QuotaCard(quota: quota, now: now));
+    final quotaCard = BlockCard(label: UiCopy.copy.usageLimit, child: QuotaCard(quota: quota, now: now));
     // 6. How fast it goes and on what (task 496): right under the quota, and folds with the home.
     final usage = switch (recipe?.usage) { final u? when !u.isEmpty => u, _ => null };
 
@@ -135,18 +135,18 @@ class HomeV2 extends StatelessWidget {
         (
           'stuck',
           BlockCard(
-            label: UiCopy.text(105),
+            label: UiCopy.copy.issue2,
             child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: AlertBlock(items: const [], stuck: stuck, now: now)),
           )
         ),
-      if (allFull) ('quota:label',  _Label(UiCopy.text(545))),
+      if (allFull) ('quota:label',  _Label(UiCopy.copy.usageLimit)),
       if (allFull) ('quota', quotaCard),
-      if (projects.isNotEmpty && !folded) ('projects:label',  _Label(UiCopy.text(546))),
+      if (projects.isNotEmpty && !folded) ('projects:label',  _Label(UiCopy.copy.projects3)),
       if (projects.isNotEmpty && !folded)
         (
           'projects',
           BlockCard(
-            label: UiCopy.text(546),
+            label: UiCopy.copy.projects3,
             child: Column(children: [
               for (final (i, (id, note)) in projects.indexed) ...[
                 if (i > 0) const _Inset(),
@@ -155,17 +155,17 @@ class HomeV2 extends StatelessWidget {
             ]),
           )
         ),
-      if (done.isNotEmpty && !folded) ('done:label',  _Label(UiCopy.text(547))),
-      if (done.isNotEmpty && !folded) ('done', BlockCard(label: UiCopy.text(547), child: _Done(items: done.take(3).toList(), now: now))),
-      if (quota.isNotEmpty && !allFull && !folded) ('quota:label',  _Label(UiCopy.text(545))),
+      if (done.isNotEmpty && !folded) ('done:label',  _Label(UiCopy.copy.recentlyDone)),
+      if (done.isNotEmpty && !folded) ('done', BlockCard(label: UiCopy.copy.recentlyDone, child: _Done(items: done.take(3).toList(), now: now))),
+      if (quota.isNotEmpty && !allFull && !folded) ('quota:label',  _Label(UiCopy.copy.usageLimit)),
       if (quota.isNotEmpty && !allFull && !folded) ('quota', quotaCard),
-      if (usage != null && !folded) ('usage:label',  _Label(UiCopy.text(548))),
-      if (usage != null && !folded) ('usage', BlockCard(label: UiCopy.text(548), child: UsageCard(usage: usage))),
+      if (usage != null && !folded) ('usage:label',  _Label(UiCopy.copy.usage)),
+      if (usage != null && !folded) ('usage', BlockCard(label: UiCopy.copy.usage, child: UsageCard(usage: usage))),
       if (quiet.isNotEmpty && !folded) ('quiet', Padding(padding: const EdgeInsets.only(top: 8), child: QuietBlock(projects: quiet, data: d, color: p.bg))),
     ];
     return Semantics(
       container: true,
-      label: UiCopy.text(549),
+      label: UiCopy.copy.needsAttention,
       explicitChildNodes: true,
       child: Container(
         color: p.bg,
@@ -192,7 +192,7 @@ class _Sentence extends StatelessWidget {
     return Semantics(
       button: true,
       expanded: open,
-      hint: open! ? UiCopy.text(550) : UiCopy.text(487),
+      hint: open! ? UiCopy.copy.collapseHome : UiCopy.copy.openHome,
       child: InkWell(
         onTap: onTap,
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -278,26 +278,26 @@ class ProjectRowV2 extends StatelessWidget {
     final project = d.projects.where((x) => x.id == l.id).firstOrNull;
     final tone = d.teams[project?.teamId ?? l.id]?.tone;
     String name(String id) => d.who(id).name;
-    final who = l.who.isEmpty ? '' : (l.who.length == 1 ? name(l.who.first) : UiCopy.text(112, [name(l.who.first), l.who.length - 1]));
+    final who = l.who.isEmpty ? '' : (l.who.length == 1 ? name(l.who.first) : UiCopy.copy.more3(name(l.who.first), l.who.length - 1));
     final second = T.small.copyWith(color: p.text2, height: 19 / 13);
     final String icon, word;
     String rest = '';
     String end = '';
     if (l.now != null) {
-      (icon, word) = ('play_arrow', UiCopy.text(551));
-      rest = [l.now!, if (who.isNotEmpty) who, if (l.queued > 0) UiCopy.text(552, [l.queued])].join(' · ');
+      (icon, word) = ('play_arrow', UiCopy.copy.running3);
+      rest = [l.now!, if (who.isNotEmpty) who, if (l.queued > 0) UiCopy.copy.moreQueued(l.queued)].join(' · ');
     } else if (l.queued > 0) {
-      (icon, word) = ('schedule', l.queued == 1 ? UiCopy.text(100) : UiCopy.text(101, [l.queued]));
+      (icon, word) = ('schedule', l.queued == 1 ? UiCopy.copy.oneTaskQueued : UiCopy.copy.tasksQueued(l.queued));
     } else {
-      (icon, word) = ('bedtime', UiCopy.text(115));
-      if (l.last != null) rest = UiCopy.text(553, [l.last]);
-      if (l.lastAt != null) end = daysAgo(l.lastAt!, now) == 0 ? hm(l.lastAt!) : (daysAgo(l.lastAt!, now) == 1 ? UiCopy.text(34) : dm(l.lastAt!));
+      (icon, word) = ('bedtime', UiCopy.copy.quiet);
+      if (l.last != null) rest = UiCopy.copy.latest3(l.last!);
+      if (l.lastAt != null) end = daysAgo(l.lastAt!, now) == 0 ? hm(l.lastAt!) : (daysAgo(l.lastAt!, now) == 1 ? UiCopy.copy.yesterday2 : dm(l.lastAt!));
     }
-    final waits = l.waiting == 0 ? '' : (l.waiting == 1 ? UiCopy.text(97) : UiCopy.text(554, [l.waiting]));
+    final waits = l.waiting == 0 ? '' : (l.waiting == 1 ? UiCopy.copy.needsYou2 : UiCopy.copy.needYou2(l.waiting));
     return Semantics(
       button: true,
       label: [l.name, ?(waits.isEmpty ? null : waits), word, ?(rest.isEmpty ? null : rest), ?(end.isEmpty ? null : end), ?note].join('. '),
-      hint: UiCopy.text(119),
+      hint: UiCopy.copy.openProject,
       excludeSemantics: true,
       child: InkWell(
         onTap: () => Nav.project(context, l.id),
@@ -384,7 +384,7 @@ class _Done extends StatelessWidget {
     final p = context.p;
     final d = StoreScope.of(context).data!;
     final second = T.small.copyWith(color: p.text2);
-    String when(DateTime t) => daysAgo(t, now) == 0 ? hm(t) : (daysAgo(t, now) == 1 ? UiCopy.text(34) : dm(t));
+    String when(DateTime t) => daysAgo(t, now) == 0 ? hm(t) : (daysAgo(t, now) == 1 ? UiCopy.copy.yesterday2 : dm(t));
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -414,7 +414,7 @@ class _Done extends StatelessWidget {
                     Row(children: [
                       // With no face, the face's place already has the icon.
                       if (x.who != null) ...[Ic('check_circle', size: 14, color: p.text2), const SizedBox(width: 4)],
-                      Expanded(child: Text([if (x.who != null) d.who(x.who!).name, UiCopy.text(555)].join(' · '), maxLines: 1, overflow: TextOverflow.ellipsis, style: second)),
+                      Expanded(child: Text([if (x.who != null) d.who(x.who!).name, UiCopy.copy.done10].join(' · '), maxLines: 1, overflow: TextOverflow.ellipsis, style: second)),
                       Text(when(x.at), style: second.copyWith(fontFeatures: kTabular)),
                     ]),
                   ]),
@@ -440,7 +440,7 @@ class HomeV2Page extends StatelessWidget {
     return Container(
       color: p.bg,
       child: Column(children: [
-         TopBar(title: UiCopy.text(556)),
+         TopBar(title: UiCopy.copy.home2),
         Expanded(
           child: ListView(padding: const EdgeInsets.only(bottom: 24), children: [
             Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 720), child: HomeV2(recipe: d.home, data: d, now: CompanyTime.now()))),
@@ -465,7 +465,7 @@ class HomeEntryRow extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      label: UiCopy.text(557, [sentence]),
+      label: UiCopy.copy.home3(sentence),
       excludeSemantics: true,
       child: Material(
         color: selected ? p.surface2 : p.surface,
@@ -488,7 +488,7 @@ class HomeEntryRow extends StatelessWidget {
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
-                    Expanded(child: Text(UiCopy.text(556), style: T.name.copyWith(color: p.text))),
+                    Expanded(child: Text(UiCopy.copy.home2, style: T.name.copyWith(color: p.text))),
                     // How many wait is the pinned row's, right above (task 986).
                   ]),
                   const SizedBox(height: 2),

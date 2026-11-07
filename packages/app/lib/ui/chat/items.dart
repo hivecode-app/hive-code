@@ -80,11 +80,11 @@ class Meta extends StatelessWidget {
     final p = context.p;
     final (String? icon, Color? color, String label) = switch (delivery) {
       null => (null, null, ''),
-      Delivery.pendingConnection => ('schedule', p.text2, UiCopy.text(234)),
-      Delivery.queued => ('schedule', p.text2, UiCopy.text(98)),
-      Delivery.delivered => ('check', p.text3, UiCopy.text(235)),
-      Delivery.read || Delivery.handled => ('done_all', p.read, UiCopy.text(236)),
-      Delivery.failed => ('error', p.urgent, UiCopy.text(237)),
+      Delivery.pendingConnection => ('schedule', p.text2, UiCopy.copy.waitingConnection),
+      Delivery.queued => ('schedule', p.text2, UiCopy.copy.queued),
+      Delivery.delivered => ('check', p.text3, UiCopy.copy.delivered),
+      Delivery.read || Delivery.handled => ('done_all', p.read, UiCopy.copy.read),
+      Delivery.failed => ('error', p.urgent, UiCopy.copy.notDelivered),
     };
     return Semantics(
       label: '$time $label',
@@ -169,16 +169,16 @@ class UserBubble extends StatelessWidget {
     final waiting = msg.waitingOn;
     final pendingMedia = msg.attachments.any((a) => a.id == null && a.transfer != null);
     final under = pendingMedia && msg.delivery != Delivery.failed
-        ? _QLine(text: AppLocalizations.of(context).mediaWaiting, link: UiCopy.text(239), onTap: onRetract)
+        ? _QLine(text: AppLocalizations.of(context).mediaWaiting, link: UiCopy.copy.retract, onTap: onRetract)
         : switch (msg.delivery) {
             // His `now` waits for one running tool only: the line says which, never "בתור".
             Delivery.queued || Delivery.delivered when waiting != null => WaitLine(waiting: waiting, onStop: onStopNow),
             // Otherwise his `now` is on its way this second: no line.
             Delivery.queued when msg.priority == Priority.now => null,
-            Delivery.queued => _QLine(text: UiCopy.text(238, [msg.priority == Priority.later ? UiCopy.text(230) : UiCopy.text(225)]), link: UiCopy.text(239), onTap: onRetract),
-            Delivery.pendingConnection => _QLine(text: UiCopy.text(240), link: UiCopy.text(239), onTap: onRetract),
+            Delivery.queued => _QLine(text: UiCopy.copy.queued3(msg.priority == Priority.later ? UiCopy.copy.endQueue : UiCopy.copy.afterCurrentStep), link: UiCopy.copy.retract, onTap: onRetract),
+            Delivery.pendingConnection => _QLine(text: UiCopy.copy.waitingConnection2, link: UiCopy.copy.retract, onTap: onRetract),
             // hq catches a message it could not deliver by itself (error-watch.ts): "נשלח לטיפול" is true here too.
-            Delivery.failed => _QLine(text: ErrorReports.instance.active ? UiCopy.text(241, [SentNote.text]) : UiCopy.text(242), link: UiCopy.text(243), onTap: onRetry),
+            Delivery.failed => _QLine(text: ErrorReports.instance.active ? UiCopy.copy.notDelivered2(SentNote.text) : UiCopy.copy.notDelivered3, link: UiCopy.copy.tryAgain2, onTap: onRetry),
             _ => null,
           };
     if (under == null) return bubble;
@@ -190,7 +190,7 @@ class UserBubble extends StatelessWidget {
 (String, bool) waitingWhat(WaitingOn w) {
   final cmd = w.command;
   if (w.tool == 'Bash' && cmd != null) {
-    if (RegExp(r'\b(deploy|kubectl\s+apply|helm\s+(upgrade|install))\b').hasMatch(cmd)) return (UiCopy.text(249), true);
+    if (RegExp(r'\b(deploy|kubectl\s+apply|helm\s+(upgrade|install))\b').hasMatch(cmd)) return (UiCopy.copy.release, true);
     var first = cmd
         .trim()
         .split(RegExp(r'&&|\|\||[;|\n]'))
@@ -198,13 +198,13 @@ class UserBubble extends StatelessWidget {
         .firstWhere((s) => s.isNotEmpty && !s.startsWith('cd '), orElse: () => cmd.trim())
         .replaceAll(RegExp(r'\s*(\d?>&\d|\d?>\s*/dev/null)'), '');
     if (first.length > 24) first = '${first.substring(0, 23)}…';
-    return (UiCopy.text(250, [first]), true);
+    return (UiCopy.copy.command(first), true);
   }
-  if (w.tool == 'Bash') return (UiCopy.text(251), true);
-  if (w.tool == 'Edit' || w.tool == 'Write' || w.tool == 'NotebookEdit') return (UiCopy.text(252), true);
-  if (w.tool == 'Agent' || w.tool == 'Task') return (UiCopy.text(253), false);
+  if (w.tool == 'Bash') return (UiCopy.copy.command2, true);
+  if (w.tool == 'Edit' || w.tool == 'Write' || w.tool == 'NotebookEdit') return (UiCopy.copy.edit, true);
+  if (w.tool == 'Agent' || w.tool == 'Task') return (UiCopy.copy.assistant, false);
   final name = w.tool.startsWith('mcp__') ? w.tool.split('__').last : w.tool;
-  return (UiCopy.text(254, [name]), false);
+  return (UiCopy.copy.tool(name), false);
 }
 
 /// After this long on one tool the line shows how long, and offers to stop it.
@@ -253,11 +253,7 @@ class _WaitLineState extends State<WaitLine> {
           spacing: 10,
           children: [
             Rich(
-              UiCopy.text(258, [
-                what,
-                f ? UiCopy.text(255) : UiCopy.text(256),
-                long ? UiCopy.text(257, [ran.inMinutes]) : '',
-              ]),
+              UiCopy.copy.willArriveWhen(what, f ? UiCopy.copy.finishes3 : UiCopy.copy.finishes4, long ? UiCopy.copy.minElapsed(ran.inMinutes) : ''),
               style: style,
             ),
             if (long && widget.onStop != null)
@@ -272,7 +268,7 @@ class _WaitLineState extends State<WaitLine> {
                     child: Center(
                       widthFactor: 1,
                       child: Text(
-                        UiCopy.text(259),
+                        UiCopy.copy.stopNow,
                         style: style.copyWith(color: p.accent, fontWeight: FontWeight.w700),
                       ),
                     ),
@@ -346,7 +342,7 @@ class QuoteStrip extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  quote.askId == null ? quote.author : (quote.go ? UiCopy.text(260, [quote.author]) : UiCopy.text(261, [quote.author])),
+                  quote.askId == null ? quote.author : (quote.go ? UiCopy.copy.answerSApproval(quote.author) : UiCopy.copy.answerSQuestion(quote.author)),
                   style: TextStyle(fontFamily: kFont, fontSize: 12.5, height: 1.4, fontWeight: FontWeight.w700, color: p.text),
                 ),
                 Rich(
@@ -362,7 +358,7 @@ class QuoteStrip extends StatelessWidget {
           if (onClose != null)
             IconButton(
               onPressed: onClose,
-              tooltip: UiCopy.text(262),
+              tooltip: UiCopy.copy.cancelQuote,
               icon: Ic('close', size: 18, color: p.text2),
             ),
         ],
@@ -464,7 +460,7 @@ class _TextBubbleState extends State<TextBubble> {
             child: Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
-                UiCopy.text(263, [lines - 30]),
+                UiCopy.copy.readMoreLines(lines - 30),
                 style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700),
               ),
             ),
@@ -569,7 +565,7 @@ class InternalMsgRow extends StatelessWidget {
     final name = T.small.copyWith(color: p.text, fontWeight: FontWeight.w700);
     return Semantics(
       button: true,
-      hint: UiCopy.text(264),
+      hint: UiCopy.copy.openMessage,
       label: '$from ← $to: $line',
       excludeSemantics: true,
       child: InkWell(
@@ -650,7 +646,7 @@ class InternalGroupRow extends StatelessWidget {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        UiCopy.text(265, [count]),
+                        UiCopy.copy.messagesBetweenWorkers(count),
                         style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w700),
                       ),
                     ),
@@ -1067,7 +1063,7 @@ class _DiffCardViewState extends State<DiffCardView> {
     final add = c.files.fold(0, (s, f) => s + f.add), del = c.files.fold(0, (s, f) => s + f.del);
     return ChatCard(
       footer: [
-        CardAction(icon: 'expand_more', label: UiCopy.text(266), rotate: open, onTap: () => setState(() => open = !open)),
+        CardAction(icon: 'expand_more', label: UiCopy.copy.changes, rotate: open, onTap: () => setState(() => open = !open)),
         const CardAction(icon: 'open_in_new', label: 'VS Code'),
         if (c.prRef != null) const CardAction(icon: 'call_merge', label: 'PR'),
       ],
@@ -1077,7 +1073,7 @@ class _DiffCardViewState extends State<DiffCardView> {
           trailing: DiffStat('+$add −$del'),
           child: many
               ? Text(
-                  UiCopy.text(267, [c.files.length]),
+                  UiCopy.copy.files(c.files.length),
                   style: T.secondary.copyWith(fontWeight: FontWeight.w700, color: p.text),
                 )
               : PathText(f.path),
@@ -1200,16 +1196,16 @@ class TestCardView extends StatelessWidget {
     UiCopy.watch(context);
     final p = context.p;
     final parts = [
-      UiCopy.text(268),
-      UiCopy.text(269, [card.passed]),
-      if (card.failed > 0) UiCopy.text(270, [card.failed]),
-      if (card.skipped > 0) UiCopy.text(271, [card.skipped]),
+      UiCopy.copy.tests,
+      UiCopy.copy.passed(card.passed),
+      if (card.failed > 0) UiCopy.copy.failed(card.failed),
+      if (card.skipped > 0) UiCopy.copy.skipped(card.skipped),
     ];
     return ChatCard(
       children: [
         _CardHead(
           icon: card.failed > 0 ? 'checklist' : 'check',
-          trailing: card.seconds == null ? null : Text(UiCopy.text(272, [card.seconds]), style: T.meta.copyWith(color: p.text2)),
+          trailing: card.seconds == null ? null : Text(UiCopy.copy.s(card.seconds!), style: T.meta.copyWith(color: p.text2)),
           child: Text(
             parts.join(' · '),
             style: TextStyle(fontFamily: kFont, fontSize: 14, height: 1.45, fontWeight: FontWeight.w700, color: p.text),
@@ -1302,7 +1298,7 @@ class TerminalCardView extends StatelessWidget {
                         ),
                       ),
                       IconButton(
-                        tooltip: UiCopy.text(273),
+                        tooltip: UiCopy.copy.copyCommand,
                         visualDensity: VisualDensity.compact,
                         onPressed: () => Clipboard.setData(ClipboardData(text: card.command)),
                         icon: Ic('content_copy', size: 16, color: p.text2),
@@ -1337,11 +1333,11 @@ class TerminalCardView extends StatelessWidget {
             children: [
               if (card.exitCode != 0)
                 Text(
-                  UiCopy.text(274, [card.exitCode]),
+                  UiCopy.copy.exitedError(card.exitCode),
                   style: T.secondary.copyWith(color: p.text, fontWeight: FontWeight.w700),
                 ),
               if (card.footer != null) Text('${card.footer} · ', style: T.secondary.copyWith(color: p.text2)),
-              if (card.totalLines != null) LinkText(UiCopy.text(275, [card.totalLines]), size: 13.5),
+              if (card.totalLines != null) LinkText(UiCopy.copy.fullOutputLines(card.totalLines!), size: 13.5),
             ],
           ),
         ),
@@ -1362,16 +1358,16 @@ class PrCardView extends StatelessWidget {
       Check.none => const SizedBox.shrink(),
       Check.running => Badge2(label: label, icon: 'progress_activity', spin: true),
       Check.ok => Badge2(label: label, icon: 'check'),
-      Check.failed => Badge2(label: UiCopy.text(276, [label]), icon: 'error'),
+      Check.failed => Badge2(label: UiCopy.copy.failed2(label), icon: 'error'),
     };
     final state = switch (card.state) {
-      PrState.open => UiCopy.text(277),
-      PrState.merged => UiCopy.text(278),
-      PrState.closed => UiCopy.text(279),
+      PrState.open => UiCopy.copy.open3,
+      PrState.merged => UiCopy.copy.merged,
+      PrState.closed => UiCopy.copy.closed,
     };
     return ChatCard(
       footer: [
-        CardAction(icon: 'description', label: UiCopy.text(280)),
+        CardAction(icon: 'description', label: UiCopy.copy.files2),
         CardAction(icon: 'open_in_new', label: 'GitHub'),
       ],
       children: [
@@ -1399,10 +1395,10 @@ class PrCardView extends StatelessWidget {
             children: [
               Badge2(label: state),
               check('CI', card.ci),
-              check(UiCopy.text(281), card.review),
+              check(UiCopy.copy.review, card.review),
               DiffStat('+${card.add} −${card.del}'),
               Text(
-                UiCopy.text(267, [card.files]),
+                UiCopy.copy.files(card.files),
                 style: TextStyle(fontFamily: kFont, fontSize: 12, color: p.text2),
               ),
             ],
@@ -1450,10 +1446,10 @@ class _AskCardViewState extends State<AskCardView> {
     final closed = widget.superseded || notNow || (card.state != AskState.open && card.state != AskState.pending);
     final check = card is CheckCard;
     final label = go
-        ? UiCopy.text(282, [from])
+        ? UiCopy.copy.approvalRequestFrom(from)
         : check
-        ? UiCopy.text(283, [from])
-        : UiCopy.text(284, [from]);
+        ? UiCopy.copy.checkRequested(from)
+        : UiCopy.copy.questionFrom(from);
 
     if (go && wait != null && !closed && pending == null) {
       final l = AppLocalizations.of(context);
@@ -1535,10 +1531,10 @@ class _AskCardViewState extends State<AskCardView> {
           ),
           TextSpan(
             text: go
-                ? UiCopy.text(177, [ltr('GO')])
+                ? UiCopy.copy.request(ltr('GO'))
                 : check
-                ? UiCopy.text(31)
-                : (card.blocking ? UiCopy.text(285) : UiCopy.text(286)),
+                ? UiCopy.copy.check
+                : (card.blocking ? UiCopy.copy.questionWorkWaiting : UiCopy.copy.questionCanWait),
           ),
           if (!go && card.escalation != null) TextSpan(text: ' · ${card.escalation!.replaceAll(' ', '\u00A0')}'),
           TextSpan(text: ' · ${hm(card.ts)}'),
@@ -1576,7 +1572,7 @@ class _AskCardViewState extends State<AskCardView> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  details ? UiCopy.text(287) : UiCopy.text(288),
+                  details ? UiCopy.copy.hideDetails : UiCopy.copy.details,
                   style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700),
                 ),
                 AnimatedRotation(
@@ -1614,7 +1610,7 @@ class _AskCardViewState extends State<AskCardView> {
                 Semantics(
                   button: true,
                   expanded: details,
-                  hint: details ? UiCopy.text(287) : UiCopy.text(288),
+                  hint: details ? UiCopy.copy.hideDetails : UiCopy.copy.details,
                   child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => setState(() => details = !details), child: top),
                 )
               else
@@ -1646,7 +1642,7 @@ class DecidedCardView extends StatelessWidget {
             TextSpan(
               children: [
                 TextSpan(
-                  text: UiCopy.text(289, [by]),
+                  text: UiCopy.copy.decidedYourBehalf(by),
                   style: TextStyle(color: p.text, fontWeight: FontWeight.w700),
                 ),
                 TextSpan(text: ' · ${card.time}'),
@@ -1662,7 +1658,7 @@ class DecidedCardView extends StatelessWidget {
               children: [
                 ...Rich.spans(context, card.text, T.row2),
                 const TextSpan(text: ' '),
-                WidgetSpan(alignment: PlaceholderAlignment.baseline, baseline: TextBaseline.alphabetic, child: LinkText(UiCopy.text(290), size: 14.5)),
+                WidgetSpan(alignment: PlaceholderAlignment.baseline, baseline: TextBaseline.alphabetic, child: LinkText(UiCopy.copy.change, size: 14.5)),
               ],
             ),
             style: TextStyle(fontFamily: kFont, fontSize: 14.5, height: 1.55, color: p.text),
@@ -1689,7 +1685,7 @@ class PermissionCardView extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
           child: Text(
-            UiCopy.text(291, [from]),
+            UiCopy.copy.wantsRunCommand(from),
             style: TextStyle(fontFamily: kFont, fontSize: 14, fontWeight: FontWeight.w700, color: p.text),
           ),
         ),
@@ -1711,9 +1707,9 @@ class PermissionCardView extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
             child: DoneLine(switch (card.state) {
-              PermissionState.allowed => UiCopy.text(292),
-              PermissionState.allowedForTask => UiCopy.text(293),
-              _ => UiCopy.text(294),
+              PermissionState.allowed => UiCopy.copy.approved,
+              PermissionState.allowedForTask => UiCopy.copy.approvedThisTask,
+              _ => UiCopy.copy.declined,
             }),
           )
         else
@@ -1724,7 +1720,7 @@ class PermissionCardView extends StatelessWidget {
               runSpacing: 8,
               children: [
                 Btn(
-                  UiCopy.text(295),
+                  UiCopy.copy.approve2,
                   kind: BtnKind.primary,
                   onTap: () {
                     card.state = PermissionState.allowed;
@@ -1732,14 +1728,14 @@ class PermissionCardView extends StatelessWidget {
                   },
                 ),
                 Btn(
-                  UiCopy.text(296),
+                  UiCopy.copy.decline,
                   onTap: () {
                     card.state = PermissionState.denied;
                     store.touch();
                   },
                 ),
                 Btn(
-                  UiCopy.text(297),
+                  UiCopy.copy.approveThisTask,
                   onTap: () {
                     card.state = PermissionState.allowedForTask;
                     store.touch();
@@ -1831,9 +1827,9 @@ class _HandoffCardViewState extends State<HandoffCardView> {
         spacing: 8,
         runSpacing: 8,
         children: [
-          Btn(UiCopy.text(126), kind: BtnKind.primary, onTap: () => Nav.handoff(context, w)),
+          Btn(UiCopy.copy.open2, kind: BtnKind.primary, onTap: () => Nav.handoff(context, w)),
           Btn(
-            UiCopy.text(298),
+            UiCopy.copy.done8,
             onTap: _sending
                 ? null
                 : () async {
@@ -1849,13 +1845,13 @@ class _HandoffCardViewState extends State<HandoffCardView> {
         ],
       );
     } else if (card.failed) {
-      foot = DoneLine(UiCopy.text(299), top: 0, icon: 'close');
+      foot = DoneLine(UiCopy.copy.requestCouldNot, top: 0, icon: 'close');
     } else if (done) {
-      foot = DoneLine(UiCopy.text(300), top: 0);
+      foot = DoneLine(UiCopy.copy.done9, top: 0);
     } else if (card.ended) {
-      foot = DoneLine(UiCopy.text(301), top: 0);
+      foot = DoneLine(UiCopy.copy.requestClosed, top: 0);
     } else {
-      foot = DoneLine(UiCopy.text(302), top: 0, icon: 'schedule');
+      foot = DoneLine(UiCopy.copy.preparingLink, top: 0, icon: 'schedule');
     }
     return ChatCard(
       edge: open,
@@ -1866,7 +1862,7 @@ class _HandoffCardViewState extends State<HandoffCardView> {
             TextSpan(
               children: [
                 TextSpan(
-                  text: UiCopy.text(303),
+                  text: UiCopy.copy.browserRequest,
                   style: TextStyle(fontWeight: FontWeight.w700, color: p.text),
                 ),
                 if (domain.isNotEmpty) ...[const TextSpan(text: ' · '), TextSpan(text: ltr(domain), style: T.mono(12.5))],
@@ -1911,15 +1907,15 @@ class LiveIndicator extends StatelessWidget {
     final f = gender == Gender.f;
     final (String? icon, String? text, bool spin) = switch (live.phase) {
       LivePhase.idle || LivePhase.writing => (null, null, false),
-      LivePhase.starting => ('check', live.label ?? UiCopy.text(306, [name, f ? UiCopy.text(304) : UiCopy.text(305)]), false),
-      LivePhase.thinking => (null, "${f ? UiCopy.text(307) : UiCopy.text(308)}${live.seconds != null ? UiCopy.text(309, [live.seconds]) : ''}", false),
+      LivePhase.starting => ('check', live.label ?? UiCopy.copy.delivered2(name, f ? UiCopy.copy.starting : UiCopy.copy.starting2), false),
+      LivePhase.thinking => (null, "${f ? UiCopy.copy.thinking : UiCopy.copy.thinking2}${live.seconds != null ? UiCopy.copy.s2(live.seconds!) : ''}", false),
       LivePhase.tool => (
         'progress_activity',
-        '${live.label ?? (f ? UiCopy.text(85) : UiCopy.text(86))}${live.seconds != null ? ' · ${live.seconds! ~/ 60}:${(live.seconds! % 60).toString().padLeft(2, '0')}' : ''}',
+        '${live.label ?? (f ? UiCopy.copy.working2 : UiCopy.copy.working3)}${live.seconds != null ? ' · ${live.seconds! ~/ 60}:${(live.seconds! % 60).toString().padLeft(2, '0')}' : ''}',
         true,
       ),
-      LivePhase.compacting => ('progress_activity', UiCopy.text(310), true),
-      LivePhase.stopped => ('stop_circle', '${f ? UiCopy.text(159) : UiCopy.text(160)} · ${live.stoppedAt ?? ''}', false),
+      LivePhase.compacting => ('progress_activity', UiCopy.copy.organizingMemory, true),
+      LivePhase.stopped => ('stop_circle', '${f ? UiCopy.copy.stopped : UiCopy.copy.stopped2} · ${live.stoppedAt ?? ''}', false),
     };
     if (text == null) return const SizedBox.shrink();
     if (live.phase == LivePhase.stopped) return ServiceLine(text: text, icon: icon);

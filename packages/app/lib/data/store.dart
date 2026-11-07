@@ -40,8 +40,8 @@ class PendingAnswer {
   String get label => text != null
       ? text!(secondsLeft)
       : isGo
-      ? UiCopy.text(930, [toName(to), secondsLeft])
-      : UiCopy.text(931, [toName(to), secondsLeft]);
+      ? UiCopy.copy.approvalWillSent(toName(to), secondsLeft)
+      : UiCopy.copy.willSentS(toName(to), secondsLeft);
 }
 
 /// How the conversation list is ordered. [recent] is the data's order (newest message first).
@@ -367,7 +367,7 @@ class AppStore extends ChangeNotifier {
   PendingAnswer? decision(String? askId, String id) => _pending[decisionKey(askId, id)];
 
   /// The folded line of a decision: "אישרת" for a GO, "ענית: X" for an answer.
-  static String decidedLine(AskOption option) => option.id == 'go' ? UiCopy.text(566, ['']) : UiCopy.text(568, ['', option.label]);
+  static String decidedLine(AskOption option) => option.id == 'go' ? UiCopy.copy.approved2('') : UiCopy.copy.answered2('', option.label);
 
   void answerWait(WaitItem item, AskOption option) {
     final to = nameOf(item.from);
@@ -396,7 +396,7 @@ class AppStore extends ChangeNotifier {
         to,
         () async {
           final r = await backend.go(item);
-          item.answerLineBuilder = () => UiCopy.legacy ? item.doneLine ?? UiCopy.text(932) : UiCopy.text(932);
+          item.answerLineBuilder = () => UiCopy.copy.approvalSent;
           _closeCard(card, 'GO', at);
           return r;
         },
@@ -410,7 +410,7 @@ class AppStore extends ChangeNotifier {
         to,
         () async {
           final r = await backend.answerAsk(item.askId ?? item.id, option, from: item.from);
-          item.answerLineBuilder = () => UiCopy.text(933, [option.label, to]);
+          item.answerLineBuilder = () => UiCopy.copy.answeredContinues(option.label, to);
           _closeCard(card, option.label, at);
           return r;
         },
@@ -492,7 +492,7 @@ class AppStore extends ChangeNotifier {
   Future<void> resume(WaitItem item) async => _check(await backend.resume(item));
 
   /// Closing is for good and wakes the worker: it waits the same 3 seconds as any one-tap answer.
-  void dismiss(WaitItem item) => startUndo(item.id, nameOf(item.from), () => backend.dismiss(item), text: (s) => UiCopy.text(934, [s]));
+  void dismiss(WaitItem item) => startUndo(item.id, nameOf(item.from), () => backend.dismiss(item), text: (s) => UiCopy.copy.closesS(s));
 
   Future<void> _check(CommandResult r) async {
     if (!r.ok) {
@@ -536,7 +536,7 @@ class AppStore extends ChangeNotifier {
     }
     final list = _images.putIfAbsent(identityId, () => []);
     if (list.length >= maxImages) {
-      notice(UiCopy.text(935, [maxImages]));
+      notice(UiCopy.copy.youCanAttach(maxImages));
       notifyListeners();
       return false;
     }
@@ -633,7 +633,7 @@ class AppStore extends ChangeNotifier {
         }
         final up = await uploads.run(a);
         if (msg.cancelled || _disposed) return const CommandResult.ok();
-        if (up == null) return CommandResult.localized(892, transient: a.transfer?.retryable ?? false);
+        if (up == null) return CommandResult.localized(() => UiCopy.copy.filesCouldNot, transient: a.transfer?.retryable ?? false);
         msg.attachments[i] = up;
       }
       if (msg.cancelled || _disposed) return const CommandResult.ok();
@@ -710,7 +710,7 @@ class AppStore extends ChangeNotifier {
     if (r.ok) {
       _prefs?.remove(_storageKey('media-answer:${msg.id}'));
       msg.delivery = Delivery.delivered;
-      final said = msg.text.isEmpty && msg.attachments.isNotEmpty ? UiCopy.text(247) : msg.text;
+      final said = msg.text.isEmpty && msg.attachments.isNotEmpty ? UiCopy.copy.image : msg.text;
       for (final c in chat?.items.whereType<AskCard>() ?? const <AskCard>[]) {
         if (c.askId == askId) {
           c.state = AskState.answered;
@@ -719,7 +719,7 @@ class AppStore extends ChangeNotifier {
       }
       for (final w in data?.waiting.where((w) => w.askId == askId) ?? const <WaitItem>[]) {
         w.state = WaitState.answered;
-        w.answerLineBuilder = () => UiCopy.text(936, [msg.text.isEmpty && msg.attachments.isNotEmpty ? UiCopy.text(247) : msg.text]);
+        w.answerLineBuilder = () => UiCopy.copy.answered3(msg.text.isEmpty && msg.attachments.isNotEmpty ? UiCopy.copy.image : msg.text);
       }
     } else {
       msg.delivery = Delivery.failed;
@@ -751,11 +751,11 @@ class AppStore extends ChangeNotifier {
   /// Free text typed as the answer to [item] (home row, or a question without options).
   Future<CommandResult> answerText(WaitItem item, String text) async {
     final askId = item.askId;
-    if (askId == null) return CommandResult.localized(937);
+    if (askId == null) return CommandResult.localized(() => UiCopy.copy.thereNoQuestion);
     final r = await backend.freeAnswer(askId, text);
     if (r.ok) {
       item.state = WaitState.answered;
-      item.answerLineBuilder = () => UiCopy.text(936, [text]);
+      item.answerLineBuilder = () => UiCopy.copy.answered3(text);
     } else {
       _failed(r);
     }
@@ -783,7 +783,7 @@ class AppStore extends ChangeNotifier {
 
   Future<String?> retract(String identityId, UserMsg msg) async {
     if (msg.attachments.isNotEmpty && msg.submitted && msg.delivery == Delivery.pendingConnection) {
-      notice(UiCopy.text(938));
+      notice(UiCopy.copy.thisMessageAlready);
       notifyListeners();
       return null;
     }
@@ -797,7 +797,7 @@ class AppStore extends ChangeNotifier {
     }
     if (_inFlight.contains(msg.id)) {
       // Already on its way: hq may have it, so it is not taken off here as if it never went.
-      notice(UiCopy.text(938));
+      notice(UiCopy.copy.thisMessageAlready);
       notifyListeners();
       return null;
     }
@@ -838,9 +838,9 @@ class AppStore extends ChangeNotifier {
     final hm = company_time.hm(company_time.CompanyTime.now());
     if (!on) {
       a.prevMeta = a.meta;
-      a.meta = UiCopy.text(910, [hm]);
+      a.meta = UiCopy.copy.disabledManually(hm);
     } else {
-      a.meta = a.prevMeta ?? UiCopy.text(939, [hm]);
+      a.meta = a.prevMeta ?? UiCopy.copy.enabled2(hm);
     }
     a.enabled = on;
     notifyListeners();

@@ -26,13 +26,13 @@ class ProjectBlock extends StatelessWidget {
     final d = StoreScope.of(context).data;
     final l = data;
     String name(String id) => d?.who(id).name ?? id;
-    final who = l.who.isEmpty ? '' : (l.who.length == 1 ? name(l.who.first) : UiCopy.text(112, [name(l.who.first), l.who.length - 1]));
+    final who = l.who.isEmpty ? '' : (l.who.length == 1 ? name(l.who.first) : UiCopy.copy.more3(name(l.who.first), l.who.length - 1));
     final second = T.small.copyWith(color: p.text2);
     final today = now ?? CompanyTime.now();
     String when(DateTime t) {
       final ago = daysAgo(t, today);
       if (ago == 0) return hm(t);
-      if (ago == 1) return UiCopy.text(34);
+      if (ago == 1) return UiCopy.copy.yesterday2;
       return dm(t);
     }
     final TextSpan line;
@@ -42,27 +42,27 @@ class ProjectBlock extends StatelessWidget {
     if (l.now != null) {
       to = d == null ? null : chatTargetOf(d, worker: l.who.firstOrNull);
       line = TextSpan(children: [
-         TextSpan(text: UiCopy.text(113), style: TextStyle(fontWeight: FontWeight.w700)),
+         TextSpan(text: UiCopy.copy.now2, style: TextStyle(fontWeight: FontWeight.w700)),
         TextSpan(text: l.now),
         if (who.isNotEmpty) TextSpan(text: ' · $who'),
       ]);
-      spoken = UiCopy.text(114, [l.now, who.isEmpty ? '' : ', $who']);
+      spoken = UiCopy.copy.now3(l.now!, who.isEmpty ? '' : ', $who');
     } else if (l.queued > 0) {
-      line = TextSpan(text: l.queued == 1 ? UiCopy.text(100) : UiCopy.text(101, [l.queued]));
+      line = TextSpan(text: l.queued == 1 ? UiCopy.copy.oneTaskQueued : UiCopy.copy.tasksQueued(l.queued));
       spoken = line.text!;
     } else {
       line = TextSpan(children: [
-         TextSpan(text: UiCopy.text(115), style: TextStyle(fontWeight: FontWeight.w700)),
-        if (l.last != null) TextSpan(text: UiCopy.text(116, [l.last])),
+         TextSpan(text: UiCopy.copy.quiet, style: TextStyle(fontWeight: FontWeight.w700)),
+        if (l.last != null) TextSpan(text: UiCopy.copy.latest(l.last!)),
       ]);
       if (l.lastAt != null) end = when(l.lastAt!);
       if (l.last != null && d != null) to = chatTargetOf(d, worker: l.lastWho, openedBy: l.lastOpener, done: true);
-      spoken = UiCopy.text(118, [l.last == null ? '' : UiCopy.text(117, [l.last, end.isEmpty ? '' : ', $end'])]);
+      spoken = UiCopy.copy.quiet2(l.last == null ? '' : UiCopy.copy.latest2(l.last!, end.isEmpty ? '' : ', $end'));
     }
     return Semantics(
       button: true,
-      label: [l.name, if (l.waiting > 0) l.waiting == 1 ? UiCopy.text(95) : UiCopy.text(96, [l.waiting]), if (to == null) spoken, if (l.note != null) l.note!].join('. '),
-      hint: UiCopy.text(119),
+      label: [l.name, if (l.waiting > 0) l.waiting == 1 ? UiCopy.copy.oneRequestNeeds : UiCopy.copy.requestsNeedYou(l.waiting), if (to == null) spoken, if (l.note != null) l.note!].join('. '),
+      hint: UiCopy.copy.openProject,
       // With a line that leads to a worker, that line is a node of its own; the rest is read from the label.
       excludeSemantics: to == null,
       child: InkWell(

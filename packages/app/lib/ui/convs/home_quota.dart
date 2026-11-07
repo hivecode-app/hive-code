@@ -11,13 +11,13 @@ import '../../theme/tokens.dart';
 import '../blocks/blocks.dart';
 import '../common.dart';
 
-List<String> get _days => [UiCopy.text(411), UiCopy.text(412), UiCopy.text(413), UiCopy.text(414), UiCopy.text(415), UiCopy.text(416), UiCopy.text(417)];
+List<String> get _days => [UiCopy.copy.monday, UiCopy.copy.tuesday, UiCopy.copy.wednesday, UiCopy.copy.thursday, UiCopy.copy.friday, UiCopy.copy.saturday, UiCopy.copy.sunday];
 
 /// A time ahead on his clock: "14:00", "מחר 06:59", "שבת 31/10 06:00".
 String aheadAt(DateTime t, DateTime now) {
   final days = -daysAgo(t, now);
   if (days <= 0) return hm(t);
-  if (days == 1) return UiCopy.text(509, [hm(t)]);
+  if (days == 1) return UiCopy.copy.tomorrow(hm(t));
   return '${_days[wall(t).weekday - 1]} ${dm(t)} ${hm(t)}';
 }
 
@@ -26,18 +26,18 @@ String _pct(num? v) => v == null ? '?' : '$kLRI${v.round()}%$kPDI';
 
 /// "5 שעות 17%, מתאפס 14:00": a window's line; no reset time when hq has none, or it already passed.
 String windowLine(String name, num? pct, DateTime? resets, DateTime now) =>
-    [ '$name ${_pct(pct)}', if (resets != null && resets.isAfter(now)) UiCopy.text(510, [aheadAt(resets, now)]) ].join(', ');
+    [ '$name ${_pct(pct)}', if (resets != null && resets.isAfter(now)) UiCopy.copy.resets(aheadAt(resets, now)) ].join(', ');
 
 /// Everything the card says of one account, in reading order (also its screen reader label).
 List<String> quotaLines(QuotaLine q, DateTime now) {
   final old = q.measuredAt != null && now.difference(q.measuredAt!) > const Duration(minutes: 30);
   return [
-    if (!q.usable) UiCopy.text(511)
-    else if (q.full) q.reopensAt != null ? UiCopy.text(512, [aheadAt(q.reopensAt!, now)]) : UiCopy.text(399),
+    if (!q.usable) UiCopy.copy.offline2
+    else if (q.full) q.reopensAt != null ? UiCopy.copy.unavailableUntil(aheadAt(q.reopensAt!, now)) : UiCopy.copy.blocked4,
     // Codex has one window, the week: no "5 שעות ?" line for a window it does not have.
-    if (q.usable) ...[if (!q.isCodex) windowLine(UiCopy.text(513), q.fiveHour, q.fiveHourResets, now), windowLine(UiCopy.text(514), q.sevenDay, q.sevenDayResets, now)],
+    if (q.usable) ...[if (!q.isCodex) windowLine(UiCopy.copy.n5Hours, q.fiveHour, q.fiveHourResets, now), windowLine(UiCopy.copy.weekly, q.sevenDay, q.sevenDayResets, now)],
     if (q.note != null) q.note!,
-    if (q.usable && old) UiCopy.text(515, [daysAgo(q.measuredAt!, now) == 0 ? hm(q.measuredAt!) : '${dm(q.measuredAt!)} ${hm(q.measuredAt!)}']),
+    if (q.usable && old) UiCopy.copy.measured(daysAgo(q.measuredAt!, now) == 0 ? hm(q.measuredAt!) : '${dm(q.measuredAt!)} ${hm(q.measuredAt!)}'),
   ];
 }
 

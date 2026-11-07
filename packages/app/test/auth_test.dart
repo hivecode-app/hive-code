@@ -15,6 +15,7 @@ import 'package:agent_company/theme/theme.dart';
 import 'package:agent_company/theme/tokens.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:agent_company/l10n/ui_copy.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -151,7 +152,7 @@ void main() {
             palette: palette);
         final colors = tester.widgetList<Material>(find.byType(Material)).map((m) => m.color).toList();
         expect(colors, contains(palette.accent), reason: 'the primary button');
-        expect(colors, isNot(contains(Palette.of(dark ? Brightness.dark : Brightness.light).accent)), reason: 'no old blue');
+        expect(colors, isNot(contains((dark ? Palette.darkV2 : Palette.lightV2).accent)), reason: 'no old blue');
         await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/sign_in_${dark ? 'dark' : 'light'}_${passkeys ? 'passkey' : 'code'}.png'));
       });
     }
@@ -295,7 +296,7 @@ void serverTests() {
     await pumpScreen(tester, SignInScreen(askServer: true, client: AuthClient('', client: hq.client, passkeys: FakePasskeys()), onSignedIn: (s) => got = s));
     await tester.tap(find.text('כניסה עם טביעת אצבע'));
     await tester.pumpAndSettle();
-    expect(find.text('צריך את הכתובת של השרת, מה-QR או מהקישור שקיבלת.'), findsOneWidget);
+    expect(find.text(UiCopy.copy.enterServerAddress), findsOneWidget);
     await tester.enterText(find.byKey(const Key('server-address')), 'not-hq.example.com');
     await tester.tap(find.text('כניסה עם טביעת אצבע'));
     await tester.pumpAndSettle();

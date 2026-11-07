@@ -36,7 +36,7 @@ class _WaitingListState extends State<WaitingList> {
     final byId = {for (final w in d.waiting) if (!d.superseded(w)) w.id: w};
     final items = [for (final id in _order!) if (byId[id] != null) byId[id]!, for (final w in d.waiting) if (!_order!.contains(w.id) && byId.containsKey(w.id)) w];
     return ListView(padding: EdgeInsets.zero, children: [
-      Section(UiCopy.text(97), count: d.waitingCount > 0 ? '${d.waitingCount}' : null),
+      Section(UiCopy.copy.needsYou2, count: d.waitingCount > 0 ? '${d.waitingCount}' : null),
       ListBlock(children: [for (final w in items) WaitRow(key: ValueKey(w.id), item: w)]),
     ]);
   }
@@ -59,7 +59,7 @@ class WaitRow extends StatelessWidget {
 
     Widget tail;
     if (item.state == WaitState.answered) {
-      tail = DoneLine(item.answerLine ?? item.doneLine ?? UiCopy.text(612, [hm(CompanyTime.now())]), top: 8, icon: item.failed ? 'close' : item.outcome == 'irrelevant' ? 'do_not_disturb_on' : 'check');
+      tail = DoneLine(item.answerLine ?? item.doneLine ?? UiCopy.copy.handled(hm(CompanyTime.now())), top: 8, icon: item.failed ? 'close' : item.outcome == 'irrelevant' ? 'do_not_disturb_on' : 'check');
     } else if (decided != null) {
       // Decided in one tap: folded at once, "ביטול" for 5 seconds (#258).
       tail = Padding(
@@ -72,18 +72,18 @@ class WaitRow extends StatelessWidget {
       tail = Padding(
         padding: const EdgeInsets.only(top: 8),
         child: Row(children: [
-          Text(UiCopy.text(508), style: T.secondary.copyWith(color: p.text2)),
+          Text(UiCopy.copy.notNow2, style: T.secondary.copyWith(color: p.text2)),
           const SizedBox(width: 10),
           GestureDetector(
             onTap: () => store.resume(item),
-            child: Text(UiCopy.text(18), style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+            child: Text(UiCopy.copy.cancel, style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
           ),
           // Apart from "ביטול", so a near miss doesn't close it (and the 3 seconds still undo it).
           const SizedBox(width: 24),
           // Put off, then closed for good: the worker who asked is told (#74).
           GestureDetector(
             onTap: () => store.dismiss(item),
-            child: Text(UiCopy.text(84), style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+            child: Text(UiCopy.copy.close2, style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
           ),
         ]),
       );
@@ -181,24 +181,24 @@ class WaitRow extends StatelessWidget {
       case WaitKind.urgentProd:
         return [
           for (final o in item.options) Btn(o.label, kind: o.primary ? BtnKind.primary : BtnKind.plain, onTap: () => store.answerWait(item, o)),
-          if (chat) Btn(UiCopy.text(180), onTap: ask),
-          Btn(UiCopy.text(126), onTap: open),
+          if (chat) Btn(UiCopy.copy.question, onTap: ask),
+          Btn(UiCopy.copy.open2, onTap: open),
         ];
       case WaitKind.go:
         // A tap on the row opens the conversation at the card (#258): the buttons are only the decision.
         return [
-          Btn(UiCopy.text(295), kind: BtnKind.primary, height: 48, onTap: () => store.answerWait(item, item.options.first)),
-          Btn(UiCopy.text(508), height: 48, onTap: () => store.notNow(item)),
+          Btn(UiCopy.copy.approve2, kind: BtnKind.primary, height: 48, onTap: () => store.answerWait(item, item.options.first)),
+          Btn(UiCopy.copy.notNow2, height: 48, onTap: () => store.notNow(item)),
         ];
       case WaitKind.login:
         return [
-          Btn(UiCopy.text(126), kind: BtnKind.primary, onTap: () => Nav.handoff(context, item)),
-          Btn(UiCopy.text(508), onTap: () => store.notNow(item)),
+          Btn(UiCopy.copy.open2, kind: BtnKind.primary, onTap: () => Nav.handoff(context, item)),
+          Btn(UiCopy.copy.notNow2, onTap: () => store.notNow(item)),
         ];
       case WaitKind.failure:
         return [
-          Btn(UiCopy.text(243), onTap: () => store.backend.retry(item)),
-          Btn(UiCopy.text(126), onTap: open),
+          Btn(UiCopy.copy.tryAgain2, onTap: () => store.backend.retry(item)),
+          Btn(UiCopy.copy.open2, onTap: open),
         ];
       case WaitKind.awaiting:
         // A finished task (#219): one tap each, "נכשל" asks for nothing; the details, if any, go in the conversation.
@@ -210,8 +210,8 @@ class WaitRow extends StatelessWidget {
         // Without an ask behind it (an escalation note): the conversation is where to answer.
         return [
           for (final o in item.options) Btn(o.label, kind: BtnKind.plain, onTap: () => store.answerWait(item, o)),
-          if (chat) Btn(UiCopy.text(558), onTap: ask),
-          Btn(UiCopy.text(126), onTap: open),
+          if (chat) Btn(UiCopy.copy.answer3, onTap: ask),
+          Btn(UiCopy.copy.open2, onTap: open),
         ];
     }
   }
@@ -226,7 +226,7 @@ class WaitRow extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(
             leading: Ic('content_copy', color: p.text),
-            title: Text(UiCopy.text(613), style: T.row2.copyWith(color: p.text)),
+            title: Text(UiCopy.copy.copyText, style: T.row2.copyWith(color: p.text)),
             onTap: () {
               Clipboard.setData(ClipboardData(text: item.body));
               Navigator.pop(c);
@@ -235,7 +235,7 @@ class WaitRow extends StatelessWidget {
           for (final url in linksIn(item.body))
             ListTile(
               leading: Ic('link', color: p.text),
-              title: Text(UiCopy.text(614), style: T.row2.copyWith(color: p.text)),
+              title: Text(UiCopy.copy.copyLink, style: T.row2.copyWith(color: p.text)),
               subtitle: Text(url, maxLines: 1, overflow: TextOverflow.ellipsis, textDirection: TextDirection.ltr, style: T.small.copyWith(color: p.text2)),
               onTap: () {
                 Clipboard.setData(ClipboardData(text: url));
@@ -314,7 +314,7 @@ class _AnswerFieldState extends State<AnswerField> {
       if (item.options.isNotEmpty || !open)
         Wrap(spacing: 8, runSpacing: 8, children: [
           for (final o in item.options) Btn(o.label, kind: BtnKind.plain, height: 48, onTap: () => store.answerWait(item, o)),
-          if (!open) Btn(UiCopy.text(559), height: 48, onTap: () => setState(() => open = true)),
+          if (!open) Btn(UiCopy.copy.otherAnswer, height: 48, onTap: () => setState(() => open = true)),
         ]),
       if (open) ...[
         if (item.options.isNotEmpty) const SizedBox(height: 8),
@@ -329,14 +329,14 @@ class _AnswerFieldState extends State<AnswerField> {
           style: T.body.copyWith(color: p.text),
           decoration: InputDecoration(
             isDense: true,
-            hintText: UiCopy.text(615, [toName(store.nameOf(item.from))]),
+            hintText: UiCopy.copy.answer4(toName(store.nameOf(item.from))),
             hintStyle: T.body.copyWith(color: p.text3),
             filled: true,
             fillColor: p.surface2,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
             suffixIcon: text.text.trim().isEmpty
                 ? IconButton(
-                    tooltip: UiCopy.text(606),
+                    tooltip: UiCopy.copy.paste,
                     icon: Ic('content_paste', size: 20, color: p.text2),
                     onPressed: () async {
                       final t = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
@@ -344,10 +344,10 @@ class _AnswerFieldState extends State<AnswerField> {
                       text.text = t.trim();
                     },
                   )
-                : IconButton(tooltip: UiCopy.text(206), icon: Ic('send', size: 20, color: busy ? p.text3 : p.accent), onPressed: busy ? null : _send),
+                : IconButton(tooltip: UiCopy.copy.send2, icon: Ic('send', size: 20, color: busy ? p.text3 : p.accent), onPressed: busy ? null : _send),
           ),
         ),
-        if (error != null) ShownError(error!, screen: UiCopy.text(97), padding: const EdgeInsets.only(top: 8), report: errorFault),
+        if (error != null) ShownError(error!, screen: UiCopy.copy.needsYou2, padding: const EdgeInsets.only(top: 8), report: errorFault),
       ],
     ]);
   }
@@ -389,7 +389,7 @@ class _ClampedBodyState extends State<_ClampedBody> {
           onTap: () => setState(() => open = !open),
           child: Padding(
             padding: const EdgeInsets.only(top: 2, bottom: 2),
-            child: Text(open ? UiCopy.text(469) : UiCopy.text(163), style: widget.style.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+            child: Text(open ? UiCopy.copy.less : UiCopy.copy.more4, style: widget.style.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
           ),
         ),
       ]);

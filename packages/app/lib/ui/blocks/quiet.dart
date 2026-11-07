@@ -38,12 +38,12 @@ class QuietBlock extends StatelessWidget {
           children: [
             Padding(
               padding: const EdgeInsetsDirectional.only(start: 4, end: 4),
-              child: Text(UiCopy.text(120), style: style),
+              child: Text(UiCopy.copy.alsoQuiet, style: style),
             ),
             for (final (i, id) in projects.indexed)
               Semantics(
                 button: true,
-                label: UiCopy.text(106, [known[id]?.name ?? id]),
+                label: UiCopy.copy.open(known[id]?.name ?? id),
                 excludeSemantics: true,
                 child: InkWell(
                   onTap: () => Nav.project(context, id),

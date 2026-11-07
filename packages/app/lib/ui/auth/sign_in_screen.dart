@@ -69,8 +69,8 @@ class _SignInScreenState extends State<SignInScreen> {
     final t = parseServer(server.text);
     if (t == null) {
       throw AuthFailure(server.text.trim().isEmpty
-          ? UiCopy.text(0)
-          : UiCopy.text(1));
+          ? UiCopy.copy.enterServerAddress
+          : UiCopy.copy.thisDoesNot);
     }
     if (t.code != null && code.text.trim().isEmpty) code.text = t.code!;
     widget.client.baseUrl = t.hqUrl;
@@ -102,7 +102,7 @@ class _SignInScreenState extends State<SignInScreen> {
 
   Future<void> _pair() => _run(() async {
         final c = code.text.trim();
-        if (c.isEmpty) throw  AuthFailure(UiCopy.text(2));
+        if (c.isEmpty) throw  AuthFailure(UiCopy.copy.usePairingCode);
         final name = defaultDeviceName();
         if (!widget.client.passkeysSupported) return widget.client.pair(c, name);
         try {
@@ -133,7 +133,7 @@ class _SignInScreenState extends State<SignInScreen> {
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
         );
     Widget label(String s) => Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(s, style: T.row2.copyWith(color: p.text2)));
-    final pairLabel = hasPasskeys ? UiCopy.text(14) : UiCopy.text(15);
+    final pairLabel = hasPasskeys ? UiCopy.copy.pairCreatePasskey : UiCopy.copy.pair;
     return Scaffold(
       backgroundColor: p.bg,
       body: SafeArea(
@@ -144,17 +144,17 @@ class _SignInScreenState extends State<SignInScreen> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Text(UiCopy.text(5), style: T.big.copyWith(color: p.text, height: 1.2)),
+                Text(UiCopy.copy.signThisDevice, style: T.big.copyWith(color: p.text, height: 1.2)),
                 Padding(
                   padding: const EdgeInsets.only(top: 8, bottom: 28),
-                  child: Text(widget.current != null ? UiCopy.text(4) : hasPasskeys ? UiCopy.text(3) : UiCopy.text(13), style: T.body.copyWith(color: p.text2)),
+                  child: Text(widget.current != null ? UiCopy.copy.switchServer2 : hasPasskeys ? UiCopy.copy.company2 : UiCopy.copy.pairingCodeFrom, style: T.body.copyWith(color: p.text2)),
                 ),
                 if (widget.note != null)
                   Padding(padding: const EdgeInsets.only(bottom: 16), child: Text(widget.note!, style: T.body.copyWith(color: p.text))),
                 if (widget.current != null)
-                  Padding(padding: const EdgeInsets.only(bottom: 16), child: Text(UiCopy.text(6, [widget.current]), style: T.row2.copyWith(color: p.text))),
+                  Padding(padding: const EdgeInsets.only(bottom: 16), child: Text(UiCopy.copy.thisDeviceStays(widget.current!), style: T.row2.copyWith(color: p.text))),
                 if (widget.askServer) ...[
-                  label(UiCopy.text(8)),
+                  label(UiCopy.copy.useAddressFrom),
                   TextField(
                     key: const Key('server-address'),
                     controller: server,
@@ -169,10 +169,10 @@ class _SignInScreenState extends State<SignInScreen> {
                   const SizedBox(height: 24),
                 ],
                 if (hasPasskeys) ...[
-                  _BigButton(busy ? UiCopy.text(9) : UiCopy.text(10), icon: 'fingerprint', primary: true, onTap: busy ? null : _login),
-                  Padding(padding: const EdgeInsets.only(top: 8, bottom: 28), child: Text(UiCopy.text(11), style: T.small.copyWith(color: p.text2))),
-                  label(UiCopy.text(12)),
-                  Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(UiCopy.text(13), style: T.small.copyWith(color: p.text2))),
+                  _BigButton(busy ? UiCopy.copy.oneMoment : UiCopy.copy.signPasskey, icon: 'fingerprint', primary: true, onTap: busy ? null : _login),
+                  Padding(padding: const EdgeInsets.only(top: 8, bottom: 28), child: Text(UiCopy.copy.useSavedPasskey, style: T.small.copyWith(color: p.text2))),
+                  label(UiCopy.copy.newDevice),
+                  Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(UiCopy.copy.pairingCodeFrom, style: T.small.copyWith(color: p.text2))),
                 ],
                 TextField(
                   key: const Key('pair-code'),
@@ -186,13 +186,13 @@ class _SignInScreenState extends State<SignInScreen> {
                   decoration: field('XXXX-XXXX', T.mono(20).copyWith(letterSpacing: 3)),
                 ),
                 const SizedBox(height: 12),
-                _BigButton(busy && !hasPasskeys ? UiCopy.text(9) : pairLabel, icon: 'link', primary: !hasPasskeys, onTap: busy ? null : _pair),
-                if (offerCodeOnly) ...[const SizedBox(height: 8), _BigButton(UiCopy.text(16), onTap: busy ? null : _codeOnly)],
-                if (error != null) ShownError(error!, screen: UiCopy.text(17), padding: const EdgeInsets.only(top: 16), report: errorFault),
+                _BigButton(busy && !hasPasskeys ? UiCopy.copy.oneMoment : pairLabel, icon: 'link', primary: !hasPasskeys, onTap: busy ? null : _pair),
+                if (offerCodeOnly) ...[const SizedBox(height: 8), _BigButton(UiCopy.copy.pairWithoutPasskey, onTap: busy ? null : _codeOnly)],
+                if (error != null) ShownError(error!, screen: UiCopy.copy.sign, padding: const EdgeInsets.only(top: 16), report: errorFault),
                 if (widget.onCancel != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 24),
-                    child: Align(alignment: AlignmentDirectional.centerStart, child: Btn(UiCopy.text(18), onTap: busy ? null : widget.onCancel)),
+                    child: Align(alignment: AlignmentDirectional.centerStart, child: Btn(UiCopy.copy.cancel, onTap: busy ? null : widget.onCancel)),
                   ),
               ]),
             ),

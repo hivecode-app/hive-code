@@ -28,7 +28,7 @@ void newChat(BuildContext context, CompanyData d) {
         expand: false,
         initialChildSize: 0.7,
         builder: (_, sc) => ListView(controller: sc, children: [
-          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 10), child: Text(UiCopy.text(473), style: T.small.copyWith(color: p.text2))),
+          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 10), child: Text(UiCopy.copy.selectPersonTeam, style: T.small.copyWith(color: p.text2))),
           ListBlock(children: [
             for (final who in d.identities.values)
               InkWell(
@@ -76,10 +76,10 @@ List<ConversationSummary> sortConversations(CompanyData d, List<ConversationSumm
 }
 
 Map<ConvSort, String> get kConvSortLabels => {
-  ConvSort.recent: UiCopy.text(474),
-  ConvSort.working: UiCopy.text(475),
-  ConvSort.waiting: UiCopy.text(476),
-  ConvSort.name: UiCopy.text(477),
+  ConvSort.recent: UiCopy.copy.mostRecent,
+  ConvSort.working: UiCopy.copy.workingFirst,
+  ConvSort.waiting: UiCopy.copy.needsYouFirst,
+  ConvSort.name: UiCopy.copy.name,
 };
 
 /// "השתקה" (8 hours, a week, always) or its undo, from a long press on the row or the chat menu.
@@ -97,12 +97,12 @@ void pickMute(BuildContext context, String identityId) {
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Text(muted ? UiCopy.text(478, [name]) : UiCopy.text(479, [name]), style: T.name.copyWith(color: p.text)),
+          child: Text(muted ? UiCopy.copy.chatMuted(name) : UiCopy.copy.muteNotificationsFrom(name), style: T.name.copyWith(color: p.text)),
         ),
         if (!muted)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(UiCopy.text(480), style: T.small.copyWith(color: p.text2)),
+            child: Text(UiCopy.copy.messagesStillArrive, style: T.small.copyWith(color: p.text2)),
           ),
         for (final f in muted ? const [MuteFor.off] : const [MuteFor.hours8, MuteFor.week, MuteFor.always])
           ListTile(
@@ -128,11 +128,11 @@ void pickConvSort(BuildContext context) {
     showDragHandle: true,
     builder: (ctx) => SafeArea(
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text(UiCopy.text(481), style: T.name.copyWith(color: p.text))),
+        Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text(UiCopy.copy.sortChats, style: T.name.copyWith(color: p.text))),
         for (final s in ConvSort.values)
           ListTile(
             title: Text(kConvSortLabels[s]!, style: T.body.copyWith(color: p.text)),
-            trailing: s == store.convSort ? Ic('check', color: p.text, semantic: UiCopy.text(482)) : null,
+            trailing: s == store.convSort ? Ic('check', color: p.text, semantic: UiCopy.copy.selected) : null,
             onTap: () {
               Navigator.pop(ctx);
               store.setConvSort(s);

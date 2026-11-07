@@ -286,2275 +286,2095 @@
   "approvedCopy205": "Tests failed 3 times in a row with the same error. Tomas is looking into it.",
   "approvedCopy206": "Stuck 40 min · Export invoices to CSV",
   "approvedCopy207": "Nothing needs you. 5 tasks in progress.",
-  "ui0": "Enter the server address from your QR code or pairing link.",
-  "ui1": "This does not look like a server address. For example, app.example.com.",
-  "ui2": "Use a pairing code from Settings on a connected device.",
-  "ui3": "Company",
-  "ui4": "Switch server",
-  "ui5": "Sign in on this device",
-  "ui6": "This device stays connected to {p0} until sign-in to the new server succeeds.",
-  "@ui6": {
+  "enterServerAddress": "Enter the server address from your QR code or pairing link.",
+  "thisDoesNot": "This does not look like a server address. For example, app.example.com.",
+  "usePairingCode": "Use a pairing code from Settings on a connected device.",
+  "company2": "Company",
+  "switchServer2": "Switch server",
+  "signThisDevice": "Sign in on this device",
+  "thisDeviceStays": "This device stays connected to {p0} until sign-in to the new server succeeds.",
+  "@thisDeviceStays": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui7": "Server",
-  "ui8": "Use the address from your QR code or link. You can also paste the whole link.",
-  "ui9": "One moment…",
-  "ui10": "Sign in with a passkey",
-  "ui11": "Use a saved passkey, including one created on another device.",
-  "ui12": "New device",
-  "ui13": "A pairing code from Settings on a connected device.",
-  "ui14": "Pair and create passkey",
-  "ui15": "Pair",
-  "ui16": "Pair without a passkey",
-  "ui17": "Sign in",
-  "ui18": "Cancel",
-  "ui19": "to {p0}",
-  "@ui19": {
+  "useAddressFrom": "Use the address from your QR code or link. You can also paste the whole link.",
+  "oneMoment": "One moment…",
+  "signPasskey": "Sign in with a passkey",
+  "useSavedPasskey": "Use a saved passkey, including one created on another device.",
+  "newDevice": "New device",
+  "pairingCodeFrom": "A pairing code from Settings on a connected device.",
+  "pairCreatePasskey": "Pair and create passkey",
+  "pair": "Pair",
+  "pairWithoutPasskey": "Pair without a passkey",
+  "sign": "Sign in",
+  "cancel": "Cancel",
+  "to": "to {p0}",
+  "@to": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui20": "to {p0}",
-  "@ui20": {
+  "to2": "to {p0}",
+  "@to2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui21": "{p0} ago",
-  "@ui21": {
+  "ago": "{p0} ago",
+  "@ago": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui22": "Answered",
-  "ui23": "Waiting {p0}",
-  "@ui23": {
+  "answered": "Answered",
+  "waiting2": "Waiting {p0}",
+  "@waiting2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui24": "{p0} messages",
-  "@ui24": {
+  "messages2": "{p0} messages",
+  "@messages2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui25": "You asked {p0}: {p1}",
-  "@ui25": {
+  "youAsked": "You asked {p0}: {p1}",
+  "@youAsked": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui26": "Waiting",
-  "ui27": "Open answer",
-  "ui28": "Open chat",
-  "ui29": "Answer",
-  "ui30": "Waiting for release",
-  "ui31": "Check",
-  "ui32": "Released",
-  "ui33": "Checked",
-  "ui34": "Yesterday",
-  "ui35": "Since yesterday",
-  "ui36": "since {p0}",
-  "@ui36": {
+  "waiting3": "Waiting",
+  "openAnswer": "Open answer",
+  "openChat": "Open chat",
+  "answer2": "Answer",
+  "waitingRelease": "Waiting for release",
+  "check": "Check",
+  "released": "Released",
+  "checked2": "Checked",
+  "yesterday2": "Yesterday",
+  "sinceYesterday": "Since yesterday",
+  "since": "since {p0}",
+  "@since": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui37": "{p0} min",
-  "@ui37": {
+  "min": "{p0} min",
+  "@min": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui38": "{p0} h",
-  "@ui38": {
+  "h": "{p0} h",
+  "@h": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui39": "{p0} h {p1} min",
-  "@ui39": {
+  "hMin": "{p0} h {p1} min",
+  "@hMin": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui40": "zero",
-  "ui41": "one",
-  "ui42": "two",
-  "ui43": "three",
-  "ui44": "four",
-  "ui45": "five",
-  "ui46": "six",
-  "ui47": "seven",
-  "ui48": "eight",
-  "ui49": "nine",
-  "ui50": "ten",
-  "ui51": "eleven",
-  "ui52": "twelve",
-  "ui53": "thirteen",
-  "ui54": "fourteen",
-  "ui55": "fifteen",
-  "ui56": "sixteen",
-  "ui57": "seventeen",
-  "ui58": "eighteen",
-  "ui59": "nineteen",
-  "ui60": "twenty",
-  "ui61": "thirty",
-  "ui62": "forty",
-  "ui63": "fifty",
-  "ui64": "sixty",
-  "ui65": "seventy",
-  "ui66": "eighty",
-  "ui67": "ninety",
-  "ui68": "{p0} and {p1}",
-  "@ui68": {
+  "zero": "zero",
+  "one": "one",
+  "two": "two",
+  "three": "three",
+  "four": "four",
+  "five": "five",
+  "six": "six",
+  "seven": "seven",
+  "eight": "eight",
+  "nine": "nine",
+  "ten": "ten",
+  "eleven": "eleven",
+  "twelve": "twelve",
+  "thirteen": "thirteen",
+  "fourteen": "fourteen",
+  "fifteen": "fifteen",
+  "sixteen": "sixteen",
+  "seventeen": "seventeen",
+  "eighteen": "eighteen",
+  "nineteen": "nineteen",
+  "twenty": "twenty",
+  "thirty": "thirty",
+  "forty": "forty",
+  "fifty": "fifty",
+  "sixty": "sixty",
+  "seventy": "seventy",
+  "eighty": "eighty",
+  "ninety": "ninety",
+  "and": "{p0} and {p1}",
+  "@and": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui69": "minute",
-  "ui70": "two minutes",
-  "ui71": "minutes",
-  "ui72": "hour",
-  "ui73": "two hours",
-  "ui74": "hours",
-  "ui75": "Done in {p0} of {p1}",
-  "@ui75": {
+  "minute": "minute",
+  "twoMinutes": "two minutes",
+  "minutes": "minutes",
+  "hour": "hour",
+  "twoHours": "two hours",
+  "hours": "hours",
+  "done2": "Done in {p0} of {p1}",
+  "@done2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui76": "Done in {p0} of {p1}",
-  "@ui76": {
+  "done3": "Done in {p0} of {p1}",
+  "@done3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui77": "{p0} late",
-  "@ui77": {
+  "late2": "{p0} late",
+  "@late2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui78": "Estimate {p0}",
-  "@ui78": {
+  "estimate": "Estimate {p0}",
+  "@estimate": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui79": "{p0} late, estimate {p1}",
-  "@ui79": {
+  "lateEstimate": "{p0} late, estimate {p1}",
+  "@lateEstimate": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui80": "{p0} left of {p1}",
-  "@ui80": {
+  "left": "{p0} left of {p1}",
+  "@left": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui81": "Estimate {p0} · {p1} elapsed",
-  "@ui81": {
+  "estimateElapsed": "Estimate {p0} · {p1} elapsed",
+  "@estimateElapsed": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui82": "Estimate {p0}, {p1} elapsed",
-  "@ui82": {
+  "estimateElapsed2": "Estimate {p0}, {p1} elapsed",
+  "@estimateElapsed2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui83": "Day timeline, {p0} to {p1}",
-  "@ui83": {
+  "dayTimeline": "Day timeline, {p0} to {p1}",
+  "@dayTimeline": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui84": "Close",
-  "ui85": "Working",
-  "ui86": "Working",
-  "ui87": "Running",
-  "ui88": "{p0} {p1} on this",
-  "@ui88": {
+  "close2": "Close",
+  "working2": "Working",
+  "working3": "Working",
+  "running": "Running",
+  "this2": "{p0} {p1} on this",
+  "@this2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui89": "{p0} since {p1}",
-  "@ui89": {
+  "since2": "{p0} since {p1}",
+  "@since2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui90": "and {p0} more",
-  "@ui90": {
+  "more2": "and {p0} more",
+  "@more2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui91": "{p0} done · {p1} to {p2}",
-  "@ui91": {
+  "done4": "{p0} done · {p1} to {p2}",
+  "@done4": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       },
       "p2": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui92": "Done at {p0}",
-  "@ui92": {
+  "done5": "Done at {p0}",
+  "@done5": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui93": "{p0} done, {p1} to {p2}",
-  "@ui93": {
+  "done6": "{p0} done, {p1} to {p2}",
+  "@done6": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       },
       "p2": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui94": "Issue in {p0}",
-  "@ui94": {
+  "issue": "Issue in {p0}",
+  "@issue": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui95": "One request needs you",
-  "ui96": "{p0} requests need you",
-  "@ui96": {
+  "oneRequestNeeds": "One request needs you",
+  "requestsNeedYou": "{p0} requests need you",
+  "@requestsNeedYou": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui97": "Needs you",
-  "ui98": "Queued",
-  "ui99": "{p0} queued",
-  "@ui99": {
+  "needsYou2": "Needs you",
+  "queued": "Queued",
+  "queued2": "{p0} queued",
+  "@queued2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui100": "One task queued",
-  "ui101": "{p0} tasks queued",
-  "@ui101": {
+  "oneTaskQueued": "One task queued",
+  "tasksQueued": "{p0} tasks queued",
+  "@tasksQueued": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui102": "One task running",
-  "ui103": "{p0} running",
-  "@ui103": {
+  "oneTaskRunning": "One task running",
+  "running2": "{p0} running",
+  "@running2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui104": "{p0} done today",
-  "@ui104": {
+  "doneToday": "{p0} done today",
+  "@doneToday": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui105": "Issue",
-  "ui106": "Open {p0}",
-  "@ui106": {
+  "issue2": "Issue",
+  "open": "Open {p0}",
+  "@open": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui107": "Now",
-  "ui108": "Done",
-  "ui109": "Concurrent work",
-  "ui110": "Who is working now",
-  "ui111": ", since {p0}",
-  "@ui111": {
+  "now": "Now",
+  "done7": "Done",
+  "concurrentWork": "Concurrent work",
+  "whoWorkingNow": "Who is working now",
+  "since3": ", since {p0}",
+  "@since3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui112": "{p0} and {p1} more",
-  "@ui112": {
+  "more3": "{p0} and {p1} more",
+  "@more3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui113": "Now: ",
-  "ui114": "Now {p0}{p1}",
-  "@ui114": {
+  "now2": "Now: ",
+  "now3": "Now {p0}{p1}",
+  "@now3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui115": "Quiet",
-  "ui116": " · Latest: {p0}",
-  "@ui116": {
+  "quiet": "Quiet",
+  "latest": " · Latest: {p0}",
+  "@latest": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui117": ", latest: {p0}{p1}",
-  "@ui117": {
+  "latest2": ", latest: {p0}{p1}",
+  "@latest2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui118": "Quiet{p0}",
-  "@ui118": {
+  "quiet2": "Quiet{p0}",
+  "@quiet2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui119": "Open project",
-  "ui120": "Also quiet in:",
-  "ui121": "Since {p0}",
-  "@ui121": {
+  "openProject": "Open project",
+  "alsoQuiet": "Also quiet in:",
+  "since4": "Since {p0}",
+  "@since4": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui122": "Since yesterday {p0}",
-  "@ui122": {
+  "sinceYesterday2": "Since yesterday {p0}",
+  "@sinceYesterday2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui123": "One item done",
-  "ui124": "{p0} items done",
-  "@ui124": {
+  "oneItemDone": "One item done",
+  "itemsDone": "{p0} items done",
+  "@itemsDone": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui125": "Collapse",
-  "ui126": "Open",
-  "ui127": "One item done",
-  "ui128": "{p0} items done",
-  "@ui128": {
+  "collapse": "Collapse",
+  "open2": "Open",
+  "oneItemDone2": "One item done",
+  "itemsDone2": "{p0} items done",
+  "@itemsDone2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui129": "{p0} tasks",
-  "@ui129": {
+  "tasks2": "{p0} tasks",
+  "@tasks2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui130": "One running",
-  "ui131": "One needs you",
-  "ui132": "{p0} need you",
-  "@ui132": {
+  "oneRunning": "One running",
+  "oneNeedsYou": "One needs you",
+  "needYou": "{p0} need you",
+  "@needYou": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui133": "One blocked",
-  "ui134": "{p0} blocked",
-  "@ui134": {
+  "oneBlocked": "One blocked",
+  "blocked2": "{p0} blocked",
+  "@blocked2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui135": "Queue position {p0}",
-  "@ui135": {
+  "queuePosition": "Queue position {p0}",
+  "@queuePosition": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui136": "Blocked",
-  "ui137": "Opened",
-  "ui138": "Opened",
-  "ui139": "Open work: {p0}",
-  "@ui139": {
+  "blocked3": "Blocked",
+  "opened": "Opened",
+  "opened2": "Opened",
+  "openWork": "Open work: {p0}",
+  "@openWork": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui140": "Open list",
-  "ui141": "Open work with {p0}",
-  "@ui141": {
+  "openList": "Open list",
+  "openWork2": "Open work with {p0}",
+  "@openWork2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui142": "No open tasks",
-  "ui143": "Stop during `{p0}`?",
-  "@ui143": {
+  "noOpenTasks": "No open tasks",
+  "stopDuring": "Stop during `{p0}`?",
+  "@stopDuring": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui144": "Continue",
-  "ui145": "Stop",
-  "ui146": "You",
-  "ui147": "Why?",
-  "ui148": "Work session {p0} · Continued from session {p1} · {p2}",
-  "@ui148": {
+  "continue2": "Continue",
+  "stop2": "Stop",
+  "you": "You",
+  "why": "Why?",
+  "event": "Event: {p0}",
+  "@event": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
+      }
+    }
+  },
+  "today2": "Today",
+  "mon": "Mon",
+  "tue": "Tue",
+  "wed": "Wed",
+  "thu": "Thu",
+  "fri": "Fri",
+  "sat": "Sat",
+  "sun": "Sun",
+  "offlineLastKnown": "Offline · Last known state: {p0}",
+  "@offlineLastKnown": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "stopped": "Stopped",
+  "stopped2": "Stopped",
+  "back2": "Back",
+  "searchThisChat": "Search this chat",
+  "more4": "More",
+  "unmute2": "Unmute",
+  "team2": "Team",
+  "reports": "Reports to",
+  "technicalDetails": "Technical details",
+  "openDecisions": "{p0} open decisions",
+  "@openDecisions": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "firstTime": "First time",
+  "request": "{p0} request",
+  "@request": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "request2": "Request",
+  "blockingQuestion": "Blocking question",
+  "question": "Question",
+  "question2": "Question",
+  "quote": "Quote",
+  "copy": "Copy",
+  "selectText": "Select text",
+  "share": "Share",
+  "closeSearch": "Close search",
+  "of2": "{p0} of {p1}",
+  "@of2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
+      }
+    }
+  },
+  "previous": "Previous",
+  "next": "Next",
+  "jumpLatest": "Jump to latest",
+  "dictationUnavailableThis": "Dictation is unavailable in this version. You can use your keyboard microphone.",
+  "recordingTooShort": "The recording is too short. Tap, speak, then tap again.",
+  "deleteThisRecording": "Delete this recording?",
+  "hasNotBeen": "It has not been transcribed. Deleting it cannot be undone.",
+  "delete": "Delete",
+  "camera": "Camera",
+  "keyboardDidNot": "The keyboard did not provide the image. Add it from your gallery.",
+  "message": "Message {p0}",
+  "@message": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "thisImageCould": "This image could not be read. Add it from your gallery.",
+  "attach2": "Attach",
+  "send2": "Send",
+  "stopRecording": "Stop recording",
+  "transcribing": "Transcribing",
+  "dictation": "Dictation",
+  "part2": "Part {p0} of {p1} · ",
+  "@part2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      },
+      "p1": {
+        "type": "Object"
+      }
+    }
+  },
+  "sending": "Sending {p0}%",
+  "@sending": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "yesterday3": "Yesterday · {p0}",
+  "@yesterday3": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "savedThisDevice": "Saved on this device.",
+  "savedUntilApp": "Saved until the app closes.",
+  "recordingFromWas": "Recording from {p0} ({p1}) was not transcribed",
+  "@recordingFromWas": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      },
+      "p1": {
+        "type": "Object"
+      }
+    }
+  },
+  "tryAgainDelete": "{p0} Try again or delete it.",
+  "@tryAgainDelete": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "tryAgain": "Try again",
+  "remove": "Remove",
+  "workingWhenShould": "{p0} is working. When should this arrive?",
+  "@workingWhenShould": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "them": "them",
+  "them2": "them",
+  "interruptsWhenSafe": "Interrupts {p0} when safe. This is the default when sending.",
+  "@interruptsWhenSafe": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "afterCurrentStep": "After the current step",
+  "finishes": "Finishes",
+  "finishes2": "Finishes",
+  "text": "",
+  "stepThenReads": "{p0} the step, then reads{p1}",
+  "@stepThenReads": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      },
+      "p1": {
+        "type": "Object"
+      }
+    }
+  },
+  "endQueue": "At the end of the queue",
+  "them3": "them",
+  "them4": "them",
+  "afterEverythingAlready": "After everything already queued for {p0}",
+  "@afterEverythingAlready": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "waitingConnection": "Waiting for connection",
+  "delivered": "Delivered",
+  "read": "Read",
+  "notDelivered": "Not delivered",
+  "queued3": "Queued · {p0} · ",
+  "@queued3": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "retract": "Retract",
+  "waitingConnection2": "Waiting for connection · ",
+  "notDelivered2": "Not delivered · {p0} · ",
+  "@notDelivered2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "notDelivered3": "Not delivered · ",
+  "tryAgain2": "Try again",
+  "image": "Image",
+  "release": "Release",
+  "command": "Command `{p0}`",
+  "@command": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "command2": "Command",
+  "edit": "Edit",
+  "assistant": "Assistant",
+  "tool": "Tool `{p0}`",
+  "@tool": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "finishes3": "finishes",
+  "finishes4": "finishes",
+  "minElapsed": " · {p0} min elapsed",
+  "@minElapsed": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "willArriveWhen": "Will arrive when {p0} {p1}{p2}",
+  "@willArriveWhen": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      },
+      "p1": {
+        "type": "Object"
       },
       "p2": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui149": "Event: {p0}",
-  "@ui149": {
+  "stopNow": "Stop now",
+  "answerSApproval": "Answer to {p0}'s approval request",
+  "@answerSApproval": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui150": "Today",
-  "ui151": "Mon",
-  "ui152": "Tue",
-  "ui153": "Wed",
-  "ui154": "Thu",
-  "ui155": "Fri",
-  "ui156": "Sat",
-  "ui157": "Sun",
-  "ui158": "Offline · Last known state: {p0}",
-  "@ui158": {
+  "answerSQuestion": "Answer to {p0}'s question",
+  "@answerSQuestion": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui159": "Stopped",
-  "ui160": "Stopped",
-  "ui161": "Back",
-  "ui162": "Search this chat",
-  "ui163": "More",
-  "ui164": "Expand all tools",
-  "ui165": "Unmute",
-  "ui166": "Mute",
-  "ui167": "Team",
-  "ui168": "Reports to",
-  "ui169": "Task",
-  "ui170": "Work session",
-  "ui171": " · Since {p0}",
-  "@ui171": {
+  "cancelQuote": "Cancel quote",
+  "readMoreLines": "Read more ({p0} lines)",
+  "@readMoreLines": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui172": "Context",
-  "ui173": "Computer",
-  "ui174": "Technical details",
-  "ui175": "{p0} open decisions",
-  "@ui175": {
+  "openMessage": "Open message",
+  "messagesBetweenWorkers": "{p0} messages between workers",
+  "@messagesBetweenWorkers": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui176": "First time",
-  "ui177": "{p0} request",
-  "@ui177": {
+  "changes": "Changes",
+  "files": "{p0} files",
+  "@files": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui178": "Request",
-  "ui179": "Blocking question",
-  "ui180": "Question",
-  "ui181": "Question",
-  "ui182": "Quote",
-  "ui183": "Copy",
-  "ui184": "Select text",
-  "ui185": "Share",
-  "ui186": "Close search",
-  "ui187": "{p0} of {p1}",
-  "@ui187": {
+  "tests": "Tests",
+  "passed": "{p0} passed",
+  "@passed": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
+      }
+    }
+  },
+  "failed": "{p0} failed",
+  "@failed": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "skipped": "{p0} skipped",
+  "@skipped": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "s": "{p0} s",
+  "@s": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "copyCommand": "Copy command",
+  "exitedError": "Exited with an error ({p0}) · ",
+  "@exitedError": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "fullOutputLines": "Full output ({p0} lines)",
+  "@fullOutputLines": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "failed2": "{p0} failed",
+  "@failed2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "open3": "Open",
+  "merged": "Merged",
+  "closed": "Closed",
+  "files2": "Files",
+  "review": "Review",
+  "approvalRequestFrom": "Approval request from {p0}",
+  "@approvalRequestFrom": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "checkRequested": "Check requested by {p0}",
+  "@checkRequested": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "questionFrom": "Question from {p0}",
+  "@questionFrom": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "questionWorkWaiting": "Question · Work is waiting",
+  "questionCanWait": "Question · Can wait",
+  "hideDetails": "Hide details",
+  "details": "Details",
+  "decidedYourBehalf": "{p0} decided on your behalf",
+  "@decidedYourBehalf": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "change": "Change",
+  "wantsRunCommand": "{p0} wants to run a command",
+  "@wantsRunCommand": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "approved": "Approved",
+  "approvedThisTask": "Approved for this task",
+  "declined": "Declined",
+  "approve2": "Approve",
+  "decline": "Decline",
+  "approveThisTask": "Approve for this task",
+  "done8": "Done",
+  "requestCouldNot": "The request could not reach you. The worker was notified.",
+  "done9": "Done",
+  "requestClosed": "Request closed",
+  "preparingLink": "Preparing link…",
+  "browserRequest": "Browser request",
+  "starting": "Starting",
+  "starting2": "Starting",
+  "delivered2": "Delivered · {p0} {p1}…",
+  "@delivered2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui188": "Previous",
-  "ui189": "Next",
-  "ui190": "Jump to latest",
-  "ui191": "Dictation is unavailable in this version. You can use your keyboard microphone.",
-  "ui192": "The recording is too short. Tap, speak, then tap again.",
-  "ui193": "Delete this recording?",
-  "ui194": "It has not been transcribed. Deleting it cannot be undone.",
-  "ui195": "Delete",
-  "ui196": "Supported images: PNG, JPEG, GIF and WebP.",
-  "ui197": "This image is too large (25 MB maximum).",
-  "ui198": "Camera access is unavailable. Enable it in device settings.",
-  "ui199": "Images could not open. Try again.",
-  "ui200": "Camera",
-  "ui201": "Gallery",
-  "ui202": "The keyboard did not provide the image. Add it from your gallery.",
-  "ui203": "Message {p0}",
-  "@ui203": {
+  "thinking": "Thinking",
+  "thinking2": "Thinking",
+  "s2": " · {p0} s",
+  "@s2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui204": "This image could not be read. Add it from your gallery.",
-  "ui205": "Attach",
-  "ui206": "Send",
-  "ui207": "Stop recording",
-  "ui208": "Transcribing",
-  "ui209": "Dictation",
-  "ui210": "Part {p0} of {p1} · ",
-  "@ui210": {
+  "organizingMemory": "Organizing memory",
+  "moreLines": "{p0} more lines",
+  "@moreLines": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
+      }
+    }
+  },
+  "copied": "Copied",
+  "why2": "Why",
+  "recorded": "Recorded",
+  "where": "Where",
+  "type2": "Type",
+  "from": "From",
+  "to3": "To",
+  "message2": "Message",
+  "reply": "In reply to",
+  "chat": "Chat with {p0}",
+  "@chat": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "activity": "Activity",
+  "showFullCommand": "Show full command",
+  "output": "Output",
+  "showFirstLines": "Show first lines",
+  "showOutputOne": "Show output (one line)",
+  "showOutputLines": "Show output ({p0} lines)",
+  "@showOutputLines": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "stillRunning": "Still running",
+  "completed": "Completed{p0}",
+  "@completed": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "failed3": "Failed{p0}",
+  "@failed3": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "file": "File",
+  "lines": "Lines {p0}–{p1}",
+  "@lines": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui211": "Sending {p0}%",
-  "@ui211": {
+  "oneLineAdded": "One line added",
+  "linesAdded": "Lines added",
+  "oneLineDeleted": "One line deleted",
+  "linesDeleted": "Lines deleted",
+  "change2": "Change",
+  "change3": "Change {p0}",
+  "@change3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui212": "Yesterday · {p0}",
-  "@ui212": {
+  "result": "Result",
+  "showAll": "Show all",
+  "showToolInput": "Show tool input",
+  "showToolResult": "Show tool result",
+  "actions": "Actions",
+  "companyMemory": "Company memory",
+  "companyMemory2": "Company memory · {p0}",
+  "@companyMemory2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui213": "Saved on this device.",
-  "ui214": "Saved until the app closes.",
-  "ui215": "Recording from {p0} ({p1}) was not transcribed",
-  "@ui215": {
+  "records": "Records",
+  "projectMemory": "Project memory",
+  "yourMemory": "Your memory · {p0}",
+  "@yourMemory": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
+      }
+    }
+  },
+  "workerMemory": "Worker memory · {p0}",
+  "@workerMemory": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "designGuide": "Design guide",
+  "decisions": "Decisions",
+  "lessons": "Lessons",
+  "customers": "Customers",
+  "procedures": "Procedures",
+  "timeEstimates": "Time estimates",
+  "repositories": "Repositories",
+  "contents": "Contents",
+  "designTeam": "Design team",
+  "monitoringTeam": "Monitoring team",
+  "improvementTeam": "Improvement team",
+  "decision": "Decision",
+  "lesson": "Lesson",
+  "fact": "Fact",
+  "instruction": "Instruction",
+  "pitfall": "Pitfall",
+  "command3": "Command",
+  "facts": "Facts",
+  "instructions": "Instructions",
+  "pitfalls": "Pitfalls",
+  "commands": "Commands",
+  "search2": "Search",
+  "address": "Address",
+  "request3": "Request",
+  "description": "Description",
+  "title": "Title",
+  "brief": "Brief",
+  "summary": "Summary",
+  "question3": "Question",
+  "options": "Options",
+  "summary2": "Summary",
+  "state": "State",
+  "project": "Project",
+  "priority": "Priority",
+  "reason": "Reason",
+  "risk2": "Risk",
+  "rollback2": "Rollback",
+  "what": "What",
+  "scope": "Scope",
+  "needed": "Needed",
+  "today3": "Today {p0}",
+  "@today3": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "yesterday4": "Yesterday {p0}",
+  "@yesterday4": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "lessThanSecond": "Less than a second",
+  "min2": "{p0}:{p1} min",
+  "@min2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui216": "{p0} Try again or delete it.",
-  "@ui216": {
+  "goMessage": "Go to message",
+  "chat2": "Chat with {p0}",
+  "@chat2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui217": "Try again",
-  "ui218": "Attached image {p0}",
-  "@ui218": {
+  "hide2": "Hide",
+  "blocked4": "Blocked",
+  "reportedRepair": "Reported for repair",
+  "thisScreenHas": "This screen has been loading for more than {p0} seconds",
+  "@thisScreenHas": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui219": "Remove",
-  "ui220": "Remove image",
-  "ui221": "{p0} is working. When should this arrive?",
-  "@ui221": {
+  "thisDayCould": "This day could not load. Try again.",
+  "loadingDay": "Loading day",
+  "monday": "Monday",
+  "tuesday": "Tuesday",
+  "wednesday": "Wednesday",
+  "thursday": "Thursday",
+  "friday": "Friday",
+  "saturday": "Saturday",
+  "sunday": "Sunday",
+  "text2": "{p0}, {p1}/{p2}",
+  "@text2": {
     "placeholders": {
       "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui222": "them",
-  "ui223": "them",
-  "ui224": "Interrupts {p0} when safe. This is the default when sending.",
-  "@ui224": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui225": "After the current step",
-  "ui226": "Finishes",
-  "ui227": "Finishes",
-  "ui228": "",
-  "ui229": "{p0} the step, then reads{p1}",
-  "@ui229": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
-      }
-    }
-  },
-  "ui230": "At the end of the queue",
-  "ui231": "them",
-  "ui232": "them",
-  "ui233": "After everything already queued for {p0}",
-  "@ui233": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui234": "Waiting for connection",
-  "ui235": "Delivered",
-  "ui236": "Read",
-  "ui237": "Not delivered",
-  "ui238": "Queued · {p0} · ",
-  "@ui238": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui239": "Retract",
-  "ui240": "Waiting for connection · ",
-  "ui241": "Not delivered · {p0} · ",
-  "@ui241": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui242": "Not delivered · ",
-  "ui243": "Try again",
-  "ui244": "Uploading image",
-  "ui245": "Chat image could not load",
-  "ui246": "Image in chat",
-  "ui247": "Image",
-  "ui248": "Image could not load",
-  "ui249": "Release",
-  "ui250": "Command `{p0}`",
-  "@ui250": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui251": "Command",
-  "ui252": "Edit",
-  "ui253": "Assistant",
-  "ui254": "Tool `{p0}`",
-  "@ui254": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui255": "finishes",
-  "ui256": "finishes",
-  "ui257": " · {p0} min elapsed",
-  "@ui257": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui258": "Will arrive when {p0} {p1}{p2}",
-  "@ui258": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      },
-      "p1": {
-        "type": "String"
+        "type": "Object"
       },
       "p2": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui259": "Stop now",
-  "ui260": "Answer to {p0}'s approval request",
-  "@ui260": {
+  "noMessages": "No messages",
+  "oneMessage": "One message",
+  "messages3": "Messages",
+  "previousDay": "Previous day",
+  "nextDay": "Next day",
+  "companyMap2": "Company map",
+  "ran": "Ran",
+  "yoav": "Yoav",
+  "thisMessageCould": "This message could not load. Try again.",
+  "loading2": "Loading",
+  "oneTask": "One task",
+  "tasks3": "Tasks",
+  "oneMerge": "One merge",
+  "merges": "Merges",
+  "oneRelease": "One release",
+  "releases": "Releases",
+  "fullDay": "Full day",
+  "until": "{p0}, until {p1}",
+  "@until": {
     "placeholders": {
       "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui261": "Answer to {p0}'s question",
-  "@ui261": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui262": "Cancel quote",
-  "ui263": "Read more ({p0} lines)",
-  "@ui263": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui264": "Open message",
-  "ui265": "{p0} messages between workers",
-  "@ui265": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui266": "Changes",
-  "ui267": "{p0} files",
-  "@ui267": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui268": "Tests",
-  "ui269": "{p0} passed",
-  "@ui269": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui270": "{p0} failed",
-  "@ui270": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui271": "{p0} skipped",
-  "@ui271": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui272": "{p0} s",
-  "@ui272": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui273": "Copy command",
-  "ui274": "Exited with an error ({p0}) · ",
-  "@ui274": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui275": "Full output ({p0} lines)",
-  "@ui275": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui276": "{p0} failed",
-  "@ui276": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui277": "Open",
-  "ui278": "Merged",
-  "ui279": "Closed",
-  "ui280": "Files",
-  "ui281": "Review",
-  "ui282": "Approval request from {p0}",
-  "@ui282": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui283": "Check requested by {p0}",
-  "@ui283": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui284": "Question from {p0}",
-  "@ui284": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui285": "Question · Work is waiting",
-  "ui286": "Question · Can wait",
-  "ui287": "Hide details",
-  "ui288": "Details",
-  "ui289": "{p0} decided on your behalf",
-  "@ui289": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui290": "Change",
-  "ui291": "{p0} wants to run a command",
-  "@ui291": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui292": "Approved",
-  "ui293": "Approved for this task",
-  "ui294": "Declined",
-  "ui295": "Approve",
-  "ui296": "Decline",
-  "ui297": "Approve for this task",
-  "ui298": "Done",
-  "ui299": "The request could not reach you. The worker was notified.",
-  "ui300": "Done",
-  "ui301": "Request closed",
-  "ui302": "Preparing link…",
-  "ui303": "Browser request",
-  "ui304": "Starting",
-  "ui305": "Starting",
-  "ui306": "Delivered · {p0} {p1}…",
-  "@ui306": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui307": "Thinking",
-  "ui308": "Thinking",
-  "ui309": " · {p0} s",
-  "@ui309": {
+  "pause": "Pause",
+  "play": "Play",
+  "smallFix": "Small fix",
+  "feature": "Feature",
+  "investigation": "Investigation",
+  "report": "Report",
+  "build": "Build",
+  "release2": "Release",
+  "storeRelease": "Store release",
+  "tasksProject": "Tasks by project",
+  "opened3": "Opened",
+  "completed2": "Completed",
+  "openEndDay": "Open at end of day",
+  "total": "Total",
+  "mergedReleased": "Merged and released",
+  "noProject": "No project",
+  "estimateAccuracy": "Estimate accuracy",
+  "allRecordedEstimates": "All recorded estimates. Actual: median share of the estimate used.",
+  "given": "Given",
+  "time": "On time",
+  "late3": "Late",
+  "open4": "Open",
+  "actual": "Actual",
+  "min3": "{p0} min",
+  "@min3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui310": "Organizing memory",
-  "ui311": "{p0} more lines",
-  "@ui311": {
+  "h2": "{p0} h",
+  "@h2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui312": "Copied",
-  "ui313": "Why",
-  "ui314": "Recorded",
-  "ui315": "Where",
-  "ui316": "Type",
-  "ui317": "From",
-  "ui318": "To",
-  "ui319": "Message",
-  "ui320": "In reply to",
-  "ui321": "Chat with {p0}",
-  "@ui321": {
+  "noAnswer": "No answer",
+  "workers": "Workers",
+  "timelineHoursWorked": " Timeline: hours worked by each person. Darker means more of that hour.",
+  "sortedHoursWorked": "Sorted by hours worked. Response time: median time from your message to the first reply.{p0}",
+  "@sortedHoursWorked": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui322": "Activity",
-  "ui323": "Show full command",
-  "ui324": "Output",
-  "ui325": "Show first lines",
-  "ui326": "Show output (one line)",
-  "ui327": "Show output ({p0} lines)",
-  "@ui327": {
+  "responseTime": "Response time",
+  "hoursWorked": "Hours worked",
+  "duringDay": "During the day",
+  "less": "Less",
+  "moreWorkers": "{p0} more workers",
+  "@moreWorkers": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui328": "Still running",
-  "ui329": "Completed{p0}",
-  "@ui329": {
+  "sort": "Sort",
+  "selectPersonTeam": "Select a person or team. Team messages go to the lead.",
+  "mostRecent": "Most recent",
+  "workingFirst": "Working first",
+  "needsYouFirst": "Needs you first",
+  "name": "By name",
+  "chatMuted": "Chat with {p0} is muted",
+  "@chatMuted": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui330": "Failed{p0}",
-  "@ui330": {
+  "muteNotificationsFrom": "Mute notifications from {p0}",
+  "@muteNotificationsFrom": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui331": "File",
-  "ui332": "Lines {p0}–{p1}",
-  "@ui332": {
+  "messagesStillArrive": "Messages still arrive in this chat without notifications.",
+  "sortChats": "Sort chats",
+  "selected": "Selected",
+  "home": "Home",
+  "openHome": "Open home",
+  "productionIssue": "Production issue",
+  "day": "day",
+  "days": "{p0} days",
+  "@days": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
+      }
+    }
+  },
+  "minuteAgo": "A minute ago",
+  "minutesAgo": "{p0} minutes ago",
+  "@minutesAgo": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "hourAgo": "An hour ago",
+  "twoHoursAgo": "Two hours ago",
+  "hoursAgo": "{p0} hours ago",
+  "@hoursAgo": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "daysAgo": "{p0} days ago",
+  "@daysAgo": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "urgent": "Urgent",
+  "notNow2": "Not now",
+  "tomorrow": "Tomorrow {p0}",
+  "@tomorrow": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "resets": "Resets {p0}",
+  "@resets": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "offline2": "Offline",
+  "unavailableUntil": "Unavailable until {p0}",
+  "@unavailableUntil": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "n5Hours": "5 hours",
+  "weekly": "Weekly",
+  "measured": "Measured {p0}",
+  "@measured": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "messagesFromWorkers": "Messages from workers",
+  "yourMessages": "Your messages",
+  "systemReminders": "System reminders",
+  "repeatedWork": "Repeated work",
+  "teamLeads": "Team leads",
+  "lastHour": "Last hour: {p0}",
+  "@lastHour": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "last24Hours": "Last 24 hours: {p0}",
+  "@last24Hours": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "usageHasNot": "Usage has not been measured yet",
+  "noTaskRunning": "No task running now",
+  "oneTaskRunningNow": "One task running now",
+  "tasksRunningNow": "{p0} tasks running now",
+  "@tasksRunningNow": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "dailyAverageBusiest": "Daily average {p0}, busiest hour {p1}",
+  "@dailyAverageBusiest": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui333": "One line added",
-  "ui334": "Lines added",
-  "ui335": "One line deleted",
-  "ui336": "Lines deleted",
-  "ui337": "Change",
-  "ui338": "Change {p0}",
-  "@ui338": {
+  "rateWeeklyUsage": "Rate of weekly usage",
+  "concurrent": "Concurrent",
+  "workLast24": "Work in the last 24 hours",
+  "peopleLast24": "People in the last 24 hours",
+  "task": "{p0}, task",
+  "@task": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui339": "Result",
-  "ui340": "Show all",
-  "ui341": "Show tool input",
-  "ui342": "Show tool result",
-  "ui343": "Actions",
-  "ui344": "Company memory",
-  "ui345": "Company memory · {p0}",
-  "@ui345": {
+  "twoTasksRunning": "Two tasks running",
+  "tasksRunning": "Tasks running",
+  "twoProjects": " in two projects",
+  "projects2": " in {p0} projects",
+  "@projects2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui346": "Records",
-  "ui347": "Project memory",
-  "ui348": "Your memory · {p0}",
-  "@ui348": {
+  "oneIssueNeeds": "One issue needs",
+  "twoIssuesNeed": "Two issues need",
+  "issuesNeed": "Issues need",
+  "youNow": "{p0} you now.",
+  "@youNow": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui349": "Worker memory · {p0}",
-  "@ui349": {
+  "noTasksRunning": "No tasks running now.",
+  "meanwhile": "Meanwhile {p0}",
+  "@meanwhile": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui350": "Design guide",
-  "ui351": "Decisions",
-  "ui352": "Lessons",
-  "ui353": "Customers",
-  "ui354": "Procedures",
-  "ui355": "Time estimates",
-  "ui356": "Repositories",
-  "ui357": "Contents",
-  "ui358": "Design team",
-  "ui359": "Monitoring team",
-  "ui360": "Improvement team",
-  "ui361": "Decision",
-  "ui362": "Lesson",
-  "ui363": "Fact",
-  "ui364": "Instruction",
-  "ui365": "Pitfall",
-  "ui366": "Command",
-  "ui367": "Facts",
-  "ui368": "Instructions",
-  "ui369": "Pitfalls",
-  "ui370": "Commands",
-  "ui371": "Search",
-  "ui372": "Address",
-  "ui373": "Request",
-  "ui374": "Description",
-  "ui375": "Title",
-  "ui376": "Brief",
-  "ui377": "Summary",
-  "ui378": "Question",
-  "ui379": "Options",
-  "ui380": "Summary",
-  "ui381": "State",
-  "ui382": "Project",
-  "ui383": "Priority",
-  "ui384": "Reason",
-  "ui385": "Risk",
-  "ui386": "Rollback",
-  "ui387": "What",
-  "ui388": "Scope",
-  "ui389": "Needed",
-  "ui390": "Today {p0}",
-  "@ui390": {
+  "nothingNeedsYou": "Nothing needs you. All quiet.",
+  "nothingNeedsYou2": "Nothing needs you. {p0}",
+  "@nothingNeedsYou2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui391": "Yesterday {p0}",
-  "@ui391": {
+  "usageLimit": "Usage limit",
+  "projects3": "Projects",
+  "recentlyDone": "Recently done",
+  "usage": "Usage",
+  "needsAttention": "Needs attention",
+  "collapseHome": "Collapse home",
+  "running3": "Running",
+  "moreQueued": "{p0} more queued",
+  "@moreQueued": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui392": "Less than a second",
-  "ui393": "{p0}:{p1} min",
-  "@ui393": {
+  "latest3": "Latest: {p0}",
+  "@latest3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
+      }
+    }
+  },
+  "needYou2": "{p0} need you",
+  "@needYou2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "done10": "Done",
+  "home2": "Home",
+  "home3": "Home. {p0}",
+  "@home3": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "answer3": "Answer",
+  "otherAnswer": "Other answer",
+  "replacedNewRequest": "Replaced by a new request",
+  "decided": "decided",
+  "decided2": "decided",
+  "yourBehalf": "{p0} {p1} on your behalf: {p2}",
+  "@yourBehalf": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
-      }
-    }
-  },
-  "ui394": "Go to message",
-  "ui395": "Chat with {p0}",
-  "@ui395": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui396": "Hide",
-  "ui397": "Available",
-  "ui398": "Available",
-  "ui399": "Blocked",
-  "ui400": "Stuck",
-  "ui401": "Stuck",
-  "ui402": "Restarting",
-  "ui403": "Restarting",
-  "ui404": "Resting",
-  "ui405": "Resting",
-  "ui406": "Done",
-  "ui407": "Reported for repair",
-  "ui408": "This screen has been loading for more than {p0} seconds",
-  "@ui408": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui409": "This day could not load. Try again.",
-  "ui410": "Loading day",
-  "ui411": "Monday",
-  "ui412": "Tuesday",
-  "ui413": "Wednesday",
-  "ui414": "Thursday",
-  "ui415": "Friday",
-  "ui416": "Saturday",
-  "ui417": "Sunday",
-  "ui418": "{p0}, {p1}/{p2}",
-  "@ui418": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      },
-      "p1": {
-        "type": "String"
+        "type": "Object"
       },
       "p2": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui419": "No messages",
-  "ui420": "One message",
-  "ui421": "Messages",
-  "ui422": "Previous day",
-  "ui423": "Next day",
-  "ui424": "Company map",
-  "ui425": "Ran",
-  "ui426": "Yoav",
-  "ui427": "This message could not load. Try again.",
-  "ui428": "Loading",
-  "ui429": "One task",
-  "ui430": "Tasks",
-  "ui431": "One merge",
-  "ui432": "Merges",
-  "ui433": "One release",
-  "ui434": "Releases",
-  "ui435": "Full day",
-  "ui436": "{p0}, until {p1}",
-  "@ui436": {
+  "at": " at {p0}",
+  "@at": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
+      }
+    }
+  },
+  "questionClosed": "Question closed",
+  "approved2": "Approved{p0}",
+  "@approved2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "deferred2": "Deferred{p0}",
+  "@deferred2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "answered2": "Answered{p0}: {p1}",
+  "@answered2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui437": "Pause",
-  "ui438": "Play",
-  "ui439": "Small fix",
-  "ui440": "Feature",
-  "ui441": "Investigation",
-  "ui442": "Report",
-  "ui443": "Build",
-  "ui444": "Release",
-  "ui445": "Store release",
-  "ui446": "Tasks by project",
-  "ui447": "Opened",
-  "ui448": "Completed",
-  "ui449": "Open at end of day",
-  "ui450": "Total",
-  "ui451": "Merged and released",
-  "ui452": "No project",
-  "ui453": "Estimate accuracy",
-  "ui454": "All recorded estimates. Actual: median share of the estimate used.",
-  "ui455": "Given",
-  "ui456": "On time",
-  "ui457": "Late",
-  "ui458": "Open",
-  "ui459": "Actual",
-  "ui460": "{p0} min",
-  "@ui460": {
+  "sent": "Sent",
+  "lowRisk": "Low risk",
+  "mediumRisk": "Medium risk",
+  "highRisk": "High risk",
+  "no": "No",
+  "deferred3": "Deferred",
+  "later": "Later",
+  "needYou3": "Need you",
+  "nothingNeedsYou3": "Nothing needs you.",
+  "backChats": "Back to chats",
+  "allDetails": "All details",
+  "fullReport": "Full report",
+  "pullRequest": "Pull request",
+  "chat3": "Chat with {p0}",
+  "@chat3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui461": "{p0} h",
-  "@ui461": {
+  "moreAfterThis": "{p0} more after this",
+  "@moreAfterThis": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui462": "No answer",
-  "ui463": "Workers",
-  "ui464": " Timeline: hours worked by each person. Darker means more of that hour.",
-  "ui465": "Sorted by hours worked. Response time: median time from your message to the first reply.{p0}",
-  "@ui465": {
+  "noCodeNeeded": "No code is needed for this request. Mark it as done.",
+  "websiteSign": "{p0} · Website sign-in",
+  "@websiteSign": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui466": "Response time",
-  "ui467": "Hours worked",
-  "ui468": "During the day",
-  "ui469": "Less",
-  "ui470": "{p0} more workers",
-  "@ui470": {
+  "websiteOpenedYour": "The website opened on your server: {p0}",
+  "@websiteOpenedYour": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui471": "Chats",
-  "ui472": "Sort",
-  "ui473": "Select a person or team. Team messages go to the lead.",
-  "ui474": "Most recent",
-  "ui475": "Working first",
-  "ui476": "Needs you first",
-  "ui477": "By name",
-  "ui478": "Chat with {p0} is muted",
-  "@ui478": {
+  "code": "Code",
+  "verificationCodeCode": "Verification code or code from the website",
+  "paste": "Paste",
+  "sending2": "Sending…",
+  "sendCode": "Send code {p0}",
+  "@sendCode": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui479": "Mute notifications from {p0}",
-  "@ui479": {
+  "yourTurn": "Your turn",
+  "continuing": "{p0} is continuing.",
+  "@continuing": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui480": "Messages still arrive in this chat without notifications.",
-  "ui481": "Sort chats",
-  "ui482": "Selected",
-  "ui483": "Quick switch",
-  "ui484": "New chat",
-  "ui485": "Clear search",
-  "ui486": "Home",
-  "ui487": "Open home",
-  "ui488": "You: {p0}, {p1}",
-  "@ui488": {
+  "thisPageCloses": "This page closes automatically",
+  "handled": "Handled · {p0}",
+  "@handled": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
+      }
+    }
+  },
+  "copyText": "Copy text",
+  "copyLink": "Copy link",
+  "answer4": "Answer {p0}",
+  "@answer4": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "handled2": "Handled",
+  "teamLead2": "Team lead: {p0}",
+  "@teamLead2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "oneStandingWorker": "One standing worker",
+  "standingWorkers": "{p0} standing workers",
+  "@standingWorkers": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "team3": "Team",
+  "openTasks": "Open tasks",
+  "doneToday2": "Done today",
+  "noTaskDone": "No task done today yet",
+  "more5": "{p0} more",
+  "@more5": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "oneOpenTask": "One open task",
+  "openTasks2": "{p0} open tasks",
+  "@openTasks2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "teamLead3": "Team lead · {p0}",
+  "@teamLead3": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "done11": "Done {p0}",
+  "@done11": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "temporary": " (temporary)",
+  "oneWorker": "One worker",
+  "workers2": "{p0} workers",
+  "@workers2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "resources2": "Resources",
+  "refreshFailedShowing": "Refresh failed. Showing the previous snapshot.",
+  "noMachinesListed": "No machines listed",
+  "resourcesCouldNot": "Resources could not load. Try again.",
+  "updating": "Updating",
+  "notMeasured": "Not measured",
+  "noCurrentReading": "No current reading: {p0}",
+  "@noCurrentReading": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "memory": "Memory",
+  "cpu": "CPU",
+  "loadCores": "Load {p0} on {p1} cores",
+  "@loadCores": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui489": "Draft: {p0}",
-  "@ui489": {
+  "disk": "Disk",
+  "fullFree": "{p0}% full, {p1} free",
+  "@fullFree": {
     "placeholders": {
       "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui490": "Waiting for your decision",
-  "ui491": "One unread message",
-  "ui492": "{p0} unread messages",
-  "@ui492": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui493": "Muted",
-  "ui494": "Pinned",
-  "ui495": "You: ",
-  "ui496": "Draft: ",
-  "ui497": "No chat or message found for “{p0}”",
-  "@ui497": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui498": "Production issue",
-  "ui499": "day",
-  "ui500": "{p0} days",
-  "@ui500": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui501": "A minute ago",
-  "ui502": "{p0} minutes ago",
-  "@ui502": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui503": "An hour ago",
-  "ui504": "Two hours ago",
-  "ui505": "{p0} hours ago",
-  "@ui505": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui506": "{p0} days ago",
-  "@ui506": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui507": "Urgent",
-  "ui508": "Not now",
-  "ui509": "Tomorrow {p0}",
-  "@ui509": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui510": "Resets {p0}",
-  "@ui510": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui511": "Offline",
-  "ui512": "Unavailable until {p0}",
-  "@ui512": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui513": "5 hours",
-  "ui514": "Weekly",
-  "ui515": "Measured {p0}",
-  "@ui515": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui516": "Messages from workers",
-  "ui517": "Your messages",
-  "ui518": "System reminders",
-  "ui519": "Repeated work",
-  "ui520": "Team leads",
-  "ui521": "Last hour: {p0}",
-  "@ui521": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui522": "Last 24 hours: {p0}",
-  "@ui522": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui523": "Usage has not been measured yet",
-  "ui524": "No task running now",
-  "ui525": "One task running now",
-  "ui526": "{p0} tasks running now",
-  "@ui526": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui527": "Daily average {p0}, busiest hour {p1}",
-  "@ui527": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui528": "Rate of weekly usage",
-  "ui529": "Concurrent",
-  "ui530": "Work in the last 24 hours",
-  "ui531": "People in the last 24 hours",
-  "ui532": "{p0}, task",
-  "@ui532": {
+  "notMeasured2": "Not measured: {p0}",
+  "@notMeasured2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui533": "Two tasks running",
-  "ui534": "Tasks running",
-  "ui535": " in two projects",
-  "ui536": " in {p0} projects",
-  "@ui536": {
+  "usageWorker": "Usage by worker",
+  "unknown": "Unknown",
+  "none": "None",
+  "waitingCapacity": "Waiting for capacity",
+  "noActiveReservations": "No active reservations",
+  "oneActiveReservation": "One active reservation",
+  "activeReservations": "{p0} active reservations",
+  "@activeReservations": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui537": "One issue needs",
-  "ui538": "Two issues need",
-  "ui539": "Issues need",
-  "ui540": "{p0} you now.",
-  "@ui540": {
+  "details2": "Details",
+  "noActiveReservation": "No active reservation on this machine",
+  "processes": "{p0} processes",
+  "@processes": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui541": "No tasks running now.",
-  "ui542": "Meanwhile {p0}",
-  "@ui542": {
+  "cpu2": "CPU {p0}%",
+  "@cpu2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui543": "Nothing needs you. All quiet.",
-  "ui544": "Nothing needs you. {p0}",
-  "@ui544": {
+  "aboutMinute": "About a minute",
+  "aboutMinutes": "About {p0} minutes",
+  "@aboutMinutes": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui545": "Usage limit",
-  "ui546": "Projects",
-  "ui547": "Recently done",
-  "ui548": "Usage",
-  "ui549": "Needs attention",
-  "ui550": "Collapse home",
-  "ui551": "Running",
-  "ui552": "{p0} more queued",
-  "@ui552": {
+  "serverBusy": "Server busy",
+  "available2": "{p0}, available in {p1}.",
+  "@available2": {
     "placeholders": {
       "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui553": "Latest: {p0}",
-  "@ui553": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui554": "{p0} need you",
-  "@ui554": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui555": "Done",
-  "ui556": "Home",
-  "ui557": "Home. {p0}",
-  "@ui557": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui558": "Answer",
-  "ui559": "Other answer",
-  "ui560": "Replaced by a new request",
-  "ui561": "decided",
-  "ui562": "decided",
-  "ui563": "{p0} {p1} on your behalf: {p2}",
-  "@ui563": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
+      }
+    }
+  },
+  "availabilityUnknown": "{p0}. Availability is unknown.",
+  "@availabilityUnknown": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "waitingMin": "Waiting {p0} min",
+  "@waitingMin": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "by": "by {p0}",
+  "@by": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "task2": "(task {p0})",
+  "@task2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "runningMin": "Running {p0} min",
+  "@runningMin": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "left2": "{p0} left",
+  "@left2": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "othersQueuedFirst": "Others are queued first",
+  "usingTheseResources": "{p0} is using these resources",
+  "@usingTheseResources": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "finishing": ", finishing in {p0}",
+  "@finishing": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      }
+    }
+  },
+  "needs": "Needs {p0}. {p1}{p2}.",
+  "@needs": {
+    "placeholders": {
+      "p0": {
+        "type": "Object"
+      },
+      "p1": {
+        "type": "Object"
       },
       "p2": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui564": " at {p0}",
-  "@ui564": {
+  "keep": "Keep",
+  "signOutThis": "Sign out of this device? Use a passkey or pairing code to return.",
+  "revokeWillDisconnect": "Revoke “{p0}”? It will disconnect immediately and require sign-in to return.",
+  "@revokeWillDisconnect": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui565": "Question closed",
-  "ui566": "Approved{p0}",
-  "@ui566": {
+  "signOut2": "Sign out",
+  "revokeDevice": "Revoke device",
+  "devicesUsingThis": " {p0} devices using this passkey will disconnect.",
+  "@devicesUsingThis": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui567": "Deferred{p0}",
-  "@ui567": {
+  "removePasskey": "Remove passkey “{p0}”?{p1}",
+  "@removePasskey": {
     "placeholders": {
       "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui568": "Answered{p0}: {p1}",
-  "@ui568": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui569": "Sent",
-  "ui570": "Low risk",
-  "ui571": "Medium risk",
-  "ui572": "High risk",
-  "ui573": "Two need you",
-  "ui574": "Open one at a time",
-  "ui575": "No",
-  "ui576": "Deferred",
-  "ui577": "Later",
-  "ui578": "Need you",
-  "ui579": "Nothing needs you.",
-  "ui580": "Back to chats",
-  "ui581": "All details",
-  "ui582": "Full report",
-  "ui583": "Pull request",
-  "ui584": "Chat with {p0}",
-  "@ui584": {
+  "signedPasskey": "Signed in with a passkey",
+  "pairedCodePasskey": "Paired with a code and passkey",
+  "pairedCode": "Paired with a code",
+  "devices2": "Devices",
+  "settingsDevices": "Settings · Devices",
+  "thisDeviceNot": "This device is not connected to a company. No devices are listed.",
+  "thisDevice2": "This device",
+  "neverSeen": "Never seen",
+  "seen": "Seen {p0}",
+  "@seen": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui585": "{p0} more after this",
-  "@ui585": {
+  "noRegisteredPasskeys": "No registered passkeys. Pairing a new device with a code creates one.",
+  "lastUsed": " · Last used {p0}",
+  "@lastUsed": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui586": "Quick switch: person, chat or task",
-  "ui587": "Keyboard shortcuts",
-  "ui588": "Home, chats, board, organization",
-  "ui589": "Next, previous",
-  "ui590": "Send after current step",
-  "ui591": "Send now",
-  "ui592": "Stop worker",
-  "ui593": "Close only",
-  "ui594": "All shortcuts",
-  "ui595": "Answer question",
-  "ui596": "Ticket",
-  "ui597": "passed",
-  "ui598": "passed",
-  "ui599": "Merge",
-  "ui600": "{p0} merges when all checks pass",
-  "@ui600": {
+  "created": "Created {p0}{p1}",
+  "@created": {
     "placeholders": {
       "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui601": "No code is needed for this request. Mark it as done.",
-  "ui602": "{p0} · Website sign-in",
-  "@ui602": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui603": "The website opened on your server: {p0}",
-  "@ui603": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui604": "Code",
-  "ui605": "Verification code or code from the website",
-  "ui606": "Paste",
-  "ui607": "Sending…",
-  "ui608": "Send code {p0}",
-  "@ui608": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui609": "Your turn",
-  "ui610": "{p0} is continuing.",
-  "@ui610": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui611": "This page closes automatically",
-  "ui612": "Handled · {p0}",
-  "@ui612": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui613": "Copy text",
-  "ui614": "Copy link",
-  "ui615": "Answer {p0}",
-  "@ui615": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui616": "Handled",
-  "ui617": "Hebrew",
-  "ui618": "Team lead: {p0}",
-  "@ui618": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui619": "One standing worker",
-  "ui620": "{p0} standing workers",
-  "@ui620": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui621": "Team",
-  "ui622": "Open tasks",
-  "ui623": "Done today",
-  "ui624": "No task done today yet",
-  "ui625": "{p0} more",
-  "@ui625": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui626": "One open task",
-  "ui627": "{p0} open tasks",
-  "@ui627": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui628": "Team lead · {p0}",
-  "@ui628": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui629": "Done {p0}",
-  "@ui629": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui630": " (temporary)",
-  "ui631": "Projects",
-  "ui632": "Standing teams",
-  "ui633": "One worker",
-  "ui634": "{p0} workers",
-  "@ui634": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui635": "Team lead",
-  "ui636": "Resources",
-  "ui637": "Refresh failed. Showing the previous snapshot.",
-  "ui638": "No machines listed",
-  "ui639": "Resources could not load. Try again.",
-  "ui640": "Updating",
-  "ui641": "Not measured",
-  "ui642": "No current reading: {p0}",
-  "@ui642": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui643": "Memory",
-  "ui644": "CPU",
-  "ui645": "Load {p0} on {p1} cores",
-  "@ui645": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui646": "Disk",
-  "ui647": "{p0}% full, {p1} free",
-  "@ui647": {
+  "pairNewDevice": "Pair a new device",
+  "singleUseCode": "Single-use code, valid for 10 minutes. Enter it on the new device or open the link.",
+  "validUntil": "Valid until {p0}",
+  "@validUntil": {
     "placeholders": {
       "p0": {
-        "type": "String"
-      },
-      "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui648": "Not measured: {p0}",
-  "@ui648": {
+  "pairingCode": "Pairing code",
+  "newCode": "New code",
+  "copyLink2": "Copy link",
+  "settings2": "Settings",
+  "automations2": "Automations",
+  "companySelectsAccount": "The company selects the account with available capacity.",
+  "newWorkUses": "New work uses this account. Active work moves after its current turn.",
+  "unavailableUsageLimit": "Unavailable: usage limit",
+  "available3": " · {p0}% available",
+  "@available3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui649": "Usage by worker",
-  "ui650": "Unknown",
-  "ui651": "None",
-  "ui652": "Waiting for capacity",
-  "ui653": "No active reservations",
-  "ui654": "One active reservation",
-  "ui655": "{p0} active reservations",
-  "@ui655": {
+  "use": "In use",
+  "available4": "Available",
+  "account2": "Account",
+  "allHere": "All here",
+  "moveHere": "Move here",
+  "automaticUseAccount": "Automatic: use the account with most capacity and switch when it runs out.",
+  "pinnedManually": "Pinned manually.",
+  "automatic": "Automatic",
+  "settingsAccounts": "Settings · Accounts",
+  "status2": "Status",
+  "runningQueued": "Running and queued",
+  "nothingNeedsYou4": "Nothing needs you",
+  "whatCheck": "What to check",
+  "sinceYourLast": "Since your last visit",
+  "nothingCompletedSince": "Nothing completed since then",
+  "tasks4": "In tasks",
+  "projectsNow": "In projects now",
+  "quietNoTask": "Quiet, no task running",
+  "demoServerNot": "Demo · Server not connected, showing sample content",
+  "since5": " since {p0}",
+  "@since5": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui656": "Details",
-  "ui657": "No active reservation on this machine",
-  "ui658": "{p0} processes",
-  "@ui658": {
+  "noConnectionServer": "No connection to the server{p0}. New messages will be sent when the connection is back.",
+  "@noConnectionServer": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui659": "CPU {p0}%",
-  "@ui659": {
+  "updated": "Updated",
+  "notificationsOffQuestions": "Notifications are off. Questions needing you will not arrive.",
+  "newAppVersion": "A new app version is available.",
+  "update": "Update",
+  "allowUpdateInstallation": "Allow update installation in Settings.",
+  "cancelDownload": "Cancel download",
+  "downloadingAppUpdate": "Downloading app update · {p0}%",
+  "@downloadingAppUpdate": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui660": "About a minute",
-  "ui661": "About {p0} minutes",
-  "@ui661": {
+  "confirmInstallationAndroid": "Confirm installation in the Android window.",
+  "updateFailed": "Update failed.{p0}",
+  "@updateFailed": {
     "placeholders": {
       "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui662": "Server busy",
-  "ui663": "{p0}, available in {p1}.",
-  "@ui663": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      },
-      "p1": {
-        "type": "String"
-      }
-    }
-  },
-  "ui664": "{p0}. Availability is unknown.",
-  "@ui664": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui665": "Waiting {p0} min",
-  "@ui665": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui666": "by {p0}",
-  "@ui666": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui667": "(task {p0})",
-  "@ui667": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui668": "Running {p0} min",
-  "@ui668": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui669": "{p0} left",
-  "@ui669": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui670": "Others are queued first",
-  "ui671": "{p0} is using these resources",
-  "@ui671": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui672": ", finishing in {p0}",
-  "@ui672": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui673": "Needs {p0}. {p1}{p2}.",
-  "@ui673": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      },
-      "p1": {
-        "type": "String"
-      },
-      "p2": {
-        "type": "String"
-      }
-    }
-  },
-  "ui674": "Keep",
-  "ui675": "Sign out of this device? Use a passkey or pairing code to return.",
-  "ui676": "Revoke “{p0}”? It will disconnect immediately and require sign-in to return.",
-  "@ui676": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui677": "Sign out",
-  "ui678": "Revoke device",
-  "ui679": " {p0} devices using this passkey will disconnect.",
-  "@ui679": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui680": "Remove passkey “{p0}”?{p1}",
-  "@ui680": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      },
-      "p1": {
-        "type": "String"
-      }
-    }
-  },
-  "ui681": "Signed in with a passkey",
-  "ui682": "Paired with a code and passkey",
-  "ui683": "Paired with a code",
-  "ui684": "Devices",
-  "ui685": "Settings · Devices",
-  "ui686": "This device is not connected to a company. No devices are listed.",
-  "ui687": "This device",
-  "ui688": "Never seen",
-  "ui689": "Seen {p0}",
-  "@ui689": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui690": "No registered passkeys. Pairing a new device with a code creates one.",
-  "ui691": " · Last used {p0}",
-  "@ui691": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui692": "Created {p0}{p1}",
-  "@ui692": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      },
-      "p1": {
-        "type": "String"
-      }
-    }
-  },
-  "ui693": "Pair a new device",
-  "ui694": "Single-use code, valid for 10 minutes. Enter it on the new device or open the link.",
-  "ui695": "Valid until {p0}",
-  "@ui695": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui696": "Pairing code",
-  "ui697": "New code",
-  "ui698": "Copy link",
-  "ui699": "This device signed out. You can sign in again.",
-  "ui700": "This device signed out. The app will ask you to sign in next time.",
-  "ui701": "Sign-out failed. Try again.",
-  "ui702": "Settings",
-  "ui703": "Automations",
-  "ui704": "{p0} enabled",
-  "@ui704": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui705": " · {p0} disabled manually",
-  "@ui705": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui706": "of {p0}{p1}",
-  "@ui706": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      },
-      "p1": {
-        "type": "String"
-      }
-    }
-  },
-  "ui707": "Devices and passkeys",
-  "ui708": "Revoke and pair",
-  "ui709": "Server connection",
-  "ui710": "Use a pairing link or QR code from the new server. This device stays connected here until sign-in succeeds.",
-  "ui711": "Sign out of this device",
-  "ui712": "Notifications",
-  "ui713": "Focus",
-  "ui714": "Notification permission",
-  "ui715": "Allow background operation",
-  "ui716": "Focus collects notifications quietly. Urgent production issues still come through.",
-  "ui717": "Display",
-  "ui718": "Dark mode",
-  "ui719": "Device setting",
-  "ui720": "Text size",
-  "ui721": "Device setting, up to 130%",
-  "ui722": "About",
-  "ui723": "Version",
-  "ui724": "The company selects the account with available capacity.",
-  "ui725": "New work uses this account. Active work moves after its current turn.",
-  "ui726": "Unavailable: usage limit",
-  "ui727": " · {p0}% available",
-  "@ui727": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui728": "In use",
-  "ui729": "Available",
-  "ui730": "Account",
-  "ui731": "All here",
-  "ui732": "Move here",
-  "ui733": "Automatic: use the account with most capacity and switch when it runs out.",
-  "ui734": "Pinned manually.",
-  "ui735": "Automatic",
-  "ui736": "Settings · Accounts",
-  "ui737": "Got it",
-  "ui738": "Status",
-  "ui739": "Unread",
-  "ui740": "Need you",
-  "ui741": "First load",
-  "ui742": "Running and queued",
-  "ui743": "Nothing needs you",
-  "ui744": "What to check",
-  "ui745": "Since your last visit",
-  "ui746": "Nothing completed since then",
-  "ui747": "In tasks",
-  "ui748": "In projects now",
-  "ui749": "Quiet, no task running",
-  "ui750": "Demo · Server not connected, showing sample content",
-  "ui751": " since {p0}",
-  "@ui751": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui752": "No connection to the server{p0}. New messages will be sent when the connection is back.",
-  "@ui752": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui753": "Updated",
-  "ui754": "Notifications are off. Questions needing you will not arrive.",
-  "ui755": "A new app version is available.",
-  "ui756": "Update",
-  "ui757": "Allow update installation in Settings.",
-  "ui758": "Cancel download",
-  "ui759": "Downloading app update · {p0}%",
-  "@ui759": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui760": "Confirm installation in the Android window.",
-  "ui761": "Update failed.{p0}",
-  "@ui761": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
@@ -2564,370 +2384,350 @@
   "englishLanguage": "English",
   "hebrewLanguage": "עברית",
   "deviceRevoked": "This device was disconnected from the company. You can sign in again.",
-  "ui762": "No company server found at this address. Check the address and try again.",
-  "ui763": "No connection to this server. Check the address and your internet connection.",
-  "ui764": "No connection to the server. Try again.",
-  "ui765": "Too many incorrect codes. Try again in a few minutes.",
-  "ui766": "This code is incorrect, used or expired. Get a new code from Devices in Settings.",
-  "ui767": "This passkey is not registered or was removed. Pair this device with a code.",
-  "ui768": "Sign-in cancelled.",
-  "ui769": "A company passkey is already saved here. Use it to sign in.",
-  "ui770": "No company passkey on this device. Pair it with a code.",
-  "ui771": "This device does not support passkeys. You can pair it with a code.",
-  "ui772": "Passkey verification failed. Try again.",
-  "ui773": "The server did not return the device list.",
-  "ui774": "The server could not create a code. Try again.",
-  "ui775": "Revocation failed. The device may already be revoked.",
-  "ui776": "Removal failed. The passkey may already be removed.",
-  "ui777": "Mobile browser",
-  "ui778": "iPhone browser",
-  "ui779": "Mac browser",
-  "ui780": "Windows browser",
-  "ui781": "Desktop browser",
-  "ui782": "Android app",
-  "ui783": "Device",
-  "ui784": "Accounts are unavailable in the demo.",
-  "ui785": "Muting is unavailable here.",
-  "ui786": "Microphone recording failed. You can use your keyboard microphone.",
-  "ui787": "Microphone access is off. Enable it in device settings and try again.",
-  "ui788": "Sign in before using dictation.",
-  "ui789": "No connection to dictation. The recording was not transcribed. Try again.",
-  "ui790": "This device is disconnected. Sign in again to transcribe the recording.",
-  "ui791": "The dictation service did not accept the session. The recording was not transcribed.",
-  "ui792": "The recording could not be transcribed. Try again.",
-  "ui793": "The dictation service returned an unexpected response. Try again.",
-  "ui794": "No speech detected. Try again.",
-  "ui795": "This recording is no longer saved on this device.",
-  "ui796": "The recording was not transcribed.",
-  "ui797": "The recording was not transcribed and is saved on this device. Try again.",
-  "ui798": "They will try",
-  "ui799": "They will try",
-  "ui800": "Work ended with an error. {p0} again with the next message.",
-  "@ui800": {
+  "noCompanyServer": "No company server found at this address. Check the address and try again.",
+  "noConnectionThis": "No connection to this server. Check the address and your internet connection.",
+  "noConnectionServerTry": "No connection to the server. Try again.",
+  "tooManyIncorrect": "Too many incorrect codes. Try again in a few minutes.",
+  "thisCodeIncorrect": "This code is incorrect, used or expired. Get a new code from Devices in Settings.",
+  "thisPasskeyNot": "This passkey is not registered or was removed. Pair this device with a code.",
+  "signCancelled": "Sign-in cancelled.",
+  "companyPasskeyAlready": "A company passkey is already saved here. Use it to sign in.",
+  "noCompanyPasskey": "No company passkey on this device. Pair it with a code.",
+  "thisDeviceDoes": "This device does not support passkeys. You can pair it with a code.",
+  "passkeyVerificationFailed": "Passkey verification failed. Try again.",
+  "serverDidNot": "The server did not return the device list.",
+  "serverCouldNot": "The server could not create a code. Try again.",
+  "revocationFailedDevice": "Revocation failed. The device may already be revoked.",
+  "removalFailedPasskey": "Removal failed. The passkey may already be removed.",
+  "mobileBrowser": "Mobile browser",
+  "iphoneBrowser": "iPhone browser",
+  "macBrowser": "Mac browser",
+  "windowsBrowser": "Windows browser",
+  "desktopBrowser": "Desktop browser",
+  "androidApp": "Android app",
+  "device": "Device",
+  "accountsUnavailableDemo": "Accounts are unavailable in the demo.",
+  "mutingUnavailableHere": "Muting is unavailable here.",
+  "microphoneRecordingFailed": "Microphone recording failed. You can use your keyboard microphone.",
+  "microphoneAccessOff": "Microphone access is off. Enable it in device settings and try again.",
+  "signBeforeUsing": "Sign in before using dictation.",
+  "noConnectionDictation": "No connection to dictation. The recording was not transcribed. Try again.",
+  "thisDeviceDisconnected": "This device is disconnected. Sign in again to transcribe the recording.",
+  "dictationServiceDid": "The dictation service did not accept the session. The recording was not transcribed.",
+  "recordingCouldNot": "The recording could not be transcribed. Try again.",
+  "dictationServiceReturned": "The dictation service returned an unexpected response. Try again.",
+  "noSpeechDetected": "No speech detected. Try again.",
+  "thisRecordingNo": "This recording is no longer saved on this device.",
+  "recordingWasNot": "The recording was not transcribed.",
+  "recordingWasNotTranscribed": "The recording was not transcribed and is saved on this device. Try again.",
+  "theyWillTry": "They will try",
+  "theyWillTry2": "They will try",
+  "workEndedError": "Work ended with an error. {p0} again with the next message.",
+  "@workEndedError": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui801": "Saved to memory",
-  "ui802": "Saved to memory",
-  "ui803": "Searched memory",
-  "ui804": "Searched memory",
-  "ui805": "Sent a message",
-  "ui806": "Sent a message",
-  "ui807": "Asked you a question",
-  "ui808": "Asked you a question",
-  "ui809": "Opened a task",
-  "ui810": "Opened a task",
-  "ui811": "Closed a task",
-  "ui812": "Closed a task",
-  "ui813": "Requested approval",
-  "ui814": "Requested approval",
-  "ui815": "Updated status",
-  "ui816": "Updated status",
-  "ui817": "Updated home",
-  "ui818": "Updated home",
-  "ui819": "Ran a command",
-  "ui820": "Ran a command",
-  "ui821": "Read a file",
-  "ui822": "Read a file",
-  "ui823": "Edited a file",
-  "ui824": "Edited a file",
-  "ui825": "Searched code",
-  "ui826": "Searched code",
-  "ui827": "Searched the web",
-  "ui828": "Searched the web",
-  "ui829": "Assistant",
-  "ui830": "Used a tool",
-  "ui831": "Used a tool",
-  "ui832": "Running tests",
-  "ui833": "Running tests",
-  "ui834": "Running a command",
-  "ui835": "Running a command",
-  "ui836": "Reading",
-  "ui837": "Reading",
-  "ui838": "Searching",
-  "ui839": "Searching",
-  "ui840": "Editing",
-  "ui841": "Editing",
-  "ui842": "Starting an assistant",
-  "ui843": "Starting an assistant",
-  "ui844": "Writing",
-  "ui845": "Writing",
-  "ui846": "Asking",
-  "ui847": "Asking",
-  "ui848": "Saving to memory",
-  "ui849": "Saving to memory",
-  "ui850": "Opening a team",
-  "ui851": "Opening a team",
-  "ui852": "Waiting for you in the browser",
-  "ui853": "once",
-  "ui854": "twice",
-  "ui855": "{p0} times",
-  "@ui855": {
+  "savedMemory": "Saved to memory",
+  "savedMemory2": "Saved to memory",
+  "searchedMemory": "Searched memory",
+  "searchedMemory2": "Searched memory",
+  "sentMessage": "Sent a message",
+  "sentMessage2": "Sent a message",
+  "askedYouQuestion": "Asked you a question",
+  "askedYouQuestion2": "Asked you a question",
+  "openedTask": "Opened a task",
+  "openedTask2": "Opened a task",
+  "closedTask": "Closed a task",
+  "closedTask2": "Closed a task",
+  "requestedApproval": "Requested approval",
+  "requestedApproval2": "Requested approval",
+  "updatedStatus": "Updated status",
+  "updatedStatus2": "Updated status",
+  "updatedHome": "Updated home",
+  "updatedHome2": "Updated home",
+  "ranCommand": "Ran a command",
+  "ranCommand2": "Ran a command",
+  "readFile": "Read a file",
+  "readFile2": "Read a file",
+  "editedFile": "Edited a file",
+  "editedFile2": "Edited a file",
+  "searchedCode": "Searched code",
+  "searchedCode2": "Searched code",
+  "searchedWeb": "Searched the web",
+  "searchedWeb2": "Searched the web",
+  "assistant2": "Assistant",
+  "usedTool": "Used a tool",
+  "usedTool2": "Used a tool",
+  "runningTests": "Running tests",
+  "runningTests2": "Running tests",
+  "runningCommand": "Running a command",
+  "runningCommand2": "Running a command",
+  "reading": "Reading",
+  "reading2": "Reading",
+  "searching": "Searching",
+  "searching2": "Searching",
+  "editing": "Editing",
+  "editing2": "Editing",
+  "startingAssistant": "Starting an assistant",
+  "startingAssistant2": "Starting an assistant",
+  "writing": "Writing",
+  "writing2": "Writing",
+  "asking": "Asking",
+  "asking2": "Asking",
+  "savingMemory": "Saving to memory",
+  "savingMemory2": "Saving to memory",
+  "openingTeam": "Opening a team",
+  "openingTeam2": "Opening a team",
+  "waitingYouBrowser": "Waiting for you in the browser",
+  "once": "once",
+  "twice": "twice",
+  "times": "{p0} times",
+  "@times": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui856": "Read",
-  "ui857": "Read",
-  "ui858": "file",
-  "ui859": "Searched",
-  "ui860": "Searched",
-  "ui861": "Edited",
-  "ui862": "Edited",
-  "ui863": "{p0} {p1} files",
-  "@ui863": {
+  "read2": "Read",
+  "read3": "Read",
+  "file2": "file",
+  "searched": "Searched",
+  "searched2": "Searched",
+  "edited": "Edited",
+  "edited2": "Edited",
+  "files3": "{p0} {p1} files",
+  "@files3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui864": "Ran",
-  "ui865": "Ran",
-  "ui866": "{p0} commands",
-  "@ui866": {
+  "ran": "Ran",
+  "ran2": "Ran",
+  "commands2": "{p0} commands",
+  "@commands2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui867": " · Failed",
-  "ui868": "Started an assistant",
-  "ui869": "Started an assistant",
-  "ui870": "Read online",
-  "ui871": "Read online",
-  "ui872": "Sent",
-  "ui873": "Sent",
-  "ui874": "message",
-  "ui875": "Opened a team",
-  "ui876": "Opened a team",
-  "ui877": "Used tools",
-  "ui878": "Used tools",
-  "ui879": "This device was disconnected. Sign in again.",
-  "ui880": "This item was already handled or no longer exists.",
-  "ui881": "The server did not accept this action. Try again.",
-  "ui882": "No connection to the server. The action was not sent. Try again.",
-  "ui883": "You: ",
-  "ui884": "You: {p0}",
-  "@ui884": {
+  "failed4": " · Failed",
+  "startedAssistant": "Started an assistant",
+  "startedAssistant2": "Started an assistant",
+  "readOnline": "Read online",
+  "readOnline2": "Read online",
+  "sent2": "Sent",
+  "sent3": "Sent",
+  "message3": "message",
+  "openedTeam": "Opened a team",
+  "openedTeam2": "Opened a team",
+  "usedTools": "Used tools",
+  "usedTools2": "Used tools",
+  "thisDeviceWas": "This device was disconnected. Sign in again.",
+  "thisItemWas": "This item was already handled or no longer exists.",
+  "serverDidNotAccept": "The server did not accept this action. Try again.",
+  "noConnectionServerAction": "No connection to the server. The action was not sent. Try again.",
+  "you2": "You: ",
+  "you3": "You: {p0}",
+  "@you3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui885": "This item was already handled. The answer was not sent.",
-  "ui886": "This item was already handled. The action was not sent.",
-  "ui887": "No connection to the server.",
-  "ui888": "This item cannot be closed.",
-  "ui889": "received",
-  "ui890": "received",
-  "ui891": "Closed · {p0} {p1} a message",
-  "@ui891": {
+  "thisItemWasAlready": "This item was already handled. The answer was not sent.",
+  "thisItemWasAlreadyHandled": "This item was already handled. The action was not sent.",
+  "noConnectionServer2": "No connection to the server.",
+  "thisItemCannot": "This item cannot be closed.",
+  "received": "received",
+  "received2": "received",
+  "closedMessage": "Closed · {p0} {p1} a message",
+  "@closedMessage": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui892": "Files could not upload. The message was not sent. Try again.",
-  "ui893": "This server does not support retracting messages yet. It will be delivered as usual.",
-  "ui894": "This worker has no active work to stop.",
-  "ui895": "This server does not support team notes from the app yet.",
-  "ui896": "Management",
-  "ui897": "Monitoring",
-  "ui898": "Personal team",
-  "ui899": "Design",
-  "ui900": "Lumo",
-  "ui901": "Tikibot",
-  "ui902": "All accounts at their limit",
-  "ui903": "Urgent production issue",
-  "ui904": "Release approval",
-  "ui905": "Website sign-in",
-  "ui906": "Message not delivered",
-  "ui907": "Worker did not return after an error",
-  "ui908": "Blocking",
-  "ui909": "System",
-  "ui910": "Disabled manually · {p0}",
-  "@ui910": {
+  "filesCouldNot": "Files could not upload. The message was not sent. Try again.",
+  "thisServerDoes": "This server does not support retracting messages yet. It will be delivered as usual.",
+  "thisWorkerHas": "This worker has no active work to stop.",
+  "thisServerDoesNot": "This server does not support team notes from the app yet.",
+  "management": "Management",
+  "monitoring": "Monitoring",
+  "personalTeam": "Personal team",
+  "design": "Design",
+  "lumo": "Lumo",
+  "tikibot": "Tikibot",
+  "allAccountsTheir": "All accounts at their limit",
+  "urgentProductionIssue": "Urgent production issue",
+  "releaseApproval": "Release approval",
+  "websiteSign2": "Website sign-in",
+  "messageNotDelivered": "Message not delivered",
+  "workerDidNot": "Worker did not return after an error",
+  "blocking": "Blocking",
+  "system": "System",
+  "disabledManually": "Disabled manually · {p0}",
+  "@disabledManually": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui911": "Enabled",
-  "ui912": "Disabled",
-  "ui913": "Started {p0}",
-  "@ui913": {
+  "enabled": "Enabled",
+  "disabled": "Disabled",
+  "started": "Started {p0}",
+  "@started": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui914": "Whole company",
-  "ui915": "One done today",
-  "ui916": "{p0} done today",
-  "@ui916": {
+  "wholeCompany": "Whole company",
+  "oneDoneToday": "One done today",
+  "doneToday3": "{p0} done today",
+  "@doneToday3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui917": "{p0} active workers · {p1} resting",
-  "@ui917": {
+  "activeWorkersResting": "{p0} active workers · {p1} resting",
+  "@activeWorkersResting": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui918": "Night mode active",
-  "ui919": "{p0} images",
-  "@ui919": {
+  "nightModeActive": "Night mode active",
+  "images": "{p0} images",
+  "@images": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui920": "{p0} {p1} the question without an answer: ",
-  "@ui920": {
+  "youFinished": "You finished",
+  "youClosed": "You closed",
+  "approvalWillSent": "Approval will be sent {p0} in {p1} s",
+  "@approvalWillSent": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui921": "finished",
-  "ui922": "finished",
-  "ui923": "You finished",
-  "ui924": "deferred",
-  "ui925": "deferred",
-  "ui926": "closed",
-  "ui927": "closed",
-  "ui928": "You closed",
-  "ui930": "Approval will be sent {p0} in {p1} s",
-  "@ui930": {
+  "willSentS": "Will be sent {p0} in {p1} s",
+  "@willSentS": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui931": "Will be sent {p0} in {p1} s",
-  "@ui931": {
+  "approvalSent": "Approval sent",
+  "answeredContinues": "Answered: {p0} · {p1} continues",
+  "@answeredContinues": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       },
       "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui932": "Approval sent",
-  "ui933": "Answered: {p0} · {p1} continues",
-  "@ui933": {
+  "closesS": "Closes in {p0} s",
+  "@closesS": {
     "placeholders": {
       "p0": {
-        "type": "String"
-      },
-      "p1": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui934": "Closes in {p0} s",
-  "@ui934": {
+  "youCanAttach": "You can attach up to {p0} files to a message.",
+  "@youCanAttach": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui935": "You can attach up to {p0} files to a message.",
-  "@ui935": {
+  "answered3": "Answered: {p0}",
+  "@answered3": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui936": "Answered: {p0}",
-  "@ui936": {
+  "thereNoQuestion": "There is no question to answer on this item.",
+  "thisMessageAlready": "This message is already on its way to the server and cannot be retracted.",
+  "enabled2": "Enabled · {p0}",
+  "@enabled2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui937": "There is no question to answer on this item.",
-  "ui938": "This message is already on its way to the server and cannot be retracted.",
-  "ui939": "Enabled · {p0}",
-  "@ui939": {
+  "companyOwner": "Company owner",
+  "companyManager": "Company manager",
+  "system2": "System",
+  "messageFromServer": "Message from server",
+  "system3": "to the system",
+  "notWorking": "Not working",
+  "noLongerRelevant": "No longer relevant",
+  "n8Hours": "8 hours",
+  "oneWeek": "One week",
+  "always": "Always",
+  "detailsProject": "Details by project",
+  "dockerStorage": "Docker storage",
+  "dockerContainer": "Docker container",
+  "gradleBuild": "Gradle build",
+  "kotlinBuild": "Kotlin build",
+  "almostFull": "Almost full",
+  "busy": "Busy",
+  "normal": "Normal",
+  "veryBusy": "Very busy",
+  "fillingUp": "Filling up",
+  "serverDidNotRespond": "The server did not respond",
+  "updateFailed2": "Update failed ({p0})",
+  "@updateFailed2": {
     "placeholders": {
       "p0": {
-        "type": "String"
+        "type": "Object"
       }
     }
   },
-  "ui940": "Company owner",
-  "ui941": "Company manager",
-  "ui942": "System",
-  "ui943": "Message from server",
-  "ui944": "to the system",
-  "ui945": "Not working",
-  "ui946": "No longer relevant",
-  "ui947": "8 hours",
-  "ui948": "One week",
-  "ui949": "Always",
-  "ui950": "Details by project",
-  "ui951": "Docker storage",
-  "ui952": "Docker container",
-  "ui953": "Gradle build",
-  "ui954": "Kotlin build",
-  "ui955": "Almost full",
-  "ui956": "Busy",
-  "ui957": "Normal",
-  "ui958": "Very busy",
-  "ui959": "Filling up",
-  "ui960": "The server did not respond",
-  "ui961": "Update failed ({p0})",
-  "@ui961": {
-    "placeholders": {
-      "p0": {
-        "type": "String"
-      }
-    }
-  },
-  "ui962": "App update",
-  "ui963": "Send to",
-  "ui964": "Supported images: PNG, JPEG, GIF and WebP.",
-  "ui965": "This shared image could not be read. Add it from your gallery.",
+  "appUpdate": "App update",
   "companyOverview": "Company overview",
   "works": "Works",
   "progressProposal": "Proposal",
@@ -3675,5 +3475,12 @@
   "nextYourCheck": "Your check",
   "nextNothing": "Nothing",
   "taskMessageFailed": "The message was not sent. It waits in the chat to be sent again.",
-  "evUnread": "GitHub could not be read just now. Showing what was known."
+  "evUnread": "GitHub could not be read just now. Showing what was known.",
+  "stuckFor": "{gender, select, f{Stuck for {duration}} other{Stuck for {duration}}}",
+  "@stuckFor": {"placeholders": {"gender": {"type": "String"}, "duration": {"type": "String"}}},
+  "minutesCount": "{count, plural, =1{1 minute} other{{count} minutes}}",
+  "@minutesCount": {"placeholders": {"count": {"type": "int"}}},
+  "hoursCount": "{count, plural, =1{1 hour} other{{count} hours}}",
+  "@hoursCount": {"placeholders": {"count": {"type": "int"}}},
+  "accountMenu": "Settings and sort"
 }

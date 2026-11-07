@@ -39,14 +39,14 @@ class EstimateShown {
 /// "20 דק'", "1 שע' 20 דק'", "2 שע'". [unit] false drops "דק'" under an hour ("עברו 12").
 /// A non-breaking space joins each number to its unit, so a wrap never splits "1 | שע'".
 String minutesText(int min, {bool unit = true}) {
-  if (min < 60) return unit ? UiCopy.text(37, [min]) : '$min';
+  if (min < 60) return unit ? UiCopy.copy.min(min) : '$min';
   final h = min ~/ 60, m = min % 60;
-  return m == 0 ? UiCopy.text(38, [h]) : UiCopy.text(39, [h, m]);
+  return m == 0 ? UiCopy.copy.h(h) : UiCopy.copy.hMin(h, m);
 }
 
-final _unitsF = [UiCopy.text(40), UiCopy.text(41), UiCopy.text(42), UiCopy.text(43), UiCopy.text(44), UiCopy.text(45), UiCopy.text(46), UiCopy.text(47), UiCopy.text(48), UiCopy.text(49), UiCopy.text(50)];
-final _teensF = [UiCopy.text(50), UiCopy.text(51), UiCopy.text(52), UiCopy.text(53), UiCopy.text(54), UiCopy.text(55), UiCopy.text(56), UiCopy.text(57), UiCopy.text(58), UiCopy.text(59)];
-final _tens = ['', '', UiCopy.text(60), UiCopy.text(61), UiCopy.text(62), UiCopy.text(63), UiCopy.text(64), UiCopy.text(65), UiCopy.text(66), UiCopy.text(67)];
+final _unitsF = [UiCopy.copy.zero, UiCopy.copy.one, UiCopy.copy.two, UiCopy.copy.three, UiCopy.copy.four, UiCopy.copy.five, UiCopy.copy.six, UiCopy.copy.seven, UiCopy.copy.eight, UiCopy.copy.nine, UiCopy.copy.ten];
+final _teensF = [UiCopy.copy.ten, UiCopy.copy.eleven, UiCopy.copy.twelve, UiCopy.copy.thirteen, UiCopy.copy.fourteen, UiCopy.copy.fifteen, UiCopy.copy.sixteen, UiCopy.copy.seventeen, UiCopy.copy.eighteen, UiCopy.copy.nineteen];
+final _tens = ['', '', UiCopy.copy.twenty, UiCopy.copy.thirty, UiCopy.copy.forty, UiCopy.copy.fifty, UiCopy.copy.sixty, UiCopy.copy.seventy, UiCopy.copy.eighty, UiCopy.copy.ninety];
 
 /// A number up to 99 in feminine Hebrew words (minutes and hours are feminine); digits above that.
 String _words(int n) {
@@ -54,17 +54,17 @@ String _words(int n) {
   if (n <= 10) return _unitsF[n];
   if (n < 20) return _teensF[n - 10];
   final t = _tens[n ~/ 10], u = n % 10;
-  return u == 0 ? t : UiCopy.text(68, [t, _unitsF[u]]);
+  return u == 0 ? t : UiCopy.copy.and(t, _unitsF[u]);
 }
 
 String _unitSpoken(int n, String one, String two, String many) => n == 1 ? one : (n == 2 ? two : '${_words(n)} $many');
 
 /// "עשרים דקות", "שעה ועשרים דקות", "שעתיים".
 String minutesSpoken(int min) {
-  if (min < 60) return _unitSpoken(min, UiCopy.text(69), UiCopy.text(70), UiCopy.text(71));
+  if (min < 60) return _unitSpoken(min, UiCopy.copy.minute, UiCopy.copy.twoMinutes, UiCopy.copy.minutes);
   final h = min ~/ 60, m = min % 60;
-  final hs = _unitSpoken(h, UiCopy.text(72), UiCopy.text(73), UiCopy.text(74));
-  return m == 0 ? hs : UiCopy.text(68, [hs, minutesSpoken(m)]);
+  final hs = _unitSpoken(h, UiCopy.copy.hour, UiCopy.copy.twoHours, UiCopy.copy.hours);
+  return m == 0 ? hs : UiCopy.copy.and(hs, minutesSpoken(m));
 }
 
 /// The estimate at [now]; null when there is nothing to show.
@@ -76,8 +76,8 @@ EstimateShown? estimateShown(Estimate e, DateTime now) {
       phase: EstimatePhase.done,
       icon: 'check_circle',
       strong: '',
-      rest: UiCopy.text(75, [minutesText(took), minutesText(total, unit: false)]),
-      spoken: UiCopy.text(76, [minutesSpoken(took), minutesSpoken(total)]),
+      rest: UiCopy.copy.done2(minutesText(took), minutesText(total, unit: false)),
+      spoken: UiCopy.copy.done3(minutesSpoken(took), minutesSpoken(total)),
     );
   }
   if (!now.isBefore(e.dueAt)) {
@@ -85,9 +85,9 @@ EstimateShown? estimateShown(Estimate e, DateTime now) {
     return EstimateShown(
       phase: EstimatePhase.overdue,
       icon: 'running_with_errors',
-      strong: UiCopy.text(77, [minutesText(late)]),
-      rest: UiCopy.text(78, [minutesText(total, unit: false)]),
-      spoken: UiCopy.text(79, [minutesSpoken(late), minutesSpoken(total)]),
+      strong: UiCopy.copy.late2(minutesText(late)),
+      rest: UiCopy.copy.estimate(minutesText(total, unit: false)),
+      spoken: UiCopy.copy.lateEstimate(minutesSpoken(late), minutesSpoken(total)),
     );
   }
   final passed = now.difference(e.createdAt).inMinutes.clamp(0, total);
@@ -98,16 +98,16 @@ EstimateShown? estimateShown(Estimate e, DateTime now) {
       phase: EstimatePhase.near,
       icon: 'hourglass_bottom',
       strong: '',
-      rest: UiCopy.text(80, [minutesText(left), minutesText(total, unit: false)]),
-      spoken: UiCopy.text(80, [minutesSpoken(left), minutesSpoken(total)]),
+      rest: UiCopy.copy.left(minutesText(left), minutesText(total, unit: false)),
+      spoken: UiCopy.copy.left(minutesSpoken(left), minutesSpoken(total)),
     );
   }
   return EstimateShown(
     phase: EstimatePhase.onTime,
     icon: 'schedule',
     strong: '',
-    rest: UiCopy.text(81, [minutesText(total), minutesText(passed, unit: false)]),
-    spoken: UiCopy.text(82, [minutesSpoken(total), minutesSpoken(passed)]),
+    rest: UiCopy.copy.estimateElapsed(minutesText(total), minutesText(passed, unit: false)),
+    spoken: UiCopy.copy.estimateElapsed2(minutesSpoken(total), minutesSpoken(passed)),
   );
 }
 

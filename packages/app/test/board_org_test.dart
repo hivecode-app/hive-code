@@ -178,6 +178,16 @@ void main() {
     expect(plainTitle('#23 passkey ו-token לכל מכשיר'), 'passkey ו-token לכל מכשיר');
   });
 
+  test('a chat row\'s preview has no markdown marks and no priority prefix', () {
+    expect(previewLine('**הלוח זמנים שלך** מוכן'), 'הלוח זמנים שלך מוכן');
+    expect(previewLine('p0: השרת נפל'), 'השרת נפל');
+    expect(previewLine('**p1:** ה-`deploy.sh` עבר'), 'ה-deploy.sh עבר');
+    expect(previewLine('## סיכום [PR](https://x/1)'), 'סיכום PR');
+    expect(previewLine('- שורה ראשונה'), 'שורה ראשונה');
+    expect(previewLine('snake_case_name ו-2*3*4'), 'snake_case_name ו-2*3*4', reason: 'single marks are text');
+    expect(previewLine('**'), '**');
+  });
+
   group('#t48: a project team lists its lead and standing workers, then task workers, under the project\'s name', () {
     Map<String, dynamic> w(String id, String name, String team, String kind, String life, String status, {String title = '', Map<String, dynamic>? current, int queued = 0}) =>
         {..._id(id, name, team, kind, life, status, project: 'voice-bot', title: title), 'reports_to': 'shachar', 'current_task': current, 'queued': queued};

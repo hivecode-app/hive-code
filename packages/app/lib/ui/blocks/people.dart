@@ -21,7 +21,7 @@ class PeopleBlock extends StatelessWidget {
     if (data.people.isEmpty || d == null) return const SizedBox.shrink();
     return Semantics(
       container: true,
-      label: UiCopy.text(110),
+      label: UiCopy.copy.whoWorkingNow,
       explicitChildNodes: true,
       // Each worker gets the same width, two lines and an ellipsis inside it. When they all fit, they share the
       // card's width; when not, the strip scrolls, with room at both ends so nothing is cut at the card's edge.
@@ -35,7 +35,7 @@ class PeopleBlock extends StatelessWidget {
             for (final x in data.people)
               Semantics(
                 button: true,
-                label: '${d.who(x.id).name}, ${x.text}${x.since == null ? '' : UiCopy.text(111, [hm(x.since!)])}',
+                label: '${d.who(x.id).name}, ${x.text}${x.since == null ? '' : UiCopy.copy.since3(hm(x.since!))}',
                 excludeSemantics: true,
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
@@ -67,7 +67,7 @@ class PeopleBlock extends StatelessWidget {
                           Rich(x.text, auto: true, maxLines: 2, style: T.meta.copyWith(color: p.text2)),
                           if (x.since != null)
                             Text(
-                              UiCopy.text(36, [hm(x.since!)]),
+                              UiCopy.copy.since(hm(x.since!)),
                               style: T.meta.copyWith(color: p.text3, fontFeatures: kTabular),
                             ),
                         ],

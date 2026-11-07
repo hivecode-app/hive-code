@@ -319,10 +319,10 @@ class _ChatScreenState extends State<ChatScreen> {
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: p.surface,
-          content: Rich(UiCopy.text(143, [cmd]), style: T.body.copyWith(color: p.text)),
+          content: Rich(UiCopy.copy.stopDuring(cmd), style: T.body.copyWith(color: p.text)),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(UiCopy.text(144), style: T.button.copyWith(color: p.text2))),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(UiCopy.text(145), style: T.button.copyWith(color: p.urgent, fontWeight: FontWeight.w700))),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(UiCopy.copy.continue2, style: T.button.copyWith(color: p.text2))),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(UiCopy.copy.stop2, style: T.button.copyWith(color: p.urgent, fontWeight: FontWeight.w700))),
           ],
         ),
       );
@@ -333,7 +333,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _quoteItem(ChatItem it, CompanyData d) {
     final (author, text) = switch (it) {
-      UserMsg() => (UiCopy.text(146), it.text),
+      UserMsg() => (UiCopy.copy.you, it.text),
       TextMsg() => (d.who(widget.identityId).name, it.text),
       AskCard() => (d.who(it.from).name, it.question),
       _ => (d.who(widget.identityId).name, ''),
@@ -436,7 +436,7 @@ class _ChatScreenState extends State<ChatScreen> {
             },
             onWhy: () {
               _quoteItem(selectedItem, d);
-              controller.text = UiCopy.text(147);
+              controller.text = UiCopy.copy.why;
             },
             onSelectText: widget.embedded ? null : () => _selectText(selectedItem),
           )
@@ -861,15 +861,15 @@ class _ChatScreenState extends State<ChatScreen> {
       HandoffCard() => HandoffCardView(card: it, from: widget.identityId),
       // A turn that ended in an error: hq caught it itself (turn.error, error-watch.ts).
       ErrorLine() => ServiceLine(text: ErrorReports.instance.active ? '${it.text} ${SentNote.text}.' : it.text, icon: 'error', iconColor: context.p.urgent),
-      UnknownItem() => ServiceLine(text: UiCopy.text(149, [it.kind])),
+      UnknownItem() => ServiceLine(text: UiCopy.copy.event(it.kind)),
     };
   }
 
   static String _dayLabel(DateTime d) {
     final ago = daysAgo(d, CompanyTime.now());
-    if (ago == 0) return UiCopy.text(150);
-    if (ago == 1) return UiCopy.text(34);
-    final days = [UiCopy.text(151), UiCopy.text(152), UiCopy.text(153), UiCopy.text(154), UiCopy.text(155), UiCopy.text(156), UiCopy.text(157)];
+    if (ago == 0) return UiCopy.copy.today2;
+    if (ago == 1) return UiCopy.copy.yesterday2;
+    final days = [UiCopy.copy.mon, UiCopy.copy.tue, UiCopy.copy.wed, UiCopy.copy.thu, UiCopy.copy.fri, UiCopy.copy.sat, UiCopy.copy.sun];
     return '${days[wall(d).weekday - 1]} ${dm(d)}';
   }
 }
@@ -936,15 +936,15 @@ class _ChatBar extends StatelessWidget {
     // The live status line is always true (chat.md §1): offline says so instead of "working".
     Widget status;
     if (linkDown) {
-      status = StatusWord(icon: 'cloud_off', word: UiCopy.text(158, [statusWord(presence.status, who.gender)]), size: 12);
+      status = StatusWord(icon: 'cloud_off', word: UiCopy.copy.offlineLastKnown(statusWord(presence.status, who.gender)), size: 12);
     } else if (stopped) {
-      status = StatusWord(icon: 'stop_circle', word: '${f ? UiCopy.text(159) : UiCopy.text(160)} · ${chat.live.stoppedAt}', size: 12);
+      status = StatusWord(icon: 'stop_circle', word: '${f ? UiCopy.copy.stopped : UiCopy.copy.stopped2} · ${chat.live.stoppedAt}', size: 12);
     } else if (busy) {
       status = StatusWord(
         icon: statusIcon(WorkerStatus.working),
         word: '${statusWord(WorkerStatus.working, who.gender)}${presence.activity != null ? ' · ${presence.activity}' : ''} · ',
         size: 12,
-        trailing: Semantics(button: true, label: UiCopy.text(145), child: GestureDetector(onTap: onStop, child: Text(UiCopy.text(145), style: TextStyle(fontFamily: kFont, fontSize: 12, height: 1.4, fontWeight: FontWeight.w700, color: p.accent)))),
+        trailing: Semantics(button: true, label: UiCopy.copy.stop2, child: GestureDetector(onTap: onStop, child: Text(UiCopy.copy.stop2, style: TextStyle(fontFamily: kFont, fontSize: 12, height: 1.4, fontWeight: FontWeight.w700, color: p.accent)))),
       );
     } else {
       status = StatusWord.of(presence, who.gender, size: 12);
@@ -1020,8 +1020,8 @@ class _ChatBar extends StatelessWidget {
     final p = context.p;
     final pr = presence;
     final rows = <(String, String)>[
-      (UiCopy.text(167), team?.name ?? '—'),
-      (UiCopy.text(168), team?.leadId != null && team!.leadId != who.id ? d.who(team!.leadId!).name : companyNames.manager),
+      (UiCopy.copy.team2, team?.name ?? '—'),
+      (UiCopy.copy.reports, team?.leadId != null && team!.leadId != who.id ? d.who(team!.leadId!).name : companyNames.manager),
     ];
     showModalBottomSheet(
       context: context,
@@ -1108,13 +1108,13 @@ class _PinBar extends StatelessWidget {
     final ask = open.first;
     final many = open.length > 1;
     final (what, link) = many
-        ? (UiCopy.text(175, [open.length]), UiCopy.text(176))
+        ? (UiCopy.copy.openDecisions(open.length), UiCopy.copy.firstTime)
         : ask is GoCard
-            ? (AppLocalizations.of(context).approve, UiCopy.text(178))
-            : (ask.blocking ? UiCopy.text(179) : UiCopy.text(180), UiCopy.text(181));
+            ? (AppLocalizations.of(context).approve, UiCopy.copy.request2)
+            : (ask.blocking ? UiCopy.copy.blockingQuestion : UiCopy.copy.question, UiCopy.copy.question2);
     return Semantics(
       button: true,
-      label: many ? what : UiCopy.text(89, [what, hm(ask.ts)]),
+      label: many ? what : UiCopy.copy.since2(what, hm(ask.ts)),
       hint: link,
       excludeSemantics: true,
       child: Material(
@@ -1159,13 +1159,13 @@ class _SelectionBar extends StatelessWidget {
       decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(children: [
-        IBtn('close', tip: UiCopy.text(84), onTap: onClose),
+        IBtn('close', tip: UiCopy.copy.close2, onTap: onClose),
         const Spacer(),
-        IBtn('reply', tip: UiCopy.text(182), onTap: onQuote),
-        IBtn('content_copy', tip: UiCopy.text(183), onTap: onCopy),
-        if (onSelectText != null) IBtn('select_all', tip: UiCopy.text(184), onTap: onSelectText!),
-        IBtn('help', tip: UiCopy.text(147), onTap: onWhy),
-        IBtn('share', tip: UiCopy.text(185), onTap: onCopy),
+        IBtn('reply', tip: UiCopy.copy.quote, onTap: onQuote),
+        IBtn('content_copy', tip: UiCopy.copy.copy, onTap: onCopy),
+        if (onSelectText != null) IBtn('select_all', tip: UiCopy.copy.selectText, onTap: onSelectText!),
+        IBtn('help', tip: UiCopy.copy.why, onTap: onWhy),
+        IBtn('share', tip: UiCopy.copy.share, onTap: onCopy),
       ]),
     );
   }
@@ -1186,18 +1186,18 @@ class _SearchBar extends StatelessWidget {
       decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(children: [
-        IBtn('close', tip: UiCopy.text(186), onTap: onClose),
+        IBtn('close', tip: UiCopy.copy.closeSearch, onTap: onClose),
         Expanded(
           child: TextField(
             autofocus: true,
             onChanged: onChanged,
             style: T.body.copyWith(color: p.text),
-            decoration: InputDecoration(border: InputBorder.none, hintText: UiCopy.text(162), hintStyle: T.body.copyWith(color: p.text3)),
+            decoration: InputDecoration(border: InputBorder.none, hintText: UiCopy.copy.searchThisChat, hintStyle: T.body.copyWith(color: p.text3)),
           ),
         ),
-        if (count > 0) Text(UiCopy.text(187, [index + 1, count]), style: T.meta.copyWith(color: p.text2)),
-        IBtn('keyboard_arrow_down', tip: UiCopy.text(188), onTap: onUp),
-        Transform.flip(flipY: true, child: IBtn('keyboard_arrow_down', tip: UiCopy.text(189), onTap: onDown)),
+        if (count > 0) Text(UiCopy.copy.of2(index + 1, count), style: T.meta.copyWith(color: p.text2)),
+        IBtn('keyboard_arrow_down', tip: UiCopy.copy.previous, onTap: onUp),
+        Transform.flip(flipY: true, child: IBtn('keyboard_arrow_down', tip: UiCopy.copy.next, onTap: onDown)),
       ]),
     );
   }
@@ -1212,7 +1212,7 @@ class _JumpButton extends StatelessWidget {
     UiCopy.watch(context);
     final p = context.p;
     return Tooltip(
-      message: UiCopy.text(190),
+      message: UiCopy.copy.jumpLatest,
       child: GestureDetector(
         onTap: onTap,
         child: Stack(clipBehavior: Clip.none, children: [

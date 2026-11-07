@@ -144,7 +144,7 @@ class FakeBackend extends Backend {
   @override
   Future<CommandResult> dismiss(WaitItem item) async {
     item.state = WaitState.answered;
-    item.answerLineBuilder = () => UiCopy.text(279);
+    item.answerLineBuilder = () => UiCopy.copy.closed;
     notifyListeners();
     return const CommandResult.ok();
   }
@@ -297,7 +297,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
     'ido': const Presence(status: WorkerStatus.waiting, shift: 2, shiftSince: '12:40', contextPct: 62, machine: 'hq-host'),
     'dana': const Presence(status: WorkerStatus.working, activity: 'כותבת', shift: 7, machine: 'hq-host'),
     'noa': const Presence(status: WorkerStatus.working, shift: 1, machine: 'hq-host'),
-    'itai': const Presence(status: WorkerStatus.stuck),
+    'itai': Presence(status: WorkerStatus.stuck, stuckSince: at(13, 24)),
     'amit': const Presence(status: WorkerStatus.waiting),
     'noga': const Presence(status: WorkerStatus.working),
     'eli': const Presence(status: WorkerStatus.resting),
@@ -446,14 +446,8 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
     ]),
     'rotem': simple('rotem', [
       TextMsg(id: 'r1', ts: at(14, 0), text: 'טיקיבוט: ה-webhook מחזיר 502 מ-13:58'),
-      AskCard(
-        id: 'r2',
-        ts: at(14, 0),
-        askId: 'ask-rotem',
-        from: 'rotem',
-        question: 'ה-webhook של וואטסאפ מחזיר 502 מ-13:58, כנראה מהפריסה של 13:55. ההצעה: לחזור ל-`r207`.',
-        options: const [AskOption(id: 'go', label: 'GO לחזרה', primary: true), AskOption(id: 'q', label: 'שאלה')],
-      ),
+      // A system fault goes to the manager, not to him (task 986): no ask of its in "מחכה לך", so no card here either.
+      TextMsg(id: 'r2', ts: at(14, 1), text: 'נראה שזה מהפריסה של 13:55. העברתי ליואב את ההחלטה אם לחזור ל-`r207`.'),
     ]),
     'noa': simple('noa', [TextMsg(id: 'n1', ts: at(14, 5), text: 'מריצה `flutter test` על הנגן ב-web')],
         live: const LiveState(phase: LivePhase.tool, label: 'מריצה בדיקות', seconds: 14, runningCommand: 'flutter test')),
@@ -469,7 +463,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
   const convs = [
     ConversationSummary(identityId: 'yoav', lastLine: 'הלילה נסגר: 12 מיזוגים, 2 מחכים ל-GO.', time: '09:12', pinned: true),
     ConversationSummary(identityId: 'ido', lastLine: 'שאלה: כרטיס שנדחה פעמיים בחידוש…', time: '14:02', lastIsMine: true, unread: 2, diffStat: '+48 −11'),
-    ConversationSummary(identityId: 'rotem', lastLine: 'טיקיבוט: ה-webhook מחזיר 502 מ-13:58', time: '14:00', lastIsMine: true),
+    ConversationSummary(identityId: 'rotem', lastLine: 'נראה שזה מהפריסה של 13:55. העברתי ליואב את ההחלטה אם לחזור ל-`r207`.', time: '14:01', lastIsMine: true),
     ConversationSummary(identityId: 'dana', lastLine: 'משה יקבל הודעה ברגע שיינתן GO…', time: '14:05'),
     ConversationSummary(identityId: 'noa', lastLine: 'מריצה `flutter test` על הנגן ב-web', time: '14:05', diffStat: '+31 −6'),
     ConversationSummary(identityId: 'itai', lastLine: 'אותה בדיקה נכשלת כבר 20 דקות', time: '13:44', extra: '· יואב פתח לו עוזר'),

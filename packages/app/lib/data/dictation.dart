@@ -33,16 +33,16 @@ import 'dictation_files.dart';
 const kDictateUrl = String.fromEnvironment('DICTATE_URL');
 const kDictateToken = String.fromEnvironment('DICTATE_TOKEN');
 const kDictateRate = 16000;
-String get kMicFailed => UiCopy.text(786);
+String get kMicFailed => UiCopy.copy.microphoneRecordingFailed;
 
 /// A failure already worded for the owner. [fault]: ours or the service's, so it goes to hq
 /// (error_report.dart); not so for one that is his to fix (a permission, a recording too short).
 class DictationError implements Exception {
-  const DictationError(String message, {this.fault = true}) : _message = message, copyId = null; // ignore: prefer_initializing_formals
-  const DictationError.localized(this.copyId, {this.fault = true}) : _message = null;
+  const DictationError(String message, {this.fault = true}) : _message = message, _copy = null; // ignore: prefer_initializing_formals
+  const DictationError.localized(String Function() copy, {this.fault = true}) : _copy = copy, _message = null; // ignore: prefer_initializing_formals
   final String? _message;
-  final int? copyId;
-  String get message => copyId == null ? _message! : UiCopy.text(copyId!);
+  final String Function()? _copy;
+  String get message => _copy?.call() ?? _message!;
   final bool fault;
   @override
   String toString() => message;
@@ -73,9 +73,9 @@ class MicRecorder implements Recorder {
     try {
       allowed = await rec.hasPermission();
     } catch (_) {
-      throw const DictationError.localized(786);
+      throw DictationError.localized(() => UiCopy.copy.microphoneRecordingFailed);
     }
-    if (!allowed) throw  DictationError.localized(787, fault: false);
+    if (!allowed) throw DictationError.localized(() => UiCopy.copy.microphoneAccessOff, fault: false);
     await _sub?.cancel();
     _pcm.clear();
     _broken = false;
@@ -83,7 +83,7 @@ class MicRecorder implements Recorder {
       final stream = await rec.startStream(const RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: kDictateRate, numChannels: 1));
       _sub = stream.listen(_pcm.add, onError: (_) => _broken = true);
     } catch (_) {
-      throw const DictationError.localized(786);
+      throw DictationError.localized(() => UiCopy.copy.microphoneRecordingFailed);
     }
   }
 
@@ -94,7 +94,7 @@ class MicRecorder implements Recorder {
     _sub = null;
     final pcm = _pcm.takeBytes();
     // Half a dictation is worse than none: the owner would send it without noticing the gap.
-    if (_broken) throw const DictationError.localized(786);
+    if (_broken) throw DictationError.localized(() => UiCopy.copy.microphoneRecordingFailed);
     return pcm;
   }
 
@@ -166,7 +166,7 @@ class DictateClient {
     final get = _session;
     if (get == null) return (baseUrl, token);
     final s = await get();
-    if (s == null) throw  DictationError.localized(788, fault: false);
+    if (s == null) throw DictationError.localized(() => UiCopy.copy.signBeforeUsing, fault: false);
     final hq = s.baseUrl.endsWith('/') ? s.baseUrl.substring(0, s.baseUrl.length - 1) : s.baseUrl;
     return ('$hq/api/dictate', s.token);
   }
@@ -215,22 +215,22 @@ class DictateClient {
       r = await http.Response.fromStream(await _http.send(req));
     } catch (_) {
       if (!abort.isCompleted) abort.complete();
-      throw  DictationError.localized(789);
+      throw DictationError.localized(() => UiCopy.copy.noConnectionDictation);
     } finally {
       timer?.cancel();
     }
-    if (r.statusCode == 401 && _session != null) throw  DictationError.localized(790);
-    if (r.statusCode == 401) throw  DictationError.localized(791);
-    if (r.statusCode != 200) throw  DictationError.localized(792);
+    if (r.statusCode == 401 && _session != null) throw DictationError.localized(() => UiCopy.copy.thisDeviceDisconnected);
+    if (r.statusCode == 401) throw DictationError.localized(() => UiCopy.copy.dictationServiceDid);
+    if (r.statusCode != 200) throw DictationError.localized(() => UiCopy.copy.recordingCouldNot);
     try {
       return ((jsonDecode(utf8.decode(r.bodyBytes)) as Map)['text'] as String? ?? '').trim();
     } catch (_) {
-      throw  DictationError.localized(793);
+      throw DictationError.localized(() => UiCopy.copy.dictationServiceReturned);
     }
   }
 }
 
-const kNoSpeech = DictationError.localized(794, fault: false);
+final kNoSpeech = DictationError.localized(() => UiCopy.copy.noSpeechDetected, fault: false);
 
 /// The multipart body handed to the socket a slice at a time, so [_sent] tracks what has left the
 /// device (the socket pulls the next slice only when it has room) and the stall timer sees a slow
@@ -406,7 +406,7 @@ class DictationJobs extends ChangeNotifier {
       final pcm = p.pcm ??= await files.pcm(p.id);
       if (pcm == null) {
         await _drop(p);
-        throw  DictationError.localized(795, fault: false);
+        throw DictationError.localized(() => UiCopy.copy.thisRecordingNo, fault: false);
       }
       final parts = splitPcm(pcm);
       for (var i = 0; i < parts.length; i++) {
@@ -432,8 +432,8 @@ class DictationJobs extends ChangeNotifier {
       p.error = e.message;
       rethrow;
     } catch (_) {
-      p.error = UiCopy.text(796);
-      throw  DictationError.localized(797);
+      p.error = UiCopy.copy.recordingWasNot;
+      throw DictationError.localized(() => UiCopy.copy.recordingWasNotTranscribed);
     } finally {
       p.running = false;
       notifyListeners();

@@ -125,12 +125,12 @@ class AskedBlock extends StatelessWidget {
 }
 
 /// "לעידו", and "ל-agent-company-t62" for a name in Latin letters.
-String _to(String name) => RegExp(InputCopy.v0).hasMatch(name) ? UiCopy.text(19, [name]) : UiCopy.text(20, [name]);
+String _to(String name) => RegExp(InputCopy.v0).hasMatch(name) ? UiCopy.copy.to(name) : UiCopy.copy.to2(name);
 
 /// "לפני 12 דק'", "עכשיו".
 String _ago(DateTime at, DateTime now) {
   final a = HeadData.ago(at, now);
-  return now.difference(at).inMinutes < 1 ? a : UiCopy.text(21, [a]);
+  return now.difference(at).inMinutes < 1 ? a : UiCopy.copy.ago(a);
 }
 
 class _Row extends StatelessWidget {
@@ -145,19 +145,19 @@ class _Row extends StatelessWidget {
     final d = StoreScope.of(context).data;
     final name = d == null ? x.who : d.who(x.who).name;
     final when = x.answered ? (x.replyAt ?? x.at) : x.at;
-    final word = x.answered ? UiCopy.text(22) : UiCopy.text(23, [_to(name)]);
-    final rest = [if (x.answered) name, if (x.count > 1) UiCopy.text(24, [x.count]), _ago(when, now)];
+    final word = x.answered ? UiCopy.copy.answered : UiCopy.copy.waiting2(_to(name));
+    final rest = [if (x.answered) name, if (x.count > 1) UiCopy.copy.messages2(x.count), _ago(when, now)];
     final canOpen = d == null || (d.canChat(x.who) && d.identities.containsKey(x.who));
     final spoken = [
-      UiCopy.text(25, [name, x.text]),
-      x.answered ? UiCopy.text(22) : UiCopy.text(26),
-      if (x.count > 1) UiCopy.text(24, [x.count]),
+      UiCopy.copy.youAsked(name, x.text),
+      x.answered ? UiCopy.copy.answered : UiCopy.copy.waiting3,
+      if (x.count > 1) UiCopy.copy.messages2(x.count),
       HeadData.agoSpoken(when, now),
     ].join('. ');
     return Semantics(
       button: canOpen,
       label: spoken,
-      hint: canOpen ? (x.answered ? UiCopy.text(27) : UiCopy.text(28)) : null,
+      hint: canOpen ? (x.answered ? UiCopy.copy.openAnswer : UiCopy.copy.openChat) : null,
       excludeSemantics: true,
       child: InkWell(
         onTap: canOpen ? () => openAsked(context, x) : null,
@@ -185,7 +185,7 @@ class _Row extends StatelessWidget {
               ),
               if (x.answered && canOpen) ...[
                 const SizedBox(width: 8),
-                Text(UiCopy.text(29), style: T.small.copyWith(fontWeight: FontWeight.w700, color: p.text)),
+                Text(UiCopy.copy.answer2, style: T.small.copyWith(fontWeight: FontWeight.w700, color: p.text)),
                 Ic(chevronIcon(context), size: 20, color: p.text2),
               ],
             ]),

@@ -229,14 +229,14 @@ class HqBackend extends Backend {
       }
       if (r.statusCode == 401) {
         _refused();
-        return CommandResult.localized(879);
+        return CommandResult.localized(() => UiCopy.copy.thisDeviceWas);
       }
-      if (r.statusCode == 404 || r.statusCode == 409) return CommandResult.localized(880, gone: true);
+      if (r.statusCode == 404 || r.statusCode == 409) return CommandResult.localized(() => UiCopy.copy.thisItemWas, gone: true);
       // 502-504: the proxy is up and hq is not (a restart). The request never reached it.
-      if (r.statusCode >= 502 && r.statusCode <= 504) return CommandResult.localized(882, transient: true);
-      return CommandResult.localized(881);
+      if (r.statusCode >= 502 && r.statusCode <= 504) return CommandResult.localized(() => UiCopy.copy.noConnectionServerAction, transient: true);
+      return CommandResult.localized(() => UiCopy.copy.serverDidNotAccept);
     } catch (_) {
-      return CommandResult.localized(882, transient: true);
+      return CommandResult.localized(() => UiCopy.copy.noConnectionServerAction, transient: true);
     }
   }
 
@@ -296,7 +296,7 @@ class HqBackend extends Backend {
     // Cached data can be days old: "אתמול 22:10" or "18/10 22:10", never a bare time that reads as today.
     final since = switch (company_time.daysAgo(t, company_time.CompanyTime.now())) {
       0 => hm,
-      1 => UiCopy.text(391, [hm]),
+      1 => UiCopy.copy.yesterday4(hm),
       _ => '${company_time.dm(t)} $hm',
     };
     _status = SystemStatus(LinkState.offline, since: since);
@@ -572,7 +572,7 @@ class HqBackend extends Backend {
       final mine = own != null && !own.tapped;
       final c = ConversationSummary(
         identityId: other,
-        lastLine: (mine ? UiCopy.text(883) : '') + (own?.text ?? lastLineOf(m)),
+        lastLine: (mine ? UiCopy.copy.you2 : '') + (own?.text ?? lastLineOf(m)),
         time: _hm(m['created_at'] as int),
         at: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int),
         delivery: mine ? mapDelivery(m['state'] as String?) : null,
@@ -1183,7 +1183,7 @@ class HqBackend extends Backend {
     });
     final c = ConversationSummary(
       identityId: id,
-      lastLine: own.tapped ? line : UiCopy.text(884, [line]),
+      lastLine: own.tapped ? line : UiCopy.copy.you3(line),
       time: _hm(ts),
       at: DateTime.fromMillisecondsSinceEpoch(ts),
       delivery: own.tapped ? null : mapDelivery(m['state'] as String?),
@@ -1367,12 +1367,12 @@ class HqBackend extends Backend {
     try {
       await _fresh.future.timeout(const Duration(seconds: 10));
     } catch (_) {
-      return CommandResult.localized(882);
+      return CommandResult.localized(() => UiCopy.copy.noConnectionServerAction);
     }
     final d = _data;
     final open = d != null && d.waiting.any((w) => (askId != null && w.askId == askId) || (inboxId != null && w.inboxId == inboxId));
     if (open) return null;
-    return CommandResult.fail(answer ? UiCopy.text(885) : UiCopy.text(886));
+    return CommandResult.fail(answer ? UiCopy.copy.thisItemWasAlready : UiCopy.copy.thisItemWasAlreadyHandled);
   }
 
   @override
@@ -1384,7 +1384,7 @@ class HqBackend extends Backend {
     final stale = await _stale(askId, null);
     if (stale != null) return stale;
     final (up, _) = await _uploadAll(attachments);
-    if (up == null) return CommandResult.localized(892);
+    if (up == null) return CommandResult.localized(() => UiCopy.copy.filesCouldNot);
     // A GO is an inbox item: his words close it, and the worker gets them as they are.
     final path = askId.startsWith('inbox:') ? '/api/inbox/${askId.substring(6)}/answer' : '/api/asks/${Uri.encodeComponent(askId)}/answer';
     return _send('POST', path, {
@@ -1420,7 +1420,7 @@ class HqBackend extends Backend {
   @override
   Future<CommandResult> checked(AwaitingTask t) async {
     final d = _data;
-    if (d == null) return CommandResult.localized(887);
+    if (d == null) return CommandResult.localized(() => UiCopy.copy.noConnectionServer2);
     final orig = d.awaiting.where((x) => x.id == t.id).firstOrNull ?? t;
     _checking.add(t.id);
     d.awaiting = [
@@ -1463,7 +1463,7 @@ class HqBackend extends Backend {
 
   @override
   Future<CommandResult> dismiss(WaitItem item) async {
-    if (item.inboxId == null) return CommandResult.localized(888);
+    if (item.inboxId == null) return CommandResult.localized(() => UiCopy.copy.thisItemCannot);
     final stale = await _stale(null, item.inboxId, answer: false);
     if (stale != null) return stale;
     var told = false;
@@ -1472,7 +1472,7 @@ class HqBackend extends Backend {
       item.state = WaitState.answered;
       // Only when hq did tell someone (an incident or a system item has no one to tell).
       final who = _data?.who(item.from);
-      item.answerLineBuilder = () => told ? UiCopy.text(891, [who?.name ?? item.from, who?.gender == Gender.f ? UiCopy.text(889) : UiCopy.text(890)]) : UiCopy.text(279);
+      item.answerLineBuilder = () => told ? UiCopy.copy.closedMessage(who?.name ?? item.from, who?.gender == Gender.f ? UiCopy.copy.received : UiCopy.copy.received2) : UiCopy.copy.closed;
     }
     return _after(r);
   }
@@ -1530,7 +1530,7 @@ class HqBackend extends Backend {
     if (up == null) {
       msg.delivery = transient ? Delivery.pendingConnection : Delivery.failed;
       notifyListeners();
-      return CommandResult.localized(892, transient: transient);
+      return CommandResult.localized(() => UiCopy.copy.filesCouldNot, transient: transient);
     }
     msg.attachments = up;
     if (msg.cancelled) return const CommandResult.ok();
@@ -1763,12 +1763,12 @@ class HqBackend extends Backend {
   }
 
   @override
-  Future<CommandResult> retract(String identityId, String msgId) async => CommandResult.localized(893);
+  Future<CommandResult> retract(String identityId, String msgId) async => CommandResult.localized(() => UiCopy.copy.thisServerDoes);
 
   @override
   Future<CommandResult> stop(String identityId) async {
     final shift = _boardShift[identityId];
-    if (shift == null) return CommandResult.localized(894);
+    if (shift == null) return CommandResult.localized(() => UiCopy.copy.thisWorkerHas);
     return _send('POST', '/api/shifts/${Uri.encodeComponent(shift)}/interrupt');
   }
 
@@ -1784,7 +1784,7 @@ class HqBackend extends Backend {
   }
 
   @override
-  Future<CommandResult> wake(String teamId) async => CommandResult.localized(895);
+  Future<CommandResult> wake(String teamId) async => CommandResult.localized(() => UiCopy.copy.thisServerDoesNot);
 }
 
 class HqError implements Exception {
@@ -1870,18 +1870,18 @@ CompanyData mapSnapshot({
   DateTime? now,
 }) {
   final teamNamesBuiltIn = {
-    'mgmt': UiCopy.text(896),
-    'management': UiCopy.text(896),
-    'monitor': UiCopy.text(897),
-    'monitoring': UiCopy.text(897),
-    'personal': UiCopy.text(898),
-    'improve': UiCopy.text(360),
-    'improvement': UiCopy.text(360),
-    'design': UiCopy.text(899),
-    'lumo': UiCopy.text(900),
-    'tikibot': UiCopy.text(901),
+    'mgmt': UiCopy.copy.management,
+    'management': UiCopy.copy.management,
+    'monitor': UiCopy.copy.monitoring,
+    'monitoring': UiCopy.copy.monitoring,
+    'personal': UiCopy.copy.personalTeam,
+    'improve': UiCopy.copy.improvementTeam,
+    'improvement': UiCopy.copy.improvementTeam,
+    'design': UiCopy.copy.design,
+    'lumo': UiCopy.copy.lumo,
+    'tikibot': UiCopy.copy.tikibot,
     'voice': 'voice-bot',
-    'agent-company': UiCopy.text(3),
+    'agent-company': UiCopy.copy.company2,
   };
   // A project and its team show the owner's name for the project (org.yaml `projects[].name`, from hq).
   // An older hq sends no name: the built-in names, then the id.
@@ -1979,22 +1979,23 @@ CompanyData mapSnapshot({
       currentTask: (b['current_task'] as Map?)?['title'] as String?,
       queued: b['queued'] is int ? b['queued'] as int : 0,
       machine: shift?['machine'] as String?,
+      stuckSince: b['stuck_since'] is int ? DateTime.fromMillisecondsSinceEpoch(b['stuck_since'] as int) : null,
     );
   }
 
   String kickerFor(Map<String, dynamic> i) {
     final kind = i['kind'] as String;
     return switch (kind) {
-      'incident' when i['ref'] == 'accounts-all-full' => UiCopy.text(902),
-      'incident' => UiCopy.text(903),
-      'go' => UiCopy.text(904),
-      'login' => UiCopy.text(905),
-      'delivery_failure' => UiCopy.text(906),
-      'shift_failure' => UiCopy.text(907),
-      'awaiting' => UiCopy.text(31),
+      'incident' when i['ref'] == 'accounts-all-full' => UiCopy.copy.allAccountsTheir,
+      'incident' => UiCopy.copy.urgentProductionIssue,
+      'go' => UiCopy.copy.releaseApproval,
+      'login' => UiCopy.copy.websiteSign2,
+      'delivery_failure' => UiCopy.copy.messageNotDelivered,
+      'shift_failure' => UiCopy.copy.workerDidNot,
+      'awaiting' => UiCopy.copy.check,
       // The system asks with its own title ("תפסתי תקלה", error-watch.ts): it has no name to stand for it.
       'ask' when isCaughtFault(i['from_identity'] as String?, i['ref'] as String?) && (i['title'] as String?)?.isNotEmpty == true => i['title'] as String,
-      _ => i['blocking'] == true ? UiCopy.text(908) : UiCopy.text(180),
+      _ => i['blocking'] == true ? UiCopy.copy.blocking : UiCopy.copy.question,
     };
   }
 
@@ -2066,9 +2067,9 @@ CompanyData mapSnapshot({
     for (final t in toggles)
       Automation(
         key: t['key'] as String,
-        team: UiCopy.text(909),
+        team: UiCopy.copy.system,
         sentence: (t['description'] as String?) ?? t['key'] as String,
-        meta: t['manual'] == true && t['enabled'] == false ? UiCopy.text(910, [_hm(t['updated_at'] as int)]) : (t['enabled'] == true ? UiCopy.text(911) : UiCopy.text(912)),
+        meta: t['manual'] == true && t['enabled'] == false ? UiCopy.copy.disabledManually(_hm(t['updated_at'] as int)) : (t['enabled'] == true ? UiCopy.copy.enabled : UiCopy.copy.disabled),
         enabled: t['enabled'] == true,
       ),
   ];
@@ -2125,7 +2126,7 @@ CompanyData mapSnapshot({
         assignee: who?.name ?? '',
         sub: who == null || who.title.isEmpty ? null : who.title,
         status: status,
-        endLine: state == 'done' ? UiCopy.text(629, [_hm(updated)]) : (started != null ? UiCopy.text(913, [_hm(started)]) : null),
+        endLine: state == 'done' ? UiCopy.copy.done11(_hm(updated)) : (started != null ? UiCopy.copy.started(_hm(started)) : null),
         assigneeId: idn,
         startedAt: started == null ? null : DateTime.fromMillisecondsSinceEpoch(started),
         doneAt: state == 'done' ? DateTime.fromMillisecondsSinceEpoch(updated) : null,
@@ -2167,8 +2168,8 @@ CompanyData mapSnapshot({
           teamId: t.id,
           line: [
             if (lead != null) lead.name,
-            people == 1 ? UiCopy.text(633) : UiCopy.text(634, [people]),
-            openCount == 0 ? UiCopy.text(142) : (openCount == 1 ? UiCopy.text(626) : UiCopy.text(627, [openCount])),
+            people == 1 ? UiCopy.copy.oneWorker : UiCopy.copy.workers2(people),
+            openCount == 0 ? UiCopy.copy.noOpenTasks : (openCount == 1 ? UiCopy.copy.oneOpenTask : UiCopy.copy.openTasks2(openCount)),
           ].join(' · '),
           statusIcon: '',
           statusWord: '',
@@ -2187,7 +2188,7 @@ CompanyData mapSnapshot({
         teamId: t.id,
         line: [
           if (lead != null) lead.name,
-          members.length == 1 ? UiCopy.text(633) : UiCopy.text(634, [members.length]),
+          members.length == 1 ? UiCopy.copy.oneWorker : UiCopy.copy.workers2(members.length),
         ].join(' · '),
         statusIcon: '',
         statusWord: '',
@@ -2236,17 +2237,17 @@ CompanyData mapSnapshot({
     tickets: tickets,
     ticketDetails: const {},
     boardSubtitle: [
-      UiCopy.text(914),
-      open == 1 ? UiCopy.text(626) : UiCopy.text(627, [open]),
-      if (doneToday > 0) (doneToday == 1 ? UiCopy.text(915) : UiCopy.text(916, [doneToday])),
+      UiCopy.copy.wholeCompany,
+      open == 1 ? UiCopy.copy.oneOpenTask : UiCopy.copy.openTasks2(open),
+      if (doneToday > 0) (doneToday == 1 ? UiCopy.copy.oneDoneToday : UiCopy.copy.doneToday3(doneToday)),
     ].join(' · '),
     orgTeams: orgTeams,
-    orgSubtitle: UiCopy.text(917, [active, live.length - active]),
+    orgSubtitle: UiCopy.copy.activeWorkersResting(active, live.length - active),
     projects: projectList,
     capacity: const [],
     automations: automations,
     focus: focus,
-    night: night ? UiCopy.text(918) : null,
+    night: night ? UiCopy.copy.nightModeActive : null,
     awaiting: [for (final a in awaiting) ?AwaitingTask.fromHq(a)],
     asked: [for (final a in asked) ?AskedRequest.fromHq(a)],
     openTasks: openTasks == null ? null : [for (final t in openTasks) ?OpenTask.fromHq(t)],
@@ -2265,7 +2266,7 @@ String lastLineOf(Map<String, dynamic> m) {
   final files = attachmentsOf(m);
   if (files.any((a) => !a.isImage)) return files.length == 1 ? files.single.name : UiCopy.copy.mediaEntries('${files.length}');
   final n = files.length;
-  return n > 1 ? UiCopy.text(919, [n]) : (n == 1 ? UiCopy.text(247) : '');
+  return n > 1 ? UiCopy.copy.images(n) : (n == 1 ? UiCopy.copy.image : '');
 }
 
 String withoutIds(String s) =>
@@ -2331,9 +2332,9 @@ AskCard? cardFor(List<ChatItem> items, String? ref) => ref == null ? null : item
   // Closed without doing it (dismiss) or done without a note: the card's line says so.
   final n = companyNames, owner = n.owner;
   if (body.startsWith('$owner ${n.o(InputCopy.v23, InputCopy.v24)}: ') || body.startsWith(InputCopy.closedWithoutAnswer(owner, n.o(InputCopy.v25, InputCopy.v26)))) {
-    return (UiCopy.text(279), true);
+    return (UiCopy.copy.closed, true);
   }
-  if (body.startsWith('$owner ${n.o(InputCopy.v27, InputCopy.v28)}: ')) return (UiCopy.text(298), true);
+  if (body.startsWith('$owner ${n.o(InputCopy.v27, InputCopy.v28)}: ')) return (UiCopy.copy.done8, true);
   return (body, false);
 }
 
@@ -2346,9 +2347,9 @@ AskCard? cardFor(List<ChatItem> items, String? ref) => ref == null ? null : item
   // "retry", "done"), never his own; what he types goes through reply, wrapped differently.
   final n = companyNames, first = body.split('\n').first;
   for (final (he, you) in [
-    (n.o(InputCopy.completed[0], InputCopy.completed[1]), UiCopy.text(923)),
-    (n.o(InputCopy.deferred[0], InputCopy.deferred[1]), UiCopy.text(576)),
-    (n.o(InputCopy.closed[0], InputCopy.closed[1]), UiCopy.text(928)),
+    (n.o(InputCopy.completed[0], InputCopy.completed[1]), UiCopy.copy.youFinished),
+    (n.o(InputCopy.deferred[0], InputCopy.deferred[1]), UiCopy.copy.deferred3),
+    (n.o(InputCopy.closed[0], InputCopy.closed[1]), UiCopy.copy.youClosed),
   ]) {
     if (first.startsWith('${n.owner} $he')) return (text: '$you${first.substring('${n.owner} $he'.length)}', tapped: true);
   }

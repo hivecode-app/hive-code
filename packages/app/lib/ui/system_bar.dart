@@ -51,10 +51,10 @@ class _SystemBarState extends State<SystemBar> {
     final p = context.p;
     final (String? icon, String? text, bool spin) = switch (st.state) {
       LinkState.online || LinkState.reconnected => (null, null, false),
-      LinkState.demo => ('info', UiCopy.text(750), false),
+      LinkState.demo => ('info', UiCopy.copy.demoServerNot, false),
       LinkState.connecting when !_slow => (null, null, false),
       LinkState.connecting || LinkState.offline =>
-        ('cloud_off', UiCopy.text(752, [st.since != null ? UiCopy.text(751, [st.since]) : '']), false),
+        ('cloud_off', UiCopy.copy.noConnectionServer(st.since != null ? UiCopy.copy.since5(st.since!) : ''), false),
     };
     // Offline: no update strip either, it could not download anyway.
     if (text == null) return const Column(mainAxisSize: MainAxisSize.min, children: [_NotificationsOff(), _GlueUpdateStrip()]);
@@ -167,12 +167,12 @@ class _LinkHintState extends State<LinkHint> {
       LinkState.connecting when _shown => Row(mainAxisSize: MainAxisSize.min, key: const ValueKey('c'), children: [
           Spin(child: Ic('progress_activity', size: 15, color: p.text2)),
           const SizedBox(width: 4),
-          Text(UiCopy.text(640), style: style),
+          Text(UiCopy.copy.updating, style: style),
         ]),
       LinkState.reconnected => Row(mainAxisSize: MainAxisSize.min, key: const ValueKey('r'), children: [
           Ic('check', size: 15, color: p.text2),
           const SizedBox(width: 4),
-          Text(UiCopy.text(753), style: style),
+          Text(UiCopy.copy.updated, style: style),
         ]),
       _ => const SizedBox.shrink(key: ValueKey('n')),
     };
@@ -200,14 +200,14 @@ class _NotificationsOff extends StatelessWidget {
               child: Row(children: [
                 Ic('notifications_off', size: 17, color: p.text2),
                 const SizedBox(width: 6),
-                Expanded(child: Text(UiCopy.text(754), style: T.meta.copyWith(color: p.text2))),
+                Expanded(child: Text(UiCopy.copy.notificationsOffQuestions, style: T.meta.copyWith(color: p.text2))),
                 TextButton(
                   onPressed: () async {
                     final ok = await NativeBridge.instance.requestNotificationPermission();
                     if (!ok) await NativeBridge.instance.openNotificationSettings();
                     g.notificationsOff.value = !(await NativeBridge.instance.notificationsEnabled());
                   },
-                  child: Text(UiCopy.text(438), style: T.meta.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+                  child: Text(UiCopy.copy.play, style: T.meta.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
                 ),
               ]),
             ),
@@ -242,7 +242,7 @@ class UpdateStrip extends StatelessWidget {
           TextButton(onPressed: onTap, child: Text(label, style: T.meta.copyWith(color: p.accent, fontWeight: FontWeight.w700)));
       final close = IconButton(
         onPressed: update.dismiss,
-        tooltip: UiCopy.text(508),
+        tooltip: UiCopy.copy.notNow2,
         visualDensity: VisualDensity.compact,
         icon: Ic('close', size: 17, color: p.text2),
       );
@@ -252,20 +252,20 @@ class UpdateStrip extends StatelessWidget {
         UpdatePhase.available => [
             Ic('system_update', size: 17, color: p.text2),
             const SizedBox(width: 6),
-            Expanded(child: Text(UiCopy.text(755), style: meta)),
-            action(UiCopy.text(756), update.install),
+            Expanded(child: Text(UiCopy.copy.newAppVersion, style: meta)),
+            action(UiCopy.copy.update, update.install),
             close,
           ],
         UpdatePhase.needsPermission => [
             Ic('system_update', size: 17, color: p.text2),
             const SizedBox(width: 6),
-            Expanded(child: Text(UiCopy.text(757), style: meta)),
-            action(UiCopy.text(702), update.install),
+            Expanded(child: Text(UiCopy.copy.allowUpdateInstallation, style: meta)),
+            action(UiCopy.copy.settings2, update.install),
             close,
           ],
         UpdatePhase.downloading => [
             Tooltip(
-              message: UiCopy.text(758),
+              message: UiCopy.copy.cancelDownload,
               child: InkResponse(
                 onTap: update.cancel,
                 radius: 18,
@@ -289,19 +289,19 @@ class UpdateStrip extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 6),
-            Expanded(child: Text(UiCopy.text(759, [pct]), style: meta)),
+            Expanded(child: Text(UiCopy.copy.downloadingAppUpdate(pct), style: meta)),
           ],
         UpdatePhase.installing => [
             Spin(child: Ic('progress_activity', size: 17, color: p.text2)),
             const SizedBox(width: 6),
-            Expanded(child: Text(UiCopy.text(760), style: meta)),
+            Expanded(child: Text(UiCopy.copy.confirmInstallationAndroid, style: meta)),
             close,
           ],
         UpdatePhase.failed => [
             Ic('error', size: 17, color: p.text2),
             const SizedBox(width: 6),
-            Expanded(child: Text(UiCopy.text(761, [ErrorReports.instance.active ? ' ${SentNote.text}.' : '']), style: meta)),
-            action(UiCopy.text(217), update.install),
+            Expanded(child: Text(UiCopy.copy.updateFailed(ErrorReports.instance.active ? ' ${SentNote.text}.' : ''), style: meta)),
+            action(UiCopy.copy.tryAgain, update.install),
             close,
           ],
       };

@@ -102,7 +102,7 @@ class FailedStartupBackend extends FakeBackend {
 
 void main() {
   testWidgets('English is default; switching language mirrors the whole live route and persists', (tester) async {
-    final store = await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
+    final store = await productApp(tester, home: const Scaffold(body: ProductSettings()));
     expect(find.text('Language'), findsOneWidget);
     final ctx = tester.element(find.byType(ProductSettings));
     expect(Directionality.of(ctx), TextDirection.ltr);
@@ -235,6 +235,17 @@ void main() {
     store.cancelUndo(AppStore.decisionKey(item.askId, item.id));
   });
 
+  // The account menu at the top of the chats, open: settings and the sort (#466, נועה).
+  for (final (dark, scale) in [(false, 1.0), (true, 1.0), (false, 2.0)]) {
+    final name = 'account-menu-he-${dark ? 'dark' : 'light'}-$scale';
+    testWidgets('product golden $name', (tester) async {
+      await productApp(tester, language: 'he', dark: dark, scale: scale);
+      await tester.tap(find.byKey(const Key('chats-account')));
+      await tester.pumpAndSettle();
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('golden/product/$name.png'));
+    });
+  }
+
   for (final language in ['en', 'he']) {
     for (final dark in [false, true]) {
       for (final scale in [1.0, 1.3, 2.0]) {
@@ -282,7 +293,7 @@ void main() {
         testWidgets('state golden $screen $language $dark', (tester) async {
           final backend = screen == 'offline' ? OfflineBackend() : FakeBackend(simulate: false, now: kDemoNow);
           Widget? home;
-          if (screen == 'settings') home = const Scaffold(body: ProductSettings(embedded: true));
+          if (screen == 'settings') home = const Scaffold(body: ProductSettings());
           if (screen == 'search') home = const Scaffold(body: SafeArea(child: ProductSearch(fullScreen: true)));
           final store = await productApp(tester, language: language, dark: dark, backend: backend, home: home);
           if (screen == 'quiet') {
@@ -294,7 +305,7 @@ void main() {
             store.data!.conversations
               ..clear()
               ..add(c);
-            store.data!.presence[c.identityId] = const Presence(status: WorkerStatus.stuck);
+            store.data!.presence[c.identityId] = Presence(status: WorkerStatus.stuck, stuckSince: CompanyTime.now().subtract(const Duration(minutes: 40)));
             store.touch();
           }
           if (screen == 'search') {
@@ -309,7 +320,7 @@ void main() {
     }
   }
   testWidgets('settings follow the mockup: no interface or advanced switches; the tools are one row', (tester) async {
-    await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
+    await productApp(tester, home: const Scaffold(body: ProductSettings()));
     for (final gone in ['New interface', 'Advanced mode']) {
       expect(find.text(gone), findsNothing);
     }
@@ -327,7 +338,7 @@ void main() {
   });
 
   testWidgets('the account switch lives in the Claude subscription page', (tester) async {
-    await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
+    await productApp(tester, home: const Scaffold(body: ProductSettings()));
     await tester.tap(find.text('Claude subscription'));
     await tester.pumpAndSettle();
     expect(find.byType(SettingsPageView), findsOneWidget);
@@ -367,7 +378,7 @@ void main() {
   });
 
   testWidgets('notifications say what hq does: what rings, what is silent, the number; focus is one tap', (tester) async {
-    final store = await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
+    final store = await productApp(tester, home: const Scaffold(body: ProductSettings()));
     await tester.tap(find.byKey(const Key('notifications-settings')));
     await tester.pumpAndSettle();
     expect(find.byType(NotificationsSettings), findsOneWidget);
@@ -388,7 +399,7 @@ void main() {
   });
 
   testWidgets('on a wide screen settings are a menu with the page beside it', (tester) async {
-    await productApp(tester, size: const Size(1280, 840), home: const Scaffold(body: ProductSettings(embedded: true)));
+    await productApp(tester, size: const Size(1280, 840), home: const Scaffold(body: ProductSettings()));
     expect(find.byType(SettingsPageView), findsOneWidget);
     await tester.tap(find.text('Notifications'));
     await tester.pumpAndSettle();
@@ -398,7 +409,7 @@ void main() {
   });
 
   testWidgets('settings choices use mapped symbols and one notifications destination', (tester) async {
-    await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
+    await productApp(tester, home: const Scaffold(body: ProductSettings()));
     for (final icon in tester.widgetList<Ic>(find.byType(Ic))) {
       expect(kIcons.containsKey(icon.name), isTrue, reason: icon.name);
     }
@@ -484,7 +495,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
   testWidgets('the company overview opens from the tools row', (tester) async {
-    await productApp(tester, home: const Scaffold(body: ProductSettings(embedded: true)));
+    await productApp(tester, home: const Scaffold(body: ProductSettings()));
     await tester.scrollUntilVisible(find.byKey(const Key('settings-tools')), 200);
     await tester.tap(find.byKey(const Key('settings-tools')));
     await tester.pumpAndSettle();

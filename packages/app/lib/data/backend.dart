@@ -206,13 +206,14 @@ typedef RecentLine = ({String id, String text, DateTime at, bool mine});
 
 /// Result of a command that reaches the server. Failure text is one plain sentence (design-taste §7).
 class CommandResult {
-  const CommandResult.ok() : ok = true, _error = null, copyId = null, transient = false, gone = false;
-  const CommandResult.fail(String? error, {this.transient = false, this.gone = false}) : _error = error, copyId = null, ok = false; // ignore: prefer_initializing_formals
-  const CommandResult.localized(this.copyId, {this.transient = false, this.gone = false}) : _error = null, ok = false;
+  const CommandResult.ok() : ok = true, _error = null, _copy = null, transient = false, gone = false;
+  const CommandResult.fail(String? error, {this.transient = false, this.gone = false}) : _error = error, _copy = null, ok = false; // ignore: prefer_initializing_formals
+  const CommandResult.localized(String Function() copy, {this.transient = false, this.gone = false}) : _copy = copy, _error = null, ok = false; // ignore: prefer_initializing_formals
   final bool ok;
   final String? _error;
-  final int? copyId;
-  String? get error => copyId == null ? _error : UiCopy.text(copyId!);
+  /// Worded in his language when read, so a language switch also changes a failure already shown.
+  final String Function()? _copy;
+  String? get error => _copy?.call() ?? _error;
 
   /// It never got an answer from hq (no link, a timeout, the proxy while hq restarts): the same
   /// request may go again later. A refusal (4xx) is not transient.
@@ -339,7 +340,7 @@ abstract class Backend extends ChangeNotifier {
   Future<AccountsView?> accounts() async => null;
 
   /// "כולם ל-X": new shifts go to [name], live ones move at their next turn boundary. null = automatic.
-  Future<CommandResult> pinAccount(String? name) async => CommandResult.localized(784);
+  Future<CommandResult> pinAccount(String? name) async => CommandResult.localized(() => UiCopy.copy.accountsUnavailableDemo);
 
   /// Called when a conversation opens (hq: replay events for that identity).
   Future<void> openConversation(String identityId) async {}
@@ -385,7 +386,7 @@ abstract class Backend extends ChangeNotifier {
   Future<MapBody?> companyMessage(String id) async => null;
 
   /// "השתקה" for 8 hours, a week or always, or its undo; kept on the server, the same on every device.
-  Future<CommandResult> mute(String identityId, MuteFor duration) async => CommandResult.localized(785);
+  Future<CommandResult> mute(String identityId, MuteFor duration) async => CommandResult.localized(() => UiCopy.copy.mutingUnavailableHere);
 }
 
 class UploadFailure implements Exception {

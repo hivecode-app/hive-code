@@ -142,7 +142,7 @@ class AppUpdate extends ChangeNotifier {
 
   /// "העדכון לא הצליח." is shown, and so sent to hq (error_report.dart).
   void _failed(String why) {
-    reportShown('screen', UiCopy.text(961, [why]), screen: UiCopy.text(962));
+    reportShown('screen', UiCopy.copy.updateFailed2(why), screen: UiCopy.copy.appUpdate);
     _set(UpdatePhase.failed);
   }
 

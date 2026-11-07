@@ -65,7 +65,7 @@ class HeadData {
       key: w.id,
       from: w.from,
       text: (w.headline ?? w.body).split('\n').first.trim(),
-      word: h && (w.kind == WaitKind.urgentProd || w.sourceKind == 'incident' || (w.sourceKind == null && kicker.contains(InputCopy.v6))) ? UiCopy.text(498) : kicker,
+      word: h && (w.kind == WaitKind.urgentProd || w.sourceKind == 'incident' || (w.sourceKind == null && kicker.contains(InputCopy.v6))) ? UiCopy.copy.productionIssue : kicker,
       at: w.createdAt,
       item: w,
       hot: h,
@@ -99,27 +99,27 @@ class HeadData {
   static String ago(DateTime? at, DateTime now) {
     if (at == null) return '';
     final m = now.difference(at).inMinutes;
-    if (m < 1) return UiCopy.text(107);
-    if (m < 60) return UiCopy.text(460, [m]);
+    if (m < 1) return UiCopy.copy.now;
+    if (m < 60) return UiCopy.copy.min3(m);
     final h = m ~/ 60;
-    if (h == 1) return UiCopy.text(72);
-    if (h == 2) return UiCopy.text(73);
-    if (h < 24) return UiCopy.text(461, [h]);
-    return h < 48 ? UiCopy.text(499) : UiCopy.text(500, [h ~/ 24]);
+    if (h == 1) return UiCopy.copy.hour;
+    if (h == 2) return UiCopy.copy.twoHours;
+    if (h < 24) return UiCopy.copy.h2(h);
+    return h < 48 ? UiCopy.copy.day : UiCopy.copy.days(h ~/ 24);
   }
 
   /// The same, read aloud: "לפני 4 דקות".
   static String agoSpoken(DateTime? at, DateTime now) {
     if (at == null) return '';
     final m = now.difference(at).inMinutes;
-    if (m < 1) return UiCopy.text(107);
-    if (m == 1) return UiCopy.text(501);
-    if (m < 60) return UiCopy.text(502, [m]);
+    if (m < 1) return UiCopy.copy.now;
+    if (m == 1) return UiCopy.copy.minuteAgo;
+    if (m < 60) return UiCopy.copy.minutesAgo(m);
     final h = m ~/ 60;
-    if (h == 1) return UiCopy.text(503);
-    if (h == 2) return UiCopy.text(504);
-    if (h < 24) return UiCopy.text(505, [h]);
-    return h < 48 ? UiCopy.text(34) : UiCopy.text(506, [h ~/ 24]);
+    if (h == 1) return UiCopy.copy.hourAgo;
+    if (h == 2) return UiCopy.copy.twoHoursAgo;
+    if (h < 24) return UiCopy.copy.hoursAgo(h);
+    return h < 48 ? UiCopy.copy.yesterday2 : UiCopy.copy.daysAgo(h ~/ 24);
   }
 }
 
@@ -336,7 +336,7 @@ class _LineRow extends StatelessWidget {
       Nav.chat(context, l.from);
     }
 
-    final spoken = [l.hot ? UiCopy.text(507) : UiCopy.text(97), l.word, name, HeadData.agoSpoken(l.at, now)].where((s) => s.isNotEmpty).join(', ');
+    final spoken = [l.hot ? UiCopy.copy.urgent : UiCopy.copy.needsYou2, l.word, name, HeadData.agoSpoken(l.at, now)].where((s) => s.isNotEmpty).join(', ');
     final item = l.item;
     final pending = item == null ? null : store.decision(item.askId, item.id);
     final keys = item == null || pending != null ? null : decisionKeysOf(context, item);
@@ -344,9 +344,9 @@ class _LineRow extends StatelessWidget {
     Widget row = Semantics(
       button: true,
       label: '$spoken. ${l.text}',
-      hint: UiCopy.text(126),
+      hint: UiCopy.copy.open2,
       excludeSemantics: true,
-      customSemanticsActions: canSnooze ? { CustomSemanticsAction(label: UiCopy.text(508)): () => store.notNow(item)} : null,
+      customSemanticsActions: canSnooze ? { CustomSemanticsAction(label: UiCopy.copy.notNow2): () => store.notNow(item)} : null,
       child: InkWell(
         onTap: open,
         child: ConstrainedBox(
@@ -422,7 +422,7 @@ class _SwipeLabel extends StatelessWidget {
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Ic('schedule', size: 18, color: p.text),
         const SizedBox(width: 6),
-        Text(UiCopy.text(508), style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w500)),
+        Text(UiCopy.copy.notNow2, style: T.small.copyWith(color: p.text, fontWeight: FontWeight.w500)),
       ]),
     );
   }

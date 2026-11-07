@@ -30,7 +30,7 @@ class CompanyNames {
 
   /// Before hq has said (and from an hq too old to say): the defaults of names.ts.
   static CompanyNames get fallback =>
-      CompanyNames(ownerId: 'owner', placeholder: true, owner: UiCopy.text(940), ownerGender: Gender.m, managerId: 'manager', manager: UiCopy.text(941), managerGender: Gender.m);
+      CompanyNames(ownerId: 'owner', placeholder: true, owner: UiCopy.copy.companyOwner, ownerGender: Gender.m, managerId: 'manager', manager: UiCopy.copy.companyManager, managerGender: Gender.m);
 
   static CompanyNames fromJson(Object? j) {
     if (j is! Map) return fallback;
@@ -77,10 +77,10 @@ class Team {
 /// hq itself as a sender: questions and notes from the server (accounts, pairing, failures).
 /// Shown by name and with a symbol, never as a worker called "hq" (#55).
 const kSystemId = 'hq';
-Identity get kSystem => Identity(id: kSystemId, name: UiCopy.text(942), title: UiCopy.text(943), teamId: '');
+Identity get kSystem => Identity(id: kSystemId, name: UiCopy.copy.system2, title: UiCopy.copy.messageFromServer, teamId: '');
 
 /// "לדנה", and "למערכת" (the article drops after ל).
-String toName(String name) => name == kSystem.name ? UiCopy.text(944) : UiCopy.text(19, [name]);
+String toName(String name) => name == kSystem.name ? UiCopy.copy.system3 : UiCopy.copy.to(name);
 
 class Identity {
   const Identity({required this.id, required this.name, required this.title, required this.teamId, this.gender = Gender.m, this.temp = false, this.taskRef, this.project, this.host, String? short})
@@ -114,8 +114,11 @@ extension on String {
 }
 
 class Presence {
-  const Presence({required this.status, this.activity, this.blockedOn, this.shift, this.shiftSince, this.contextPct, this.currentTask, this.queued = 0, this.machine});
+  const Presence({required this.status, this.activity, this.blockedOn, this.shift, this.shiftSince, this.contextPct, this.currentTask, this.queued = 0, this.machine, this.stuckSince});
   final WorkerStatus status;
+
+  /// Stuck: since when (hq `stuck_since`), for "תקועה 40 דקות" in its chat row; null when not stuck or unknown.
+  final DateTime? stuckSince;
 
   /// The machine its shift runs on (hq `shift.machine`): hq-host, or another server that takes task shifts.
   final String? machine;
@@ -143,6 +146,7 @@ class Presence {
     currentTask: currentTask,
     queued: queued,
     machine: machine,
+    stuckSince: stuckSince,
   );
 }
 
@@ -271,9 +275,9 @@ class WaitItem {
 /// "עובד" and "לא עובד" on a task he was asked to check (#219). One tap each; "לא עובד" asks for nothing more.
 // #297: "לא רלוונטי" takes it off without telling anyone it failed.
 List<AskOption> get kAwaitingOptions => [
-  AskOption(id: 'done', label: UiCopy.legacy ? UiCopy.text(86) : UiCopy.copy.works, primary: true),
-  AskOption(id: 'failed', label: UiCopy.text(945)),
-  AskOption(id: 'irrelevant', label: UiCopy.text(946)),
+  AskOption(id: 'done', label: UiCopy.copy.works, primary: true),
+  AskOption(id: 'failed', label: UiCopy.copy.notWorking),
+  AskOption(id: 'irrelevant', label: UiCopy.copy.noLongerRelevant),
 ];
 
 class DecisionByManager {
@@ -358,15 +362,19 @@ class ConversationSummary {
 
 /// How long "השתקה" lasts (hq `POST /api/conversations/:id/mute {for}`); [off] is "ביטול השתקה".
 enum MuteFor {
-  hours8('8h', 947),
-  week('week', 948),
-  always('always', 949),
-  off('off', 165);
+  hours8('8h'),
+  week('week'),
+  always('always'),
+  off('off');
 
-  const MuteFor(this.wire, this.copyId);
+  const MuteFor(this.wire);
   final String wire;
-  final int copyId;
-  String get label => UiCopy.text(copyId);
+  String get label => switch (this) {
+    hours8 => UiCopy.copy.n8Hours,
+    week => UiCopy.copy.oneWeek,
+    always => UiCopy.copy.always,
+    off => UiCopy.copy.unmute2,
+  };
 }
 
 // ───────────────────────────── chat items (chat.md §2, §8) ─────────────────────────────
@@ -745,7 +753,7 @@ class GoCard extends AskCard {
          question: details,
          options: [
            AskOption(id: 'go', label: 'GO', primary: true),
-           AskOption(id: 'not_now', label: UiCopy.text(508)),
+           AskOption(id: 'not_now', label: UiCopy.copy.notNow2),
          ],
        );
 }
@@ -1247,6 +1255,19 @@ class SystemStatus {
   final LinkState state;
   final String? since;
   final int updated;
+}
+
+/// A chat row's preview (mockup a-he-home-phone): the line as he would read it, without markdown marks
+/// (`**bold**`, `` `code` ``, `## `, `- `, `[text](url)`) and without a priority prefix ("p0: ", "[p1] ").
+String previewLine(String line) {
+  final t = line.trim()
+      .replaceFirst(RegExp(r'^(#{1,6}|>|[-*+]|\d+[.)])\s+'), '')
+      .replaceAllMapped(RegExp(r'!?\[([^\]]*)\]\([^)]*\)'), (m) => m[1]!)
+      .replaceAllMapped(RegExp(r'(\*\*|__|~~)(\S(?:.*?\S)?)\1'), (m) => m[2]!)
+      .replaceAllMapped(RegExp(r'`+([^`]+)`+'), (m) => m[1]!)
+      .replaceFirst(RegExp(r'^(\[p[0-3]\]|p[0-3]\s*[:·])\s*', caseSensitive: false), '')
+      .trim();
+  return t.isEmpty ? line : t;
 }
 
 /// A task title as one line for him: without the area prefix ("אפליקציה: ", "hq: ") and the issue number.

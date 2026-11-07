@@ -37,7 +37,7 @@ class AutomationsScreen extends StatelessWidget {
       backgroundColor: p.bg,
       body: SafeArea(
         child: Column(children: [
-          TopBar(title: UiCopy.text(703), leading: IBtn(backIcon(context), tip: UiCopy.text(161), onTap: () => Navigator.of(context).maybePop())),
+          TopBar(title: UiCopy.copy.automations2, leading: IBtn(backIcon(context), tip: UiCopy.copy.back2, onTap: () => Navigator.of(context).maybePop())),
           Expanded(
             child: ListView(padding: EdgeInsets.zero, children: [
               for (final (i, g) in order.indexed) ...[
@@ -107,7 +107,7 @@ class AccountSwitchState extends State<AccountSwitch> {
       setState(() {
         busy = false;
         noteFailed = !r.ok && !r.transient;
-        note = r.ok ? (name == null ? UiCopy.text(724) : UiCopy.text(725)) : r.error;
+        note = r.ok ? (name == null ? UiCopy.copy.companySelectsAccount : UiCopy.copy.newWorkUses) : r.error;
       });
     }
   }
@@ -119,14 +119,14 @@ class AccountSwitchState extends State<AccountSwitch> {
     if (v == null) return const SizedBox.shrink();
     final p = context.p;
     String state(AccountInfo a) {
-      if (!a.usable) return a.note ?? UiCopy.text(511);
-      if (a.blocked) return UiCopy.text(726);
-      final room = a.room == null ? '' : UiCopy.text(727, [a.room!.round()]);
-      return '${a.name == v.active ? UiCopy.text(728) : UiCopy.text(729)}$room';
+      if (!a.usable) return a.note ?? UiCopy.copy.offline2;
+      if (a.blocked) return UiCopy.copy.unavailableUsageLimit;
+      final room = a.room == null ? '' : UiCopy.copy.available3(a.room!.round());
+      return '${a.name == v.active ? UiCopy.copy.use : UiCopy.copy.available4}$room';
     }
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-       Section(UiCopy.text(730)),
+       Section(UiCopy.copy.account2),
       ListBlock(inset: 16, children: [
         for (final a in v.accounts)
           Padding(
@@ -140,19 +140,19 @@ class AccountSwitchState extends State<AccountSwitch> {
               ),
               if (a.usable)
                 v.pinned == a.name
-                    ? Text(UiCopy.text(731), style: T.small.copyWith(color: p.text2))
-                    : Btn(UiCopy.text(732), onTap: busy ? null : () => _pin(a.name)),
+                    ? Text(UiCopy.copy.allHere, style: T.small.copyWith(color: p.text2))
+                    : Btn(UiCopy.copy.moveHere, onTap: busy ? null : () => _pin(a.name)),
             ]),
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 11),
           child: Row(children: [
-            Expanded(child: Text(v.pinned == null ? UiCopy.text(733) : UiCopy.text(734), style: T.small.copyWith(color: p.text2))),
-            if (v.pinned != null) Btn(UiCopy.text(735), onTap: busy ? null : () => _pin(null)),
+            Expanded(child: Text(v.pinned == null ? UiCopy.copy.automaticUseAccount : UiCopy.copy.pinnedManually, style: T.small.copyWith(color: p.text2))),
+            if (v.pinned != null) Btn(UiCopy.copy.automatic, onTap: busy ? null : () => _pin(null)),
           ]),
         ),
         if (note != null && noteFailed)
-          ShownError(note!, screen: UiCopy.text(736), padding: const EdgeInsets.fromLTRB(16, 0, 16, 11))
+          ShownError(note!, screen: UiCopy.copy.settingsAccounts, padding: const EdgeInsets.fromLTRB(16, 0, 16, 11))
         else if (note != null)
           Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 11), child: Text(note!, style: T.secondary.copyWith(color: p.text))),
       ]),

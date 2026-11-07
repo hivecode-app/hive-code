@@ -127,6 +127,10 @@ test('watchdog: stuck in a turn → nudge → interrupt → new shift', async ()
     clock.advance(10 * 60_000 + 1);
     await hq.shifts.pingAll(); // claude still answers pings: alive but not progressing
     assert.equal((await hq.watchdog.sweep())['eli-1'], 'stuck');
+    const stuck = hq.board().find((b) => b.id === 'eli')!;
+    assert.equal(stuck.status, 'stuck');
+    assert.equal(stuck.stuck_since, hq.shifts.get('eli-1')!.last_event_at, 'since its last progress, not since the watchdog noticed');
+    assert.ok(clock.now() - stuck.stuck_since! > 10 * 60_000);
     const nudge = hq.store.db.prepare(`SELECT * FROM messages WHERE to_identity = 'eli' AND id LIKE 'nudge-%'`).get() as { priority: string } | undefined;
     assert.equal(nudge?.priority, 'now');
 
@@ -175,12 +179,14 @@ test('liveness (bet 4): claude not answering pings → warning "לא עונה" o
     await hq.shifts.pingAll();
     let eli = hq.board().find((b) => b.id === 'eli')!;
     assert.notEqual(eli.blocked_on, 'לא עונה');
+    assert.equal(eli.stuck_since, null);
     assert.ok(eli.last_seen_at && eli.derived_at >= eli.last_seen_at, 'freshness stamp');
 
     clock.advance(16_000); // > 3 × 5s without a ping answer
     eli = hq.board().find((b) => b.id === 'eli')!;
     assert.equal(eli.status, 'stuck');
     assert.equal(eli.blocked_on, 'לא עונה');
+    assert.equal(eli.stuck_since, eli.last_seen_at, 'stuck since the last ping answered');
 
     clock.advance(2 * 60_000);
     assert.equal((await hq.watchdog.sweep())['eli-1'], 'stuck');

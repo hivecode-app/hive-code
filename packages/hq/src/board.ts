@@ -14,6 +14,8 @@ export interface BoardEntry {
   /** Its team's tone (org.yaml), for a task worker its project's; null = none set, the app draws slate. */
   tone: Tone | null;
   status: DerivedStatus; status_symbol: string; blocked_on: string | null; live: boolean;
+  /** Stuck: since when (ms), its last event or the last ping it answered; null otherwise. The app says "תקועה 40 דקות". */
+  stuck_since: number | null;
   /** machine: where it runs, this machine's hostname or a node's name (nodes.ts). */
   shift: { id: string; state: string; started_at: number; last_event_at: number | null; in_turn: boolean; machine: string } | null;
   task: { id: number; ref: string | null; title: string; state: string } | null;
@@ -28,17 +30,19 @@ export interface BoardEntry {
 
 export function deriveStatus(i: IdentityRow, s: ShiftRow | undefined, f: {
   openAsks: number; taskState: string | null; now: number; hadEarlierShift: boolean; unresponsiveAfterMs?: number; tz?: string;
-}): { status: DerivedStatus; blocked_on: string | null } {
+}): { status: DerivedStatus; blocked_on: string | null; stuck_since?: number } {
   if (i.lifecycle === 'ephemeral' && f.taskState === 'done') return { status: 'done', blocked_on: null };
   if (f.openAsks > 0) return { status: 'waiting_for_you', blocked_on: null };
   if (s) {
     if (s.rate_limited_until && s.rate_limited_until > f.now) {
       return { status: 'blocked', blocked_on: `מכסה, חוזר ב-${hhmm(s.rate_limited_until, f.tz ?? FALLBACK_TIME_ZONE)}` };
     }
-    if (s.stuck_since) return { status: 'stuck', blocked_on: null };
+    // Stuck since its last sign of progress, not since the watchdog noticed (that is stuckAfterMs later).
+    if (s.stuck_since) return { status: 'stuck', blocked_on: null, stuck_since: s.last_event_at ?? s.started_at };
     // Unresponsive ≠ dead (bet 4): claude stopped answering control pings. Shown as `warning` with the reason.
-    if (s.state === 'live' && f.unresponsiveAfterMs && f.now - Math.max(s.last_ping_ok_at ?? 0, s.started_at) > f.unresponsiveAfterMs) {
-      return { status: 'stuck', blocked_on: 'לא עונה' };
+    const answered = Math.max(s.last_ping_ok_at ?? 0, s.started_at);
+    if (s.state === 'live' && f.unresponsiveAfterMs && f.now - answered > f.unresponsiveAfterMs) {
+      return { status: 'stuck', blocked_on: 'לא עונה', stuck_since: answered };
     }
     if (s.state === 'starting') return { status: f.hadEarlierShift ? 'restarting' : 'working', blocked_on: null };
     // Between turns but with background work of its own running (CI, a build): working, not "פנוי" (#175).
@@ -74,7 +78,7 @@ export function board(store: Store, unresponsiveAfterMs?: number, tz?: string,
       id: i.id, name: i.name, title: i.title, symbol: i.symbol, team: i.team, team_kind: i.team_kind, project: i.project,
       reports_to: i.reports_to, lifecycle: i.lifecycle,
       tone: (i.team ? tones.teams.get(i.team) : undefined) ?? (i.project ? tones.projects.get(i.project) : undefined) ?? null,
-      status: d.status, status_symbol: STATUS_SYMBOL[d.status], blocked_on: d.blocked_on,
+      status: d.status, status_symbol: STATUS_SYMBOL[d.status], blocked_on: d.blocked_on, stuck_since: d.stuck_since ?? null,
       live: !!live,
       shift: latest ? { id: latest.id, state: latest.state, started_at: latest.started_at, last_event_at: latest.last_event_at, in_turn: latest.in_turn === 1, machine: !latest.machine || latest.machine === 'local' ? hostname() : latest.machine } : null,
       task: task ?? null, current_task: (currentQ.get(i.id) as BoardEntry['current_task'] | undefined) ?? null,

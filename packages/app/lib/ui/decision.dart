@@ -80,8 +80,8 @@ class DecisionKeys extends StatelessWidget {
   /// The buttons of a GO: "אישור" and "לא עכשיו".
   /// Without [onNotNow] (no inbox item behind the card to put off), "אישור" alone.
   static List<DecisionButton> go({required VoidCallback onGo, VoidCallback? onNotNow}) => [
-        DecisionButton(UiCopy.text(295), primary: true, onTap: onGo),
-        if (onNotNow != null) DecisionButton(UiCopy.text(508), onTap: onNotNow),
+        DecisionButton(UiCopy.copy.approve2, primary: true, onTap: onGo),
+        if (onNotNow != null) DecisionButton(UiCopy.copy.notNow2, onTap: onNotNow),
       ];
 
   /// The buttons of a question: one per option, then "תשובה אחרת" ("תשובה" when it has no options).
@@ -92,7 +92,7 @@ class DecisionKeys extends StatelessWidget {
     final opts = options.where((o) => o.id != 'q' && o.id != 'not_now').toList();
     return [
       for (final (i, o) in opts.indexed) DecisionButton(o.label, primary: o.primary, hint: keys && i < 4 ? '${i + 1}' : null, onTap: () => onPick(o)),
-      if (other || opts.isEmpty) DecisionButton(options.isEmpty ? UiCopy.text(558) : UiCopy.text(559), onTap: onOther),
+      if (other || opts.isEmpty) DecisionButton(options.isEmpty ? UiCopy.copy.answer3 : UiCopy.copy.otherAnswer, onTap: onOther),
     ];
   }
 }
@@ -141,7 +141,7 @@ class DecisionLine extends StatelessWidget {
                 constraints: const BoxConstraints(minHeight: 48, minWidth: 64),
                 alignment: Alignment.center,
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Text(UiCopy.text(18), style: TextStyle(fontFamily: kFont, fontSize: 14, fontWeight: FontWeight.w700, color: p.accent)),
+                child: Text(UiCopy.copy.cancel, style: TextStyle(fontFamily: kFont, fontSize: 14, fontWeight: FontWeight.w700, color: p.accent)),
               ),
             ),
           ),
@@ -152,22 +152,22 @@ class DecisionLine extends StatelessWidget {
 
 /// How a request reads once it is no longer open: its icon and words (#258).
 ({String icon, String text}) closedLine(AskCard card, {required bool superseded, bool notNow = false}) {
-  if (superseded) return (icon: 'history', text: UiCopy.text(560));
-  if (notNow) return (icon: 'schedule', text: UiCopy.text(508));
+  if (superseded) return (icon: 'history', text: UiCopy.copy.replacedNewRequest);
+  if (notNow) return (icon: 'schedule', text: UiCopy.copy.notNow2);
   if (card.state == AskState.decidedByManager) {
     final n = companyNames;
-    return (icon: 'check_circle', text: UiCopy.text(563, [n.manager, n.m(UiCopy.text(561), UiCopy.text(562)), card.answer]));
+    return (icon: 'check_circle', text: UiCopy.copy.yourBehalf(n.manager, n.m(UiCopy.copy.decided, UiCopy.copy.decided2), card.answer ?? ''));
   }
-  final at = card.answeredAt == null ? '' : UiCopy.text(564, [hm(card.answeredAt!)]);
+  final at = card.answeredAt == null ? '' : UiCopy.copy.at(hm(card.answeredAt!));
   final a = card.answer;
-  if (a == null) return (icon: 'check_circle', text: card is GoCard ? UiCopy.text(301) : UiCopy.text(565));
-  if (card is GoCard && a == 'GO') return (icon: 'check_circle', text: UiCopy.text(566, [at]));
-  if (a == InputCopy.v7 || a == 'not_now') return (icon: 'do_not_disturb_on', text: UiCopy.text(567, [at]));
-  return (icon: 'check_circle', text: UiCopy.text(568, [at, a]));
+  if (a == null) return (icon: 'check_circle', text: card is GoCard ? UiCopy.copy.requestClosed : UiCopy.copy.questionClosed);
+  if (card is GoCard && a == 'GO') return (icon: 'check_circle', text: UiCopy.copy.approved2(at));
+  if (a == InputCopy.v7 || a == 'not_now') return (icon: 'do_not_disturb_on', text: UiCopy.copy.deferred2(at));
+  return (icon: 'check_circle', text: UiCopy.copy.answered2(at, a));
 }
 
 /// The line while it can still be taken back: "אישרת · 02:14".
-String pendingLine(PendingAnswer p) => '${p.line ?? UiCopy.text(569)} · ${hm(p.at)}';
+String pendingLine(PendingAnswer p) => '${p.line ?? UiCopy.copy.sent} · ${hm(p.at)}';
 
 /// Its icon: `close` for "לא עובד" (#219), `do_not_disturb_on` for "לא רלוונטי" (#297), `check_circle` for the rest.
 String pendingIcon(PendingAnswer p) => switch (p.answerId) {

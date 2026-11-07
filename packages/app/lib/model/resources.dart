@@ -15,11 +15,11 @@ class Reading {
 
 /// The parts of a machine's reading hq could not take, in his words (`unmeasured`).
 Map<String, String> get kPartWords => {
-  'memory': UiCopy.text(643),
-  'disk': UiCopy.text(646),
-  'cgroups': UiCopy.text(950),
+  'memory': UiCopy.copy.memory,
+  'disk': UiCopy.copy.disk,
+  'cgroups': UiCopy.copy.detailsProject,
   'docker': 'docker',
-  'docker-df': UiCopy.text(951),
+  'docker-df': UiCopy.copy.dockerStorage,
 };
 
 class Holder {
@@ -37,7 +37,7 @@ class Holder {
     final mem = _num(j['mem_mb']);
     if (mem == null) return null;
     final project = _str(j['project']);
-    return Holder(project: project, name: _str(j['name']) ?? (project ?? UiCopy.text(650)), memMb: mem.toDouble(), cpuPct: _num(j['cpu_pct'])?.toDouble(), count: _num(j['count'])?.toInt() ?? 1);
+    return Holder(project: project, name: _str(j['name']) ?? (project ?? UiCopy.copy.unknown), memMb: mem.toDouble(), cpuPct: _num(j['cpu_pct'])?.toDouble(), count: _num(j['count'])?.toInt() ?? 1);
   }
 }
 
@@ -52,9 +52,9 @@ class Unidentified {
   String get readable {
     var last = name.split('/').last.replaceAll(RegExp(r'\.(service|scope|slice)$'), '');
     last = last.replaceAll(RegExp(r'\s*\(.*\)$'), '');
-    if (RegExp(r'^docker-[0-9a-f]{12,}$').hasMatch(last)) return UiCopy.text(952);
-    if (last.toLowerCase().contains('gradle')) return UiCopy.text(953);
-    if (last.toLowerCase().contains('kotlin')) return UiCopy.text(954);
+    if (RegExp(r'^docker-[0-9a-f]{12,}$').hasMatch(last)) return UiCopy.copy.dockerContainer;
+    if (last.toLowerCase().contains('gradle')) return UiCopy.copy.gradleBuild;
+    if (last.toLowerCase().contains('kotlin')) return UiCopy.copy.kotlinBuild;
     return last.isEmpty ? name : last;
   }
 
@@ -121,7 +121,7 @@ class MachineRes {
     final used = memUsedMb, total = memTotalMb;
     if (used == null || total == null || total <= 0) return null;
     final f = used / total;
-    return f >= 0.9 ?  Reading(UiCopy.text(955), warn: true) : f >= 0.75 ?  Reading(UiCopy.text(956)) :  Reading(UiCopy.text(957));
+    return f >= 0.9 ?  Reading(UiCopy.copy.almostFull, warn: true) : f >= 0.75 ?  Reading(UiCopy.copy.busy) :  Reading(UiCopy.copy.normal);
   }
 
   /// CPU: the load of the last minute per core. Under half a core each is quiet; over one, work waits for a core.
@@ -129,18 +129,18 @@ class MachineRes {
     final l = load1, c = cpus;
     if (l == null || c == null || c <= 0) return null;
     final f = l / c;
-    return f >= 1 ?  Reading(UiCopy.text(958), warn: true) : f >= 0.5 ?  Reading(UiCopy.text(956)) :  Reading(UiCopy.text(115));
+    return f >= 1 ?  Reading(UiCopy.copy.veryBusy, warn: true) : f >= 0.5 ?  Reading(UiCopy.copy.busy) :  Reading(UiCopy.copy.quiet);
   }
 
   /// Disk: hq cleans at 85% and writes to him at 92%.
   Reading? get disk {
     final p = diskPct;
     if (p == null) return null;
-    return p >= 92 ?  Reading(UiCopy.text(955), warn: true) : p >= 85 ?  Reading(UiCopy.text(959), warn: true) :  Reading(UiCopy.text(957));
+    return p >= 92 ?  Reading(UiCopy.copy.almostFull, warn: true) : p >= 85 ?  Reading(UiCopy.copy.fillingUp, warn: true) :  Reading(UiCopy.copy.normal);
   }
 
   /// Why there is no reading, in a sentence: hq's own Hebrew when it has one, else that the machine did not answer.
-  String get errorWords => error != null && RegExp(InputCopy.v31).hasMatch(error!) ? error! : UiCopy.text(960);
+  String get errorWords => error != null && RegExp(InputCopy.v31).hasMatch(error!) ? error! : UiCopy.copy.serverDidNotRespond;
 
   /// The parts hq could not read, as words: they are said, never left out.
   List<String> get unmeasuredWords => [for (final p in unmeasured) if (p != 'memory' && p != 'disk') kPartWords[p] ?? p];

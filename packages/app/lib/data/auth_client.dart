@@ -92,12 +92,12 @@ class AuthClient {
   /// Is there an hq at [baseUrl]? Its open GET /health answers JSON with the store's schema (503 too:
   /// hq is there, only its scheduler is late).
   Future<void> probe() async {
-    final missing = AuthFailure(UiCopy.text(762));
+    final missing = AuthFailure(UiCopy.copy.noCompanyServer);
     final http.Response r;
     try {
       r = await _http.get(Uri.parse('$baseUrl/health')).timeout(const Duration(seconds: 10));
     } catch (_) {
-      throw  AuthFailure(UiCopy.text(763));
+      throw  AuthFailure(UiCopy.copy.noConnectionThis);
     }
     try {
       final j = jsonDecode(utf8.decode(r.bodyBytes));
@@ -115,10 +115,10 @@ class AuthClient {
               headers: {'content-type': 'application/json', if (token != null) 'authorization': 'Bearer $token'}, body: jsonEncode(body))
           .timeout(const Duration(seconds: 15));
     } catch (_) {
-      throw  AuthFailure(UiCopy.text(764));
+      throw  AuthFailure(UiCopy.copy.noConnectionServerTry);
     }
     if (r.statusCode == 200) return (jsonDecode(utf8.decode(r.bodyBytes)) as Map).cast<String, dynamic>();
-    if (r.statusCode == 429) throw  AuthFailure(UiCopy.text(765));
+    if (r.statusCode == 429) throw  AuthFailure(UiCopy.copy.tooManyIncorrect);
     final err = (() {
       try {
         return (jsonDecode(r.body) as Map)['error'] as String? ?? '';
@@ -126,8 +126,8 @@ class AuthClient {
         return '';
       }
     })();
-    if (err.contains('pairing code')) throw  AuthFailure(UiCopy.text(766));
-    if (err.contains('unknown passkey')) throw  AuthFailure(UiCopy.text(767));
+    if (err.contains('pairing code')) throw  AuthFailure(UiCopy.copy.thisCodeIncorrect);
+    if (err.contains('unknown passkey')) throw  AuthFailure(UiCopy.copy.thisPasskeyNot);
     throw AuthFailure(otherwise, fault: true);
   }
 
@@ -136,11 +136,11 @@ class AuthClient {
     if (r.json != null) return r.json!;
     throw AuthFailure(
         switch (r.error!) {
-          PasskeyError.cancelled => UiCopy.text(768),
-          PasskeyError.exists => UiCopy.text(769),
-          PasskeyError.none => UiCopy.text(770),
-          PasskeyError.unsupported => UiCopy.text(771),
-          PasskeyError.failed => UiCopy.text(772),
+          PasskeyError.cancelled => UiCopy.copy.signCancelled,
+          PasskeyError.exists => UiCopy.copy.companyPasskeyAlready,
+          PasskeyError.none => UiCopy.copy.noCompanyPasskey,
+          PasskeyError.unsupported => UiCopy.copy.thisDeviceDoes,
+          PasskeyError.failed => UiCopy.copy.passkeyVerificationFailed,
         },
         code: r.error);
   }
@@ -171,9 +171,9 @@ class AuthClient {
     try {
       r = await _http.get(Uri.parse('$baseUrl/api/devices'), headers: {'authorization': 'Bearer $token'}).timeout(const Duration(seconds: 10));
     } catch (_) {
-      throw  AuthFailure(UiCopy.text(764));
+      throw  AuthFailure(UiCopy.copy.noConnectionServerTry);
     }
-    if (r.statusCode != 200) throw  AuthFailure(UiCopy.text(773), fault: true);
+    if (r.statusCode != 200) throw  AuthFailure(UiCopy.copy.serverDidNot, fault: true);
     final j = (jsonDecode(utf8.decode(r.bodyBytes)) as Map).cast<String, dynamic>();
     return (
       devices: [for (final d in (j['devices'] as List).cast<Map<String, dynamic>>()) DeviceInfo.fromJson(d)],
@@ -182,11 +182,11 @@ class AuthClient {
   }
 
   Future<PairCode> newPairCode(String token) async =>
-      PairCode.fromJson(await _post('/api/devices/pair', {}, token: token, otherwise: UiCopy.text(774)));
+      PairCode.fromJson(await _post('/api/devices/pair', {}, token: token, otherwise: UiCopy.copy.serverCouldNot));
   Future<void> revokeDevice(String token, String id) =>
-      _post('/api/devices/${Uri.encodeComponent(id)}/revoke', {}, token: token, otherwise: UiCopy.text(775));
+      _post('/api/devices/${Uri.encodeComponent(id)}/revoke', {}, token: token, otherwise: UiCopy.copy.revocationFailedDevice);
   Future<void> revokePasskey(String token, String id) =>
-      _post('/api/passkeys/${Uri.encodeComponent(id)}/revoke', {}, token: token, otherwise: UiCopy.text(776));
+      _post('/api/passkeys/${Uri.encodeComponent(id)}/revoke', {}, token: token, otherwise: UiCopy.copy.removalFailedPasskey);
 
   void close() {
     if (_ownsHttp) _http.close();
@@ -197,12 +197,12 @@ class AuthClient {
 String defaultDeviceName() {
   if (kIsWeb) {
     return switch (defaultTargetPlatform) {
-      TargetPlatform.android => UiCopy.text(777),
-      TargetPlatform.iOS => UiCopy.text(778),
-      TargetPlatform.macOS => UiCopy.text(779),
-      TargetPlatform.windows => UiCopy.text(780),
-      _ => UiCopy.text(781),
+      TargetPlatform.android => UiCopy.copy.mobileBrowser,
+      TargetPlatform.iOS => UiCopy.copy.iphoneBrowser,
+      TargetPlatform.macOS => UiCopy.copy.macBrowser,
+      TargetPlatform.windows => UiCopy.copy.windowsBrowser,
+      _ => UiCopy.copy.desktopBrowser,
     };
   }
-  return defaultTargetPlatform == TargetPlatform.android ? UiCopy.text(782) : UiCopy.text(783);
+  return defaultTargetPlatform == TargetPlatform.android ? UiCopy.copy.androidApp : UiCopy.copy.device;
 }

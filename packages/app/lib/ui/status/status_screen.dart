@@ -34,22 +34,22 @@ class StatusScreen extends StatelessWidget {
     final since = store.statusSeenAt ?? dayStart(now);
     final done = [for (final t in d.tickets) if (t.doneAt != null && t.assigneeId != null && t.doneAt!.isAfter(since)) t]..sort((a, b) => b.doneAt!.compareTo(a.doneAt!));
     return Column(children: [
-      TopBar(title: UiCopy.text(738), showLink: true, actions: [
-        IBtn('dns', tip: UiCopy.text(636), onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ResourcesPage()))),
-        IBtn('hub', tip: UiCopy.text(424), onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CompanyMapPage()))),
+      TopBar(title: UiCopy.copy.status2, showLink: true, actions: [
+        IBtn('dns', tip: UiCopy.copy.resources2, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ResourcesPage()))),
+        IBtn('hub', tip: UiCopy.copy.companyMap2, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CompanyMapPage()))),
       ]),
       const SystemBar(),
       Expanded(
         child: ListView(padding: EdgeInsets.zero, children: [
           // "בעבודה ובתור" (#128): every open task, wherever it runs, queued ones too.
-          Section(UiCopy.text(742), count: d.openTasks.isEmpty ? null : '${d.openTasks.length}', top: 8),
+          Section(UiCopy.copy.runningQueued, count: d.openTasks.isEmpty ? null : '${d.openTasks.length}', top: 8),
           ListBlock(children: [
-            if (d.openTasks.isEmpty)  _Quiet(icon: 'radio_button_unchecked', text: UiCopy.text(142))
+            if (d.openTasks.isEmpty)  _Quiet(icon: 'radio_button_unchecked', text: UiCopy.copy.noOpenTasks)
             else TasksBlock(tasks: d.openTasks, now: now),
           ]),
-          Section(UiCopy.text(97), count: waiting.isEmpty ? null : '${waiting.length}'),
+          Section(UiCopy.copy.needsYou2, count: waiting.isEmpty ? null : '${waiting.length}'),
           ListBlock(children: [
-            if (waiting.isEmpty)  _Quiet(icon: 'check_circle', text: UiCopy.text(743))
+            if (waiting.isEmpty)  _Quiet(icon: 'check_circle', text: UiCopy.copy.nothingNeedsYou4)
             else for (final w in waiting) _WaitLine(item: w),
           ]),
           // "מה לבדוק" (#108): only when something waits on him. A merged task waiting for its deploy is the lead's to
@@ -63,22 +63,22 @@ class StatusScreen extends StatelessWidget {
             child: checks.isEmpty
                 ? const SizedBox(key: ValueKey('awaiting-none'), width: double.infinity)
                 : Column(key: const ValueKey('awaiting'), children: [
-                    Section(UiCopy.text(744), count: '${checks.length}'),
+                    Section(UiCopy.copy.whatCheck, count: '${checks.length}'),
                     ListBlock(children: [AwaitingBlock(data: AwaitingData(items: [for (final t in checks) AwaitingItem.of(t)]), now: now)]),
                   ]),
           ),
-          Section(UiCopy.text(745), count: UiCopy.text(36, [_since(since, now)])),
+          Section(UiCopy.copy.sinceYourLast, count: UiCopy.copy.since(_since(since, now))),
           ListBlock(inset: 16, children: [
-            if (done.isEmpty)  _Quiet(icon: 'radio_button_unchecked', text: UiCopy.text(746))
+            if (done.isEmpty)  _Quiet(icon: 'radio_button_unchecked', text: UiCopy.copy.nothingCompletedSince)
             else for (final t in done.take(kDoneShown)) _DoneLine(t: t),
           ]),
           if (done.length > kDoneShown)
-            MoreRow(icon: 'history', bold: UiCopy.text(625, [done.length - kDoneShown]), rest: UiCopy.text(747), top: false, onTap: () {
+            MoreRow(icon: 'history', bold: UiCopy.copy.more5(done.length - kDoneShown), rest: UiCopy.copy.tasks4, top: false, onTap: () {
               // This screen is pushed over settings: back to the tabs first, so the tasks tab is what he sees.
               Navigator.of(context).popUntil((r) => r.isFirst);
               NavScope.read(context).go(AppTab.tasks);
             }),
-           Section(UiCopy.text(748)),
+           Section(UiCopy.copy.projectsNow),
           ListBlock(inset: 16, children: [for (final proj in d.projects.where((x) => x.active)) _ProjectNow(proj: proj)]),
           const SizedBox(height: 24),
         ]),
@@ -89,7 +89,7 @@ class StatusScreen extends StatelessWidget {
   static String _since(DateTime since, DateTime now) {
     final ago = daysAgo(since, now);
     if (ago <= 0) return hm(since);
-    return ago == 1 ? UiCopy.text(391, [hm(since)]) : dm(since);
+    return ago == 1 ? UiCopy.copy.yesterday4(hm(since)) : dm(since);
   }
 }
 
@@ -205,7 +205,7 @@ class _ProjectNow extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Expanded(child: Rich(proj.name, style: T.name.copyWith(color: p.text))),
-            if (queued > 0) Text(UiCopy.text(99, [queued]), style: T.small.copyWith(color: p.text2)),
+            if (queued > 0) Text(UiCopy.copy.queued2(queued), style: T.small.copyWith(color: p.text2)),
           ]),
           if (running.isEmpty)
             Padding(
@@ -213,7 +213,7 @@ class _ProjectNow extends StatelessWidget {
               child: Row(children: [
                 Ic('bedtime', size: 16, fill: true, color: p.text2),
                 const SizedBox(width: 4),
-                Text(UiCopy.text(749), style: T.secondary.copyWith(color: p.text2)),
+                Text(UiCopy.copy.quietNoTask, style: T.secondary.copyWith(color: p.text2)),
               ]),
             )
           else

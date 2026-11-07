@@ -128,7 +128,7 @@ void main() {
 
   test('faces hold 3:1 against the background in every tone, light and dark, and the letter reads on the fill', () {
     for (final b in [Brightness.light, Brightness.dark]) {
-      final p = Palette.of(b);
+      final p = productPalette(b);
       for (final tone in [...kTones.keys, null]) {
         expect(contrast(faceRing(p, tone), p.bg), greaterThanOrEqualTo(kFaceContrast), reason: '$tone on ${b.name}');
         expect(contrast(tone == null ? p.text : p.identity(tone).$2, faceFill(p, tone)), greaterThanOrEqualTo(4.5), reason: 'the letter on $tone, ${b.name}');

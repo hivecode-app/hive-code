@@ -13,9 +13,9 @@ import 'parts.dart';
 /// "מאז 19:00", "מאז אתמול 22:10", "מאז 18/10".
 String sinceLabel(DateTime since, DateTime now) {
   final ago = daysAgo(since, now);
-  if (ago <= 0) return UiCopy.text(121, [hm(since)]);
-  if (ago == 1) return UiCopy.text(122, [hm(since)]);
-  return UiCopy.text(121, [dm(since)]);
+  if (ago <= 0) return UiCopy.copy.since4(hm(since));
+  if (ago == 1) return UiCopy.copy.sinceYesterday2(hm(since));
+  return UiCopy.copy.since4(dm(since));
 }
 
 /// Where a finished line leads: the board's task when a composer named it, else the worker who did it, or
@@ -82,8 +82,8 @@ class _Since extends StatelessWidget {
     final second = T.small.copyWith(color: p.text2);
     final head = Semantics(
       button: true,
-      label: '$label, ${done.length == 1 ? UiCopy.text(123) : UiCopy.text(124, [done.length])}',
-      hint: open ? UiCopy.text(125) : UiCopy.text(126),
+      label: '$label, ${done.length == 1 ? UiCopy.copy.oneItemDone : UiCopy.copy.itemsDone(done.length)}',
+      hint: open ? UiCopy.copy.collapse : UiCopy.copy.open2,
       excludeSemantics: true,
       child: InkWell(
         onTap: onTap,
@@ -107,10 +107,10 @@ class _Since extends StatelessWidget {
                     duration: kBlockMotion,
                     layoutBuilder: (cur, prev) => Stack(alignment: AlignmentDirectional.centerStart, children: [...prev, ?cur]),
                     child: Row(key: ValueKey(open), crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: open
-                        ? [Expanded(child: Text(done.length == 1 ? UiCopy.text(127) : UiCopy.text(128, [done.length]), maxLines: 1, style: second))]
+                        ? [Expanded(child: Text(done.length == 1 ? UiCopy.copy.oneItemDone2 : UiCopy.copy.itemsDone2(done.length), maxLines: 1, style: second))]
                         : [
                             Expanded(child: Rich(done.first.text, auto: true, maxLines: 1, style: second)),
-                            if (more > 0) ...[const SizedBox(width: 8), Text(UiCopy.text(90, [more]), style: second.copyWith(fontFeatures: kTabular))],
+                            if (more > 0) ...[const SizedBox(width: 8), Text(UiCopy.copy.more2(more), style: second.copyWith(fontFeatures: kTabular))],
                           ]),
                   ),
                 ]),

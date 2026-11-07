@@ -70,25 +70,12 @@ String statusIcon(WorkerStatus s) => switch (s) {
       WorkerStatus.done => 'check_circle',
     };
 
-/// The status word follows the worker's grammatical gender (APP-SPEC §6.2).
+/// The status word (APP-SPEC §6.2). [g] is the worker's grammatical gender, which the ARB words do not split yet.
 String statusWord(WorkerStatus s, Gender g) {
-  if (!UiCopy.legacy) {
-    final l = UiCopy.copy;
-    return switch (s) { WorkerStatus.working => l.working, WorkerStatus.resting => l.resting,
-      WorkerStatus.free => l.available, WorkerStatus.waiting => l.waiting, WorkerStatus.blocked => l.blocked,
-      WorkerStatus.stuck => l.stuck, WorkerStatus.restarting => l.restarting, WorkerStatus.done => l.done };
-  }
-  final f = g == Gender.f;
-  return switch (s) {
-    WorkerStatus.free => f ? UiCopy.text(397) : UiCopy.text(398),
-    WorkerStatus.working => f ? UiCopy.text(85) : UiCopy.text(86),
-    WorkerStatus.waiting => UiCopy.text(97),
-    WorkerStatus.blocked => f ? UiCopy.text(136) : UiCopy.text(399),
-    WorkerStatus.stuck => f ? UiCopy.text(400) : UiCopy.text(401),
-    WorkerStatus.restarting => f ? UiCopy.text(402) : UiCopy.text(403),
-    WorkerStatus.resting => f ? UiCopy.text(404) : UiCopy.text(405),
-    WorkerStatus.done => UiCopy.text(406),
-  };
+  final l = UiCopy.copy;
+  return switch (s) { WorkerStatus.working => l.working, WorkerStatus.resting => l.resting,
+    WorkerStatus.free => l.available, WorkerStatus.waiting => l.waiting, WorkerStatus.blocked => l.blocked,
+    WorkerStatus.stuck => l.stuck, WorkerStatus.restarting => l.restarting, WorkerStatus.done => l.done };
 }
 
 /// Statuses that need the owner read in bold (`.st.b`).
@@ -532,7 +519,7 @@ class UndoLine extends StatelessWidget {
             onTap: onCancel,
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Text(UiCopy.text(18), style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+              child: Text(UiCopy.copy.cancel, style: T.secondary.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
             ),
           ),
         ]),
@@ -781,7 +768,7 @@ class SentNote extends StatelessWidget {
 
   /// Part of a line of text (" · נשלח לטיפול") rather than a line of its own.
   final bool inline;
-  static String get text => UiCopy.text(407);
+  static String get text => UiCopy.copy.reportedRepair;
 
   @override
   Widget build(BuildContext context) {
@@ -862,7 +849,7 @@ class _LoadingWatchState extends State<LoadingWatch> {
   void initState() {
     super.initState();
     _timer = Timer(widget.after, () {
-      reportShown('stuck', UiCopy.text(408, [widget.after.inSeconds]), screen: widget.screen);
+      reportShown('stuck', UiCopy.copy.thisScreenHas(widget.after.inSeconds), screen: widget.screen);
       if (mounted) setState(() => stuck = true);
     });
   }

@@ -39,7 +39,7 @@ void main() {
     UiCopy.configure('he'); expect(error.text, contains('שגיאה'));
   });
   test('command and dictation errors retain their identity and change their copy', () {
-    const command = CommandResult.localized(882);
+    final command = CommandResult.localized(() => UiCopy.copy.noConnectionServerAction);
     final speech = kNoSpeech;
     expect(command.error, startsWith('No connection'));
     expect(speech.message, contains('No speech'));
@@ -74,7 +74,7 @@ void main() {
       final described = ToolLine(icon: 'person', label: 'Inspect', name: 'Agent', call: ToolCall(name: 'Agent', started: DateTime(2026), input: {'description': 'Inspect / בדיקה'}));
       expect(toolHasAgentDescription(described), isTrue);
       final incident = WaitItem(id: 'incident', kind: WaitKind.failure, sourceKind: 'incident', from: 'yoav', time: '', kicker: 'Incident', body: 'fault');
-      expect(HeadData.lineOf(incident).word, UiCopy.text(498));
+      expect(HeadData.lineOf(incident).word, UiCopy.copy.productionIssue);
     }
   });
   testWidgets('pending check icons and saved answer lines survive language changes', (tester) async {
