@@ -48,11 +48,6 @@ class _WorkSettingsScreenState extends State<WorkSettingsScreen> {
       if (mounted) setState(() { draft = Map.of(confirmed!); error = true; });
     } finally { if (mounted) setState(() => saving = false); }
   }
-  Future<void> time(String key, String label) async {
-    final parts = (draft![key] as String).split(':').map(int.parse).toList();
-    final result = await showTimePicker(context: context, helpText: label, initialTime: TimeOfDay(hour: parts[0], minute: parts[1]));
-    if (result != null && mounted) setState(() { saved = false; draft![key] = '${result.hour.toString().padLeft(2, '0')}:${result.minute.toString().padLeft(2, '0')}'; });
-  }
   @override
   void dispose() { if (widget.client == null) client?.close(); super.dispose(); }
   @override
@@ -69,11 +64,6 @@ class _WorkSettingsScreenState extends State<WorkSettingsScreen> {
           Semantics(liveRegion: true, child: Text('${draft!['parallel']}')),
           IconButton(tooltip: l.workIncreaseParallel, onPressed: saving || draft!['parallel'] == 32 ? null : () => setState(() { draft!['parallel']++; saved = false; }), icon: const Ic('add')),
         ]),
-        SwitchListTile(contentPadding: EdgeInsets.zero, title: Text(l.workNight), subtitle: Text(l.workNightHint), value: draft!['nightEnabled'] as bool, onChanged: saving ? null : (v) => setState(() { draft!['nightEnabled'] = v; saved = false; })),
-        if (draft!['nightEnabled'] == true) ...[
-          ListTile(contentPadding: EdgeInsets.zero, title: Text(l.workFrom), subtitle: Text(draft!['nightStart'] as String), onTap: saving ? null : () => time('nightStart', l.workFrom)),
-          ListTile(contentPadding: EdgeInsets.zero, title: Text(l.workUntil), subtitle: Text(draft!['nightEnd'] as String), onTap: saving ? null : () => time('nightEnd', l.workUntil)),
-        ],
         SwitchListTile(key: const Key('auto-accounts'), contentPadding: EdgeInsets.zero, title: Text(l.workAutoAccounts), value: draft!['autoAccounts'] as bool, onChanged: saving ? null : (v) => setState(() { draft!['autoAccounts'] = v; saved = false; })),
         Text(l.workContinueLimit), const SizedBox(height: 20),
         FilledButton(onPressed: saving ? null : save, child: saving ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator()) : Text(l.workSave)),

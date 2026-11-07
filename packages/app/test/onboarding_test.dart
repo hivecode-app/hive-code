@@ -18,7 +18,8 @@ class SetupApi {
   int starts = 0;
   bool reposEmpty = false, reposFail = false;
   final calls = <String>[];
-  final settings = {'parallel': 2, 'nightEnabled': true, 'nightStart': '23:00', 'nightEnd': '07:00', 'autoAccounts': false};
+  Map<String, dynamic>? savedSettings;
+  final settings = <String, dynamic>{'parallel': 2, 'autoAccounts': false};
   late final client = ProductClient(const Session('https://company.example/hq', 'device'), httpClient: MockClient((r) async {
     final path = r.url.path.replaceFirst('/hq', '');
     calls.add('${r.method} $path');
@@ -31,7 +32,9 @@ class SetupApi {
     }
     if (path == '/api/setup/start') starts++;
     if (path == '/api/settings/work') {
+      if (r.method == 'POST') savedSettings = jsonDecode(r.body) as Map<String, dynamic>;
       if (r.method == 'POST' && failSave) return http.Response('{}', 503);
+      if (r.method == 'POST') settings.addAll(savedSettings!);
       value = {'settings': settings};
     }
     return http.Response(jsonEncode(value), 200);
@@ -87,6 +90,27 @@ void main() {
     expect(find.text('Existing company'), findsOneWidget);
     expect(find.byKey(const Key('setup-consent')), findsNothing);
   });
+  for (final language in ['en', 'he']) {
+    testWidgets('work settings save capacity and accounts without a night schedule ($language)', (tester) async {
+      final api = SetupApi(); addTearDown(api.client.close);
+      await productApp(tester, language: language, home: WorkSettingsScreen(client: api.client));
+      expect(find.byType(SwitchListTile), findsOneWidget);
+      expect(find.text(language == 'en' ? 'Scheduled night work' : 'עבודת לילה מתוזמנת'), findsNothing);
+      expect(find.text('23:00'), findsNothing);
+      expect(find.text('07:00'), findsNothing);
+      await tester.tap(find.byTooltip(language == 'en' ? 'More workers in parallel' : 'הגדלת מספר העובדים במקביל'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('auto-accounts')));
+      await tester.pumpAndSettle();
+      final save = find.text(language == 'en' ? 'Save work settings' : 'שמירת הגדרות העבודה');
+      await tester.ensureVisible(save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(api.savedSettings, {'parallel': 3, 'autoAccounts': true});
+      expect(find.text(language == 'en' ? 'Work settings saved' : 'הגדרות העבודה נשמרו'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
   testWidgets('work settings failure restores the confirmed value and reports failure', (tester) async {
     final api = SetupApi()..failSave = true; addTearDown(api.client.close);
     await productApp(tester, home: WorkSettingsScreen(client: api.client));

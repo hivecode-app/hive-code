@@ -9,7 +9,6 @@ import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
 import type { Caller } from './auth.ts';
 import { AuthError } from './auth.ts';
-import { hhmm, readTimeZone, nextLocal } from './timezone.ts';
 import { usage, sufficientUntil } from './usage.ts';
 
 export const CONSENT_VERSION = '2026-11-04';
@@ -47,21 +46,23 @@ export async function repositories(page: number, run: SetupCommand = setupComman
   return { repos, more: rows.length === 50, page };
 }
 
-export interface WorkSettings { parallel: number; nightEnabled: boolean; nightStart: string; nightEnd: string; autoAccounts: boolean }
+export interface WorkSettings { parallel: number; autoAccounts: boolean }
 export function workSettings(store: Store, cfg: HqConfig): WorkSettings {
   const saved = store.getMeta('work.settings');
-  if (saved) return JSON.parse(saved) as WorkSettings;
+  if (saved) {
+    const { parallel, autoAccounts } = JSON.parse(saved) as WorkSettings;
+    return { parallel, autoAccounts };
+  }
   const fresh = setupPending(cfg.companyDir);
-  return { parallel: cfg.capacity.maxSlots, nightEnabled: fresh, nightStart: '23:00', nightEnd: '07:00', autoAccounts: !fresh };
+  return { parallel: cfg.capacity.maxSlots, autoAccounts: !fresh };
 }
 export function saveWorkSettings(store: Store, cfg: HqConfig, body: Record<string, unknown>): WorkSettings {
   const v = { ...workSettings(store, cfg), ...body };
   if (!Number.isInteger(v.parallel) || v.parallel < 1 || v.parallel > 32 ||
-      typeof v.nightEnabled !== 'boolean' || typeof v.autoAccounts !== 'boolean' ||
-      !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(v.nightStart)) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(v.nightEnd)) || v.nightStart === v.nightEnd) {
+      typeof v.autoAccounts !== 'boolean') {
     throw new AuthError(400, 'invalid work settings');
   }
-  const value: WorkSettings = { parallel: v.parallel, nightEnabled: v.nightEnabled, nightStart: v.nightStart, nightEnd: v.nightEnd, autoAccounts: v.autoAccounts };
+  const value: WorkSettings = { parallel: v.parallel, autoAccounts: v.autoAccounts };
   store.setMeta('work.settings', JSON.stringify(value));
   applyWorkSettings(store, cfg);
   store.emit('settings.changed', null, value);
@@ -78,19 +79,10 @@ export function autoAccounts(store: Store): boolean {
   const saved = store.getMeta('work.settings');
   return saved ? (JSON.parse(saved) as WorkSettings).autoAccounts : true;
 }
-export async function scheduledNight(hq: Hq): Promise<void> {
-  if (setupPending(hq.cfg.companyDir)) return;
-  const v = workSettings(hq.store, hq.cfg);
-  if (!v.nightEnabled) return;
-  const tz = readTimeZone(hq.cfg.companyDir), now = hq.store.now(), time = hhmm(now, tz);
-  const inWindow = v.nightStart > v.nightEnd ? time >= v.nightStart || time < v.nightEnd : time >= v.nightStart && time < v.nightEnd;
-  // One automatic start per window, including across a restart or a manual early end.
-  const [h, m] = v.nightEnd.split(':').map(Number);
-  const until = nextLocal(now, h!, m!, tz);
-  if (inWindow && !hq.night.current() && hq.store.getMeta('night.scheduled_until') !== String(until)) {
-    hq.store.setMeta('night.scheduled_until', String(until));
-    await hq.night.start({ scope: null, note: null, until, by: 'owner' });
-  }
+// APK 2328 reads these fields after both loading and saving. Remove this response-only
+// compatibility shim after the new APK is deployed; these values never schedule work.
+function workSettingsResponse(settings: WorkSettings) {
+  return { settings: { ...settings, nightEnabled: false, nightStart: '23:00', nightEnd: '07:00' } };
 }
 
 type Context = { body: () => Promise<Record<string, unknown>>; caller: Caller; url: URL };
@@ -147,8 +139,8 @@ export function onboardingRoutes(hq: Hq, route: Route): void {
     hq.mailbox.tell({ to: hq.cfg.managerId, body: 'Begin company setup using skills/setup/SKILL.md and setup_repositories in org.yaml. Consent is recorded. Continue setup in this conversation, then demonstrate one task with a PR, independent review and owner approval. Never deploy.', msg_id: 'first-company-setup' });
     return { started: true, manager: hq.cfg.managerId };
   });
-  route('GET', '/api/settings/work', () => ({ settings: workSettings(hq.store, hq.cfg) }));
-  route('POST', '/api/settings/work', async ({ body }) => ({ settings: saveWorkSettings(hq.store, hq.cfg, await body()) }));
+  route('GET', '/api/settings/work', () => workSettingsResponse(workSettings(hq.store, hq.cfg)));
+  route('POST', '/api/settings/work', async ({ body }) => workSettingsResponse(saveWorkSettings(hq.store, hq.cfg, await body())));
   route('GET', '/api/usage/forecast', () => {
     const accounts = hq.accounts.capacity();
     const u = usage(hq.store, accounts.map(a => a.name), id => hq.mailbox.label(id));

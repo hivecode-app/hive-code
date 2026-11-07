@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { ORG_YAML, makeEnv } from './helpers.ts';
-import { CONSENT_VERSION, connectionStatus, repositories, workSettings, saveWorkSettings, scheduledNight } from '../src/onboarding.ts';
+import { CONSENT_VERSION, connectionStatus, repositories, workSettings } from '../src/onboarding.ts';
 import { sufficientUntil } from '../src/usage.ts';
 
 async function setupEnv(pending = true) {
@@ -53,8 +53,7 @@ test('existing company pairs directly; device and admin access required', async 
   try {
     assert.equal((await env.call('/api/setup')).value.pending, false);
     assert.equal((await env.call('/api/setup', undefined, 'bad')).status, 401);
-    assert.equal(workSettings(env.hq.store, env.cfg).nightEnabled, false);
-    assert.equal(workSettings(env.hq.store, env.cfg).autoAccounts, true);
+    assert.deepEqual(workSettings(env.hq.store, env.cfg), { parallel: env.cfg.capacity.maxSlots, autoAccounts: true });
     assert.equal((await env.call('/api/setup/projects', { selected: ['owner/repo'] })).status, 409);
   } finally { await env.cleanup(); }
 });
@@ -63,15 +62,16 @@ test('work settings validate, persist and apply capacity without changing access
   const env = await setupEnv();
   try {
     const { hq, cfg } = env;
-    assert.equal(workSettings(hq.store, cfg).nightEnabled, true);
-    assert.equal(workSettings(hq.store, cfg).autoAccounts, false);
-    const body = { parallel: 2, nightEnabled: false, autoAccounts: true, nightStart: '23:00', nightEnd: '07:00' };
+    assert.deepEqual(workSettings(hq.store, cfg), { parallel: cfg.capacity.maxSlots, autoAccounts: false });
+    const body = { parallel: 2, autoAccounts: true };
     assert.equal((await env.call('/api/settings/work', body)).status, 200);
     assert.equal(cfg.capacity.maxSlots, 2);
     assert.equal(workSettings(hq.store, cfg).parallel, 2);
     assert.equal((await env.call('/api/settings/work', { parallel: 0 })).status, 400);
-    assert.equal((await env.call('/api/settings/work', { nightStart: '29:30' })).status, 400);
-    assert.deepEqual((await env.call('/api/settings/work')).value.settings, body);
+    assert.equal((await env.call('/api/settings/work', { autoAccounts: 'yes' })).status, 400);
+    assert.deepEqual((await env.call('/api/settings/work')).value.settings, {
+      ...body, nightEnabled: false, nightStart: '23:00', nightEnd: '07:00',
+    });
     assert.equal(cfg.telegramChat, '');
     assert.equal(hq.scheduler.slots().total <= 2, true);
   } finally { await env.cleanup(); }
@@ -114,23 +114,58 @@ test('public login attempts are limited per address and recover after the minute
   } finally { await env.cleanup(); }
 });
 
-test('night schedule follows company time and starts only once per window', async () => {
-  const env = await setupEnv(false);
-  try {
-    const file = join(env.cfg.companyDir, 'org.yaml');
-    writeFileSync(file, `${ORG_YAML}\ntimezone: Asia/Jerusalem\n`);
-    env.clock.t = Date.UTC(2026, 10, 4, 21, 5); // 23:05 in Jerusalem.
-    saveWorkSettings(env.hq.store, env.cfg, { nightEnabled: true });
-    await scheduledNight(env.hq);
-    const first = env.hq.night.current();
-    assert.ok(first);
-    await scheduledNight(env.hq);
-    assert.equal(env.hq.night.current()?.id, first.id);
-    env.hq.night.end('owner');
-    await scheduledNight(env.hq);
-    assert.equal(env.hq.night.current(), undefined);
-  } finally { await env.cleanup(); }
-});
+for (const pending of [false, true]) {
+  test(`legacy night settings are ignored by the API and scheduler (pending=${pending})`, async (t) => {
+    const env = await makeEnv({ noStart: true, org: `${ORG_YAML}\ntimezone: Asia/Jerusalem\n${pending ? 'setup: pending\n' : ''}` });
+    try {
+      const { hq, cfg, clock } = env;
+      const expected = { parallel: 2, autoAccounts: true };
+      const response = { ...expected, nightEnabled: false, nightStart: '23:00', nightEnd: '07:00' };
+      const legacy = { ...response, nightEnabled: true };
+      hq.store.setMeta('work.settings', JSON.stringify(legacy));
+      clock.t = Date.UTC(2026, 10, 4, 20, 55); // Cross 23:00 in Jerusalem below.
+      let schedulerTick: (() => unknown) | undefined;
+      t.mock.method(hq as unknown as { every(ms: number, name: string, fn: () => unknown): void }, 'every',
+        (_ms: number, name: string, fn: () => unknown) => { if (name === 'scheduler') schedulerTick = fn; });
+      await hq.start({ listen: true });
+      assert.equal(cfg.capacity.maxSlots, 2);
+      const token = readFileSync(join(cfg.stateDir, 'api-token'), 'utf8').trim();
+      const request = async (body?: unknown) => {
+        const r = await fetch(`http://127.0.0.1:${hq.port}/api/settings/work`, {
+          method: body == null ? 'GET' : 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+          body: body == null ? undefined : JSON.stringify(body),
+        });
+        assert.equal(r.status, 200);
+        return (await r.json() as { settings: unknown }).settings;
+      };
+      assert.deepEqual(await request(), response);
+      assert.deepEqual(workSettings(hq.store, cfg), expected);
+      assert.ok(schedulerTick);
+      for (const minutes of [0, 10, 120, 480, 1440]) {
+        clock.t = Date.UTC(2026, 10, 4, 20, 55) + minutes * 60_000;
+        await schedulerTick();
+        assert.equal(hq.night.current(), undefined);
+        assert.equal(hq.store.toggle('night'), false);
+      }
+      assert.equal(hq.store.getMeta('night.scheduled_until'), undefined);
+      // Old clients may still post these fields, including invalid times: ignore them.
+      assert.deepEqual(await request({ ...legacy, nightStart: 'invalid', nightEnd: null }), response);
+      assert.deepEqual(await request(), response);
+      // A legacy save cannot enable the mode later in its former night window.
+      clock.t = Date.UTC(2026, 10, 6, 21, 5);
+      await schedulerTick();
+      assert.equal(hq.night.current(), undefined);
+      assert.equal(hq.store.toggle('night'), false);
+      assert.deepEqual(JSON.parse(hq.store.getMeta('work.settings')!), expected);
+      if (!pending) {
+        const night = await hq.night.start({ scope: null, note: null, until: null, by: 'owner' });
+        assert.equal(hq.night.current()?.id, night.id);
+        assert.equal(hq.store.toggle('night'), true);
+        hq.night.end('owner');
+      }
+    } finally { await env.cleanup(); }
+  });
+}
 
 test('valid pairing pages never lock login and a second forwarded client stays independent', async () => {
   const env = await setupEnv(false);

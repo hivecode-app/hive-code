@@ -1,4 +1,4 @@
-import { applyWorkSettings, scheduledNight, setupCommand, type SetupCommand } from './onboarding.ts';
+import { applyWorkSettings, setupCommand, type SetupCommand } from './onboarding.ts';
 // `company hq` composition root: one process (B.1) wiring store, mailboxes, inbox, scheduler,
 // watchdog, probe-runner, push, backups and the API. Timers are plain intervals; every loop is
 // independently guarded so one failing loop never stops the others.
@@ -388,7 +388,6 @@ export class Hq {
       this.every(T.watchdogMs, 'watchdog', async () => { await this.watchdog.sweep(); await this.shifts.releaseEnded(); });
       this.every(T.livenessMs, 'liveness', () => this.shifts.pingAll());
       this.every(T.schedulerMs, 'scheduler', async () => {
-        await scheduledNight(this);
         await this.scheduler.sweep();
         if (!this.cfg.codexLean) { await this.night.sweep(); this.home.watchAsked(); }
         this.awaiting.sweep();
