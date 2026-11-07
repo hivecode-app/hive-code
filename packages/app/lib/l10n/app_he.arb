@@ -1568,5 +1568,44 @@
   "standingTeams": "צוותים קבועים",
   "projectLead": "{gender, select, f{ראשת צוות: {name}} other{ראש צוות: {name}}}",
   "teamLead": "{gender, select, f{ראשת צוות} other{ראש צוות}}",
-  "openTasksCount": "{count, plural, =0{אין משימות פתוחות} =1{משימה פתוחה אחת} other{{count} משימות פתוחות}}"
+  "openTasksCount": "{count, plural, =0{אין משימות פתוחות} =1{משימה פתוחה אחת} other{{count} משימות פתוחות}}",
+  "searchInTeamOf": "בצוות של {name}",
+  "@searchInTeamOf": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "searchTaskStage": "{task}, {stage}",
+  "@searchTaskStage": {
+    "placeholders": {
+      "task": {
+        "type": "String"
+      },
+      "stage": {
+        "type": "String"
+      }
+    }
+  },
+  "searchOpenTasks": "{count, plural, =0{אין משימות פתוחות} =1{משימה פתוחה אחת} other{{count} משימות פתוחות}}",
+  "@searchOpenTasks": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "searchLedBy": "בהובלת {name}",
+  "@searchLedBy": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "searchFinished": "הסתיימה",
+  "searchCancelled": "בוטלה",
+  "searchNotes": "הערות",
+  "searchAll": "כל ה-{count}"
 }

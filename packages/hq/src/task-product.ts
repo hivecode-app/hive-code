@@ -144,7 +144,34 @@ export class TaskCatalog {
     this.pending.set(key, read);
     return read;
   }
-  private context(tasks: TaskRow[]) {
+  /** The task's PR links and its charter's CI check: one place for item() and knownStage(). */
+  private prSource(task: TaskRow, context: ReturnType<TaskCatalog['context']>) {
+    const info = task.project ? context.charters.get(task.project) : undefined;
+    const selected = (JSON.parse(task.labels) as string[]).find((l) => l.startsWith('repo:'))?.slice(5);
+    const checkout = selected ? info?.charter?.checkouts.find((c) => c.name === selected) : info?.charter?.checkouts[0];
+    return { info, check: info?.charter?.ciCheck ?? null, urls: () => taskPrUrls(this.hq, task, checkout?.repo ?? '') };
+  }
+  /** What is known of a PR without reading GitHub: the cache, or "not checked yet". */
+  private knownOrPending(url: string, check: string | null): PrEvidence {
+    return this.known(url, check) ?? { url, head: '', state: '', draft: false, merged: false, review: 'pending', ci: 'unknown', quote: null, checked_at: 0 };
+  }
+  /** The stage from the PR facts already known, without reading GitHub: search answers immediately. */
+  knownStage(task: TaskRow, context: ReturnType<TaskCatalog['context']>): TaskStage | null {
+    const { check, urls } = this.prSource(task, context);
+    return taskStage(task, urls().map((url) => this.knownOrPending(url, check)), context.requests, context.deployed.has(task.id));
+  }
+  private projectsContext: { at: number; key: string; context: ReturnType<TaskCatalog['context']> } | null = null;
+  /** The context of whole projects, kept for a few seconds: search asks for it on every keystroke pause, and
+   * it reads every charter from disk and all deploys. */
+  projectContext(projects: string[]): ReturnType<TaskCatalog['context']> {
+    const key = projects.join('\n'), now = this.hq.store.now();
+    // The open requests stay live: an answered GO must not read "waits for you" for the next few seconds.
+    if (this.projectsContext && this.projectsContext.key === key && now - this.projectsContext.at < 5000) return { ...this.projectsContext.context, requests: taskRequests(this.hq) };
+    const context = this.context(projects.map((project) => ({ project }) as TaskRow));
+    this.projectsContext = { at: now, key, context };
+    return context;
+  }
+  context(tasks: TaskRow[]) {
     const people = new Map(this.hq.board().map((p) => [p.id, p]));
     const charters = new Map([...new Set(tasks.map((t) => t.project).filter((p): p is string => !!p))]
       .map((p) => [p, { charter: readCharter(this.hq.cfg.companyDir, p), lead: projectLead(this.hq.store, p) }]));
@@ -152,12 +179,9 @@ export class TaskCatalog {
     return { people, charters, deployed, requests: taskRequests(this.hq) };
   }
   async item(task: TaskRow, context = this.context([task]), refresh = true, urls?: string[]) {
-    const info = task.project ? context.charters.get(task.project) : undefined;
-    const selected = (JSON.parse(task.labels) as string[]).find((l) => l.startsWith('repo:'))?.slice(5);
-    const checkout = selected ? info?.charter?.checkouts.find((c) => c.name === selected) : info?.charter?.checkouts[0];
-    urls ??= taskPrUrls(this.hq, task, checkout?.repo ?? '');
-    const check = info?.charter?.ciCheck ?? null;
-    const prs = await Promise.all(urls.map((url) => refresh ? this.pr(url, check) : this.known(url, check) ?? { url, head: '', state: '', draft: false, merged: false, review: 'pending' as const, ci: 'unknown' as const, quote: null, checked_at: 0 }));
+    const { info, check, urls: own } = this.prSource(task, context);
+    urls ??= own();
+    const prs = await Promise.all(urls.map((url) => refresh ? this.pr(url, check) : this.knownOrPending(url, check)));
     const released = context.deployed.has(task.id);
     return { id: task.id, title: task.title, body: task.body, project: task.project, worker: task.identity,
       opened_by: openedBy(task) ?? info?.lead ?? null,

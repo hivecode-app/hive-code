@@ -3357,5 +3357,51 @@
         "type": "int"
       }
     }
+  },
+  "searchInTeamOf": "In {name}'s team",
+  "@searchInTeamOf": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "searchTaskStage": "{task}, {stage}",
+  "@searchTaskStage": {
+    "placeholders": {
+      "task": {
+        "type": "String"
+      },
+      "stage": {
+        "type": "String"
+      }
+    }
+  },
+  "searchOpenTasks": "{count, plural, =0{No open tasks} =1{1 open task} other{{count} open tasks}}",
+  "@searchOpenTasks": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "searchLedBy": "Led by {name}",
+  "@searchLedBy": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "searchFinished": "Finished",
+  "searchCancelled": "Cancelled",
+  "searchNotes": "Notes",
+  "searchAll": "All {count}",
+  "@searchAll": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   }
 }

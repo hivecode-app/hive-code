@@ -128,7 +128,7 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   onboardingRoutes(hq, route);
 
   // timezone: org.yaml's (#121), so the app shows his hours wherever the phone thinks it is.
-  route('GET', '/api/search', ({ url }) => search(hq, url.searchParams.get('q') ?? ''));
+  route('GET', '/api/search', ({ url }) => search(hq, url.searchParams.get('q') ?? '', catalog));
   route('GET', '/api/org/tree', () => orgTree(hq));
   route('GET', '/api/org', () => ({ identities: hq.board(), teams: hq.teams(), timezone: hq.clock() }));
   // awaiting: "מה לבדוק" (#108), finished tasks that wait for a deploy or for him to check (awaiting.ts).

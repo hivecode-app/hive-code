@@ -13,6 +13,9 @@ import 'package:agent_company/ui/convs/conversations_screen.dart';
 import 'package:agent_company/ui/product/approval.dart';
 import 'package:agent_company/ui/product/chats.dart';
 import 'package:agent_company/ui/product/product_theme.dart';
+import 'package:agent_company/data/search.dart';
+import 'package:agent_company/l10n/app_localizations.dart';
+import 'package:agent_company/model/task_progress.dart';
 import 'package:agent_company/ui/product/search_screen.dart';
 import 'package:agent_company/ui/product/settings.dart';
 import 'package:agent_company/ui/product/shell.dart';
@@ -148,12 +151,70 @@ void main() {
     await tester.enterText(find.byKey(const Key('global-search')), 'דנה');
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pump();
+    // The chip and the group heading.
+    expect(find.text('People'), findsNWidgets(2));
+    await tester.tap(find.byKey(const Key('search-filter-tasks')));
+    await tester.pump();
     expect(find.text('People'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('search-filter-people')));
+    await tester.pump();
+    expect(find.text('People'), findsNWidgets(2));
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(find.byType(ProductSearch), findsNothing);
+  });
+
+  testWidgets('search on the phone is a full screen that closes back to the chats', (tester) async {
+    await productApp(tester);
+    await tester.tap(find.text('Search').first);
+    await tester.pumpAndSettle();
+    expect(find.byWidgetPredicate((w) => w is ProductSearch && w.fullScreen), findsOneWidget);
+    expect(find.byType(Dialog), findsNothing);
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ProductSearch), findsNothing);
+  });
+
+  testWidgets('"all" is a summary: three of a group, then "all N" opens its chip; a task without a stage has no check mark', (tester) async {
+    final store = await productApp(tester, home: const Scaffold(body: SafeArea(child: ProductSearch(fullScreen: true))));
+    await tester.enterText(find.byKey(const Key('global-search')), 'לומו');
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump();
+    final people = (await store.backend.search('לומו')).where((h) => h.kind == 'person').length;
+    expect(people, greaterThan(3));
+    expect(find.byType(ProjectMonogram), findsNWidgets(3));
+    expect(find.text('All $people'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('search-more-person')));
+    await tester.pump();
+    expect(find.byType(ProjectMonogram), findsNWidgets(people));
+    expect(find.byKey(const Key('search-more-person')), findsNothing);
+    final state = tester.state(find.byType(ProductSearch)) as dynamic;
+    expect(state.icon(const SearchHit(kind: 'task', id: '1', title: 't')), 'radio_button_unchecked');
+    expect(state.icon(const SearchHit(kind: 'task', id: '1', title: 't', outcome: 'completed')), 'check_circle');
+    // The second line: words, never ids; the stage says what waits on him and how a task ended.
+    final l = AppLocalizations.of(tester.element(find.byType(ProductSearch)));
+    String meta(SearchHit h) => state.meta(l, store.data!, h) as String;
+    expect(meta(const SearchHit(kind: 'task', id: '1', title: 't', projectName: 'Field log', stage: TaskStage.review, waiting: true)), 'Field log · ${l.needsYou}');
+    expect(meta(const SearchHit(kind: 'task', id: '1', title: 't', projectName: 'Field log', outcome: 'cancelled')), 'Field log · Cancelled');
+    expect(meta(const SearchHit(kind: 'task', id: '1', title: 't', projectName: 'Field log', outcome: 'completed')), 'Field log · Finished');
+    expect(meta(const SearchHit(kind: 'person', id: 'a', title: 'A', leadName: 'Mira')), "In Mira's team");
+    expect(meta(const SearchHit(kind: 'person', id: 'a', title: 'A', leadName: 'Yoav', leads: true)), l.reportsTo('Yoav'));
+    expect(meta(const SearchHit(kind: 'person', id: 'a', title: 'A', status: 'waiting_for_you', leadName: 'Mira')), l.needsYou);
+  });
+
+  test('a note shows the words that matched, in bold, even deep in a long note', () {
+    final span = matchSpan('${'מילה ' * 20}לומו נפל', 'לומו', const TextStyle());
+    expect(span.toPlainText(), startsWith('…'));
+    expect(span.toPlainText(), endsWith('לומו נפל'));
+    expect(span.children![1].toPlainText(), 'לומו');
+    expect((span.children![1] as TextSpan).style!.fontWeight, FontWeight.w700);
+    // A Hebrew note with English in it keeps each English run isolated, as ProductContentText does.
+    final mixed = matchSpan('לומו נפל ב-feature/wa-retry אחרי PR #452.', 'לומו', const TextStyle());
+    expect(mixed.toPlainText(), contains('${kLRI}feature/'));
+    expect(stripBidi(mixed.toPlainText()), 'לומו נפל ב-feature/wa-retry אחרי PR #452.');
+    expect(matchSpan('fixed lumo retry', 'lumo', const TextStyle()).toPlainText(), 'fixed lumo retry');
   });
 
   test('approval fact adapter retains source facts and discloses missing facts', () {
@@ -231,7 +292,7 @@ void main() {
           final backend = screen == 'offline' ? OfflineBackend() : FakeBackend(simulate: false, now: kDemoNow);
           Widget? home;
           if (screen == 'settings') home = const Scaffold(body: ProductSettings(embedded: true));
-          if (screen == 'search') home = const Scaffold(body: ProductSearch());
+          if (screen == 'search') home = const Scaffold(body: SafeArea(child: ProductSearch(fullScreen: true)));
           final store = await productApp(tester, language: language, dark: dark, backend: backend, home: home);
           if (screen == 'quiet') {
             store.data!.waiting.clear();
