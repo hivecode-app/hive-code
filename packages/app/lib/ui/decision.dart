@@ -4,8 +4,10 @@ import 'package:agent_company/l10n/ui_copy.dart';
 // decides, and the card folds at once to one line ("אישרת · 02:14") with "ביטול" for 5 seconds, in the card
 // itself. The same pieces in the conversation's card and in "מחכה לך" at home, so both look and act the same.
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderProxyBox;
 
 import '../data/store.dart';
+import 'chat/markdown.dart' show Markdown;
 import '../model/models.dart';
 import '../theme/tokens.dart';
 import 'common.dart';
@@ -174,3 +176,144 @@ String pendingIcon(PendingAnswer p) => switch (p.answerId) {
   'failed' => 'close', 'irrelevant' => 'do_not_disturb_on',
   _ => switch (p.line) { InputCopy.v8 => 'close', InputCopy.v9 => 'do_not_disturb_on', _ => 'check_circle' },
 };
+
+/// The worker's trailer under a decision ("PR: https://github.com/…/pull/210", "סיכון: medium"), and the text
+/// above it. One reading for the pile, the card and the approval (#1499): the trailer is a link and a level, not
+/// text; a "PR: #12" with no address says nothing he can open, and goes too.
+final _prLine = RegExp(r'^PR:\s*(?:#?\d+|(https://github\.com/\S+/pull/\d+))\s*$');
+final _riskLine = RegExp(InputCopy.v10);
+
+({String text, String? pr, String? risk}) decisionTrailer(String body) {
+  String? pr, risk;
+  final lines = <String>[];
+  for (final l in body.split('\n')) {
+    final t = l.trim();
+    final m = _prLine.firstMatch(t), r = _riskLine.firstMatch(t);
+    if (m != null) {
+      pr ??= m[1];
+    } else if (r != null) {
+      risk = r[1];
+    } else {
+      lines.add(l);
+    }
+  }
+  return (text: lines.join('\n').trim(), pr: pr, risk: risk);
+}
+
+/// "low" / "medium" / "high" in his words.
+String? riskWords(String? risk) => {'low': UiCopy.copy.lowRisk, 'medium': UiCopy.copy.mediumRisk, 'high': UiCopy.copy.highRisk}[risk];
+
+/// A request's whole text, markdown and all (#1499): what the worker wrote is always reachable, here and not
+/// only in the notification. Taller than [lines] lines, it shows them with "עוד", which opens the rest in place;
+/// the height is measured, not guessed from the length, so a wide panel shows a short text whole.
+/// [open] opens it from outside (the banner's "לבקשה").
+class DecisionBody extends StatefulWidget {
+  const DecisionBody(this.text, {super.key, this.open = false, this.lines = 7});
+  final String text;
+  final bool open;
+
+  /// How many lines of body text show while it is folded.
+  final int lines;
+
+  @override
+  State<DecisionBody> createState() => _DecisionBodyState();
+}
+
+class _DecisionBodyState extends State<DecisionBody> {
+  late bool expanded = widget.open;
+
+  /// The text's whole height, as last laid out; null until then.
+  double? natural;
+
+  @override
+  void didUpdateWidget(DecisionBody old) {
+    super.didUpdateWidget(old);
+    if (widget.open && !old.open) expanded = true;
+  }
+
+  void measured(Size size) {
+    if (size.height != natural && mounted) setState(() => natural = size.height);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    UiCopy.watch(context);
+    final p = context.p;
+    final text = widget.text.trim();
+    if (text.isEmpty) return const SizedBox.shrink();
+    final line = MediaQuery.textScalerOf(context).scale(T.body.fontSize ?? 15) * (T.body.height ?? 1.5);
+    final fold = line * widget.lines;
+    final body = _Measure(onSize: measured, child: Markdown(text));
+    final long = natural != null && natural! > fold + line / 2;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          alignment: Alignment.topCenter,
+          child: expanded || natural != null && !long
+              ? body
+              : ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: fold),
+                  child: ShaderMask(
+                    shaderCallback: (r) => LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: const [Colors.white, Colors.white, Colors.transparent],
+                      stops: [0, r.height <= line ? 0 : (r.height - line) / r.height, 1],
+                    ).createShader(r),
+                    blendMode: BlendMode.dstIn,
+                    child: SingleChildScrollView(physics: const NeverScrollableScrollPhysics(), primary: false, child: body),
+                  ),
+                ),
+        ),
+        if (long)
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: Semantics(
+              button: true,
+              expanded: expanded,
+              child: InkWell(
+                onTap: () => setState(() => expanded = !expanded),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  constraints: const BoxConstraints(minHeight: 44),
+                  alignment: AlignmentDirectional.centerStart,
+                  padding: const EdgeInsetsDirectional.only(end: 12),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text(expanded ? UiCopy.copy.less : UiCopy.copy.more, style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+                    AnimatedRotation(turns: expanded ? 0.5 : 0, duration: const Duration(milliseconds: 180), child: Ic('expand_more', size: 18, color: p.accent)),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Reports its child's laid-out size after the frame.
+class _Measure extends SingleChildRenderObjectWidget {
+  const _Measure({required this.onSize, super.child});
+  final ValueChanged<Size> onSize;
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderMeasure(onSize);
+  @override
+  void updateRenderObject(BuildContext context, _RenderMeasure r) => r.onSize = onSize;
+}
+
+class _RenderMeasure extends RenderProxyBox {
+  _RenderMeasure(this.onSize);
+  ValueChanged<Size> onSize;
+  Size? _last;
+  @override
+  void performLayout() {
+    super.performLayout();
+    if (size == _last) return;
+    _last = size;
+    final s = size;
+    WidgetsBinding.instance.addPostFrameCallback((_) => onSize(s));
+  }
+}

@@ -219,7 +219,7 @@ void main() {
   testWidgets('opening a card\'s details while scrolled up moves nothing above it', (tester) async {
     final store = await pumpApp(tester, home: const SizedBox());
     final chat = _chat(store, after: 30);
-    chat.items.add(AskCard(id: 'q:9', ts: _at(13, 0).add(const Duration(seconds: 19, milliseconds: 500)), askId: 'inbox:9', from: 'dana', headline: 'בקשה באמצע', question: '**מה נכנס:** הרבה\n**סיכון:** נמוך\n**חזרה:** revert\nועוד שורה\nועוד שורה', options: const [AskOption(id: 'y', label: 'כן'), AskOption(id: 'n', label: 'לא')]));
+    chat.items.add(AskCard(id: 'q:9', ts: _at(13, 0).add(const Duration(seconds: 19, milliseconds: 500)), askId: 'inbox:9', from: 'dana', headline: 'בקשה באמצע', question: '**מה נכנס:** הרבה\n**סיכון:** נמוך\n**חזרה:** revert${'\nועוד שורה' * 12}', options: const [AskOption(id: 'y', label: 'כן'), AskOption(id: 'n', label: 'לא')]));
     chat.items.sort((a, b) => a.ts.compareTo(b.ts));
     store.data!.waiting.add(_wait('inbox:9'));
     await pumpScreen(tester, store, const ChatScreen(identityId: 'dana'));
@@ -227,25 +227,25 @@ void main() {
     await tester.pumpAndSettle();
     final list = _list(tester);
     final pos = _position(tester);
-    pos.jumpTo(pos.pixels + (list.top + 250 - tester.getTopLeft(findShown('בקשה באמצע')).dy));
+    pos.jumpTo(pos.pixels + (list.top + 100 - tester.getTopLeft(findShown('בקשה באמצע')).dy));
     await tester.pump();
     final above = findShown('שורה 19');
     final head = findShown('בקשה באמצע');
     final y = tester.getTopLeft(above).dy, hy = tester.getTopLeft(head).dy;
-    await tester.tap(find.text('פרטים'));
+    await tester.tap(find.text('עוד'));
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 30));
       expect(tester.getTopLeft(above).dy, y, reason: 'frame $i');
       expect(tester.getTopLeft(head).dy, hy);
     }
-    expect(find.text('הסתרת הפרטים'), findsOneWidget);
+    expect(find.text('פחות'), findsOneWidget);
   });
 
   testWidgets('a touch on a card keeps what is open below it open', (tester) async {
     final store = await pumpApp(tester, size: const Size(342, 1200), home: const SizedBox());
     final chat = _chat(store, after: 60);
     chat.items.addAll([
-      AskCard(id: 'q:9', ts: _at(13, 0).add(const Duration(seconds: 19, milliseconds: 400)), askId: 'inbox:9', from: 'dana', headline: 'בקשה באמצע', question: 'פרטים\nעוד שורה', options: const [AskOption(id: 'y', label: 'כן'), AskOption(id: 'n', label: 'לא')]),
+      AskCard(id: 'q:9', ts: _at(13, 0).add(const Duration(seconds: 19, milliseconds: 400)), askId: 'inbox:9', from: 'dana', headline: 'בקשה באמצע', question: 'פרטים${'\nעוד שורה' * 12}', options: const [AskOption(id: 'y', label: 'כן'), AskOption(id: 'n', label: 'לא')]),
       ToolGroup(id: 'tg', ts: _at(13, 0).add(const Duration(seconds: 19, milliseconds: 600)), summary: 'קרא 2 קבצים', tools: const [
         ToolLine(icon: 'description', label: 'lib/a.dart'),
         ToolLine(icon: 'description', label: 'lib/b.dart'),
@@ -263,9 +263,9 @@ void main() {
     await tester.tap(find.textContaining('קרא 2 קבצים'));
     await tester.pumpAndSettle();
     expect(find.text('lib/a.dart'), findsOneWidget);
-    await tester.tap(find.text('פרטים'));
+    await tester.tap(find.text('עוד'));
     await tester.pumpAndSettle();
-    expect(find.text('הסתרת הפרטים'), findsOneWidget);
+    expect(find.text('פחות'), findsOneWidget);
     expect(find.text('lib/a.dart'), findsOneWidget, reason: 'the tool group below the card stayed open');
   });
 }

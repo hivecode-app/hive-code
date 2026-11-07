@@ -18,6 +18,7 @@ import '../../data/error_report.dart';
 import '../../data/engine_model.dart' show hebrewOrEmpty, toolHasDetail, toolHasAgentDescription, toolLabel;
 import '../../data/store.dart';
 import '../../model/models.dart';
+import '../../native/open_url.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
 import '../decision.dart';
@@ -1430,7 +1431,14 @@ class AskCardView extends StatefulWidget {
 }
 
 class _AskCardViewState extends State<AskCardView> {
-  bool details = false;
+  late bool details = widget.flash;
+
+  /// "לבקשה" in the banner opens the card whole, not only brings it into view (#1499).
+  @override
+  void didUpdateWidget(AskCardView old) {
+    super.didUpdateWidget(old);
+    if (widget.flash && !old.flash) details = true;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1453,6 +1461,7 @@ class _AskCardViewState extends State<AskCardView> {
 
     if (go && wait != null && !closed && pending == null) {
       final l = AppLocalizations.of(context);
+      final parts = approvalParts(wait);
       return Bubble(
         out: false,
         wide: true,
@@ -1462,6 +1471,25 @@ class _AskCardViewState extends State<AskCardView> {
             Text(approvalTitle(context, wait), style: T.name.copyWith(color: p.text)),
             const SizedBox(height: 4),
             Text('${store.nameOf(card.from)} · ${store.data!.roleLine(card.from)}', style: T.small.copyWith(color: p.text2)),
+            // The whole request, hq's text and not the card's, folded with "עוד" when long (#1499).
+            if (parts.text.isNotEmpty) ...[const SizedBox(height: 8), DecisionBody(parts.text, open: widget.flash)],
+            if (parts.pr != null)
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: InkWell(
+                  onTap: () => openExternalUrl(parts.pr!),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 44),
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Ic('call_merge', size: 18, color: p.accent),
+                      const SizedBox(width: 4),
+                      Text(l.pullRequest, style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700)),
+                    ]),
+                  ),
+                ),
+              ),
             const SizedBox(height: 10),
             Align(
               alignment: AlignmentDirectional.centerStart,
@@ -1554,7 +1582,7 @@ class _AskCardViewState extends State<AskCardView> {
             keys: MediaQuery.sizeOf(context).width >= 800 && identical(shortcutAsk(store.data?.chats[card.from]), card),
           );
 
-    // The whole card is the details' toggle; the buttons are its only answers.
+    // The buttons are the card's only answers.
     final top = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -1566,30 +1594,11 @@ class _AskCardViewState extends State<AskCardView> {
             headline,
             style: TextStyle(fontFamily: kFont, fontSize: 15.5, height: 1.45, fontWeight: FontWeight.w700, color: p.text),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  details ? UiCopy.copy.hideDetails : UiCopy.copy.details,
-                  style: T.small.copyWith(color: p.accent, fontWeight: FontWeight.w700),
-                ),
-                AnimatedRotation(
-                  turns: details ? 0.5 : 0,
-                  duration: _fold,
-                  child: Ic('expand_more', size: 18, color: p.accent),
-                ),
-              ],
-            ),
-          ),
-          AnimatedSize(
-            duration: _fold,
-            alignment: Alignment.topCenter,
-            child: details ? Padding(padding: const EdgeInsets.only(bottom: 4), child: Markdown(card.question)) : const SizedBox(width: double.infinity),
-          ),
+          // The whole question under its headline, folded with "עוד" when long, not behind "פרטים" (#1499).
+          const SizedBox(height: 6),
+          DecisionBody(card.question, open: widget.flash),
         ] else
-          Markdown(card.question),
+          DecisionBody(card.question, open: widget.flash),
       ],
     );
 
@@ -1606,15 +1615,7 @@ class _AskCardViewState extends State<AskCardView> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (headline != null)
-                Semantics(
-                  button: true,
-                  expanded: details,
-                  hint: details ? UiCopy.copy.hideDetails : UiCopy.copy.details,
-                  child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => setState(() => details = !details), child: top),
-                )
-              else
-                top,
+              top,
               const SizedBox(height: 8),
               DecisionKeys(keys: keys),
               const SizedBox(height: 4),

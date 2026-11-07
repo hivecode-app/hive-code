@@ -1,51 +1,36 @@
-import 'package:agent_company/l10n/input_copy.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/store.dart';
 import '../../l10n/app_localizations.dart';
 import '../../model/models.dart';
+import '../../native/open_url.dart';
 import '../../theme/tokens.dart';
+import '../chat/markdown.dart' show Markdown;
 import '../common.dart';
 import '../decision.dart';
 import '../nav.dart';
+import '../selection.dart';
 import 'product_theme.dart';
 
 String approvalTitle(BuildContext context, WaitItem item) {
   final l = AppLocalizations.of(context);
   final headline = item.headline?.trim();
   if (headline == null || headline.isEmpty) return item.action == 'release' ? l.releaseThisChange : l.approveThisAction;
-  if (headline.endsWith('?') || headline.endsWith('؟')) return headline;
-  final title = headline;
-  return item.action == 'release' ? l.releaseQuestion(title) : l.approvalQuestion(title);
+  // Only a short name of a thing is wrapped ("לשחרר את התיקון לקריסה במפה?"). A question, or a sentence of
+  // the worker's own ("להחליט אם להמשיך הלילה…"), is shown as written (#1499).
+  if (RegExp(r'[?؟.!:]$').hasMatch(headline) || headline.split(RegExp(r'\s+')).length > 4) return headline;
+  return item.action == 'release' ? l.releaseQuestion(headline) : l.approvalQuestion(headline);
 }
 
-/// Old servers still send a single body. Extract only labelled facts; absent facts are disclosed.
-/// Structured approval facts from a future server can replace this adapter without changing UI.
-List<String?> approvalFacts(String body) {
-  final labels = [
-    RegExp(InputCopy.v13, caseSensitive: false),
-    RegExp(InputCopy.v14, caseSensitive: false),
-    RegExp(InputCopy.v15, caseSensitive: false),
-    RegExp(InputCopy.v16, caseSensitive: false),
-  ];
-  final parts = List<String?>.filled(4, null);
-  int? current;
-  for (final raw in body.split('\n')) {
-    final line = raw.replaceAll('**', '').replaceFirst(RegExp(r'^#+\s*'), '').trim();
-    bool header = false;
-    for (var i = 0; i < labels.length; i++) {
-      final m = labels[i].firstMatch(line);
-      if (m != null) {
-        current = i;
-        parts[i] = m[1]!.trim();
-        header = true;
-        break;
-      }
-    }
-    if (!header && current != null && line.isNotEmpty) parts[current] = '${parts[current] ?? ''}\n$line'.trim();
-  }
-  if (parts.every((p) => p == null)) parts[0] = body.trim().isEmpty ? null : body;
-  return parts;
+/// A GO's whole text as the worker wrote it, without its trailer and without the headline when it opens the
+/// text too, and the PR it is about: hq's link first (#1499).
+({String text, String? pr, String? risk}) approvalParts(WaitItem item) {
+  final t = decisionTrailer(item.body);
+  var text = t.text;
+  final headline = item.headline?.trim();
+  if (headline != null && headline.isNotEmpty && text.startsWith(headline)) text = text.substring(headline.length).trim();
+  final pr = item.links.where((l) => l.kind == WaitLinkKind.pr).firstOrNull?.url ?? t.pr;
+  return (text: text, pr: pr, risk: t.risk);
 }
 
 Future<void> showApproval(BuildContext context, WaitItem item) => showModalBottomSheet<void>(
@@ -68,7 +53,7 @@ class ApprovalSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = StoreScope.of(context), p = context.p, l = AppLocalizations.of(context);
     final d = store.data!;
-    final facts = approvalFacts(item.body);
+    final parts = approvalParts(item);
     final pending = store.decision(item.askId, item.id);
     final unavailable = pending != null || item.state == WaitState.answered || d.superseded(item);
     return Column(
@@ -117,14 +102,25 @@ class ApprovalSheet extends StatelessWidget {
                     subtitle: ProductContentText(d.roleLine(item.from)),
                   ),
                 ),
-                for (final (i, label) in [l.whatChanges, l.risk, l.rollback, l.checked].indexed) ...[
+                // The worker's own text, whole and in its order, as markdown: no section is guessed out of it, and
+                // nothing of it is dropped (#1499).
+                if (parts.text.isNotEmpty) ...[
                   const SizedBox(height: 20),
+                  CopySelectionArea(child: Markdown(parts.text)),
+                ],
+                if (parts.risk != null) ...[
+                  const SizedBox(height: 16),
                   Text(
-                    label,
+                    riskWords(parts.risk)!,
                     style: T.small.copyWith(fontWeight: FontWeight.w600, color: p.text2),
                   ),
-                  const SizedBox(height: 6),
-                  Rich(facts[i]?.isNotEmpty == true ? facts[i]! : l.notProvided, auto: true, style: T.row2.copyWith(color: p.text)),
+                ],
+                if (parts.pr != null) ...[
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Btn(l.pullRequest, icon: 'call_merge', height: 40, fontSize: 13.5, hpad: 14, onTap: () => openExternalUrl(parts.pr!)),
+                  ),
                 ],
                 if (pending != null)
                   Padding(

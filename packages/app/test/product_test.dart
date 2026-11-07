@@ -208,9 +208,16 @@ void main() {
     expect(matchSpan('fixed lumo retry', 'lumo', const TextStyle()).toPlainText(), 'fixed lumo retry');
   });
 
-  test('approval fact adapter retains source facts and discloses missing facts', () {
-    expect(approvalFacts('Risk: Low\nRollback: Restore\nChecked: Review\nChanges: A fix'), ['A fix', 'Low', 'Restore', 'Review']);
-    expect(approvalFacts('Plain old server body'), ['Plain old server body', null, null, null]);
+  test('an approval keeps the whole body, without its trailer, and the PR it is about (#1499)', () {
+    WaitItem go(String body, {List<WaitLink> links = const []}) => WaitItem(id: 'g', kind: WaitKind.go, from: 'dana', time: '', kicker: '', body: body, links: links);
+    final parts = approvalParts(go('**הסדר:**\n1. שלב\n**הסיכון:** קטן\nPR: https://github.com/a/b/pull/7\nסיכון: medium'));
+    expect(parts.text, '**הסדר:**\n1. שלב\n**הסיכון:** קטן');
+    expect(parts.pr, 'https://github.com/a/b/pull/7');
+    expect(parts.risk, 'medium');
+    // hq's link wins; a "PR: #12" with no address is a trailer too, not text.
+    final linked = approvalParts(go('PR: #12', links: const [WaitLink(WaitLinkKind.pr, 'https://github.com/a/b/pull/12')]));
+    expect(linked.text, '');
+    expect(linked.pr, 'https://github.com/a/b/pull/12');
     expect(twoLetters('Mira'), 'Mi');
     expect(twoLetters('מירה'), 'מי');
     expect(twoLetters('Maya Cohen'), 'MC');

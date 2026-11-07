@@ -10,6 +10,7 @@ import '../../data/store.dart';
 import '../../model/models.dart';
 import '../../theme/tokens.dart';
 import '../chat/chat_screen.dart';
+import '../chat/markdown.dart' show Markdown;
 import '../common.dart';
 import '../convs/head.dart' show decisionKeysOf;
 import '../decision.dart';
@@ -64,9 +65,10 @@ class WaitItemScreen extends StatelessWidget {
                 const SizedBox(height: 6),
                 if (isDecision && item.body.trim().isNotEmpty) Text(UiCopy.copy.details, style: T.small.copyWith(color: p.text2, fontWeight: FontWeight.w700)),
                 if (isDecision && item.body.trim().isNotEmpty) const SizedBox(height: 4),
-                CopySelectionArea(child: Rich(item.body, auto: true, style: bodyStyle)),
+                // A decision's body is the worker's markdown: its sections, lists and links as written (#1499).
+                CopySelectionArea(child: isDecision ? Markdown(item.body) : Rich(item.body, auto: true, style: bodyStyle)),
               ] else
-                CopySelectionArea(child: Rich(item.body, auto: true, style: isDecision ? bodyStyle.copyWith(fontWeight: FontWeight.w700) : bodyStyle)),
+                CopySelectionArea(child: isDecision ? Markdown(item.body) : Rich(item.body, auto: true, style: bodyStyle)),
               const SizedBox(height: 20),
               if (item.state == WaitState.answered)
                 DoneLine(item.answerLine ?? item.doneLine ?? UiCopy.copy.handled2, icon: item.failed ? 'close' : 'check')

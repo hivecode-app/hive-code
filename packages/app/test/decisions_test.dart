@@ -9,6 +9,7 @@ import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
 import 'package:agent_company/ui/decisions/decisions_screen.dart';
 import 'package:agent_company/ui/home/home_screen.dart';
+import 'package:agent_company/ui/home/wait_item_screen.dart';
 import 'package:agent_company/ui/product/approval.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -119,8 +120,9 @@ void main() {
     final store = await pumpApp(tester, home: const SizedBox());
     _danaWithHistory(store);
     await pumpScreen(tester, store, const ChatScreen(identityId: 'dana'));
+    // The card shows hq's text (the wait item's body), not the chat item's (#1499).
     expect(find.textContaining('deploy.sh rollback', findRichText: true), findsNothing);
-    expect(find.textContaining('חזרה לגרסה הקודמת', findRichText: true), findsNothing);
+    expect(find.textContaining('חזרה לגרסה הקודמת', findRichText: true), findsWidgets);
     await openApproval(tester);
     // The facts are hq's (the wait item's body), not the card's text.
     expect(inSheet(find.textContaining('חזרה לגרסה הקודמת לוקחת כדקה', findRichText: true)), findsWidgets);
@@ -171,7 +173,130 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
     await tester.pumpAndSettle();
+    // The first is a GO: it opens whole, over its card, which is now on screen (#1499).
+    expect(find.byType(ApprovalSheet), findsOneWidget);
+    Navigator.of(tester.element(find.byType(ApprovalSheet))).pop();
+    await tester.pumpAndSettle();
     expect(find.text('אישור'), findsOneWidget, reason: 'the open GO is on screen');
+  });
+
+  // #1499: Dana's GO of 08/11, as hq sent it. Its sections are her own ("מה השתנה מהתוכנית הקודמת",
+  // "הסדר", "הסיכון", "איך חוזרים"): every one of them is reachable, in the card and in the approval.
+  const realGo = '**מה השתנה מהתוכנית הקודמת:** מהתקלה של הערב למדנו שהמכונה אצל ספק השרתים נחסמת כשמעתיקים אליה הרבה.\n\n'
+      '**הסדר:**\n1. **בלי ניתוק:** הוצאת העותק של ה-DB מהמכונה אצל ספק השרתים.\n2. **ניתוק 1, ‏20–45 שניות:** שרת הצ\'אט עובר מהמכונה של dev.\n'
+      '3. **ה-promote.**\n   - **ניתוק 2,** כ-10 שניות בכל מכונה.\n\n'
+      '**הסיכון:** שלושה ניתוקים קצרים. הודעות מחכות בטלפון ויוצאות לבד.\n\n'
+      '**איך חוזרים:** לכל שלב יש דרך חזרה כתובה.\n\n'
+      '**איפה אני חולקת:** אפשר גם לוותר הלילה על העותק השלישי של תור הבוטים.\n'
+      'PR: https://github.com/hive-owner/lumo-app/pull/4378\nסיכון: medium';
+  const realHeadline = 'להחליט אם להמשיך הלילה את הפריסה שנעצרה, בתוכנית מתוקנת בלי סיכון מספק השרתים';
+
+  void danaRealGo(AppStore store) {
+    final d = store.data!;
+    d.chats['dana'] = Conversation(identityId: 'dana', items: [
+      GoCard(id: 'rg', ts: _at(13, 41), askId: 'inbox:1279', from: 'dana', headline: realHeadline, details: realGo),
+    ]);
+    d.waiting.removeWhere((w) => w.from == 'dana');
+    d.waiting.insert(0, WaitItem(id: 'w-rg', kind: WaitKind.go, from: 'dana', time: '13:41', kicker: 'GO לפרודקשן', headline: realHeadline, body: realGo, options: const [AskOption(id: 'go', label: 'GO', primary: true)],
+        links: const [WaitLink(WaitLinkKind.pr, 'https://github.com/hive-owner/lumo-app/pull/4378')], askId: 'inbox:1279', inboxId: 1279, createdAt: _at(13, 41)));
+  }
+
+  testWidgets('a GO\'s whole body: folded with "עוד" in the card, whole in the approval, with its PR', (tester) async {
+    final store = await pumpApp(tester, home: const SizedBox());
+    danaRealGo(store);
+    await pumpScreen(tester, store, const ChatScreen(identityId: 'dana'));
+    // The headline is a sentence of hers: shown as written, not wrapped in "לאשר את …?".
+    expect(find.text(realHeadline), findsOneWidget);
+    expect(find.textContaining('לאשר את', findRichText: true), findsNothing);
+    expect(find.textContaining('מהתקלה של הערב', findRichText: true), findsWidgets);
+    expect(find.text('עוד'), findsOneWidget, reason: 'a long body folds');
+    await _shot(tester, 'real-go-card-folded');
+    await tester.tap(find.text('עוד'));
+    await tester.pumpAndSettle();
+    await _shot(tester, 'real-go-card-open');
+    expect(find.textContaining('לוותר הלילה על העותק השלישי', findRichText: true), findsWidgets);
+    expect(find.text('ה-\u2060PR'), findsOneWidget);
+    expect(find.textContaining('סיכון: medium', findRichText: true), findsNothing, reason: 'the trailer is a level, not text');
+
+    await openApproval(tester);
+    for (final words in ['מהתקלה של הערב', 'הוצאת העותק של', 'שלושה ניתוקים קצרים', 'לכל שלב יש דרך חזרה כתובה', 'לוותר הלילה על העותק השלישי']) {
+      expect(inSheet(find.textContaining(words, findRichText: true)), findsWidgets, reason: words);
+    }
+    expect(inSheet(find.text('סיכון בינוני')), findsOneWidget);
+    expect(inSheet(find.text('ה-\u2060PR')), findsOneWidget);
+    expect(inSheet(find.text('לא צוין')), findsNothing, reason: 'no guessed section left empty');
+    await _shot(tester, 'real-go-approval');
+    await tester.drag(inSheet(find.byType(SingleChildScrollView)).first, const Offset(0, -600));
+    await tester.pumpAndSettle();
+    await _shot(tester, 'real-go-approval-end');
+  });
+
+  testWidgets('a long question folds with "עוד" under its headline, and opens whole', (tester) async {
+    final store = await pumpApp(tester, home: const SizedBox());
+    store.data!.chats['dana'] = Conversation(identityId: 'dana', items: [
+      AskCard(id: 'lq', ts: _at(13, 45), askId: 'ask-lq', from: 'dana', headline: 'להעביר את הבוטים לתור החדש הלילה?', question: realGo.split('\nPR:').first,
+          options: const [AskOption(id: 'y', label: 'כן'), AskOption(id: 'n', label: 'לא')]),
+    ]);
+    store.data!.waiting.removeWhere((w) => w.from == 'dana');
+    store.data!.waiting.add(WaitItem(id: 'w-lq', kind: WaitKind.softAsk, from: 'dana', time: '13:45', kicker: 'שאלה', body: 'q', askId: 'ask-lq', inboxId: 46, createdAt: _at(13, 45)));
+    await pumpScreen(tester, store, const ChatScreen(identityId: 'dana'));
+    expect(find.textContaining('מהתקלה של הערב', findRichText: true), findsWidgets);
+    expect(find.text('עוד'), findsOneWidget);
+    await _shot(tester, 'real-ask-folded');
+    await tester.tap(find.text('עוד'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('לוותר הלילה על העותק השלישי', findRichText: true), findsWidgets);
+    expect(find.text('פחות'), findsOneWidget);
+  });
+
+  testWidgets('a question\'s whole text shows in the card, and "לשאלה" opens its details', (tester) async {
+    final store = await pumpApp(tester, home: const SizedBox());
+    final chat = Conversation(identityId: 'dana', items: [
+      AskCard(id: 'dq', ts: _at(13, 45), askId: 'ask-dq', from: 'dana', headline: 'לשלוח למשה את רשימת השינויים?',
+          question: 'הרשימה ארוכה: **14 שינויים** מאז הגרסה הקודמת, כולל התיקון לתמונות.', options: const [AskOption(id: 'y', label: 'כן'), AskOption(id: 'n', label: 'לא')]),
+      for (var i = 0; i < 40; i++) TextMsg(id: 'pad$i', ts: _at(14, 0), text: 'שורה $i'),
+    ]);
+    store.data!.chats['dana'] = chat;
+    store.data!.waiting.removeWhere((w) => w.from == 'dana');
+    store.data!.waiting.add(WaitItem(id: 'w-dq', kind: WaitKind.softAsk, from: 'dana', time: '13:45', kicker: 'שאלה', body: 'q', askId: 'ask-dq', inboxId: 45, createdAt: _at(13, 45)));
+    await pumpScreen(tester, store, const ChatScreen(identityId: 'dana'));
+    await tester.tap(find.text('לשאלה'));
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    await tester.pumpAndSettle();
+    expect(find.textContaining('14 שינויים', findRichText: true), findsWidgets);
+  });
+
+  testWidgets('"מחכה לך": the pile\'s card and a decision\'s page show the GO\'s whole text as markdown (#1499)', (tester) async {
+    final store = await pumpApp(tester, size: const Size(342, 900), home: const SizedBox());
+    danaRealGo(store);
+    decisionQueue
+      ..order.clear()
+      ..done.clear()
+      ..current = null
+      ..focus('w-rg');
+    await pumpScreen(tester, store, const DecisionStack());
+    expect(find.textContaining('מהתקלה של הערב', findRichText: true), findsWidgets);
+    expect(find.textContaining('**', findRichText: true), findsNothing, reason: 'markdown, not its marks');
+    // A decision with no headline: its page shows the body as markdown too.
+    final bare = WaitItem(id: 'w-bare', kind: WaitKind.go, from: 'dana', time: '13:41', kicker: 'GO', body: realGo, options: const [AskOption(id: 'go', label: 'GO', primary: true)], askId: 'inbox:1280', inboxId: 1280);
+    await pumpScreen(tester, store, WaitItemScreen(item: bare));
+    expect(find.textContaining('לוותר הלילה על העותק השלישי', findRichText: true), findsWidgets);
+    expect(find.textContaining('**', findRichText: true), findsNothing);
+  });
+
+  testWidgets('a headline that is the worker\'s sentence is not wrapped; a short name is, and is not said twice (#1499)', (tester) async {
+    late BuildContext ctx;
+    await pumpApp(tester, home: Builder(builder: (c) {
+      ctx = c;
+      return const SizedBox();
+    }));
+    WaitItem go(String? headline, {String body = ''}) => WaitItem(id: 'g', kind: WaitKind.go, from: 'dana', time: '', kicker: '', headline: headline, body: body);
+    expect(approvalTitle(ctx, go(realHeadline)), realHeadline);
+    expect(approvalTitle(ctx, go('לשלוח את הגרסה?')), 'לשלוח את הגרסה?');
+    expect(approvalTitle(ctx, go('התיקון למפה')), 'לאשר את התיקון למפה?');
+    expect(approvalParts(go('התיקון למפה', body: 'התיקון למפה\nשלב אחד')).text, 'שלב אחד');
   });
 
   testWidgets('no banner when nothing is open', (tester) async {

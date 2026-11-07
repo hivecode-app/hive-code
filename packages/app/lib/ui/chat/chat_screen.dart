@@ -1,4 +1,5 @@
 import '../../l10n/app_localizations.dart';
+import '../product/approval.dart' show showApproval;
 import '../product/product_theme.dart';
 import 'package:agent_company/l10n/ui_copy.dart';
 // The conversation screen (chat.md, mockup screens 3 and 4). One conversation per worker;
@@ -296,6 +297,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// The card the banner names, wherever it is in the history: the list is lazy, so a card far up is not
   /// built yet and has no context to scroll to. Seek it like a target from "מחכה לך", and light it (#258).
+  /// A GO opens its approval whole, over the card it brought into view (#1499); a question opens its details.
   void _toAsk(AskCard card) {
     setState(() {
       _target = card.id;
@@ -303,6 +305,8 @@ class _ChatScreenState extends State<ChatScreen> {
       _targetSince = DateTime.now();
       _flashNext = true;
     });
+    final wait = card is GoCard ? StoreScope.read(context).data?.waiting.where((w) => w.askId != null && w.askId == card.askId).firstOrNull : null;
+    if (wait != null) showApproval(context, wait).ignore();
   }
 
   /// The card lit for a moment after the banner brought it into view.

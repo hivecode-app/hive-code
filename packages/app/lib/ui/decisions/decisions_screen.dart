@@ -196,25 +196,10 @@ class DecisionText {
   /// The PR's own link, when the worker wrote one in the trailer ("PR: https://github.com/…/pull/210").
   final String? prUrl;
 
-  static final _prLine = RegExp(r'^PR:\s*(?:#?\d+|(https://github\.com/\S+/pull/\d+))\s*$');
-  static final _riskLine = RegExp(InputCopy.v10);
-
   factory DecisionText.of(WaitItem w) {
-    String? prUrl, risk;
-    final lines = <String>[];
-    for (final l in w.body.split('\n')) {
-      final t = l.trim();
-      final m = _prLine.firstMatch(t);
-      final r = _riskLine.firstMatch(t);
-      if (m != null) {
-        prUrl = m.group(1);
-      } else if (r != null) {
-        risk =  {'low': UiCopy.copy.lowRisk, 'medium': UiCopy.copy.mediumRisk, 'high': UiCopy.copy.highRisk}[r.group(1)];
-      } else {
-        lines.add(l);
-      }
-    }
-    var details = lines.join('\n').trim();
+    final t = decisionTrailer(w.body);
+    final prUrl = t.pr, risk = riskWords(t.risk);
+    var details = t.text;
     var headline = w.headline;
     if (headline == null) {
       final i = details.indexOf('\n');
@@ -738,7 +723,8 @@ class _Card extends StatelessWidget {
         ...top,
         if (t.details.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Flexible(child: SingleChildScrollView(child: Rich(t.details, auto: true, style: T.body.copyWith(color: p.text, height: 25 / 15.5)))),
+          // The worker's markdown, its lists and sections as written (#1499).
+          Flexible(child: SingleChildScrollView(child: Markdown(t.details))),
         ],
         if (item.managerNote case final note?) ...[
           const SizedBox(height: 10),
