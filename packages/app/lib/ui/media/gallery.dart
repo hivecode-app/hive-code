@@ -254,8 +254,8 @@ class _ImageViewerState extends State<ImageViewer> {
                           spacing: 8,
                           children: [
                             Text(source.mine ? (data?.ownerName.isNotEmpty == true ? data!.ownerName : l.mediaYou) : data?.who(source.chat).name ?? '', style: T.meta),
-                            Text(MaterialLocalizations.of(context).formatCompactDate(source.at), style: T.meta),
-                            Text(MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(source.at)), style: T.meta, textDirection: TextDirection.ltr),
+                            Text(dm(source.at), style: T.meta, textDirection: TextDirection.ltr),
+                            Text(hm(source.at), style: T.meta, textDirection: TextDirection.ltr),
                             Text(fileSize(a.bytes), style: T.meta, textDirection: TextDirection.ltr),
                           ],
                         ),

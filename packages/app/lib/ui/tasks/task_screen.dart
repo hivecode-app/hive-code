@@ -466,12 +466,8 @@ class _Facts extends StatelessWidget {
 
 String _time(BuildContext context, dynamic ms) => ms is int ? _when(context, DateTime.fromMillisecondsSinceEpoch(ms)) : '';
 
-String _when(BuildContext context, DateTime at) {
-  final local = at.toLocal(), now = CompanyTime.now(), copy = MaterialLocalizations.of(context);
-  final time = copy.formatTimeOfDay(TimeOfDay.fromDateTime(local), alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context));
-  final today = local.year == now.year && local.month == now.month && local.day == now.day;
-  return today ? time : '${copy.formatShortMonthDay(local)} · $time';
-}
+/// The company's clock, like the chats: "14:02" today, "20/10 · 14:02" on another day.
+String _when(BuildContext context, DateTime at) => daysAgo(at, CompanyTime.now()) == 0 ? hm(at) : '${dm(at)} · ${hm(at)}';
 
 class _RequestCard extends StatelessWidget {
   const _RequestCard({required this.request, required this.onOpen});

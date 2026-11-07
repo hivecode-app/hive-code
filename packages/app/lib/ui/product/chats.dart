@@ -277,17 +277,22 @@ class ProductChatRow extends StatelessWidget {
                       ],
                     ),
                     if (chatLine(context, d, store, who.id) case (final icon, final text, final fill))
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Ic(icon, size: 16, fill: fill, color: p.text),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: ProductContentText(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: T.meta.copyWith(color: p.text)),
-                            ),
-                          ],
+                      // The icon goes with the line's own direction: a Hebrew activity in the English app starts at the
+                      // right, and its icon has to stand next to it, not alone at the left.
+                      Directionality(
+                        textDirection: paragraphDirection(text),
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Ic(icon, size: 16, fill: fill, color: p.text),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: ProductContentText(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: T.meta.copyWith(color: p.text)),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                   ],

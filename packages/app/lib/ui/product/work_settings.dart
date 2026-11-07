@@ -56,7 +56,7 @@ class _WorkSettingsScreenState extends State<WorkSettingsScreen> {
     return Scaffold(appBar: AppBar(leading: IBtn(backIcon(context), tip: l.back, onTap: () => Navigator.maybePop(context)), title: Text(l.workSettingsTitle)), body: SafeArea(child: ListView(padding: const EdgeInsets.all(20), children: [
       if (loading) const Center(child: CircularProgressIndicator()),
       if (draft != null && !loading) ...[
-        Text(forecast == null ? l.workForecastUnknown : l.workForecast(DateFormat.yMMMMEEEEd(Localizations.localeOf(context).languageCode).format(DateTime.fromMillisecondsSinceEpoch(forecast!)))),
+        Text(forecast == null ? l.workForecastUnknown : l.workForecast(DateFormat.yMMMMEEEEd(Localizations.localeOf(context).languageCode).format(wall(DateTime.fromMillisecondsSinceEpoch(forecast!))))),
         const SizedBox(height: 20),
         Text(l.workParallel),
         Row(children: [

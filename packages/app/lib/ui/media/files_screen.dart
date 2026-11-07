@@ -126,14 +126,9 @@ class _FilesScreenState extends State<FilesScreen> {
                 final rows = snap.data!;
                 String sender(Map<String, dynamic> row) => store.data!.who(row['sender'] as String? ?? '').name;
                 String date(Map<String, dynamic> row) {
-                  final at = DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int? ?? 0), now = CompanyTime.now();
-                  final day = DateTime(at.year, at.month, at.day), today = DateTime(now.year, now.month, now.day);
-                  final label = day == today
-                      ? l.today
-                      : day == today.subtract(const Duration(days: 1))
-                      ? l.yesterday
-                      : MaterialLocalizations.of(context).formatCompactDate(at);
-                  return '$label ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(at), alwaysUse24HourFormat: true)}';
+                  final at = DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int? ?? 0), days = daysAgo(at, CompanyTime.now());
+                  final label = days == 0 ? l.today : days == 1 ? l.yesterday : dm(at);
+                  return '$label ${hm(at)}';
                 }
 
                 Widget entry(Map<String, dynamic> row, {bool desktop = false}) {

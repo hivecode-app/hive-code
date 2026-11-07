@@ -124,7 +124,7 @@ class _ArtifactCardState extends State<ArtifactCard> {
   }
 }
 
-String _date(BuildContext context, int at) => MaterialLocalizations.of(context).formatCompactDate(DateTime.fromMillisecondsSinceEpoch(at));
+String _date(BuildContext context, int at) => dm(DateTime.fromMillisecondsSinceEpoch(at));
 
 typedef ArtifactSurfaceBuilder = Widget Function(String url, void Function(String) blocked);
 
