@@ -25,6 +25,8 @@ export type Awaiting = (typeof AWAITING)[number];
 export interface AwaitingTask {
   id: number; ref: string | null; project: string | null; title: string; summary: string | null; identity: string | null;
   awaiting: Awaiting; awaiting_note: string | null; awaiting_at: number; pr: string | null;
+  /** owner/name of `pr` (task 1476); null = not known (two repos could have that number; no guess). */
+  pr_repo: string | null;
 }
 
 /** A `deploy` with no GO about it reminds its opener after this long without a deploy. */
@@ -45,6 +47,8 @@ export type AwaitingTell = (t: AwaitingTask, itemId: number, to: string, outcome
 
 export interface DeployReport {
   project: string; sha: string; target?: string | null;
+  /** The repo its PRs are in (owner/name). Default: the project's repo (its first checkout). */
+  repo?: string | null;
   /** hq task ids it includes (a task's branch is company-t<id>). */
   tasks?: number[];
   /** PR numbers (or URLs) it includes, in the project's repo. */
@@ -57,6 +61,12 @@ const line = (v: unknown, max = 200): string | null => {
   const l = v.split('\n')[0]!.trim();
   return l ? l.slice(0, max) : null;
 };
+
+/** `https://github.com/o/r/pull/12` → "o/r"; anything else → null. */
+export function prRepo(v: unknown): string | null {
+  const m = typeof v === 'string' ? /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/\d+/.exec(v) : null;
+  return m ? m[1]! : null;
+}
 
 /** "#12", "12" and ".../pull/12" are the same PR. */
 export function prNumber(v: unknown): string | null {
@@ -74,6 +84,12 @@ export class AwaitingBoard {
   openerOf: (t: { project: string | null; labels: string }) => string | null = () => null;
   /** A project's GitHub repo (owner/name), for the PR's link under a decision. */
   repoOf: (project: string, worktree: string | null) => string | null = () => null;
+  /** The project's own repo (its first checkout): what a PR number means in a deploy report that names no repo. */
+  defaultRepoOf: (project: string) => string | null = () => null;
+  /** The charter's checkouts (name, repo), first = where hq opens a task's worktree unless a `repo:` label names another. */
+  checkoutsOf: (project: string) => { name: string; repo: string | null }[] = () => [];
+  /** The PR links a task's own shift created (task-prs.ts). */
+  prLinksOf: (taskId: number) => string[] = () => [];
   /** A new card to check: hq.ts says so in the opener's conversation. */
   onCard: (t: AwaitingTask, itemId: number, from: string | null) => void = () => {};
   /** A deploy stuck with no GO about it: hq.ts reminds its opener, once per wait. */
@@ -86,7 +102,7 @@ export class AwaitingBoard {
    */
   mark(taskId: number, a: { awaiting?: unknown; awaiting_note?: unknown; pr?: unknown }, by: string): AwaitingTask | null {
     const pr = prNumber(a.pr);
-    if (pr) this.store.db.prepare('UPDATE tasks SET pr = ? WHERE id = ?').run(pr, taskId);
+    if (pr) this.store.db.prepare('UPDATE tasks SET pr = ?, pr_repo = ? WHERE id = ?').run(pr, prRepo(a.pr) ?? this.resolvePrRepo(taskId, pr), taskId);
     const note = line(a.awaiting_note);
     if (a.awaiting === 'none') {
       this.clear(taskId, by);
@@ -105,6 +121,47 @@ export class AwaitingBoard {
     if (t) this.store.emit('task.awaiting', t.identity, { id: taskId, awaiting: t.awaiting, note: t.awaiting_note, by });
     this.sync(taskId);
     return t;
+  }
+
+  /**
+   * The repo of a task's PR given as a bare number: the one PR link with that number its shift created, else the
+   * checkout its worktree is in (repoOf). A closed task's worktree is gone: a task team (identity <project>-t<id>) ran
+   * in the checkout hq opened it in, the one its `repo:` label names or the first. Null when it can't be told: no
+   * guess between two repos (a standing worker's task ran wherever that worker works).
+   */
+  private resolvePrRepo(taskId: number, pr: string): string | null {
+    const repos = new Set(this.prLinksOf(taskId).filter((u) => prNumber(u) === pr).map(prRepo).filter((r): r is string => !!r));
+    if (repos.size === 1) return [...repos][0]!;
+    if (repos.size > 1) return null;
+    const t = this.store.db.prepare('SELECT project, worktree, identity, labels FROM tasks WHERE id = ?').get(taskId) as { project: string | null; worktree: string | null; identity: string | null; labels: string } | undefined;
+    if (!t?.project) return null;
+    const byWorktree = this.repoOf(t.project, t.worktree);
+    if (byWorktree || t.worktree) return byWorktree;
+    const checkouts = this.checkoutsOf(t.project);
+    const label = (JSON.parse(t.labels || '[]') as string[]).find((l) => l.startsWith('repo:'))?.slice(5);
+    if (label) return checkouts.find((c) => c.name === label)?.repo ?? null;
+    return t.identity === `${t.project}-t${taskId}` ? checkouts[0]?.repo ?? null : null;
+  }
+
+  /**
+   * Tasks that wait on a deploy with a PR and no repo (before v43): the repo from the PR link the closer gave in
+   * `status`/`close_team` (its op in `ops` while the task was open), else resolvePrRepo. Idempotent.
+   */
+  backfillPrRepos(): number {
+    const rows = this.store.db.prepare(`SELECT id, pr, identity, created_at, awaiting_at FROM tasks
+      WHERE awaiting = 'deploy' AND pr IS NOT NULL AND pr_repo IS NULL`).all() as { id: number; pr: string; identity: string | null; created_at: number; awaiting_at: number | null }[];
+    let n = 0;
+    for (const t of rows) {
+      // `status` comes from the task's worker; `close_team` from whoever closed it, naming the team (t<N> or its identity).
+      const urls = (this.store.db.prepare(`SELECT json_extract(args, '$.pr') AS pr FROM ops
+        WHERE ((op = 'status' AND identity = ?) OR (op = 'close_team' AND json_extract(args, '$.team') IN (?, ?)))
+        AND received_at BETWEEN ? AND ? AND json_extract(args, '$.pr') LIKE ?`)
+        .all(t.identity ?? '', `t${t.id}`, t.identity ?? '', t.created_at, (t.awaiting_at ?? this.store.now()) + 60_000, `%/pull/${t.pr}`) as { pr: string }[]).map((r) => r.pr);
+      const repos = new Set([...urls, ...this.prLinksOf(t.id)].filter((u) => prNumber(u) === t.pr).map(prRepo).filter((r): r is string => !!r));
+      const repo = repos.size === 1 ? [...repos][0]! : repos.size > 1 ? null : this.resolvePrRepo(t.id, t.pr);
+      if (repo) { this.store.db.prepare('UPDATE tasks SET pr_repo = ? WHERE id = ?').run(repo, t.id); n++; }
+    }
+    return n;
   }
 
   get(taskId: number): AwaitingTask | null {
@@ -200,7 +257,7 @@ export class AwaitingBoard {
     const title = (t.summary?.split('\n')[0]?.trim() || t.title).slice(0, 200);
     const headline = t.awaiting_note ?? title;
     const body = t.pr ? `${title} · PR #${t.pr}` : title;
-    const repo = t.pr && t.project ? this.repoOf(t.project, this.worktreeOf(taskId)) : null;
+    const repo = t.pr && t.project ? t.pr_repo ?? this.repoOf(t.project, this.worktreeOf(taskId)) : null;
     const links = repo ? JSON.stringify([{ kind: 'pr', url: `https://github.com/${repo}/pull/${t.pr}` }]) : null;
     const [cur, ...extra] = open;
     for (const o of extra) this.inbox.resolve(o.id);
@@ -285,10 +342,14 @@ export class AwaitingBoard {
     const prs = [...new Set((r.prs ?? []).map(prNumber).filter((p): p is string => !!p))];
     const id = Number(this.store.db.prepare(`INSERT INTO deploys (project, sha, target, tasks, prs, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
       .run(r.project, r.sha, r.target ?? null, JSON.stringify(tasks), JSON.stringify(prs), this.store.now()).lastInsertRowid);
-    // A task id is global; a PR number only means something inside its project.
+    // A task id is global; a PR number only means something inside its repo (task 1476: my-company#69 is not
+    // agent-company#69). A task whose repo isn't known matches a report of the project's own repo only.
+    const repo = r.repo ?? this.defaultRepoOf(r.project);
+    const own = (repo ?? '').toLowerCase() === (this.defaultRepoOf(r.project) ?? '').toLowerCase() ? 1 : 0;
     const rows = this.store.db.prepare(`SELECT id FROM tasks WHERE awaiting = 'deploy' AND (project = ? OR project IS NULL)
-      AND (id IN (SELECT value FROM json_each(?)) OR (project = ? AND pr IN (SELECT value FROM json_each(?))))`)
-      .all(r.project, JSON.stringify(tasks), r.project, JSON.stringify(prs)) as { id: number }[];
+      AND (id IN (SELECT value FROM json_each(?)) OR (project = ? AND pr IN (SELECT value FROM json_each(?))
+        AND (lower(pr_repo) = lower(?) OR (pr_repo IS NULL AND ? = 1))))`)
+      .all(r.project, JSON.stringify(tasks), r.project, JSON.stringify(prs), repo ?? '', own) as { id: number }[];
     const cleared = rows.filter((t) => this.clear(t.id, `deploy:${id}`, 'deployed')).map((t) => t.id);
     this.store.db.prepare('UPDATE deploys SET cleared = ? WHERE id = ?').run(JSON.stringify(cleared), id);
     this.store.emit('deploy.recorded', null, { id, project: r.project, sha: r.sha, target: r.target ?? null, cleared });
@@ -296,7 +357,7 @@ export class AwaitingBoard {
   }
 }
 
-const COLS = 'id, ref, project, title, summary, identity, awaiting, awaiting_note, awaiting_at, pr';
+const COLS = 'id, ref, project, title, summary, identity, awaiting, awaiting_note, awaiting_at, pr, pr_repo';
 
 interface FollowUp { id: number; title: string; project: string | null; state: string; awaiting: string | null }
 

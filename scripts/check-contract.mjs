@@ -492,6 +492,22 @@ export function main() {
         if (!isObj(dr) || !Array.isArray(dr.paths) || !dr.paths.length || !dr.paths.every((v) => typeof v === 'string' && v)) err(`${rel(charter)}: design_review needs "paths", a list of paths`);
         for (const k of ['wait_minutes', 'small_lines']) if (isObj(dr) && dr[k] != null && !(Number.isInteger(dr[k]) && dr[k] > 0)) err(`${rel(charter)}: design_review "${k}" must be a positive whole number`);
       }
+      // live: what runs in production and how hq reads it (packages/hq/src/live.ts, task 1476). A part hq would drop is an error.
+      if (fm.live != null) {
+        if (!Array.isArray(fm.live)) err(`${rel(charter)}: "live" must be a list of parts`);
+        const seen = new Set();
+        for (const p of Array.isArray(fm.live) ? fm.live : []) {
+          const name = isObj(p) && typeof p.part === 'string' && p.part ? p.part : null;
+          if (!name) { err(`${rel(charter)}: every live part needs "part", a name`); continue; }
+          if (seen.has(name)) err(`${rel(charter)}: live part "${name}" appears twice`);
+          seen.add(name);
+          if (!(typeof p.sha === 'string' && p.sha.trim())) err(`${rel(charter)}: live part "${name}" needs "sha", a command that prints the commit it runs`);
+          if (p.repo != null ? !(typeof p.repo === 'string' && /^[\w.-]+\/[\w.-]+$/.test(p.repo)) : !(typeof fm.repo === 'string' && fm.repo))
+            err(`${rel(charter)}: live part "${name}" needs "repo" (owner/name), or the charter's repo`);
+          if (p.paths != null && !(Array.isArray(p.paths) && p.paths.length && p.paths.every((v) => typeof v === 'string' && v)))
+            err(`${rel(charter)}: live part "${name}" "paths" must be a list of paths`);
+        }
+      }
       // codex: Codex as a task worker (packages/hq/src/workspace.ts codexCharter). No `default`: a task goes to Codex only when its opener asks.
       if (fm.codex != null) {
         const cx = fm.codex;

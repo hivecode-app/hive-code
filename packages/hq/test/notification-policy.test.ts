@@ -59,7 +59,7 @@ test('check card is silent after the task worker reported, including across chat
     clock.advance(30_000); hq.conversations.flush();
     assert.equal(hq.conversations.soundedRecently('eli'), true);
     const task = hq.scheduler.addTask({ title: 'תיקון', identity: 'eli' });
-    hq.awaiting.onCard?.({ ...task, awaiting: 'check', summary: null, awaiting_note: null, awaiting_at: clock.t, pr: null, project: task.project }, 99, 'rotem');
+    hq.awaiting.onCard?.({ ...task, awaiting: 'check', summary: null, awaiting_note: null, awaiting_at: clock.t, pr: null, pr_repo: null, project: task.project }, 99, 'rotem');
     clock.advance(20_000); hq.conversations.flush();
     const alerts = hq.store.eventsAfter(0, 1000).filter((e) => e.type === 'conv.alert');
     assert.equal((alerts.at(-1)!.data as any).level, 'silent');

@@ -26,6 +26,17 @@ export interface DesignReview { reviewer: string; paths: string[]; waitMinutes: 
 /** Never `default` (yet): a task goes to Codex only when whoever opens it asks (task 836). */
 export interface CodexCharter { tasks: 'off' | 'on-request'; model: string | null }
 
+/**
+ * `live:` in a charter (task 1476): one part of the project that runs in production, and how hq reads what it runs.
+ * `sha` is a shell command (from $HOME, with COMPANY_DIR set: the long ones are scripts in company/live/<project>/)
+ * that prints the commit(s) the part runs now, one per line (every instance of a fleet: a
+ * PR is live only when all of them contain it). `paths`: a PR needs this part only when it touches one of them
+ * (prefixes); none = every file of the repo. hq clears "מחכה לפריסה" by itself once every part a PR needs runs it.
+ * `sha: report` (sha null here): no command can tell (a store release); the part runs what the last deploy report with
+ * `target` = its name said, and is unknown until one comes.
+ */
+export interface LivePart { part: string; repo: string; paths: string[] | null; sha: string | null }
+
 export interface AccessGrant { resource: string; verbs: ('read' | 'write' | 'exec')[]; quote: string; date: string }
 
 export interface Charter {
@@ -44,6 +55,8 @@ export interface Charter {
   heavy: HeavyClass[];
   /** `codex:` — Codex as a task worker (codex-helper.md). `on-request`: an open_team with `engine: "codex"` runs on it. Off by default. */
   codex: CodexCharter;
+  /** `live:` — what runs in production and how to read it (LivePart). Empty: hq can't tell, only a deploy report clears. */
+  live: LivePart[];
   paused: string | null;  // paused: he put the project on hold (the reason, or "מושהה"). Workers still run; hq doesn't wake it (stall-watch.ts)
   error?: string;         // status "invalid": why the charter could not be read
 }
@@ -79,7 +92,7 @@ export function readCharter(companyDir: string, project: string): Charter | null
     const m = readFileSync(file, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
     fm = ((m ? parse(m[1]!) : {}) ?? {}) as Record<string, unknown>;
   } catch (e) {
-    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, designReview: null, access: [], heavy: [], codex: { tasks: 'off', model: null }, paused: null, error: (e as Error).message };
+    return { project, status: 'invalid', machine: null, checkouts: [], worktreeDir: '.worktrees', commands: {}, ciCheck: null, mergeInstructions: null, designReview: null, access: [], heavy: [], codex: { tasks: 'off', model: null }, live: [], paused: null, error: (e as Error).message };
   }
   const s = (v: unknown) => (typeof v === 'string' && v ? v : null);
   const checkouts: Checkout[] = [];
@@ -96,7 +109,7 @@ export function readCharter(companyDir: string, project: string): Charter | null
     project, status: s(fm.status) ?? 'active', machine: s(fm.machine), checkouts,
     worktreeDir: s(fm.worktree_dir) ?? '.worktrees', commands, ciCheck: s(fm.ci_check),
     mergeInstructions: steps(fm.merge_instructions), designReview: designReview(fm.design_review), access: accessGrants(fm.access), heavy: parseHeavy(fm.heavy),
-    codex: codexCharter(fm.codex),
+    codex: codexCharter(fm.codex), live: liveParts(fm.live, checkouts[0]?.repo ?? s(fm.repo)),
     paused: fm.paused === true ? 'מושהה' : s(fm.paused),
   };
 }
@@ -111,6 +124,18 @@ function accessGrants(v: unknown): AccessGrant[] {
     if (!resource || !quote || !date) return [];
     const verbs = (Array.isArray(o.verbs) ? o.verbs : ['read']).filter((w): w is 'read' | 'write' | 'exec' => w === 'read' || w === 'write' || w === 'exec');
     return verbs.length ? [{ resource, verbs, quote, date }] : [];
+  });
+}
+
+/** Only a whole part counts: a name, a repo (its own or the charter's) and a command (or `report`). */
+export function liveParts(v: unknown, repo: string | null): LivePart[] {
+  const s = (x: unknown) => (typeof x === 'string' && x.trim() ? x.trim() : null);
+  return (Array.isArray(v) ? v : []).flatMap((x): LivePart[] => {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const part = s(o.part), sha = s(o.sha), r = s(o.repo) ?? repo;
+    if (!part || !sha || !r) return [];
+    const paths = (Array.isArray(o.paths) ? o.paths : []).map(s).filter((p): p is string => !!p);
+    return [{ part, repo: r, paths: paths.length ? paths : null, sha: sha === 'report' ? null : sha }];
   });
 }
 

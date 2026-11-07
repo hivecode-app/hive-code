@@ -642,6 +642,19 @@ const MIGRATIONS: string[] = [
   // works); pending_since: the oldest high-priority push it has not acked yet (push.ts fcmReachable).
   `CREATE TABLE fcm_tokens (device TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL,
     last_ok_at INTEGER, failures INTEGER NOT NULL DEFAULT 0, acked_at INTEGER, pending_since INTEGER);`,
+
+  // v43, task 1476: what runs in production, read by hq itself (live.ts), and the repo of a task's PR (a number alone
+  // is ambiguous in a project with two repos).
+  `ALTER TABLE tasks ADD COLUMN pr_repo TEXT;                          -- owner/name of tasks.pr; NULL = not known (no guess)
+   CREATE TABLE live_parts (
+     project TEXT NOT NULL,
+     part TEXT NOT NULL,                     -- the charter's live[].part
+     repo TEXT NOT NULL,
+     shas TEXT NOT NULL DEFAULT '[]',        -- JSON: every commit that part runs now; [] = unknown
+     error TEXT,                             -- why it is unknown
+     checked_at INTEGER NOT NULL,
+     PRIMARY KEY (project, part)
+   );`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

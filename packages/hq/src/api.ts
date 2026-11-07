@@ -475,6 +475,16 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
   // call production behind main on their account a drift.
   route('GET', '/api/deploys/waiting', ({ url }) => hq.awaiting.waitingDeploy(url.searchParams.get('project') ?? 'agent-company'));
 
+  // task 1476: what each part of a project runs (the charter's `live:`, read by hq), and why each waiting task stays.
+  route('GET', '/api/deploys/live', ({ url }) => {
+    const project = url.searchParams.get('project');
+    const parts = (hq.store.db.prepare(`SELECT project, part, repo, shas, error, checked_at FROM live_parts ${project ? 'WHERE project = ?' : ''} ORDER BY project, part`)
+      .all(...(project ? [project] : [])) as { shas: string }[]).map((r) => ({ ...r, shas: JSON.parse(r.shas) as string[] }));
+    const waiting = hq.awaiting.list().filter((t) => t.awaiting === 'deploy' && (!project || t.project === project))
+      .map((t) => ({ id: t.id, project: t.project, pr: t.pr, pr_repo: t.pr_repo, verdict: hq.live.verdicts.get(t.id) ?? null }));
+    return { parts, waiting };
+  });
+
   // A deploy reports what it put in production (scripts/deploy.sh; any project's deploy may call it): the
   // tasks it includes leave "מה לבדוק" if they waited for a deploy. By task id, or by PR number in the project.
   route('POST', '/api/deploys', async ({ body }) => {
@@ -483,8 +493,11 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     if (!Array.isArray(tasks) || tasks.some((t) => !Number.isInteger(t))) throw new HttpError(400, 'tasks must be an array of task ids');
     const prs = b.prs == null ? [] : b.prs;
     if (!Array.isArray(prs) || prs.some((p) => typeof p !== 'string' && !Number.isInteger(p))) throw new HttpError(400, 'prs must be an array of PR numbers');
-    return { deploy: hq.awaiting.deployed({ project: str(b.project, 'project')!, sha: str(b.sha, 'sha')!, target: str(b.target, 'target', false),
-      tasks: tasks as number[], prs: (prs as (string | number)[]).map(String) }) };
+    const deploy = hq.awaiting.deployed({ project: str(b.project, 'project')!, sha: str(b.sha, 'sha')!, target: str(b.target, 'target', false),
+      repo: str(b.repo, 'repo', false), tasks: tasks as number[], prs: (prs as (string | number)[]).map(String) });
+    // A `sha: report` part (a store release) is what this report says: what waits on it may clear now.
+    hq.store.bg(hq.live.refresh(str(b.project, 'project')!), 'live.refresh');
+    return { deploy };
   });
 
   // Night mode (B.16): the same as writing "לילה" / the first message in the morning, for the app.

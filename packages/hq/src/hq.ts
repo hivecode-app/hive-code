@@ -14,6 +14,8 @@ import { Artifacts } from './artifacts.ts';
 import { ownerCompletions } from './owner-completions.ts';
 import { Conversations } from './conversations.ts';
 import { AwaitingBoard, DEPLOY_STUCK_MS } from './awaiting.ts';
+import { LIVE_EVERY_MS, LiveWatch, type LiveGit, type LiveRun } from './live.ts';
+import { recordedTaskPrs } from './task-prs.ts';
 import { Estimates } from './estimates.ts';
 import { Access, type JobRunner } from './access.ts';
 import { Leases } from './leases.ts';
@@ -83,6 +85,9 @@ export interface HqDeps {
   /** Reads Codex's rate limits (codex-quota.ts; default: a short-lived `codex app-server`). */
   codexLimits?: CodexLimitsReader;
   setupCommand?: SetupCommand;
+  /** What production runs (live.ts): GitHub, and the charters' `live:` commands. */
+  liveGit?: LiveGit;
+  liveRun?: LiveRun;
   now?: () => number;
 }
 
@@ -109,6 +114,7 @@ export class Hq {
   readonly inbox: Inbox;
   readonly conversations: Conversations;
   readonly awaiting: AwaitingBoard;
+  readonly live: LiveWatch;
   readonly estimates: Estimates;
   readonly access: Access;
   readonly leases: Leases;
@@ -216,6 +222,11 @@ export class Hq {
     // back to him as a delivery failure (21/10).
     // The PR's link under the decision: the project's repo from its charter.
     this.awaiting.repoOf = (project, worktree) => repoOfWorktree(readCharter(this.cfg.companyDir, project), worktree);
+    this.awaiting.defaultRepoOf = (project) => readCharter(this.cfg.companyDir, project)?.checkouts[0]?.repo ?? null;
+    this.awaiting.checkoutsOf = (project) => (readCharter(this.cfg.companyDir, project)?.checkouts ?? []).map((c) => ({ name: c.name, repo: c.repo }));
+    this.awaiting.prLinksOf = (id) => recordedTaskPrs(this.store, id);
+    this.live = new LiveWatch(this.store, this.awaiting, (project) => readCharter(this.cfg.companyDir, project)?.live ?? [],
+      { git: deps.liveGit, run: deps.liveRun, companyDir: this.cfg.companyDir });
     this.awaiting.openerOf = (t) => [openedBy(t), t.project ? projectLead(this.store, t.project) : null, this.cfg.managerId]
       .find((id): id is string => !!id && id !== OWNER && !!getIdentity(this.store, id)?.active && !this.mailbox.taskClosed(id)) ?? null;
     // #219: "נכשל" on a task's card reaches the opener at once, with no details: if he has any, he writes them in
@@ -242,7 +253,7 @@ export class Hq {
     this.awaiting.onStuck = (t, to) => {
       this.mailbox.tell({ msg_id: `task-${t.id}-deploy-stuck-${t.awaiting_at}`, from: 'hq', to, kind: 'system', ref: `task-${t.id}`, priority: 'next',
         body: `משימה ${t.id} (${t.title}${t.pr ? `, PR #${t.pr}` : ''}) מוזגה ומחכה לפריסה כבר ${Math.round(DEPLOY_STUCK_MS / 3600_000)} שעות, בלי בקשת GO. `
-          + `מאחדים את כל מה שמחכה לפריסה בפרויקט לבקשת GO אחת (request_go). אם היא כבר נפרסה: status עם awaiting: "none" על המשימה, או דיווח פריסה.` });
+          + `מאחדים את כל מה שמחכה לפריסה בפרויקט לבקשת GO אחת (request_go). אם היא כבר נפרסה ו-hq לא ראה: חסר באמנה חלק ב-\`live:\` שמראה מה רץ בפרודקשן (למה היא נשארת: GET /api/deploys/live). עד שיתוקן: status עם awaiting: "none" על המשימה.` });
     };
     this.estimates = new Estimates(this.store);
     this.access = new Access(this, deps.accessRunner);
@@ -383,6 +394,7 @@ export class Hq {
     this.ingest.resumePendingDone();
     // #219: what waited on him before this version (and anything a crash left half-done) gets its card now.
     this.awaiting.sweep();
+    this.awaiting.backfillPrRepos();
     this.store.emit('hq.started', null, { pid: process.pid });
     // task 986: a fault caught while the card was still his goes to the manager, as a new one does.
     this.mailbox.caughtFaultsToManager();
@@ -405,6 +417,9 @@ export class Hq {
         this.inbox.returnStale((i) => this.mailbox.returnToManager(i));
       });
       this.every(5_000, 'probes', () => this.probes.tick());
+      // task 1476: "מחכה לפריסה" clears by what production runs (the charters' `live:`), now and every 30 minutes.
+      this.store.bg(this.live.tick(), 'live.tick');
+      this.every(LIVE_EVERY_MS, 'live', () => this.live.tick());
       // reserve (leases.ts): the ceiling of a class, a company-run that stopped answering, a place nobody takes; then whoever waits is served.
       this.every(5_000, 'leases', () => this.leases.sweep());
       this.every(30_000, 'push', () => this.pusher.sweepUnacked());

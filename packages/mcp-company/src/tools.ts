@@ -25,14 +25,14 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
   const G = (male: string, female: string) => g(n.owner, male, female);
   // "מה לבדוק" (#108): what a finished task still waits for, shown to him until a deploy or his "בדקתי" clears it.
   const awaitingArgs: Record<string, Schema> = {
-    awaiting: oneOf(['deploy', 'check', 'verify', 'none'], 'מה המשימה עוד מחכה ' + G('לו', 'לה') + ': deploy = מוזג ומחכה ל-GO או לפריסה (מתנקה לבד כשפריסה כוללת אותה), '
+    awaiting: oneOf(['deploy', 'check', 'verify', 'none'], 'מה המשימה עוד מחכה ' + G('לו', 'לה') + ': deploy = מוזג ומחכה ל-GO או לפריסה (מתנקה לבד: hq קורא מה רץ בפרודקשן לפי `live:` באמנת הפרויקט, ומנקה כשכל חלק שה-PR נוגע בו מריץ אותו; גם דיווח פריסה שמזכיר אותה מנקה), '
       + 'check = כבר בפרודקשן ' + pre('ו', O) + ' ' + G('צריך', 'צריכה') + ' לבדוק משהו ' + G('בעצמו', 'בעצמה') + ' (מתנקה ' + G('כשהוא מסמן', 'כשהיא מסמנת') + ' "בוצע"), verify = לבדוק לפני שחרור, למשל build ב-TestFlight, none = כלום, מנקה. בלי: לא מחכה לכלום. '
       + 'check ו-verify מגיעים מיד ' + G('אליו', 'אליה') + ' כהודעה בשיחה איתך, עם "עובד" ו"לא עובד", ו"לא עובד" מגיע לפותח המשימה. deploy לא מגיע ' + G('אליו', 'אליה') + ' אף פעם: מאחדים פריסות לבקשת GO אחת לפרויקט (request_go), ואחרי 6 שעות בלי פריסה ובלי בקשת GO hq מזכיר לך. '
       + 'רק מה שבאמת מחכה ' + G('לו', 'לה') + ' וחוסם: בלי ' + G('הבדיקה שלו', 'הבדיקה שלה') + ' או בלי הפריסה העבודה לא גמורה. הצעה, "אם בא לך" או משהו שאפשר לעשות בלי ' + G('אותו', 'אותה') + ' לא נכנסים ל-awaiting: כותבים אותם ב-tell. '
       + '/ only what truly waits on ' + G('him', 'her') + ' and blocks; a suggestion or an optional check goes in a tell. deploy = merged, waits for GO or a deploy; check = live, ' + G('he has', 'she has') + ' to check something ' + G('himself', 'herself') + '; verify = to check before release (a TestFlight build); none = clears'),
     awaiting_note: s('עם awaiting: שורה אחת במילים ' + G('שלו', 'שלה') + ', מה מחכה או מה לבדוק, פותחים במה מבקשים, e.g. "לבדוק בטלפון שתמונה נשלחת ועולה בצ\'אט" '
       + '/ with awaiting: one line in ' + G('his', 'her') + ' words, what waits or what to check'),
-    pr: s('ה-PR שמוזג, מספר או קישור. פריסה שמדווחת עליו מנקה את deploy / the merged PR, number or url; a deploy that reports it clears deploy'),
+    pr: s('ה-PR שמוזג. קישור מלא עדיף: בפרויקט עם כמה repos מספר לבד לא אומר באיזה. כשהוא בפרודקשן deploy יורד לבד / the merged PR; a full url is best (a number alone is ambiguous in a project with several repos). deploy clears once production runs it'),
   };
 
   // הערכות זמן (estimates.ts): a promise of "X יהיה מוכן תוך Y" goes in these fields, not only in the text. hq keeps the register,
