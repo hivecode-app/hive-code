@@ -1,6 +1,6 @@
 // Tool catalogue of the `company` MCP server (B.4, B.3, B.6). Every tool but
 // recall is a write: it goes to the local WAL and is answered {queued:true}.
-import { DEFAULT_NAMES, englishLines, g, hebrewReason, isEnglishTitle, pre } from '@company/shared';
+import { DEFAULT_NAMES, englishLines, g, hebrewReason, isEnglishTitle, pre, UI_TERMS, uiTermsLine } from '@company/shared';
 import type { CompanyNames, OpName } from '@company/shared';
 
 type Schema = Record<string, unknown>;
@@ -23,6 +23,9 @@ function tool(name: ToolDef['name'], description: string, properties: Record<str
 export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
   const O = n.owner.name;
   const G = (male: string, female: string) => g(n.owner, male, female);
+  // What the interface shows him has no internal term (owner, 08/11). One dictionary: packages/shared/src/ui-terms.json.
+  const WORDS = ' בלי מונחים פנימיים וראשי תיבות, אלא במילים ' + G('שלו', 'שלה') + ': ' + uiTermsLine() + '. ';
+  const NO_TERMS = ' בלי מונחים פנימיים כמו ' + UI_TERMS.slice(0, 3).map((t) => t.term).join(', ') + '. ';
   // "מה לבדוק" (#108): what a finished task still waits for, shown to him until a deploy or his "בדקתי" clears it.
   const awaitingArgs: Record<string, Schema> = {
     awaiting: oneOf(['deploy', 'check', 'verify', 'none'], 'מה המשימה עוד מחכה ' + G('לו', 'לה') + ': deploy = מוזג ומחכה ל-GO או לפריסה (מתנקה לבד: hq קורא מה רץ בפרודקשן לפי `live:` באמנת הפרויקט, ומנקה כשכל חלק שה-PR נוגע בו מריץ אותו; גם דיווח פריסה שמזכיר אותה מנקה), '
@@ -30,7 +33,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'check ו-verify מגיעים מיד ' + G('אליו', 'אליה') + ' כהודעה בשיחה איתך, עם "עובד" ו"לא עובד", ו"לא עובד" מגיע לפותח המשימה. deploy לא מגיע ' + G('אליו', 'אליה') + ' אף פעם: מאחדים פריסות לבקשת GO אחת לפרויקט (request_go), ואחרי 6 שעות בלי פריסה ובלי בקשת GO hq מזכיר לך. '
       + 'רק מה שבאמת מחכה ' + G('לו', 'לה') + ' וחוסם: בלי ' + G('הבדיקה שלו', 'הבדיקה שלה') + ' או בלי הפריסה העבודה לא גמורה. הצעה, "אם בא לך" או משהו שאפשר לעשות בלי ' + G('אותו', 'אותה') + ' לא נכנסים ל-awaiting: כותבים אותם ב-tell. '
       + '/ only what truly waits on ' + G('him', 'her') + ' and blocks; a suggestion or an optional check goes in a tell. deploy = merged, waits for GO or a deploy; check = live, ' + G('he has', 'she has') + ' to check something ' + G('himself', 'herself') + '; verify = to check before release (a TestFlight build); none = clears'),
-    awaiting_note: s('עם awaiting: שורה אחת במילים ' + G('שלו', 'שלה') + ', מה מחכה או מה לבדוק, פותחים במה מבקשים, e.g. "לבדוק בטלפון שתמונה נשלחת ועולה בצ\'אט" '
+    awaiting_note: s('עם awaiting: שורה אחת במילים ' + G('שלו', 'שלה') + ', מה מחכה או מה לבדוק, פותחים במה מבקשים,' + NO_TERMS + 'e.g. "לבדוק בטלפון שתמונה נשלחת ועולה בצ\'אט" '
       + '/ with awaiting: one line in ' + G('his', 'her') + ' words, what waits or what to check'),
     pr: s('ה-PR שמוזג. קישור מלא עדיף: בפרויקט עם כמה repos מספר לבד לא אומר באיזה. כשהוא בפרודקשן deploy יורד לבד / the merged PR; a full url is best (a number alone is ambiguous in a project with several repos). deploy clears once production runs it'),
   };
@@ -43,7 +46,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
     eta_at: s('הערכה: באיזו שעה יהיה מוכן, HH:MM או תאריך ושעה מלאים. שעה בלי אזור זמן נקראת לפי שעון ישראל (Asia/Jerusalem), לא לפי שעון השרת. או eta_min / estimate: the time it will be ready, HH:MM or full ISO; a time with no zone is Israel time (Asia/Jerusalem), not the server\'s (or eta_min)'),
     eta_kind: oneOf(['small-fix', 'feature', 'investigation', 'report', 'build', 'deploy', 'release'],
       'סוג העבודה של ההערכה. release = שחרור לחנויות או שרשרת release, deploy = rollout לשרת, build = build או CI / kind of work; release = store release chain, deploy = server rollout'),
-    eta_what: s('מה יהיה מוכן, בשורה אחת בעברית, e.g. "ה-PR מוכן לסקירה" / what will be ready, one line'),
+    eta_what: s('מה יהיה מוכן, בשורה אחת בעברית,' + NO_TERMS + 'e.g. "השינוי מוכן לסקירה" / what will be ready, one line'),
     eta_done: { type: 'boolean', description: 'מה שהובטח ב-eta_what מוכן: סוגר את ההערכה הפתוחה עם הזמן האמיתי (בלי eta_what: האחרונה) / what was promised is ready: closes the open estimate with the real time' },
   };
 
@@ -71,7 +74,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'והפרטים (question) מקופלים. מה ' + G('שהוא כותב', 'שהיא כותבת') + ' בשיחה כשהשאלה פתוחה הוא התשובה. '
       + 'Ask the owner/manager a question. ' + G('He sees', 'She sees') + ' it as a message in ' + G('his', 'her') + ' chat with you: the headline first, '
       + 'buttons from options under it, the question folded as details. Whatever ' + G('he types', 'she types') + ' in that chat while it is open is the answer.', {
-      headline: s('שורה ראשונה קצרה במילים ' + G('שלו', 'שלה') + ': מה משתנה ' + G('אצלו', 'אצלה') + ' או מה צריך ' + G('ממנו', 'ממנה') + ', בלי מונחים טכניים, '
+      headline: s('שורה ראשונה קצרה במילים ' + G('שלו', 'שלה') + ': מה משתנה ' + G('אצלו', 'אצלה') + ' או מה צריך ' + G('ממנו', 'ממנה') + ',' + WORDS
         + 'e.g. "עדכון לאפליקציה: תמונות בצ\'אט" / one short line in ' + G('his', 'her') + ' words: what changes for ' + G('him', 'her')),
       question: s('השאלה עם הפרטים (מקופלים מתחת ל-headline) / the question with the details, folded under the headline'),
       blocking: { type: 'boolean', description: 'האם העבודה עוצרת עד תשובה / work is blocked until answered' },
@@ -118,7 +121,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
     }, ['state']),
     tool('status', 'עדכון מצב העובד. עם state: "done" המשימה נסגרת, ותמיד כותבים summary: זו השורה ' + pre('ש', O) + ' רואה ב"מאז שהיית פה" וב"מה הסתיים". '
       + 'בלי summary ' + G('הוא רואה', 'היא רואה') + ' רק את שם המשימה. '
-      + 'אם משהו עוד מחכה ' + G('לו', 'לה') + ' (פריסה אחרי GO, או משהו ' + G('שהוא צריך', 'שהיא צריכה') + ' לבדוק ' + G('בעצמו', 'בעצמה') + '), מוסיפים awaiting ו-awaiting_note, ו-check או verify מגיעים ' + G('אליו', 'אליה') + ' כהודעה בשיחה עם "עובד" ו"לא עובד". '
+      + 'אם משהו עוד מחכה ' + G('לו', 'לה') + ' (פריסה אחרי אישור, או משהו ' + G('שהוא צריך', 'שהיא צריכה') + ' לבדוק ' + G('בעצמו', 'בעצמה') + '), מוסיפים awaiting ו-awaiting_note, ו-check או verify מגיעים ' + G('אליו', 'אליה') + ' כהודעה בשיחה עם "עובד" ו"לא עובד". '
       + 'המשימה נסגרת כשהסבב נגמר, ורק אם ענית על כל מה ' + pre('ש', O) + ' ' + G('שלח', 'שלחה') + ' לך. אחרת hq כותב לך "' + O + ' מחכה לתשובה על…" והיא נשארת פתוחה. '
       + 'The task closes when the turn ends, and only if every message ' + G('he', 'she') + ' sent you was answered; else hq tells you so and it stays open. '
       + 'Update your working status. With state "done" the task closes; always give summary: it is the line ' + G('he sees', 'she sees') + ' under "since you were here" '
@@ -128,7 +131,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'A time estimate goes in the eta_* fields; done or eta_done closes it with the real time.', {
       state: s('מצב, e.g. working | blocked | idle | done. בשרת השני: needs-local כשחסר משהו שיש רק בשרת הראשי, והמשימה עוברת לשם / state; on the second server, needs-local moves the task to the main one'),
       note: s('הערה קצרה / short note'),
-      summary: s('ב-done: שורה אחת במילים ' + G('שלו', 'שלה') + ', מה השתנה ' + G('אצלו', 'אצלה') + ', בלי מספרי PR ובלי מונחים טכניים, e.g. "התמונות בצ\'אט עולות גם מהטלפון" '
+      summary: s('ב-done: שורה אחת במילים ' + G('שלו', 'שלה') + ', מה השתנה ' + G('אצלו', 'אצלה') + ', בלי מספרים של שינויים ומשימות.' + WORDS + 'e.g. "התמונות בצ\'אט עולות גם מהטלפון" '
         + '/ with done: one line in ' + G('his', 'her') + ' words on what changed for ' + G('him', 'her') + ', no PR numbers or jargon'),
       ...awaitingArgs,
       ...etaArgs,
@@ -142,9 +145,9 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'עדיפות: priority 0-3 (0 הכי דחוף, ברירת מחדל 2). בלי priority, כותרת שמתחילה ב-p0 או p1 (גם p0: או אחרי רווח או סוגריים) מקבלת אותה עדיפות. '
       + 'Priority: priority 0-3 (0 most urgent, default 2). Without priority, a name starting with p0 or p1 (also "p0:", after a space or bracket) gets that priority.', {
       for_owner: { type: 'boolean', description: 'true למשימה שהמשתמש ביקש: בסיום ה-summary נשלח למשתמש אוטומטית אם לא דיווחת בעצמך / requested by the owner; completion is reported automatically' },
-      name: s('כותרת המשימה. חלק ממאמץ גדול: שם המאמץ קודם, e.g. "מוצר גנרי, שלב 4: …" / task title; part of a larger effort: the effort\'s name first'),
+      name: s('כותרת המשימה, כמו שהיא מופיעה ' + G('לו', 'לה') + ' בלשונית המשימות:' + NO_TERMS + 'עדיפות ב-priority, לא p0 בכותרת. חלק ממאמץ גדול: שם המאמץ קודם, e.g. "מוצר גנרי, שלב 4: …" / task title; part of a larger effort: the effort\'s name first'),
       purpose: s('מה בדיוק לעשות ואיך יודעים שזה גמור / what to do and the definition of done'),
-      about: s('שורה אחת במילים ' + G('שלו', 'שלה') + ': מה המשימה תשנה ' + G('אצלו', 'אצלה') + ', בלי מונחים טכניים, e.g. "התראה כשנהג לא מאשר נסיעה תוך 5 דקות". '
+      about: s('שורה אחת במילים ' + G('שלו', 'שלה') + ': מה המשימה תשנה ' + G('אצלו', 'אצלה') + ',' + NO_TERMS + 'e.g. "התראה כשנהג לא מאשר נסיעה תוך 5 דקות". '
         + 'זה מה ש' + G('הוא רואה', 'היא רואה') + ' בדף המשימה. ה-purpose הוא לעובד ולא מוצג ' + G('לו', 'לה')
         + ' / one line in ' + G('his', 'her') + ' words on what the task will change for ' + G('him', 'her') + '; the task page shows it, the purpose is for the worker'),
       proposal: { type: 'boolean', description: 'true להצעה: המשימה לא מתחילה עד ש' + O + ' ' + G('לוחץ', 'לוחצת') + ' "התחלה" בלשונית המשימות. לרעיון ש' + G('הוא לא ביקש', 'היא לא ביקשה') + ', לא למשימה ש' + G('ביקש', 'ביקשה') + ' '
@@ -167,7 +170,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'Close a task team: the task is done, its shift stops, uncommitted work is preserved.', {
       team: s('מזהה המשימה (t22), ה-identity של העובד (lumo-t22) או השם שלו / task id, worker identity or name'),
       reason: s('סיבה, נשלחת לעובד לפני העצירה / reason, sent to the worker before the stop'),
-      summary: s('שורה אחת במילים ' + G('שלו', 'שלה') + ', מה השתנה ' + G('אצלו', 'אצלה') + ', בלי מספרי PR ובלי מונחים טכניים, e.g. "מיכל בצוות של לומו בוט". '
+      summary: s('שורה אחת במילים ' + G('שלו', 'שלה') + ', מה השתנה ' + G('אצלו', 'אצלה') + ', בלי מספרים של שינויים ומשימות,' + NO_TERMS + 'e.g. "מיכל בצוות של לומו בוט". '
         + 'גוברת על מה שהעובד כתב. כתבו אותה כשהעובד לא כתב, אחרת ' + G('הוא רואה', 'היא רואה') + ' רק את שם המשימה '
         + '/ one line in ' + G('his', 'her') + ' words on what changed for ' + G('him', 'her') + ', no PR numbers or jargon; overrides the worker\'s. Give it when the worker gave none, '
         + 'or ' + G('he sees', 'she sees') + ' only the task title'),
@@ -191,32 +194,32 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       message: s('עם approved_in_chat: ה-msg_id של ההודעה של ' + O + ' (מה שבסוגריים בכותרת ההודעה שהגיעה אליך) / with approved_in_chat: the msg_id of the owner\'s message'),
       note: s('למה, שורה אחת בעברית / why, one line in Hebrew'),
     }, ['ref', 'outcome']),
-    tool('request_go', 'בקשת אישור לפעולה. מופיעה ' + G('אצלו', 'אצלה') + ' כהודעה בשיחה איתך עם כפתור GO: קודם headline, והפרטים (what) מקופלים. '
+    tool('request_go', 'בקשת אישור לפעולה. מופיעה ' + G('אצלו', 'אצלה') + ' כהודעה בשיחה איתך עם כפתור "אישור": קודם headline, והפרטים (what) מקופלים. '
       + 'אישור או דחייה ברורים בשיחה (או הכפתור) סוגרים את הבקשה; כל מה אחר ' + G('שהוא כותב', 'שהיא כותבת') + ' מגיע אליך כהודעה רגילה והבקשה נשארת פתוחה. אם ההחלטה כבר התקבלה בשיחה ' + G('והוא', 'והיא') + ' לא לחץ/לחצה על הכרטיס, סוגרים אותו ב-withdraw_go. לא סוגרים את המשימה כל עוד היא פתוחה. '
-      + 'Request a go-ahead before acting. ' + G('He sees', 'She sees') + ' it as a message in ' + G('his', 'her') + ' chat with you with a GO button: the headline first, '
+      + 'Request a go-ahead before acting. ' + G('He sees', 'She sees') + ' it as a message in ' + G('his', 'her') + ' chat with you with an approve button: the headline first, '
       + 'the details (what) folded. Only a clear yes or no closes it; anything else ' + G('he types', 'she types') + ' reaches you as an ordinary message and the request stays open. The task is not closed while it is open.', {
       action: oneOf(['release', 'deploy', 'publish', 'run'], 'מה מבקשים לעשות; קובע כותרת כשאין headline / requested action; default deploy'),
-      headline: s('שורה ראשונה קצרה במילים ' + G('שלו', 'שלה') + ', בלי מונחים טכניים, שאומרת מה מבקשים ממנו: מתחילה ב"להחליט אם…", '
-        + 'e.g. "להחליט אם לפרוס את עדכון האפליקציה: תמונות בצ\'אט" / one short line in ' + G('his', 'her') + ' words that says what is asked, starting "להחליט אם…"'),
+      headline: s('שורה ראשונה קצרה שאומרת מה מבקשים ' + G('ממנו', 'ממנה') + ': מתחילה ב"להחליט אם…". היא גם הכותרת של ההתראה.' + WORDS
+        + 'e.g. "להחליט אם לשחרר את עדכון האפליקציה: תמונות בצ\'אט" / one short line in ' + G('his', 'her') + ' words that says what is asked, starting "להחליט אם…"'),
       what: s('הפרטים: מה נכנס, סיכון ואיך חוזרים אחורה (מקופלים) / details: what ships, risk, rollback (folded)'),
-      pr: s('קישור או מספר PR. קישור מלא הופך לכפתור "ה-PR" בהחלטה / PR url or number; a full https link becomes the PR button'),
+      pr: s('קישור או מספר PR. קישור מלא הופך לכפתור "השינוי בקוד" בהחלטה / PR url or number; a full https link becomes the code-change button'),
       report: s('קישור לדוח המלא (https), אם יש. כפתור "הדוח המלא" בהחלטה / link to the full report (https), if any'),
       risk: oneOf(['low', 'medium', 'high'], 'רמת סיכון / risk level'),
     }, ['what']),
     tool('compose_home', 'הרכבת ראש מסך השיחות של ' + O + ': אילו בלוקים, באיזה סדר ובאיזה ניסוח. רק ' + (n.composer ? `${pre('ל', n.composer.name)} ${pre('ו', pre('ל', n.manager.name))}` : pre('ל', n.manager.name)) + '. '
-      + 'האפליקציה מציירת כל בלוק מקומפוננטה קבועה וממלאת אותו מנתונים חיים, ולכן מפנים לנתונים לפי מזהה, והטקסט בעברית. '
+      + 'האפליקציה מציירת כל בלוק מקומפוננטה קבועה וממלאת אותו מנתונים חיים, ולכן מפנים לנתונים לפי מזהה, והטקסט בעברית,' + WORDS
       + 'אוצר הבלוקים: '
       + 'headline {text} משפט אחד. מה שמחכה ' + G('לו', 'לה') + ' מוצג בשורה נעוצה משלו בראש השיחות ("3 מחכות לך"), ולכן לא כותבים בו כמה מחכה ' + G('לו', 'לה') + ' · alert {shift: מזהה משמרת} תקלה שאין עליה החלטה, למשל משמרת תקועה · '
       + 'tasks {tasks: [מזהי משימות] או "open"} בעבודה ובתור: משימות פתוחות עם מי פתח, מי עובד והמצב. "open" מציג את כולן, ורשימה מציגה משימה מסוימת (למשל דחופה) · '
       + 'lanes {projects: [ids]} פסי היום · '
       + 'project {project, note?} שתי שורות · quiet {projects: [ids]} שורה אחת בסוף, "שקט גם ב: …", לפרויקטים שלא זזו · people {identities: [ids], caption?} · since {items: [עד 3: משפט, או {text, task: מזהה משימה}]}, עם task השורה מובילה לשיחה עם מי שעשה את המשימה · '
       + 'note {text, icon} הערה שלך, icon הוא שם של Material Symbol. לכל בלוק אפשר emphasis: normal|quiet|strong (טיפוגרפיה בלבד). '
-      + 'ההחלטות (GO, שאלות, בדיקות, תקלות עם תשובה) לא בבית: הן בשורה "מחכות לך" בראש השיחות, ו-waiting, asked, awaiting ו-alert על inbox לא מוצגים (אם הם מגיעים, מדלגים עליהם בשקט). '
+      + 'ההחלטות (בקשות אישור, שאלות, בדיקות, תקלות עם תשובה) לא בבית: הן בשורה "מחכות לך" בראש השיחות, ו-waiting, asked, awaiting ו-alert על inbox לא מוצגים (אם הם מגיעים, מדלגים עליהם בשקט). '
       + 'בלוק לא מוכר, שדה חסר או הפניה שלא קיימת נדחים עם הסיבה. מה שנסגר נעלם לבד. '
       + 'מתכון ישן מ-30 דקות מתחלף בברירת המחדל של hq. '
       + 'דוגמה: [{"type":"headline","text":"בוקר שקט, שתי משימות רצות"},'
-      + '{"type":"lanes","projects":["agent-company","lumo"]},{"type":"project","project":"lumo","note":"מחכה ל-GO על 2.6.10"},'
-      + '{"type":"note","text":"שווה לבדוק את הפריסה של 2.6.10","icon":"rocket_launch","emphasis":"quiet"}] '
+      + '{"type":"lanes","projects":["agent-company","lumo"]},{"type":"project","project":"lumo","note":"מחכה לאישור לשחרור 2.6.10"},'
+      + '{"type":"note","text":"שווה לבדוק את השחרור של 2.6.10","icon":"rocket_launch","emphasis":"quiet"}] '
       + "Compose the head of the owner's conversations screen from the fixed block vocabulary above (Hebrew text, data by reference).", {
       blocks: { type: 'array', items: { type: 'object' }, description: 'הבלוקים לפי הסדר / the blocks, in order' },
       reason: s('למה ההרכבה הזו, בשורה / why this composition, one line'),

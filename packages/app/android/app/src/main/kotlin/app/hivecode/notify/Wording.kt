@@ -7,7 +7,7 @@ package app.hivecode.notify
 object Wording {
     const val SYSTEM_NAME = "המערכת" // hq itself as a sender; same name as in the app (#55)
 
-    const val GO = "GO"
+    const val GO = "אישור"
     const val NOT_NOW = "לא עכשיו"
     const val OPEN = "פתיחה"
     const val REPLY = "תשובה"
@@ -19,7 +19,7 @@ object Wording {
     const val ME = "אני"
     const val MARK_READ = "סימון כנקרא"
 
-    const val SUBTEXT_URGENT = "דחוף בפרודקשן"
+    const val SUBTEXT_URGENT = "תקלה דחופה בשירות"
     const val SUBTEXT_HANDOFF = "כניסה לאתר"
     const val BLOCKING_PREFIX = "חוסם: "
 
@@ -55,6 +55,6 @@ object Wording {
     const val ERR_GONE = "הפריט כבר נסגר ממקום אחר."
     const val ERR_SERVER = "החברה לא ענתה. אפשר לנסות שוב בעוד רגע."
     const val ERR_NOT_CONFIGURED = "החיבור לחברה עוד לא הוגדר באפליקציה."
-    const val ERR_NO_SHIFT = "אין משמרת פעילה לעצור."
-    const val ERR_LOCKED = "GO נשלח רק כשהמכשיר פתוח. אפשר לפתוח ולנסות שוב."
+    const val ERR_NO_SHIFT = "אין עבודה פעילה לעצור."
+    const val ERR_LOCKED = "אישור נשלח רק כשהמכשיר פתוח. אפשר לפתוח ולנסות שוב."
 }

@@ -19,8 +19,10 @@ data class InboxItem(
     /** For kind=ask: the ask id. */
     val ref: String?,
     val createdAt: Long,
-    /** Button label for GO, e.g. "GO לחזרה". hq items use plain "GO". */
+    /** Button label for an approval; hq items use the plain one (Wording.GO). */
     val goLabel: String? = null,
+    /** The worker's line in his words (request_go / ask headline): what a notification says first. */
+    val headline: String? = null,
 )
 
 data class Ask(
@@ -96,6 +98,7 @@ object HqJson {
                 blocking = o.optBoolean("blocking"),
                 ref = o.optStringOrNull("ref"),
                 createdAt = o.optLong("created_at"),
+                headline = o.optStringOrNull("headline"),
             )
         }
     }

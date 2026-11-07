@@ -26,8 +26,8 @@ object Channels {
             NotificationChannelCompat.Builder(id, importance).setName(name).setDescription(desc).build()
         nm.createNotificationChannelsCompat(
             listOf(
-                ch(BLOCKING, NotificationManagerCompat.IMPORTANCE_HIGH, "מחכה לך", "שאלה חוסמת ובקשת GO"),
-                ch(URGENT_PROD, NotificationManagerCompat.IMPORTANCE_HIGH, "דחוף בפרודקשן",
+                ch(BLOCKING, NotificationManagerCompat.IMPORTANCE_HIGH, "מחכה לך", "שאלה חוסמת ובקשת אישור"),
+                ch(URGENT_PROD, NotificationManagerCompat.IMPORTANCE_HIGH, "תקלה דחופה בשירות",
                     "תקלה דחופה. כדאי לאפשר לערוץ הזה לעקוף את נא לא להפריע"),
                 ch(HANDOFF, NotificationManagerCompat.IMPORTANCE_HIGH, "כניסה לאתר", "בקשה להיכנס לאתר מהטלפון, בתוקף 10 דקות"),
                 ch(MESSAGES, NotificationManagerCompat.IMPORTANCE_HIGH, "הודעות", "הודעה מעובד, כמו בוואטסאפ. שיחה מושתקת לא מתריעה"),

@@ -147,7 +147,7 @@ class _SignInScreenState extends State<SignInScreen> {
                 Text(UiCopy.copy.signThisDevice, style: T.big.copyWith(color: p.text, height: 1.2)),
                 Padding(
                   padding: const EdgeInsets.only(top: 8, bottom: 28),
-                  child: Text(widget.current != null ? UiCopy.copy.switchServer2 : hasPasskeys ? UiCopy.copy.company2 : UiCopy.copy.pairingCodeFrom, style: T.body.copyWith(color: p.text2)),
+                  child: Text(widget.current != null ? UiCopy.copy.switchServer2 : hasPasskeys ? UiCopy.copy.productName : UiCopy.copy.pairingCodeFrom, style: T.body.copyWith(color: p.text2)),
                 ),
                 if (widget.note != null)
                   Padding(padding: const EdgeInsets.only(bottom: 16), child: Text(widget.note!, style: T.body.copyWith(color: p.text))),

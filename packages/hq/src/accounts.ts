@@ -492,7 +492,7 @@ export class AccountManager {
     else if (r.health === 'ok') this.store.emit('account.connected', null, { name, email: r.email });
   }
 
-  stop(): void { for (const name of [...this.pending.keys()]) this.cancelLogin(name, 'hq נעצר'); }
+  stop(): void { for (const name of [...this.pending.keys()]) this.cancelLogin(name, 'השרת נעצר'); }
 }
 
 // ── defaults (real Claude Code) ────────────────────────────────────────────

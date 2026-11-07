@@ -2023,7 +2023,7 @@ CompanyData mapSnapshot({
     };
     final ask = askById[i['ref']];
     final options = <AskOption>[
-      if (kind == WaitKind.go || kind == WaitKind.urgentProd) const AskOption(id: 'go', label: 'GO', primary: true),
+      if (kind == WaitKind.go || kind == WaitKind.urgentProd) AskOption(id: 'go', label: UiCopy.copy.approve2, primary: true),
       if (kind == WaitKind.awaiting) ...kAwaitingOptions,
       // The system's card for a fault (error-watch.ts): its first answer ("לטפל") is the main one.
       if (ask != null)

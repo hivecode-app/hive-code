@@ -65,7 +65,7 @@ export class PressureWatch {
       const holders = this.hq.resources.holdersLine();
       const top = procs.length ? procs.map((p) => `- ${(p.rssMb / 1024).toFixed(1)}GB · pid ${p.pid} · ${p.cmd}`).join('\n') : 'לא הצלחתי לקרוא את רשימת התהליכים';
       inbox.add({ kind: 'incident', urgency: 'urgent', from_identity: this.owner(), dedupe_key: `pressure-${t.id}-${since}`,
-        title: `משימה דחופה (${t.ref ?? `#${t.id}`}) מחכה ${Math.round((now - since) / 60_000)} דקות כי השרת עמוס`,
+        title: `משימה דחופה מחכה ${Math.round((now - since) / 60_000)} דקות כי השרת עמוס: ${t.title}`.slice(0, 200),
         body: `המשימה שמחכה: ${t.title}\n\n${why}.\n\n${holders ? `מי מחזיק, לפי פרויקט: ${holders}.\n\n` : ''}התהליכים שתופסים הכי הרבה זיכרון:\n${top}` });
       store.emit('pressure.alert', null, { task: t.id, processes: procs, holders });
     }

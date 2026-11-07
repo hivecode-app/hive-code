@@ -95,7 +95,7 @@ test('fallback: the default with no recipe, the agent one while fresh, the defau
     let cur = hq.home.current();
     assert.equal(cur.source, 'hq', 'home-headline is on: hq writes the sentence');
     assert.equal(cur.fallback, 'none');
-    assert.deepEqual(cur.blocks, [{ type: 'headline', text: 'GO: hq.' }, { type: 'quiet', projects: ['agent-company'] }],
+    assert.deepEqual(cur.blocks, [{ type: 'headline', text: 'בקשת אישור: hq.' }, { type: 'quiet', projects: ['agent-company'] }],
       'the active project that did not move folds into the last line; dormant lumo is not in it');
     // "מה לבדוק" is on the status screen: the default does not show it, a composed recipe still may.
     const t = hq.scheduler.addTask({ title: 'תמונות', project: 'agent-company' });
@@ -172,25 +172,25 @@ test('sentence: a person\'s sentence from the facts, after the app\'s "N החל�
   assert.equal(sentence(f({ done: 3 })), 'מאז שהיית פה הסתיימו 3 משימות. שום דבר לא מחכה לך.');
   assert.equal(sentence(f({ done: 1, visited: false })), 'ביממה האחרונה הסתיימה משימה אחת. שום דבר לא מחכה לך.');
   // With something waiting the app leads with the count: this names the one, and goes on.
-  assert.equal(sentence(f({ waiting: 1, decision: { kind: 'go', text: 'GO: שחרור voice-bot' }, running: 1, where: ['החברה'] })),
-    'GO: שחרור voice-bot. בינתיים משימה אחת רצה בחברה.');
+  assert.equal(sentence(f({ waiting: 1, decision: { kind: 'go', text: 'בקשת אישור: שחרור voice-bot' }, running: 1, where: ['החברה'] })),
+    'בקשת אישור: שחרור voice-bot. בינתיים משימה אחת רצה בחברה.');
   assert.equal(sentence(f({ waiting: 1, decision: { kind: 'ask', text: 'איזה שם לבוט?' } })), 'שאלה: איזה שם לבוט?');
   assert.equal(sentence(f({ waiting: 3, running: 2, done: 2 })), 'מאז שהיית פה הסתיימו שתי משימות. בינתיים שתיים רצות.');
   assert.equal(sentence(f({ waiting: 2 })), '', 'the lead says it all');
   // Many: what they are, and the GO by name when it is the only one.
-  assert.equal(sentence(f({ waiting: 5, gos: 1, decision: { kind: 'go', text: 'GO: שחרור voice-bot', first: true } })), 'בראש התור: שחרור voice-bot.', 'not two colons in a row');
-  assert.equal(sentence(f({ waiting: 5, gos: 1, decision: { kind: 'go', text: 'GO: שחרור voice-bot', first: false } })), 'אחת מהן היא בקשת GO: שחרור voice-bot.');
-  assert.equal(sentence(f({ waiting: 5, gos: 1, decision: { kind: 'go', text: 'א'.repeat(60), first: false }, done: 3, running: 2 })), 'אחת מהן היא בקשת GO. בינתיים שתי משימות רצות.', 'a long name: without it');
+  assert.equal(sentence(f({ waiting: 5, gos: 1, decision: { kind: 'go', text: 'בקשת אישור: שחרור voice-bot', first: true } })), 'בראש התור: שחרור voice-bot.', 'not two colons in a row');
+  assert.equal(sentence(f({ waiting: 5, gos: 1, decision: { kind: 'go', text: 'בקשת אישור: שחרור voice-bot', first: false } })), 'אחת מהן היא בקשת אישור: שחרור voice-bot.');
+  assert.equal(sentence(f({ waiting: 5, gos: 1, decision: { kind: 'go', text: 'א'.repeat(60), first: false }, done: 3, running: 2 })), 'אחת מהן היא בקשת אישור. בינתיים שתי משימות רצות.', 'a long name: without it');
   assert.equal(sentence(f({ done: 250, visited: false, running: 11, where: ['א', 'ב', 'ג', 'ד'] })),
     'ביממה האחרונה הסתיימו 250 משימות. בינתיים 11 רצות ב-4 פרויקטים, ושום דבר לא מחכה לך.', 'never a number right after a number');
-  assert.equal(sentence(f({ waiting: 6, gos: 4, running: 2 })), '4 מהן GO. בינתיים שתי משימות רצות.');
-  assert.equal(sentence(f({ waiting: 2, gos: 2 })), 'שתיהן GO.');
-  assert.equal(sentence(f({ waiting: 3, gos: 3 })), 'כולן GO.');
+  assert.equal(sentence(f({ waiting: 6, gos: 4, running: 2 })), '4 מהן בקשות אישור. בינתיים שתי משימות רצות.');
+  assert.equal(sentence(f({ waiting: 2, gos: 2 })), 'שתיהן בקשות אישור.');
+  assert.equal(sentence(f({ waiting: 3, gos: 3 })), 'כולן בקשות אישור.');
   assert.equal(sentence(f({ stuck: 2 })), 'שני עובדים תקועים. שום דבר לא מחכה לך.', 'never "הכול שקט" over a stuck worker');
   // Too long: the project names go first, then what finished, then the name of what waits.
   const long = sentence(f({ waiting: 1, decision: { kind: 'go', text: 'א'.repeat(55) }, running: 2, where: ['לומו', 'ב'.repeat(30)] }));
   assert.ok(long.length <= 100 && long.includes('א'.repeat(55)) && !long.includes('בלומו'), long);
-  assert.equal(sentence(f({ waiting: 1, decision: { kind: 'go', text: 'א'.repeat(40) }, running: 1, done: 30 }), 70), `GO: ${'א'.repeat(40)}. בינתיים משימה אחת רצה.`);
+  assert.equal(sentence(f({ waiting: 1, decision: { kind: 'go', text: 'א'.repeat(34) }, running: 1, done: 30 }), 70), `בקשת אישור: ${'א'.repeat(34)}. בינתיים משימה אחת רצה.`);
   assert.equal(sentence(f({ waiting: 1, decision: { kind: 'go', text: 'א'.repeat(80) }, running: 1, done: 30 }), 60), 'בינתיים משימה אחת רצה.');
 });
 
@@ -302,7 +302,7 @@ test('facts: as the app counts; the one GO among many is named when it is first 
     assert.equal(f.waiting, 2, 'the replaced GO is not counted');
     assert.equal(f.gos, 1);
     assert.equal(f.decision!.first, false, 'the question is first in line: the GO is not "בראש התור"');
-    assert.equal(sentence(f), 'אחת מהן היא בקשת GO: להעביר את כל הנהגים שלנו לגרסה החדשה שמתקנת את…');
+    assert.equal(sentence(f), 'אחת מהן היא בקשת אישור: להעביר את כל הנהגים שלנו לגרסה החדשה שמתקנת את…');
     for (const i of hq.inbox.open()) if (!i.title.includes('החדשה')) hq.inbox.resolve(i.id);
     assert.equal(hq.home.facts().decision!.text, 'GO: להעביר את כל הנהגים שלנו לגרסה החדשה שמתקנת את…', 'a quote is not left open');
   } finally { await env.cleanup(); }

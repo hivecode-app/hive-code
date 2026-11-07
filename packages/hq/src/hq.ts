@@ -170,7 +170,7 @@ export class Hq {
     this.auth = new Auth(this.store, cfg.auth);
     this.nodes = new Nodes(cfg.nodes, cfg.stateDir, deps.ssh);
     // A node's switch, on by default: off, nothing new starts there (what runs there finishes there).
-    for (const n of cfg.nodes) this.store.ensureToggle(nodeToggle(n.name), true, `משמרות משימה רצות גם על ${n.name}`);
+    for (const n of cfg.nodes) this.store.ensureToggle(nodeToggle(n.name), true, `משימות רצות גם על ${n.name}`);
     // A launcher given by the caller (tests) launches on every machine itself.
     const launcher = deps.launcher ?? (cfg.nodes.length ? new RoutingLauncher(lazyTemplateLauncher(cfg), this.nodes, cfg.stateDir) : lazyTemplateLauncher(cfg));
     this.shifts = new ShiftManager(this.store, cfg, launcher, deps.connect);

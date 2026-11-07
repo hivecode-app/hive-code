@@ -1,6 +1,6 @@
 {
   "@@locale": "en",
-  "company": "Company",
+  "productName": "Hive Code",
   "chats": "Chats",
   "search": "Search",
   "projects": "Projects",
@@ -889,14 +889,6 @@
     }
   },
   "firstTime": "First time",
-  "request": "{p0} request",
-  "@request": {
-    "placeholders": {
-      "p0": {
-        "type": "Object"
-      }
-    }
-  },
   "request2": "Request",
   "blockingQuestion": "Blocking question",
   "question": "Question",
@@ -1207,7 +1199,7 @@
     }
   },
   "open3": "Open",
-  "merged": "Merged",
+  "merged": "In the code",
   "closed": "Closed",
   "files2": "Files",
   "review": "Review",
@@ -1527,8 +1519,8 @@
   "loading2": "Loading",
   "oneTask": "One task",
   "tasks3": "Tasks",
-  "oneMerge": "One merge",
-  "merges": "Merges",
+  "oneMerge": "One code change",
+  "merges": "Code changes",
   "oneRelease": "One release",
   "releases": "Releases",
   "fullDay": "Full day",
@@ -1546,7 +1538,7 @@
   "pause": "Pause",
   "play": "Play",
   "smallFix": "Small fix",
-  "feature": "Feature",
+  "feature": "New feature",
   "investigation": "Investigation",
   "report": "Report",
   "build": "Build",
@@ -1557,7 +1549,7 @@
   "completed2": "Completed",
   "openEndDay": "Open at end of day",
   "total": "Total",
-  "mergedReleased": "Merged and released",
+  "mergedReleased": "Code changes and releases",
   "noProject": "No project",
   "estimateAccuracy": "Estimate accuracy",
   "allRecordedEstimates": "All recorded estimates. Actual: median share of the estimate used.",
@@ -1632,7 +1624,7 @@
   "selected": "Selected",
   "home": "Home",
   "openHome": "Open home",
-  "productionIssue": "Production issue",
+  "productionIssue": "Service issue",
   "day": "day",
   "days": "{p0} days",
   "@days": {
@@ -1909,7 +1901,7 @@
   "backChats": "Back to chats",
   "allDetails": "All details",
   "fullReport": "Full report",
-  "pullRequest": "Pull request",
+  "pullRequest": "Code change",
   "chat3": "Chat with {p0}",
   "@chat3": {
     "placeholders": {
@@ -2413,7 +2405,7 @@
   "signBeforeUsing": "Sign in before using dictation.",
   "noConnectionDictation": "No connection to dictation. The recording was not transcribed. Try again.",
   "thisDeviceDisconnected": "This device is disconnected. Sign in again to transcribe the recording.",
-  "dictationServiceDid": "The dictation service did not accept the session. The recording was not transcribed.",
+  "dictationServiceDid": "The dictation service did not accept the connection. The recording was not transcribed.",
   "recordingCouldNot": "The recording could not be transcribed. Try again.",
   "dictationServiceReturned": "The dictation service returned an unexpected response. Try again.",
   "noSpeechDetected": "No speech detected. Try again.",
@@ -2573,7 +2565,7 @@
   "lumo": "Lumo",
   "tikibot": "Tikibot",
   "allAccountsTheir": "All accounts at their limit",
-  "urgentProductionIssue": "Urgent production issue",
+  "urgentProductionIssue": "Urgent service issue",
   "releaseApproval": "Release approval",
   "websiteSign2": "Website sign-in",
   "messageNotDelivered": "Message not delivered",
@@ -2732,9 +2724,9 @@
   "works": "Works",
   "progressProposal": "Proposal",
   "progressProposals": "Proposals",
-  "progressDevelopment": "In development",
+  "progressDevelopment": "Building",
   "progressReview": "In review",
-  "progressApproval": "Waiting for you",
+  "progressApproval": "Needs you",
   "progressReleased": "Released",
   "progressReleasedWeek": "Released this week",
   "progressNoProposals": "No proposals",
@@ -2751,10 +2743,10 @@
   "progressProposalBy": "Proposed by {name}",
   "progressDetailAsk": "Waiting for your answer",
   "progressDetailGo": "Waiting for your approval",
-  "progressDetailDeploy": "Merged, waiting for release",
+  "progressDetailDeploy": "In the code, waiting for release",
   "progressReleasing": "Waiting for release",
   "progressReleasingStuck": "{count, plural, =1{1 stuck} other{{count} stuck}}",
-  "progressDetailReleaseStuck": "Stuck: merged and waiting for release over a week",
+  "progressDetailReleaseStuck": "Stuck: waiting for release over a week",
   "@progressReleasingStuck": {
     "placeholders": {
       "count": {
@@ -2795,7 +2787,7 @@
   "progressShowCompleted": "Include completed tasks",
   "progressActivityFailed": "Activity could not be loaded. Try again.",
   "progressNoActivity": "No activity for this stage yet.",
-  "progressPullRequests": "Pull requests",
+  "progressPullRequests": "Code changes",
   "progressNoFiles": "No files attached yet.",
   "progressSourceMissing": "The source message is unavailable. You can continue in this conversation.",
   "progressCiPassed": "Checks passed",
@@ -2844,7 +2836,7 @@
   "setupMore": "Load more repositories",
   "setupStart": "Set up company",
   "setupFirstTask": "Your first task",
-  "setupFirstTaskHint": "Continue setup in the manager conversation. The first task will create a pull request, get an independent review and ask for approval.",
+  "setupFirstTaskHint": "Continue setup in the manager conversation. The first task will create a code change, get an independent review and ask for approval.",
   "setupOpenConversation": "Open conversation",
   "setupLater": "Go to conversations",
   "setupError": "The change could not be saved. Check the server connection and try again.",
@@ -3417,12 +3409,12 @@
     }
   },
   "evStarted": "Work started",
-  "evPr": "PR opened",
+  "evPr": "Code change opened",
   "evChecksPassed": "Automated checks passed",
   "evChecksFailed": "Automated checks failed",
   "evReviewApproved": "Review approved",
   "evReviewChanges": "Review asked for fixes",
-  "evMerged": "Merged",
+  "evMerged": "Change added to the code",
   "evGo": "Approval request: {title}",
   "@evGo": {
     "placeholders": {
@@ -3475,12 +3467,15 @@
   "nextYourCheck": "Your check",
   "nextNothing": "Nothing",
   "taskMessageFailed": "The message was not sent. It waits in the chat to be sent again.",
-  "evUnread": "GitHub could not be read just now. Showing what was known.",
+  "evUnread": "The code change could not be read from GitHub just now. Showing what was known.",
   "stuckFor": "{gender, select, f{Stuck for {duration}} other{Stuck for {duration}}}",
   "@stuckFor": {"placeholders": {"gender": {"type": "String"}, "duration": {"type": "String"}}},
   "minutesCount": "{count, plural, =1{1 minute} other{{count} minutes}}",
   "@minutesCount": {"placeholders": {"count": {"type": "int"}}},
   "hoursCount": "{count, plural, =1{1 hour} other{{count} hours}}",
   "@hoursCount": {"placeholders": {"count": {"type": "int"}}},
-  "accountMenu": "Settings and sort"
+  "accountMenu": "Settings and sort",
+  "approvalRequest": "Approval request",
+  "codeChangeN": "Change {n}",
+  "@codeChangeN": {"placeholders": {"n": {"type": "int"}}}
 }

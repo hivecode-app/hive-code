@@ -383,7 +383,7 @@ void main() {
             ),
           ),
           BlockCard(label: 'מי עובד עכשיו', child: PeopleBlock(data: PeopleData.of(d))),
-          const BlockCard(child: NoteBlock(data: NoteData(text: 'היום נסגרו 30 משימות בחברה, רובן באפליקציה. בוט ההזמנות מחכה ל-GO שלך מ-19:57.', from: 'adi'))),
+          const BlockCard(child: NoteBlock(data: NoteData(text: 'היום נסגרו 30 משימות בחברה, רובן באפליקציה. בוט ההזמנות מחכה לאישור שלך מ-19:57.', from: 'adi'))),
           BlockCard(label: 'מאז שהיית פה', child: SinceBlock(data: SinceData.of(d, since: DateTime(2026, 10, 20, 19, 0)), now: _at, max: 3)),
         ]),
       ),

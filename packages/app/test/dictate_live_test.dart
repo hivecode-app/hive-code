@@ -27,7 +27,7 @@ void main() {
   test('a wrong token is reported in Hebrew', () async {
     await expectLater(
       DictateClient(baseUrl: url!, token: 'wrong').transcribe(Uint8List(0)),
-      throwsA(isA<DictationError>().having((e) => e.message, 'message', contains('טוקן'))),
+      throwsA(isA<DictationError>().having((e) => e.message, 'message', contains('החיבור'))),
     );
   }, skip: skip);
 

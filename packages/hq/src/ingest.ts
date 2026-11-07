@@ -209,10 +209,15 @@ export class Ingest {
       }
       case 'request_go': {
         const what = need('what');
-        const item = inbox.add({ kind: 'go', from_identity: e.identity, title: `GO: ${what}`.slice(0, 200), blocking: true,
-          urgency: a.risk === 'high' ? 'urgent' : 'normal', ref: e.id, dedupe_key: `op:${e.id}`, headline: s(a.headline)?.trim() || goHeadline(s(a.action), what),
-          links: requestGoLinks(a, this.repoOfWorker(e.identity)),
-          body: [what, s(a.pr) ? `PR: ${String(a.pr)}` : '', s(a.risk) ? `סיכון: ${String(a.risk)}` : ''].filter(Boolean).join('\n') });
+        // The title is what a notification and the widget say: his words, never "GO: …" (owner, 08/11).
+        const headline = s(a.headline)?.trim() || goHeadline(s(a.action), what);
+        // The body is shown as is (the chat card, Telegram): the PR goes in links, the risk in his words.
+        const links = requestGoLinks(a, this.repoOfWorker(e.identity));
+        const risk = s(a.risk) ? `סיכון: ${RISK_HE[String(a.risk)] ?? String(a.risk)}` : '';
+        const item = inbox.add({ kind: 'go', from_identity: e.identity, title: headline.slice(0, 200), blocking: true,
+          urgency: a.risk === 'high' ? 'urgent' : 'normal', ref: e.id, dedupe_key: `op:${e.id}`, headline,
+          links,
+          body: [what, s(a.pr) && !links.some((l) => l.kind === 'pr') ? `שינוי בקוד: ${String(a.pr)}` : '', risk].filter(Boolean).join('\n') });
         return { ok: true, id: e.id, ref: `inbox-${item.id}` };
       }
       case 'open_ticket':
@@ -726,6 +731,8 @@ export function taskSummary(v: unknown): string | null {
 }
 
 /** The links of a GO: its report and PR. A bare PR number becomes a link in the worker's project repo, when it has one. */
+const RISK_HE: Record<string, string> = { low: 'נמוך', medium: 'בינוני', high: 'גבוה' };
+
 function requestGoLinks(a: Record<string, unknown>, repo: string | null): InboxLink[] {
   const https = (v: unknown) => (typeof v === 'string' && /^https:\/\/\S+$/.test(v.trim()) ? v.trim() : null);
   const report = https(a.report);
@@ -737,6 +744,6 @@ function requestGoLinks(a: Record<string, unknown>, repo: string | null): InboxL
 export function goHeadline(action: string | undefined, what: string): string {
   const subject = what.split('\n').find((s) => s.trim())?.trim().slice(0, 140) ?? '';
   const hebrew = /[\u0590-\u05ff]/.test(subject);
-  const verbs: Record<string, [string, string]> = { release: ['לשחרר', 'Release'], deploy: ['לפרוס', 'Deploy'], publish: ['לפרסם', 'Publish'], run: ['להריץ', 'Run'] };
+  const verbs: Record<string, [string, string]> = { release: ['לשחרר', 'Release'], deploy: ['לשחרר', 'Release'], publish: ['לפרסם', 'Publish'], run: ['להריץ', 'Run'] };
   return `${(verbs[action ?? 'deploy'] ?? verbs.deploy)![hebrew ? 0 : 1]} ${subject}?`;
 }

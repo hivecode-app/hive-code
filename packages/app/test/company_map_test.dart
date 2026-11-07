@@ -146,7 +146,7 @@ void main() {
     expect(find.text('12:00'), findsOneWidget);
     await tester.pump(const Duration(seconds: 11));
     expect(find.text('24:00'), findsOneWidget);
-    expect(find.text('היום: משימה אחת, מיזוג אחד, 0 פריסות'), findsOneWidget);
+    expect(find.text('היום: משימה אחת, שינוי אחד בקוד, 0 שחרורים'), findsOneWidget);
     expect(find.byTooltip('הפעלה'), findsOneWidget); // stopped by itself
     await tester.pumpAndSettle();
   });

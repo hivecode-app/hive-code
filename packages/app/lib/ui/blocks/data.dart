@@ -198,7 +198,7 @@ class ProjectLine {
   final String name;
   final String symbol;
 
-  /// A line from whoever composes the home, under the two ("הפריסה מחכה ל-GO שלך").
+  /// A line from whoever composes the home, under the two ("השחרור מחכה לאישור שלך").
   final String? note;
 
   /// The task running now (the newest, when more than one); null when nothing runs.

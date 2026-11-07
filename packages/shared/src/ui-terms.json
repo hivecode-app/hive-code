@@ -1,0 +1,33 @@
+{
+  "about": "The one dictionary of internal terms that never reach the interface, and the user's word for each (docs/product/copy-guide.md). Read by the app's copy test (ARB), by hq's test of its fixed interface text, and by the MCP tool descriptions. `re` is a regular expression for JavaScript (flag u) and Dart (unicode: true); `i` makes it case-insensitive; `lang` limits it to one catalogue. Placeholders ({p0}, {title}) are removed before matching.",
+  "terms": [
+    { "term": "GO", "he": "אישור", "en": "approval", "match": [{ "re": "\\bGO\\b" }, { "re": "(?<!\\p{L})ה?גו(?!\\p{L})" }] },
+    { "term": "PR", "he": "שינוי בקוד", "en": "code change", "match": [{ "re": "\\bPRs?\\b" }, { "re": "\\bpull requests?\\b", "i": true }, { "re": "בקשו?ת מיזוג" }] },
+    { "term": "CI", "he": "בדיקות", "en": "tests", "match": [{ "re": "\\bCI\\b" }] },
+    { "term": "p0–p3", "he": "דחוף, גבוה, רגיל, נמוך", "en": "urgent, high, normal, low", "match": [{ "re": "\\b[pP][0-3]\\b" }] },
+    { "term": "awaiting", "he": "מחכה לך", "en": "needs you", "match": [{ "re": "\\bawaiting\\b", "i": true }] },
+    { "term": "deploy", "he": "שחרור", "en": "release", "match": [{ "re": "\\bdeploy(?:s|ed|ing|ment)?\\b", "i": true }, { "re": "פריס(?:ה|ות|ת)|נפרס|לפרוס" }] },
+    { "term": "merge", "he": "נכנס לקוד", "en": "in the code", "match": [{ "re": "\\bmerg(?:e|ed|es|ing)\\b", "i": true }, { "re": "מיזוג|מוזג|למזג" }] },
+    { "term": "review (בבדיקה)", "he": "סקירה", "en": "review", "match": [{ "re": "(?<!\\p{L})בבדיקה(?!\\p{L})" }] },
+    { "term": "worktree", "he": "(לא מוצג)", "en": "(not shown)", "match": [{ "re": "\\bworktrees?\\b", "i": true }] },
+    { "term": "handoff", "he": "(לא מוצג)", "en": "(not shown)", "match": [{ "re": "\\bhandoffs?\\b", "i": true }] },
+    { "term": "lease", "he": "הזמנה", "en": "reservation", "match": [{ "re": "\\bleases?\\b", "i": true }] },
+    { "term": "sha", "he": "גרסה", "en": "version", "match": [{ "re": "\\bsha\\b", "i": true }] },
+    { "term": "commit", "he": "שינוי", "en": "change", "match": [{ "re": "\\bcommits?\\b", "i": true }, { "re": "קומיט" }] },
+    { "term": "branch", "he": "(לא מוצג)", "en": "(not shown)", "match": [{ "re": "\\bbranch(?:es)?\\b", "i": true }, { "re": "(?<!\\p{L})ה?(?:ענף|ענפים)(?!\\p{L})" }] },
+    { "term": "task-1234", "he": "שם המשימה", "en": "the task's title", "match": [{ "re": "\\btask-\\d+" }, { "re": "\\bt\\d{2,}\\b" }] },
+    { "term": "MCP", "he": "(לא מוצג)", "en": "(not shown)", "match": [{ "re": "\\bMCP\\b", "i": true }] },
+    { "term": "hq", "he": "המערכת", "en": "the system", "match": [{ "re": "\\bhq\\b", "i": true }] },
+    { "term": "hq-host, ci-host", "he": "השרת", "en": "the server", "match": [{ "re": "\\b(?:hq-host|ci-host)\\b" }] },
+    { "term": "ETA", "he": "זמן משוער", "en": "expected time", "match": [{ "re": "\\bETA\\b" }] },
+    { "term": "FYI", "he": "לידיעה", "en": "for your information", "match": [{ "re": "\\bfyi\\b", "i": true }] },
+    { "term": "ticket", "he": "משימה", "en": "task", "match": [{ "re": "\\btickets?\\b", "i": true }, { "re": "טיקט" }] },
+    { "term": "shift", "he": "עבודה", "en": "work", "match": [{ "re": "משמרת|משמרות" }] },
+    { "term": "session", "he": "שיחה", "en": "conversation", "match": [{ "re": "\\bsessions?\\b", "i": true }, { "re": "סשן" }] },
+    { "term": "tmux", "he": "(לא מוצג)", "en": "(not shown)", "match": [{ "re": "\\btmux\\b", "i": true }] },
+    { "term": "production", "he": "השירות", "en": "the service", "match": [{ "re": "פרודקשן" }, { "re": "\\bproduction\\b", "i": true }] },
+    { "term": "build", "he": "בנייה", "en": "build", "match": [{ "re": "בילד" }] },
+    { "term": "feature", "he": "יכולת חדשה", "en": "new feature", "match": [{ "re": "פיצ'ר|פיצ׳ר" }] },
+    { "term": "passkey", "he": "מפתח גישה", "en": "passkey", "match": [{ "re": "passkey", "i": true, "lang": "he" }] }
+  ]
+}

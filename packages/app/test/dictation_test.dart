@@ -97,7 +97,7 @@ void main() {
       expect(await err(c), 'אין חיבור לשירות ההכתבה, ולכן ההקלטה לא תומללה. אפשר לנסות שוב.');
     });
     test('bad token, server error, empty text', () async {
-      expect(await err(client((_) => http.Response('bad token', 401))), contains('טוקן'));
+      expect(await err(client((_) => http.Response('bad token', 401))), contains('החיבור'));
       expect(await err(client((_) => http.Response('openai 500', 502))), contains('לא הצליח לתמלל'));
       expect(await err(client((_) => http.Response('{"text":"  "}', 200))), contains('לא נשמע דיבור'));
       expect(await err(client((_) => http.Response('<html>', 200))), contains('לא צפויה'));

@@ -6,10 +6,28 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-final forbidden = RegExp(r'משמרת|\bhq\b|\blease\b|\bGO\b|hq-host|!|—|את/ה');
-List<String> copyViolations(Map<String, dynamic> catalogue) => [
+// Internal terms come from the one dictionary that hq and the tool descriptions read too (packages/shared/src/ui-terms.json).
+final _terms = [
+  for (final t in (jsonDecode(File('../shared/src/ui-terms.json').readAsStringSync()) as Map<String, dynamic>)['terms'] as List)
+    for (final m in (t as Map<String, dynamic>)['match'] as List)
+      (term: t['term'] as String, lang: (m as Map<String, dynamic>)['lang'] as String?, re: RegExp(m['re'] as String, caseSensitive: m['i'] != true, unicode: true)),
+];
+final _style = RegExp(r'!|—|את/ה');
+final _placeholder = RegExp(r'\{[^{}]*\}');
+
+/// The terms one text uses: a dictionary term, or a style rule (copy-guide.md 3, 4, 5).
+List<String> termsIn(String text, [String? lang]) {
+  final plain = text.replaceAll(_placeholder, ' ');
+  return {
+    for (final t in _terms)
+      if ((t.lang == null || lang == null || t.lang == lang) && t.re.hasMatch(plain)) t.term,
+    if (_style.hasMatch(text)) 'style',
+  }.toList();
+}
+
+List<String> copyViolations(Map<String, dynamic> catalogue, [String? lang]) => [
   for (final entry in catalogue.entries)
-    if (!entry.key.startsWith('@') && entry.value is String && forbidden.hasMatch(entry.value as String)) entry.key,
+    if (!entry.key.startsWith('@') && entry.value is String && termsIn(entry.value as String, lang).isNotEmpty) '${entry.key}: ${termsIn(entry.value as String, lang).join(', ')}',
 ];
 
 class _LiteralVisitor extends RecursiveAstVisitor<void> {
@@ -35,17 +53,21 @@ void main() {
     final he = jsonDecode(File('lib/l10n/app_he.arb').readAsStringSync()) as Map<String, dynamic>;
     Set<String> keys(Map<String, dynamic> m) => m.keys.where((k) => !k.startsWith('@')).toSet();
     expect(keys(en), keys(he));
-    expect(copyViolations(en), isEmpty);
-    expect(copyViolations(he), isEmpty);
+    expect(copyViolations(en, 'en'), isEmpty);
+    expect(copyViolations(he, 'he'), isEmpty);
     final args = RegExp(r'\{(\w+)\}');
     for (final k in keys(en)) {
       expect(args.allMatches(en[k] as String).map((m) => m[1]).toSet(), args.allMatches(he[k] as String).map((m) => m[1]).toSet(), reason: k);
     }
   });
   test('copy guard rejects each planted prohibited term', () {
-    for (final term in ['משמרת', 'hq', 'lease', 'GO', 'hq-host', '!', '—', 'את/ה']) {
-      expect(copyViolations({'label': 'bad $term copy'}), ['label']);
+    for (final term in ['משמרת', 'hq', 'lease', 'GO', 'hq-host', 'PR', 'CI', 'p1', 'deploy', 'פריסה', 'מוזג', 'worktree', 'handoff', 'sha', 'task-1234', '!', '—', 'את/ה']) {
+      expect(copyViolations({'label': 'bad $term copy'}), hasLength(1), reason: term);
     }
+    // A placeholder is not a term: "{p0}" is not p0, and "release" is not "lease".
+    expect(copyViolations({'label': 'בתור · {p0} · release'}), isEmpty);
+    expect(copyViolations({'label': 'passkey'}, 'en'), isEmpty);
+    expect(copyViolations({'label': 'passkey'}, 'he'), hasLength(1));
   });
   test('application literals live in ARB across every application layer', () {
     for (final file in Directory('lib').listSync(recursive: true).whereType<File>().where((f) => f.path.endsWith('.dart') && !f.path.startsWith('lib/l10n/') && !f.path.endsWith('fake_backend.dart') && !f.path.endsWith('demo_map.dart'))) {

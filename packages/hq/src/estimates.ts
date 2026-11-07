@@ -28,7 +28,7 @@ export const DEFAULT_FACTOR: Record<EtaKind, number> = {
 };
 
 const PLURAL: Record<EtaKind, string> = {
-  release: 'שחרורים', build: 'בילדים', deploy: 'פריסות', report: 'דוחות', 'small-fix': 'תיקונים קטנים', feature: 'פיצ\'רים', investigation: 'חקירות',
+  release: 'שחרורים', build: 'תהליכי בנייה', deploy: 'שחרורים לשרת', report: 'דוחות', 'small-fix': 'תיקונים קטנים', feature: 'יכולות חדשות', investigation: 'חקירות',
 };
 
 export interface EstimateRow {

@@ -156,7 +156,8 @@ test('access: a write in prod is his every time, even with a grant that lists wr
     const card = env.hq.inbox.open().find((i) => i.kind === 'go')!;
     assert.equal(card.urgency, 'urgent');
     assert.match(card.body, /kubectl -n lumo-prod rollout restart deploy\/api/);
-    assert.match(card.body, /פרודקשן/);
+    assert.match(card.body, /השירות החי/);
+    assert.match(card.body, /^סיכון: גבוה/m, 'the risk in his words, never "high"');
     assert.equal(runner.started.length, 0);
     // a prod read the grant covers goes through
     assert.equal(((await ask({ resource: 'kube:lumo-prod', argv: ['get', 'pods'] })) as any).status, 'done');

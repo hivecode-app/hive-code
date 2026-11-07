@@ -10,7 +10,7 @@ class InputCopy {
   static const v7 = "לא עכשיו";
   static const v8 = "לא עובד";
   static const v9 = "לא רלוונטי";
-  static const v10 = "^סיכון:\\s*(low|medium|high)\\s*\$";
+  static const v10 = "^סיכון:\\s*(low|medium|high|נמוך|בינוני|גבוה)\\s*\$";
   static const v11 = "כן";
   static const v12 = "לא";
   static const v13 = "^(?:מה נכנס|מה משתנה(?: למשתמשים)?|What changes(?: for users)?|Changes)\\s*[:：]?\\s*(.*)\$";
@@ -37,4 +37,6 @@ class InputCopy {
   static const completed = ['סיים', 'סיימה'];
   static const deferred = ['דחה', 'דחתה'];
   static const closed = ['סגר', 'סגרה'];
+  /// hq's risk line in his words ("סיכון: גבוה"): low, medium, high.
+  static const riskWords = ['נמוך', 'בינוני', 'גבוה'];
 }

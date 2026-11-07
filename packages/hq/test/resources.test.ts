@@ -72,9 +72,9 @@ test('חלק שנכשל או נחתך מסומן "לא נמדד", לא נעלם'
 test('ייחוס: משמרת→משימה→פרויקט, ci-slice, docker, וכל השאר "לא מזוהה" עם השם; בלי ספירה כפולה', () => {
   const rows = attribute(parseRaw(FAST_OUT, DOCKER_OUT), ctx({ map: { 'mystery-1': 'lumo' } }), new Map(), 'local', 1000);
   const by = (n: RegExp) => rows.filter((r) => n.test(r.name));
-  assert.deepEqual(by(/t394/).map((r) => [r.kind, r.project, r.task, r.memMb]), [['shift', 'agent-company', 394, 2048]]);
+  assert.deepEqual(rows.filter((r) => r.kind === 'shift' && r.task === 394).map((r) => [r.kind, r.project, r.task, r.memMb]), [['shift', 'agent-company', 394, 2048]]); // the name is his: the task, not t394
   assert.deepEqual(by(/ghost/).map((r) => [r.project, r.name.includes('ghost')]), [[null, true]]);
-  assert.deepEqual(by(/ci-lumo/).map((r) => [r.kind, r.project, r.memMb]), [['ci', 'lumo', 3072]]);
+  assert.deepEqual(rows.filter((r) => r.kind === 'ci' && r.project).map((r) => [r.kind, r.project, r.memMb]), [['ci', 'lumo', 3072]]);
   assert.equal(by(/gha-runner/).length, 0); // a child of the slice
   assert.equal(by(/app\.scope/).length, 0); // a child of a shift
   assert.equal(by(/docker-0123/).length, 0); // docker was read: counted from its stats
@@ -305,7 +305,7 @@ test('ברירת מחדל: user@1001, דפדפן, claude-remote, gha-deploy ומ
     { path: 'user.slice/user-1001.slice/user@1001.service/app.slice/company-shift@yoav-6.service', memBytes: 200 * MBc, cpuUsec: null },
   ] };
   const by = (map = {}) => Object.fromEntries(attribute(raw, ctx({ map, shift: (id) => (id === 'yoav-6' ? { task: null, project: null } : null) }), new Map(), 'local', 1).map((r) => [r.name.split('/').pop()!.split(' ')[0], r.project]));
-  assert.deepEqual(by(), { 'user@1001.service': 'agent-company', 'chrome-personal.service': 'agent-company', 'claude-remote@hq-host.service': 'owner-sessions', 'gha-deploy.service': 'lumo', 'mystery.service': null, 'משמרת': 'agent-company' });
+  assert.deepEqual(by(), { 'user@1001.service': 'agent-company', 'chrome-personal.service': 'agent-company', 'claude-remote@hq-host.service': 'owner-sessions', 'gha-deploy.service': 'lumo', 'mystery.service': null, 'עבודה': 'agent-company' });
   assert.equal(by({ 'chrome-personal.service': 'lumo' })['chrome-personal.service'], 'lumo');
 });
 

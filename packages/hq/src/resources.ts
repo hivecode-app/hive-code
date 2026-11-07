@@ -155,7 +155,7 @@ export function parseRaw(fast: string | null, docker: string | null): Raw {
 
 export interface AttrCtx {
   /** shift id → its task and project (a shift without a task: the identity's project, else null) */
-  shift: (id: string) => { task: number | null; project: string | null } | null;
+  shift: (id: string) => { task: number | null; project: string | null; title?: string | null } | null;
   /** project ids of org.yaml */
   projects: ReadonlySet<string>;
   /** resources.map: an exact name (a cgroup's last segment, a container, a compose project) → project id. A key `<machine>:<name>`
@@ -227,12 +227,12 @@ export function attribute(raw: Raw, ctx: AttrCtx, prev: Map<string, { usec: numb
       if (shiftAt !== seg.length - 1) continue;
       const id = /^company-shift@(.+)\.service$/.exec(last)![1]!;
       const hit = ctx.shift(id);
-      out.push({ kind: 'shift', project: hit ? (hit.project ?? COMPANY) : null, task: hit?.task ?? null, name: hit ? `משמרת ${id}` : c.path, memMb, cpuPct: cpuOf(c.path, c.cpuUsec) });
+      out.push({ kind: 'shift', project: hit ? (hit.project ?? COMPANY) : null, task: hit?.task ?? null, name: hit ? (hit.title ? `עבודה על ${hit.title}` : 'עבודה') : c.path, memMb, cpuPct: cpuOf(c.path, c.cpuUsec) });
     } else if (ciAt >= 0) {
       if (ciAt !== seg.length - 1) continue;
       const slug = last.slice(3, -'.slice'.length);
       const project = mapped([last, slug]) ?? (ctx.projects.has(slug) ? slug : null);
-      out.push({ kind: 'ci', project, task: null, name: project ? `CI ${last}` : c.path, memMb, cpuPct: cpuOf(c.path, c.cpuUsec) });
+      out.push({ kind: 'ci', project, task: null, name: project ? `בדיקות של ${project}` : c.path, memMb, cpuPct: cpuOf(c.path, c.cpuUsec) });
     } else if (dockerAt >= 0) {
       if (ctx.dockerRead) continue;
       if (dockerAt === seg.length - 1) out.push({ kind: 'docker', project: null, task: null, name: c.path, memMb, cpuPct: cpuOf(c.path, c.cpuUsec) });
@@ -240,7 +240,7 @@ export function attribute(raw: Raw, ctx: AttrCtx, prev: Map<string, { usec: numb
       const project = mapped([last, c.path], c.cmd);
       const inside = counted.filter((x) => x.path.startsWith(`${c.path}/`) && !counted.some((y) => y !== x && x.path.startsWith(`${y.path}/`)));
       const own = Math.max(0, memMb - Math.round((inside.reduce((n, x) => n + x.memBytes, 0) / MB) * 10) / 10);
-      if (project || own >= MIN_OTHER_MB) out.push({ kind: 'other', project, task: null, name: inside.length ? `${c.path} (בלי המשמרות וה-CI שבתוכו)` : c.path, memMb: own, cpuPct: cpuOf(c.path, c.cpuUsec) });
+      if (project || own >= MIN_OTHER_MB) out.push({ kind: 'other', project, task: null, name: inside.length ? `${c.path} (בלי העבודות והבדיקות שבתוכו)` : c.path, memMb: own, cpuPct: cpuOf(c.path, c.cpuUsec) });
     }
   }
   for (const k of raw.containers ?? []) {
@@ -319,10 +319,10 @@ export class Resources {
 
   private ctx(dockerRead: boolean): AttrCtx {
     const { db } = this.hq.store;
-    const q1 = db.prepare(`SELECT s.task_id AS task, COALESCE(t.project, i.project) AS project FROM shifts s
+    const q1 = db.prepare(`SELECT s.task_id AS task, COALESCE(t.project, i.project) AS project, t.title AS title FROM shifts s
       LEFT JOIN tasks t ON t.id = s.task_id LEFT JOIN identities i ON i.id = s.identity WHERE s.id = ?`);
     return {
-      shift: (id) => (q1.get(id) as { task: number | null; project: string | null } | undefined) ?? null,
+      shift: (id) => (q1.get(id) as { task: number | null; project: string | null; title: string | null } | undefined) ?? null,
       projects: new Set(this.hq.projects().map((p) => p.id)),
       map: this.hq.cfg.resources.map,
       dockerRead,

@@ -533,13 +533,13 @@ export class RootWatch {
     }
     const ref = `roots-${cluster}-${roots[0]!.key}-${roots[0]!.first_seen}`;
     const minutes = Math.round((now - roots[0]!.first_seen) / 60_000);
-    const body = [`שורש בפרודקשן, בקלאסטר ${cluster}, כבר ${minutes} דקות:`, ...roots.map((r) => r.text),
-      'מה הוא גורם:', ...symptoms.map((r) => `- ${r.text}`), ...http.map((k) => `- probe של http נכשל: ${k}`),
+    const body = [`תקלה בשירות, בקלאסטר ${cluster}, כבר ${minutes} דקות:`, ...roots.map((r) => r.text),
+      'מה הוא גורם:', ...symptoms.map((r) => `- ${r.text}`), ...http.map((k) => `- בדיקת זמינות נכשלה: ${k}`),
       ...(symptoms.length || http.length ? [] : [`- אף סימפטום לא עבר סף, אבל זה שורש של הקלאסטר עצמו שנמשך יותר מ-${ROOT_ALONE_MS / 60_000} דקות. כך רצה לולאת ה-PATCH של 26/10 תשעה ימים, וכילתה את ה-CPU credits של המאסטר.`]),
-      `${this.mailbox.label(this.lead)} כבר על זה. observe-only: לא נעשתה פעולה על הפרודקשן.`].join('\n');
+      `${this.mailbox.label(this.lead)} כבר על זה. רק מעקב: לא נעשתה פעולה בשירות.`].join('\n');
     this.mailbox.tell({ msg_id: `${ref}-owner`, from: this.lead, to: OWNER, kind: 'probe_anomaly', urgency: 'urgent', priority: 'now', body });
     this.inbox?.add({ kind: 'incident', urgency: 'urgent', from_identity: this.lead, ref, dedupe_key: ref,
-      title: `שורש בפרודקשן: ${roots.map((r) => `${r.signal} ${r.subject}`).join(', ')}`, body });
+      title: `תקלה בשירות: ${roots.map((r) => `${r.signal} ${r.subject}`).join(', ')}`, body });
     for (const r of roots) set.run(now, cluster, r.key);
     this.store.setMeta(`roots.owner_ref.${cluster}`, ref);
     this.store.emit('roots.owner', this.lead, { cluster, roots: roots.map((r) => r.key), symptoms: symptoms.map((r) => r.key), http });

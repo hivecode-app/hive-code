@@ -256,7 +256,7 @@ export class AwaitingBoard {
     }
     const title = (t.summary?.split('\n')[0]?.trim() || t.title).slice(0, 200);
     const headline = t.awaiting_note ?? title;
-    const body = t.pr ? `${title} · PR #${t.pr}` : title;
+    const body = title; // the change itself is the link under the card, not a number in the text
     const repo = t.pr && t.project ? t.pr_repo ?? this.repoOf(t.project, this.worktreeOf(taskId)) : null;
     const links = repo ? JSON.stringify([{ kind: 'pr', url: `https://github.com/${repo}/pull/${t.pr}` }]) : null;
     const [cur, ...extra] = open;

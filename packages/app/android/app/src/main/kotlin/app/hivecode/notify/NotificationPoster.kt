@@ -29,6 +29,8 @@ import app.hivecode.hq.Snapshot
  * re-posts the whole picture, silently unless an item is new.
  */
 object NotificationPoster {
+    /** The lines under a request that the app's card shows as a button and a word ("PR: 12", "סיכון: low"). */
+    private val TRAILER = Regex("^(?:PR|סיכון|Risk)\\s*:")
     const val GROUP = "company.waiting"
     const val SUMMARY_ID = 1
     const val SHARE_CATEGORY = "app.hivecode.category.WORKER"
@@ -123,7 +125,10 @@ object NotificationPoster {
             val q = item.ref?.let { snap.asks[it]?.question } ?: listOf(item.title, item.body).filter { it.isNotBlank() }.joinToString(". ")
             return (if (item.blocking) Wording.BLOCKING_PREFIX else "") + q
         }
-        return listOf(item.title.trimEnd('.'), item.body).filter { it.isNotBlank() }.joinToString(". ")
+        // A request's headline is its line in his words; the code-change and risk lines are for the card in the app.
+        val title = item.headline?.takeIf { it.isNotBlank() } ?: item.title
+        val body = item.body.lines().filterNot { TRAILER.containsMatchIn(it) }.joinToString("\n").trim()
+        return listOf(title.trimEnd('.'), body).filter { it.isNotBlank() }.joinToString(". ")
     }
 
     fun person(context: Context, who: Identity): Person = Person.Builder()

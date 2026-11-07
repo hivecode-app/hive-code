@@ -157,8 +157,8 @@ test('(1) the same loop with an http probe failing beside it reaches the owner a
     assert.equal(o.length, 1);
     assert.equal(o[0]!.kind, 'probe_anomaly');
     assert.equal(o[0]!.urgency, 'urgent');
-    assert.match(o[0]!.body, /שורש בפרודקשן, בקלאסטר c, כבר 10 דקות:\nversion skew: 6 kubelets/);
-    assert.match(o[0]!.body, /מה הוא גורם:\n- probe של http נכשל: tiki-bot-go\/entry-health/);
+    assert.match(o[0]!.body, /תקלה בשירות, בקלאסטר c, כבר 10 דקות:\nversion skew: 6 kubelets/);
+    assert.match(o[0]!.body, /מה הוא גורם:\n- בדיקת זמינות נכשלה: tiki-bot-go\/entry-health/);
     assert.equal(env.hq.inbox.open().filter((i) => i.kind === 'incident').length, 1);
     w.observe('c', snap(c.next(true))); // 14:15: the flood lasted too
     assert.equal(to('owner').length, 2);
@@ -228,7 +228,7 @@ test('(2) autoanalyze then a Due running a minute is a root, the stalled queue i
     assert.ok(open().includes(`queue/lumo-prod/lumo-db/tinode/${Q}`));
     const o = to('owner');
     assert.equal(o.length, 1, 'root three rounds, 10 minutes, a symptom beside it');
-    assert.match(o[0]!.body, /שורש בפרודקשן, בקלאסטר lumo\/cluster, כבר 10 דקות/);
+    assert.match(o[0]!.body, /תקלה בשירות, בקלאסטר lumo\/cluster, כבר 10 דקות/);
     assert.match(o[0]!.body, /מה הוא גורם:\n- התור botgw\.deliveries \(delivered_at IS NULL\) ב-lumo-prod\/lumo-db\/tinode עומד: 12,700 ממתינים, הישן ביותר מ-15:33:01 UTC \(12 דקות\)\. בדרך כלל הישן ביותר בן 2 שניות/);
     w.observe('lumo/cluster', snap(lumoDb('15:50:00', { depth: 18094, oldest: '15:33:01', due: 55 })));
     w.observe('lumo/cluster', snap(lumoDb('15:55:00', { depth: 25100, oldest: '15:33:01', due: 49 })));

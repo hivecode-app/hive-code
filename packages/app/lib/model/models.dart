@@ -752,7 +752,7 @@ class GoCard extends AskCard {
   }) : super(
          question: details,
          options: [
-           AskOption(id: 'go', label: 'GO', primary: true),
+           AskOption(id: 'go', label: UiCopy.copy.approve2, primary: true),
            AskOption(id: 'not_now', label: UiCopy.copy.notNow2),
          ],
        );

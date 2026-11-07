@@ -143,6 +143,10 @@ void main() {
     expect(n.details, 'פרטים');
     expect(n.prUrl, isNull, reason: 'a bare number is not a link: hq sends the link');
     expect(n.risk, 'סיכון בינוני');
+
+    final he = DecisionText.of(item('h', WaitKind.go, body: 'כותרת\nפרטים\nסיכון: גבוה'));
+    expect(he.details, 'פרטים', reason: 'hq now writes the risk in his words; it is still the trailer, not a detail');
+    expect(he.risk, 'סיכון גבוה');
   });
 
   void resetQueue() => decisionQueue
@@ -408,7 +412,7 @@ void main() {
     await tester.tap(find.text('כל הפרטים'));
     await tester.pumpAndSettle();
     expect(find.text('הדוח המלא'), findsOneWidget);
-    expect(find.text('ה-\u2060PR'), findsOneWidget);
+    expect(find.text('השינוי בקוד'), findsOneWidget);
     expect(find.textContaining('השיחה עם'), findsOneWidget);
   });
 

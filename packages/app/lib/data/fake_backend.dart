@@ -556,7 +556,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
     ],
     awaiting: [
       AwaitingTask(id: 3720, kind: AwaitingKind.check, title: 'אפליקציה: תמונות בצ\'אט', summary: 'התמונות בצ\'אט עולות גם מהטלפון', note: 'לשלוח תמונה מהטלפון ולראות שהיא עולה', identity: 'noa', project: 'lumo', at: at(13, 20)),
-      AwaitingTask(id: 3711, kind: AwaitingKind.deploy, title: 'לומו: שעת איסוף', summary: 'שעת איסוף "לא ידוע" לא נאמרת ללקוח', note: 'מחכה ל-GO שלך', identity: 'ido', project: 'lumo', at: at(11, 5)),
+      AwaitingTask(id: 3711, kind: AwaitingKind.deploy, title: 'לומו: שעת איסוף', summary: 'שעת איסוף "לא ידוע" לא נאמרת ללקוח', note: 'מחכה לאישור שלך', identity: 'ido', project: 'lumo', at: at(11, 5)),
     ],
     asked: [
       // Open: his last line to Dana, no answer yet. Answered: Ido's answer (t1) to his question (u1), not read yet.

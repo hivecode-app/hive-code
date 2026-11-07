@@ -20,7 +20,7 @@ List<Map<String, dynamic>> get _gos => (_json('test/fixtures/samples/hq_evening/
 
 final _awaiting = [
   AwaitingTask(id: 49, kind: AwaitingKind.deploy, title: 'מיזוג מה שגיל הכניס בשרת 2.6.9, והכנה לפריסה', summary: 'ורקר 2.6.10 מוכן לפריסה',
-      note: 'מחכה ל-GO שלך', identity: 'yonatan', project: 'shop-bot', at: DateTime(2026, 10, 20, 19, 37)),
+      note: 'מחכה לאישור שלך', identity: 'yonatan', project: 'shop-bot', at: DateTime(2026, 10, 20, 19, 37)),
   AwaitingTask(id: 62, kind: AwaitingKind.check, title: 'אפליקציה: ראש מסך השיחות, שלושה כיווני עיצוב',
       summary: 'יש שלוש הצעות לראש מסך השיחות, מצולמות מהאפליקציה', note: 'לבחור כיוון', identity: 'agent-company-t62', project: 'agent-company', at: DateTime(2026, 10, 20, 22, 20)),
 ];

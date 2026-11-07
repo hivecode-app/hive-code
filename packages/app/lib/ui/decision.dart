@@ -200,8 +200,11 @@ final _riskLine = RegExp(InputCopy.v10);
   return (text: lines.join('\n').trim(), pr: pr, risk: risk);
 }
 
-/// "low" / "medium" / "high" in his words.
-String? riskWords(String? risk) => {'low': UiCopy.copy.lowRisk, 'medium': UiCopy.copy.mediumRisk, 'high': UiCopy.copy.highRisk}[risk];
+/// "low" / "medium" / "high" in his words; hq already writes the level in Hebrew ("סיכון: גבוה").
+String? riskWords(String? risk) {
+  final i = InputCopy.riskWords.indexOf(risk ?? '');
+  return {'low': UiCopy.copy.lowRisk, 'medium': UiCopy.copy.mediumRisk, 'high': UiCopy.copy.highRisk}[i < 0 ? risk : const ['low', 'medium', 'high'][i]];
+}
 
 /// A request's whole text, markdown and all (#1499): what the worker wrote is always reachable, here and not
 /// only in the notification. Taller than [lines] lines, it shows them with "עוד", which opens the rest in place;

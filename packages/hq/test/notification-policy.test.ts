@@ -106,7 +106,7 @@ test('inbox quiet modes preserve emergencies and keep ordinary GO silent', () =>
 test('GO action titles and worker notification instructions', () => {
   assert.equal(goHeadline('release', 'עדכון התמונות'), 'לשחרר עדכון התמונות?');
   assert.equal(goHeadline('release', 'photo fix'), 'Release photo fix?');
-  assert.equal(goHeadline(undefined, 'העדכון'), 'לפרוס העדכון?');
+  assert.equal(goHeadline(undefined, 'העדכון'), 'לשחרר העדכון?');
   const prompt = readFileSync(new URL('../src/system-prompt.ts', import.meta.url), 'utf8');
   for (const text of ['הודעה אחת, לא שתיים', 'for_owner: true', 'באדג׳ בלבד', 'eta_done', 'שולחים `tell`']) assert.ok(prompt.includes(text), text);
 });

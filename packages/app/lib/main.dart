@@ -253,7 +253,7 @@ class _Frame extends StatelessWidget {
   final Widget home;
   @override
   Widget build(BuildContext context) => MaterialApp(
-        onGenerateTitle: (context) => AppLocalizations.of(context).company,
+        onGenerateTitle: (context) => AppLocalizations.of(context).productName,
         debugShowCheckedModeBanner: false,
         theme: buildTheme(productPalette(Brightness.light), product: true),
         darkTheme: buildTheme(productPalette(Brightness.dark), product: true),
@@ -354,7 +354,7 @@ class _CompanyAppState extends State<CompanyApp> {
         nav: nav,
         child: ListenableBuilder(listenable: widget.store.preferences, builder: (context, _) => MaterialApp(
           navigatorKey: navigatorKey,
-          onGenerateTitle: (context) => AppLocalizations.of(context).company,
+          onGenerateTitle: (context) => AppLocalizations.of(context).productName,
           debugShowCheckedModeBanner: false,
           theme: buildTheme(productPalette(Brightness.light), product: true),
           darkTheme: buildTheme(productPalette(Brightness.dark), product: true),

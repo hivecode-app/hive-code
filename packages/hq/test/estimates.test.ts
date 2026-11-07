@@ -99,7 +99,7 @@ test('status with eta: message_id is null; a short non-release promise gets 0.33
     assert.equal(said(env, `${ack.id}-estimate`), 'עבודה כזו נגמרת בחברה פי 3 מהר. אולי 20 דקות?');
     // 120 min deploy: ×0.33, over 30 so no padding; build ×1.5 without data.
     assert.equal(env.hq.estimates.suggest('agent-company', 'deploy', 120).minutes, 40);
-    assert.equal(env.hq.estimates.suggest('agent-company', 'build', 20).line, 'בילדים יוצאים פי 1.5. אולי 40 דקות?');
+    assert.equal(env.hq.estimates.suggest('agent-company', 'build', 20).line, 'תהליכי בנייה יוצאים פי 1.5. אולי 40 דקות?');
     assert.equal(env.hq.estimates.suggest(null, 'report', 3).minutes, 11, 'padding comes after the factor');
   } finally { await env.cleanup(); }
 });
@@ -222,7 +222,7 @@ test('the factor moves from the default to the project\'s data at 8 closed estim
     op(env, 'status', { state: 'working', eta_done: true, eta_what: 'בילד 7' });
     s = estimates.suggest('agent-company', 'build', 40);
     assert.deepEqual([s.source, s.samples, s.factor, s.minutes], ['data', 8, 3, 120]);
-    assert.equal(s.line, 'בילדים יוצאים פי 3. אולי 120 דקות?');
+    assert.equal(s.line, 'תהליכי בנייה יוצאים פי 3. אולי 120 דקות?');
     // Other kinds and other projects are not mixed in; cancelled and updated ones do not count.
     assert.equal(estimates.suggest('agent-company', 'release', 60).source, 'default');
     assert.equal(estimates.suggest('lumo', 'build', 40).source, 'default');
@@ -518,7 +518,7 @@ test('accuracyLine: several late and several unclosed come in creation order, ki
     view(5, { identity: 'eli', what: 'ה', est: 10, act: 30, kind: 'build' }),
   ]);
   assert.equal(line, 'הערכות אתמול: 4, מתוכן 0 בזמן ו-2 באיחור (eli, "ה", פי 3; dana, "ו", פי 2) ו-2 שלא נסגרו (eli, "ז"; noa, "ח")'
-    + ' · חריגים לפי סוג: בילדים 2 מתוך 2, שחרורים 2 מתוך 2');
+    + ' · חריגים לפי סוג: תהליכי בנייה 2 מתוך 2, שחרורים 2 מתוך 2');
 });
 
 test('accuracyLine: several unclosed say שלא נסגרו, one says שלא נסגרה; names come from the label function', () => {

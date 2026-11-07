@@ -114,7 +114,7 @@ void main() {
     msg.waitingOn = WaitingOn(tool: 'Bash', command: 'bash deploy/hq.sh', since: kDemoNow.subtract(const Duration(minutes: 4)));
     store.touch();
     await tester.pump();
-    expect(find.textContaining('נכנסת כשהפריסה תסתיים · כבר 4 דק׳', findRichText: true), findsOneWidget);
+    expect(find.textContaining('נכנסת כשהשחרור יסתיים · כבר 4 דק׳', findRichText: true), findsOneWidget);
     expect(find.textContaining('כבר 4 דק׳ ·', findRichText: true), findsNothing, reason: 'no dot left hanging before the link');
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/chat_noa_waiting.png'));
     await tester.tap(find.text('עצירה עכשיו'));
@@ -154,7 +154,7 @@ void main() {
   test('what a message waits for, in his words', () {
     WaitingOn w(String tool, [String? cmd]) => WaitingOn(tool: tool, command: cmd, since: kDemoNow);
     expect(waitingWhat(w('Bash', 'npm test 2>&1 | tail')), ('הפקודה `npm test`', true));
-    expect(waitingWhat(w('Bash', 'kubectl apply -f x.yaml')), ('הפריסה', true));
+    expect(waitingWhat(w('Bash', 'kubectl apply -f x.yaml')), ('השחרור', false));
     expect(waitingWhat(w('Bash', 'git push origin HEAD --force-with-lease --no-verify')).$1, 'הפקודה `git push origin HEAD --…`');
     expect(waitingWhat(w('Edit')), ('העריכה', true));
     expect(waitingWhat(w('Agent')), ('העוזר', false));

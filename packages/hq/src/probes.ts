@@ -1130,7 +1130,7 @@ export class ProbeRunner {
         this.outage = o;
         const ref = `probe-shared-${o.since}`;
         const body = [`נפילה משותפת ברשת שנמשכת ${minutes} דקות.`, ...this.sharedFacts(lost, known.length), ...ci-host.lines,
-          `${this.mailbox.label(lead)} כבר על זה. observe-only: לא נעשתה פעולה על הפרודקשן.`].join('\n');
+          `${this.mailbox.label(lead)} כבר על זה. רק מעקב: לא נעשתה פעולה בשירות.`].join('\n');
         this.mailbox.tell({ msg_id: `${ref}-owner`, from: lead, to: OWNER, kind: 'probe_anomaly', urgency: 'urgent', priority: 'now', body });
         this.inbox?.add({ kind: 'incident', urgency: 'urgent', from_identity: lead, ref, dedupe_key: ref,
           title: `נפילה ברשת: ${lost.length} נודים מאבדים pings כבר ${minutes} דקות`, body });

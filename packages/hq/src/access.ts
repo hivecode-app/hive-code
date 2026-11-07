@@ -219,10 +219,10 @@ export class Access {
     }
     const item = this.hq.inbox.add({
       kind: 'go', from_identity: identity, blocking: true, urgency: prod ? 'urgent' : 'normal', ref: `acc-${id}`, dedupe_key: `access:${id}`,
-      title: `GO: ${plan.shown}`.slice(0, 200),
+      title: `להחליט אם לאשר ל${this.hq.mailbox.label(identity)} להריץ ב-${resource}`.slice(0, 200),
       headline: `להחליט אם לאשר ל${this.hq.mailbox.label(identity)} להריץ ב-${resource}`,
-      body: [`הפקודה המדויקת:\n${plan.shown}`, `משאב: ${resource}${prod ? ' (פרודקשן)' : ''}`, `סוג: ${CLASS_HE[plan.class]}`, why ? `למה: ${why}` : '',
-        prod && plan.class !== 'read' ? 'סיכון: high. כתיבה לפרודקשן נשאלת בכל פעם' : '', 'אישור מריץ את הפקודה הזו פעם אחת, ולא יותר.'].filter(Boolean).join('\n'),
+      body: [`הפקודה המדויקת:\n${plan.shown}`, `משאב: ${resource}${prod ? ' (השירות החי)' : ''}`, `סוג: ${CLASS_HE[plan.class]}`, why ? `למה: ${why}` : '',
+        prod && plan.class !== 'read' ? 'סיכון: גבוה. כל כתיבה לשירות החי נשאלת מחדש' : '', 'אישור מריץ את הפקודה הזו פעם אחת, ולא יותר.'].filter(Boolean).join('\n'),
     });
     this.setState(id, 'pending', { inbox_id: item.id });
     return this.advance({ ...row, inbox_id: item.id }, Math.min(waitS, 30), plan);

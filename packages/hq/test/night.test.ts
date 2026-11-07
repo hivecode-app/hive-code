@@ -77,7 +77,7 @@ test('simulated night: one hour, 3 tasks on 2 slots, < 5% empty, correct morning
 
     const msg = hq.mailbox.get(`night-summary-${last.id}`)!;
     assert.equal(msg.to_identity, 'yoav');
-    for (const part of ['מה נעשה (3)', 'PR #102 מוזג', 'מה מחכה לך (1)', 'GO: פריסת hq', 'מה דולג ולמה (1)', 'needs-decision', '0 דקות (0% מהלילה']) {
+    for (const part of ['מה נעשה (3)', 'PR #102 מוזג', 'מה מחכה לך (1)', 'בקשת אישור: פריסת hq', 'מה דולג ולמה (1)', 'needs-decision', '0 דקות (0% מהלילה']) {
       assert.ok(msg.body.includes(part), `summary has "${part}":\n${msg.body}`);
     }
   } finally { await env.cleanup(); }

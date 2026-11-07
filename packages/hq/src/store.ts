@@ -671,9 +671,9 @@ export const defaultToggles = (manager: string): { key: string; enabled: boolean
   { key: 'residents', enabled: true, description: `התושבים (${manager}) רצים תמיד` },
   { key: 'escalation', enabled: true, description: `שאלה חוסמת שלא נענתה עוברת ${pre('ל', manager)}` },
   { key: 'push', enabled: true, description: 'התראות: מה שחסום עליך, והודעות מעובדים' },
-  { key: 'backup', enabled: true, description: 'גיבוי hq.db כל שעה' },
-  { key: 'focus', enabled: false, description: 'מצב פוקוס: רק תקלה דחופה בפרודקשן מתריעה' },
-  { key: 'night', enabled: false, description: 'מצב לילה (B.16)' },
+  { key: 'backup', enabled: true, description: 'גיבוי של נתוני החברה כל שעה' },
+  { key: 'focus', enabled: false, description: 'מצב פוקוס: רק תקלה דחופה בשירות מתריעה' },
+  { key: 'night', enabled: false, description: 'מצב לילה' },
 ];
 
 type Listener = (e: HqEvent) => void;
@@ -713,7 +713,8 @@ export class Store {
 
   private seedToggles(manager: string): void {
     const ins = this.db.prepare(
-      'INSERT OR IGNORE INTO toggles (key, enabled, description, updated_at) VALUES (?, ?, ?, ?)');
+      'INSERT INTO toggles (key, enabled, description, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET description = excluded.description');
+    // The description is the code's wording, so a store from before a copy change shows the new one too.
     for (const t of defaultToggles(manager)) ins.run(t.key, t.enabled ? 1 : 0, t.description, this.now());
   }
 
@@ -779,7 +780,7 @@ export class Store {
 
   /** A switch that exists only with its config (a node, nodes.ts): created once, then his to flip. */
   ensureToggle(key: string, enabled: boolean, description: string): void {
-    this.db.prepare('INSERT OR IGNORE INTO toggles (key, enabled, description, updated_at) VALUES (?, ?, ?, ?)')
+    this.db.prepare('INSERT INTO toggles (key, enabled, description, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET description = excluded.description')
       .run(key, enabled ? 1 : 0, description, this.now());
   }
 

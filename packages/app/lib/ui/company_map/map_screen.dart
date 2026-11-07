@@ -495,7 +495,7 @@ class _MapState extends State<_Map> {
     final halo = [for (final (dx, dy) in const [(1, 0), (-1, 0), (0, 1), (0, -1), (.7, .7), (-.7, .7), (.7, -.7), (-.7, -.7)]) Shadow(color: p.bg, offset: Offset(dx * 1.6 * ui, dy * 1.6 * ui))];
     final style = T.meta.copyWith(color: p.text2, fontSize: 12.5 * ui, height: 1.2, shadows: halo);
     if (team.id == 'management') {
-      for (final (id, name) in [('owner', UiCopy.copy.ran), ('yoav', UiCopy.copy.yoav), ('hq', 'hq')]) {
+      for (final (id, name) in [('owner', UiCopy.copy.ran), ('yoav', UiCopy.copy.yoav), ('hq', UiCopy.copy.system2)]) {
         final at = layout.pos[id]!;
         yield _label(at + Offset(0, _dim(d.people[id]!.role) * g / 2 + 4), Text(name, style: style), ui);
       }

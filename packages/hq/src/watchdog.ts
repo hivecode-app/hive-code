@@ -160,8 +160,8 @@ export class Watchdog {
         await this.shifts.request(s.identity, { reason: 'resurrect' });
       } catch (e) {
         this.store.emit('watchdog.resurrect_failed', s.identity, { shift: s.id, error: (e as Error).message });
-        this.inbox.add({ kind: 'shift_failure', title: `${s.identity} נפל ולא קם מחדש`, from_identity: s.identity,
-          body: `${why}; resume נכשל: ${(e as Error).message}`, ref: s.id, dedupe_key: `shift_failure:${s.id}:${s.started_at}` });
+        this.inbox.add({ kind: 'shift_failure', title: `${this.mailbox.label(s.identity)} נפל ולא קם מחדש`, from_identity: s.identity,
+          body: `${why}; ההפעלה מחדש נכשלה: ${(e as Error).message}`, ref: s.id, dedupe_key: `shift_failure:${s.id}:${s.started_at}` });
       }
     }
     return 'dead';

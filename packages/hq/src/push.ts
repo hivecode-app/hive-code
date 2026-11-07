@@ -264,7 +264,7 @@ export class Pusher {
 
   private async toTelegram(item: InboxItemDTO, why: string): Promise<void> {
     const link = item.link ? `\n${item.link}` : '';
-    const text = `⏸ ${item.title}\n${item.body.slice(0, 1500)}${link}\n(${why} · inbox #${item.id})`;
+    const text = `⏸ ${item.headline ?? item.title}\n${item.body.slice(0, 1500)}${link}\n(${why})`;
     if (!this.inbox.claimTelegram(item.id)) return; // another sweep took it
     try {
       await this.telegram(text);

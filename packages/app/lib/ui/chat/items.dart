@@ -191,7 +191,7 @@ class UserBubble extends StatelessWidget {
 (String, bool) waitingWhat(WaitingOn w) {
   final cmd = w.command;
   if (w.tool == 'Bash' && cmd != null) {
-    if (RegExp(r'\b(deploy|kubectl\s+apply|helm\s+(upgrade|install))\b').hasMatch(cmd)) return (UiCopy.copy.release, true);
+    if (RegExp(r'\b(deploy|kubectl\s+apply|helm\s+(upgrade|install))\b').hasMatch(cmd)) return (UiCopy.copy.release, false);
     var first = cmd
         .trim()
         .split(RegExp(r'&&|\|\||[;|\n]'))
@@ -1066,7 +1066,7 @@ class _DiffCardViewState extends State<DiffCardView> {
       footer: [
         CardAction(icon: 'expand_more', label: UiCopy.copy.changes, rotate: open, onTap: () => setState(() => open = !open)),
         const CardAction(icon: 'open_in_new', label: 'VS Code'),
-        if (c.prRef != null) const CardAction(icon: 'call_merge', label: 'PR'),
+        if (c.prRef != null) const CardAction(icon: 'open_in_new', label: 'GitHub'),
       ],
       children: [
         _CardHead(
@@ -1378,8 +1378,8 @@ class PrCardView extends StatelessWidget {
             TextSpan(
               children: [
                 TextSpan(
-                  text: ltr('PR #${card.number}'),
-                  style: T.mono(12.5, w: FontWeight.w500).copyWith(color: p.text2),
+                  text: UiCopy.copy.pullRequest,
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w500, color: p.text2),
                 ),
                 TextSpan(text: ' · ${card.title}'),
               ],
@@ -1395,7 +1395,7 @@ class PrCardView extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Badge2(label: state),
-              check('CI', card.ci),
+              check(UiCopy.copy.tests, card.ci),
               check(UiCopy.copy.review, card.review),
               DiffStat('+${card.add} −${card.del}'),
               Text(
@@ -1559,7 +1559,7 @@ class _AskCardViewState extends State<AskCardView> {
           ),
           TextSpan(
             text: go
-                ? UiCopy.copy.request(ltr('GO'))
+                ? UiCopy.copy.approvalRequest
                 : check
                 ? UiCopy.copy.check
                 : (card.blocking ? UiCopy.copy.questionWorkWaiting : UiCopy.copy.questionCanWait),

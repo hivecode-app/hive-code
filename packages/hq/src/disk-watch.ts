@@ -149,6 +149,6 @@ export class DiskWatch {
     const ran = { ok: 'הניקוי האוטומטי רץ ולא הספיק.', failed: 'הניקוי האוטומטי נכשל (הפירוט באירוע `disk.clean_failed`).', 'not-now': 'הניקוי האוטומטי רץ לפני פחות מחצי שעה ולא הספיק.' }[cleaned];
     inbox.add({ kind: 'incident', urgency: 'urgent', from_identity: this.owner(), dedupe_key: key,
       title: `הדיסק של ${where} מלא ${u.pct}%, נשארו ${human(u.freeMb * 1024 ** 2)}`,
-      body: `${ran}\n\nמה שתופס הכי הרבה:\n${top.length ? top.map((c) => `- ${human(c.bytes)} · ${c.name}`).join('\n') : 'לא הצלחתי למדוד'}\n\nב-100% נופלות עבודות באמצע (כך נפל worktree של משימה ב-22/10).` });
+      body: `${ran}\n\nמה שתופס הכי הרבה:\n${top.length ? top.map((c) => `- ${human(c.bytes)} · ${c.name}`).join('\n') : 'לא הצלחתי למדוד'}\n\nב-100% נופלות עבודות באמצע (כך נעצרה משימה באמצע ב-22/10).` });
   }
 }

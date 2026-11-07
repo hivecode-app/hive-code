@@ -195,7 +195,7 @@ class _Sidebar extends StatelessWidget {
             if (expanded)
               Padding(
                 padding: const EdgeInsets.all(20),
-                child: Text(l.company, style: T.name),
+                child: Text(l.productName, style: T.name),
               ),
             const SizedBox(height: 8),
             item('chat', l.chats, () => nav.go(AppTab.chats), selected: nav.tab == AppTab.chats, count: d.unreadCount > 0 ? '${d.unreadCount}' : null),

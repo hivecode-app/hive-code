@@ -215,7 +215,7 @@ void main() {
     await tester.pumpAndSettle();
     await _shot(tester, 'real-go-card-open');
     expect(find.textContaining('לוותר הלילה על העותק השלישי', findRichText: true), findsWidgets);
-    expect(find.text('ה-\u2060PR'), findsOneWidget);
+    expect(find.text('השינוי בקוד'), findsOneWidget);
     expect(find.textContaining('סיכון: medium', findRichText: true), findsNothing, reason: 'the trailer is a level, not text');
 
     await openApproval(tester);
@@ -223,7 +223,7 @@ void main() {
       expect(inSheet(find.textContaining(words, findRichText: true)), findsWidgets, reason: words);
     }
     expect(inSheet(find.text('סיכון בינוני')), findsOneWidget);
-    expect(inSheet(find.text('ה-\u2060PR')), findsOneWidget);
+    expect(inSheet(find.text('השינוי בקוד')), findsOneWidget);
     expect(inSheet(find.text('לא צוין')), findsNothing, reason: 'no guessed section left empty');
     await _shot(tester, 'real-go-approval');
     await tester.drag(inSheet(find.byType(SingleChildScrollView)).first, const Offset(0, -600));

@@ -550,7 +550,7 @@ export interface HomeFacts {
 const count = (n: number, one: string, two: string, many: string): string => (n === 1 ? one : n === 2 ? two : `${n} ${many}`);
 /** "ב" before a name: בלומו, ב-tiki-bot-go, and בחברה, not בהחברה (the ה is swallowed). */
 const inName = (prefix: string, name: string): string => (/^ה[֐-׿]/.test(name) ? `${prefix}${name.slice(1)}` : pre(prefix, name));
-const KIND_WORD: Record<string, string> = { go: 'GO', ask: 'שאלה', login: 'כניסה', incident: 'תקלה' };
+const KIND_WORD: Record<string, string> = { go: 'בקשת אישור', ask: 'שאלה', login: 'כניסה', incident: 'תקלה' };
 
 /**
  * The sentence on top of his conversations screen, from facts, without a model. The app puts "החלטה אחת מחכה לך."
@@ -563,20 +563,21 @@ export function sentence(f: HomeFacts, max = 100): string {
     const parts: string[] = [];
     if (f.stuck) parts.push(`${count(f.stuck, 'עובד אחד תקוע', 'שני עובדים תקועים', 'עובדים תקועים')}.`);
     const gos = f.gos ?? 0;
-    // The one that waits, by name: "GO: …" when it is the only one, "בראש התור: …" when it is the only GO of many
-    // (two colons in a row read like code; the card itself says GO). "GO: GO: …" reads like a log: the word once.
+    // The one that waits, by name: "בקשת אישור: …" when it is the only one, "בראש התור: …" when it is the only request of
+    // many (two colons in a row read like code). "בקשת אישור: בקשת אישור: …" reads like a log: the word once, and an
+    // item from before 08/11 still has "GO: " in its title.
     const named = (lead: string | null): string => {
       if (!f.decision) return '';
       const w = KIND_WORD[f.decision.kind];
       const raw = f.decision.text.replace(/[.\s]+$/, '');
-      const t = w ? raw.replace(new RegExp(`^${w}:\\s*`, 'i'), '') : raw;
+      const t = w ? raw.replace(new RegExp(`^(?:${w}|GO):\\s*`, 'i'), '') : raw;
       return `${lead ?? (w ? `${w}:` : '')}${lead ?? w ? ' ' : ''}${t}${/[?!…]$/.test(t) ? '' : '.'}`;
     };
     if (f.waiting === 1) { if (decision) parts.push(named(null)); }
     else if (f.waiting > 1 && gos) {
-      // What the many are: "בראש התור: …" when the one GO is first, else "אחת מהן היא בקשת GO: …"; "3 מהן GO.", "כולן GO."
-      parts.push(gos === 1 ? (decision && f.decision ? named(f.decision.first ? 'בראש התור:' : 'אחת מהן היא בקשת GO:') : 'אחת מהן היא בקשת GO.')
-        : gos === f.waiting ? (gos === 2 ? 'שתיהן GO.' : 'כולן GO.') : `${gos} מהן GO.`);
+      // What the many are: "בראש התור: …" when the one request is first, else "אחת מהן היא בקשת אישור: …"; "3 מהן בקשות אישור."
+      parts.push(gos === 1 ? (decision && f.decision ? named(f.decision.first ? 'בראש התור:' : 'אחת מהן היא בקשת אישור:') : 'אחת מהן היא בקשת אישור.')
+        : gos === f.waiting ? (gos === 2 ? 'שתיהן בקשות אישור.' : 'כולן בקשות אישור.') : `${gos} מהן בקשות אישור.`);
     }
     const said = !!f.done && finished;
     if (said) parts.push(`${f.visited ? 'מאז שהיית פה' : 'ביממה האחרונה'} ${f.done === 1 ? 'הסתיימה משימה אחת' : `הסתיימו ${count(f.done, '', 'שתי משימות', 'משימות')}`}.`);

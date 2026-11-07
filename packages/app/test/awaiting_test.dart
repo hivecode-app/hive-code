@@ -58,9 +58,9 @@ void main() {
     final store = await _block(tester);
     expect(findShown('התמונות בצ\'אט עולות גם מהטלפון'), findsOneWidget);
     expect(findShown('לבדוק · לשלוח תמונה מהטלפון ולראות שהיא עולה'), findsOneWidget);
-    expect(findShown('מחכה לפריסה · מחכה ל-GO שלך'), findsOneWidget);
+    expect(findShown('מחכה לשחרור · מחכה לאישור שלך'), findsOneWidget);
     expect(find.text('בדקתי'), findsOneWidget);
-    expect(find.text('נפרס'), findsOneWidget);
+    expect(find.text('שוחרר'), findsOneWidget);
     expect(find.bySemanticsLabel(RegExp(r'^לבדוק\. התמונות')), findsOneWidget);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
@@ -70,7 +70,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('בדקתי'), findsNothing);
     expect(store.data!.awaiting.map((t) => t.id), [3711]);
-    await tester.tap(find.text('נפרס'));
+    await tester.tap(find.text('שוחרר'));
     await tester.pumpAndSettle();
     expect(store.data!.awaiting, isEmpty);
     expect(find.byType(InkWell), findsNothing, reason: 'an empty block shows nothing');

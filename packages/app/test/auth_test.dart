@@ -162,7 +162,7 @@ void main() {
     final hq = FakeHq(), keys = FakePasskeys();
     Session? got;
     await pumpScreen(tester, SignInScreen(client: AuthClient(base, client: hq.client, passkeys: keys), pairCode: 'GOOD-CODE', onSignedIn: (s) => got = s));
-    await tester.tap(find.text('צימוד ויצירת passkey'));
+    await tester.tap(find.text('צימוד ויצירת מפתח גישה'));
     await tester.pumpAndSettle();
     expect(keys.calls, ['create ch-reg']);
     expect(got?.token, 'tok-new');
@@ -172,7 +172,7 @@ void main() {
     final hq = FakeHq(), keys = FakePasskeys(createError: PasskeyError.exists);
     Session? got;
     await pumpScreen(tester, SignInScreen(client: AuthClient(base, client: hq.client, passkeys: keys), pairCode: 'GOOD-CODE', onSignedIn: (s) => got = s));
-    await tester.tap(find.text('צימוד ויצירת passkey'));
+    await tester.tap(find.text('צימוד ויצירת מפתח גישה'));
     await tester.pumpAndSettle();
     expect(keys.calls, ['create ch-reg', 'get ch-login']);
     expect(got?.token, 'tok-new');
@@ -190,7 +190,7 @@ void main() {
     final hq = FakeHq(), keys = FakePasskeys(createError: PasskeyError.cancelled);
     Session? got;
     await pumpScreen(tester, SignInScreen(client: AuthClient(base, client: hq.client, passkeys: keys), pairCode: 'GOOD-CODE', onSignedIn: (s) => got = s));
-    await tester.tap(find.text('צימוד ויצירת passkey'));
+    await tester.tap(find.text('צימוד ויצירת מפתח גישה'));
     await tester.pumpAndSettle();
     expect(got, isNull);
     expect(find.text('הכניסה בוטלה.'), findsOneWidget);
@@ -199,7 +199,7 @@ void main() {
     expect(got?.token, 'tok-paired');
 
     await tester.enterText(find.byKey(const Key('pair-code')), 'BAD');
-    await tester.tap(find.text('צימוד ויצירת passkey'));
+    await tester.tap(find.text('צימוד ויצירת מפתח גישה'));
     await tester.pumpAndSettle();
     expect(find.textContaining('הקוד שגוי'), findsOneWidget);
   });

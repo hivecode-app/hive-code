@@ -426,7 +426,7 @@ export class Night {
   }
 }
 
-const KIND_HE: Record<string, string> = { go: 'GO', ask: 'שאלה', login: 'כניסה לאתר', incident: 'תקלה' };
+const KIND_HE: Record<string, string> = { go: 'בקשת אישור', ask: 'שאלה', login: 'כניסה לאתר', incident: 'תקלה' };
 
 function summaryText(s: Omit<NightSummary, 'text'>, night: NightRow, tz: string): string {
   const hhmm = (t: number) => localHHMM(t, tz);
@@ -443,7 +443,7 @@ function summaryText(s: Omit<NightSummary, 'text'>, night: NightRow, tz: string)
   }
   lines.push('', `מה מחכה לך (${s.waiting.length}):`);
   if (!s.waiting.length) lines.push('- כלום');
-  for (const w of s.waiting) lines.push(`- ${KIND_HE[w.kind] ?? w.kind}${w.blocking ? ' חוסם' : ''}: ${w.title} (בתיבה, פריט ${w.id})`);
+  for (const w of s.waiting) lines.push(`- ${KIND_HE[w.kind] ?? w.kind}${w.blocking ? ' (חוסם את העבודה)' : ''}: ${w.title} (ב"מחכה לך")`);
   lines.push('', `מה דולג ולמה (${s.skipped.length}):`);
   if (!s.skipped.length) lines.push('- כלום');
   for (const k of s.skipped) lines.push(`- ${k.ref ?? `#${k.id}`} ${k.title}: ${k.why}`);

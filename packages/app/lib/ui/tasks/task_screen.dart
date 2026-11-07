@@ -414,7 +414,7 @@ class _Facts extends StatelessWidget {
             Wrap(
               spacing: 12,
               children: [
-                for (final x in t.prs)
+                for (final (i, x) in t.prs.indexed)
                   Semantics(
                     link: true,
                     child: InkWell(
@@ -425,7 +425,7 @@ class _Facts extends StatelessWidget {
                       children: [
                         Ic('open_in_new', size: 16, color: p.accent),
                         const SizedBox(width: 4),
-                        Text('PR #${x.number}', style: link),
+                        Text(t.prs.length == 1 ? 'GitHub' : l.codeChangeN(i + 1), style: link),
                       ],
                     ),
                   ),
@@ -618,7 +618,7 @@ class _EventText extends StatelessWidget {
                   children: [
                     Ic('open_in_new', size: 14, color: p.accent),
                     const SizedBox(width: 3),
-                    Text(number == null ? l.progressPullRequests : 'PR #$number', style: T.meta.copyWith(color: p.accent)),
+                    Text(number == null ? l.progressPullRequests : 'GitHub', style: T.meta.copyWith(color: p.accent)),
                   ],
                 ),
               ),

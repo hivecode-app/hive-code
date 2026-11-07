@@ -484,7 +484,7 @@ void main() {
         home: const ProductTaskScreen(id: 3),
       );
       expect(find.text('Upload a file from the phone'), findsOneWidget);
-      expect(find.text('PR #12'), findsOneWidget, reason: 'the code link comes with the task, not its activity');
+      expect(find.text('GitHub'), findsOneWidget, reason: 'the code link comes with the task, not its activity');
       backend.failedActivity = false;
       await tester.ensureVisible(find.byKey(const Key('retry-task-activity')));
       await tester.tap(find.byKey(const Key('retry-task-activity')));
@@ -640,7 +640,7 @@ void main() {
     }
     expect(find.descendant(of: find.byKey(const Key('task-needs-you')), matching: find.text('${d.needsYou.length + 1}')), findsOneWidget);
     expect(find.byKey(const ValueKey('task-7')), findsOneWidget, reason: 'a check is his');
-    expect(find.text('Merged, waiting for release'), findsNothing);
+    expect(find.text('In the code, waiting for release'), findsNothing);
     expect(find.byKey(const ValueKey('task-4')), findsNothing, reason: 'folded');
     await tester.ensureVisible(find.byKey(const Key('task-releasing')));
     await tester.pumpAndSettle();
@@ -659,7 +659,7 @@ void main() {
     await tester.tap(find.byKey(const Key('task-releasing')));
     await tester.pumpAndSettle();
     expect(find.text('לומו · 1', skipOffstage: false), findsOneWidget);
-    expect(find.textContaining('Stuck: merged and waiting for release over a week', findRichText: true, skipOffstage: false), findsOneWidget);
+    expect(find.textContaining('Stuck: waiting for release over a week', findRichText: true, skipOffstage: false), findsOneWidget);
     expect(find.byKey(const ValueKey('task-8'), skipOffstage: false), findsOneWidget);
   });
 
@@ -785,10 +785,10 @@ void main() {
       final lines = [
         'You opened the task, assigned to $kFSIעידו$kPDI',
         'Work started',
-        'PR opened',
+        'Code change opened',
         'Automated checks failed',
         'Review asked for fixes. "${kFSI}The retry loses the file name.$kPDI"',
-        'Merged',
+        'Change added to the code',
         'Released',
       ];
       for (final line in lines) {
@@ -797,7 +797,7 @@ void main() {
       // "Released" is also the stages' last word: the activity's is the last one on the page.
       final ys = [for (final line in lines) tester.getTopLeft(find.text(line, skipOffstage: false).last).dy];
       expect(ys, [...ys]..sort(), reason: 'oldest first');
-      expect(find.text('PR #12', skipOffstage: false), findsNWidgets(2), reason: 'the PR and the merge');
+      expect(find.text('GitHub', skipOffstage: false), findsNWidgets(2), reason: 'the PR and the merge');
     },
   );
 
@@ -845,7 +845,7 @@ void main() {
         find.descendant(
           of: find.byKey(const Key('task-4')),
           matching: find.textContaining(
-            'Merged, waiting for release',
+            'In the code, waiting for release',
             findRichText: true,
           ),
         ),
@@ -855,7 +855,7 @@ void main() {
         find.descendant(
           of: find.byKey(const Key('task-5')),
           matching: find.textContaining(
-            'Merged, waiting for release',
+            'In the code, waiting for release',
             findRichText: true,
           ),
         ),

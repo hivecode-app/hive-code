@@ -44,14 +44,15 @@ jobs:
       - name: test
         run: npm test
       # The app (#97): flutter analyze and test, as deploy.sh runs them, so a failure shows on the PR and
-      # not at deploy time. Only when the PR (or the push) touches packages/app. Flutter is in $HOME/flutter,
+      # not at deploy time. Only when the PR (or the push) touches packages/app, or the terms dictionary and
+      # the copy table its copy test reads. Flutter is in $HOME/flutter,
       # and the unit sets HOME=/home/owner/company-ci-home on ci-host (3.47.2, as on hq-host).
       - name: app changed?
         id: app
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
-          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null || ! git diff --quiet "$BASE" HEAD -- packages/app .github/workflows/company-ci.yml; then
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null || ! git diff --quiet "$BASE" HEAD -- packages/app packages/shared/src/ui-terms.json docs/product/copy-table.md .github/workflows/company-ci.yml; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
       - name: flutter analyze

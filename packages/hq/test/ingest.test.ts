@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { request } from 'node:http';
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { WalEntry } from '@company/shared';
+import { uiTermHits, type WalEntry } from '@company/shared';
 import { makeEnv, until } from './helpers.ts';
 import { forApp } from '../src/api.ts';
 import { isCancelled } from '../src/scheduler.ts';
@@ -59,12 +59,14 @@ test('ingest socket: 0600, ops are idempotent on id, tell/ask/request_go land wh
     const go = hq.inbox.open().find((i) => i.kind === 'go')!;
     assert.equal(go.headline, 'עדכון לאפליקציה');
     assert.equal(go.urgency, 'urgent');
-    assert.match(go.body, /PR: #12/);
+    assert.match(go.body, /^שינוי בקוד: #12$/m, 'a bare number with no link stays, in his words');
+    assert.match(go.body, /^סיכון: גבוה$/m);
+    assert.deepEqual(uiTermHits(go.body.split('\n').slice(1).join('\n'), 'he'), [], 'what hq adds to his what: no PR, no high');
     assert.deepEqual(go.links, [], 'a bare number with no repo behind it is not a link');
     await post(sock, '/v1/ops', entry('request_go', { headline: 'עוד אחד', what: 'פרטים', pr: 'https://github.com/hivecode-app/hive-code/pull/13', report: 'https://example.com/report' }, 'ac-ceo-1:02', 'ac-ceo'));
     assert.deepEqual(hq.inbox.open().find((i) => i.headline === 'עוד אחד')!.links,
       [{ kind: 'report', url: 'https://example.com/report' }, { kind: 'pr', url: 'https://github.com/hivecode-app/hive-code/pull/13' }]);
-    await until(() => env.telegrams.some((x) => /GO: פריסה לפרודקשן/.test(x)), 2000, 'GO pushed (telegram fallback)');
+    await until(() => env.telegrams.some((x) => /^⏸ עדכון לאפליקציה\n/.test(x) && !/GO|inbox #/.test(x)), 2000, 'the request pushed in his words (telegram fallback)');
 
     assert.equal((await post(sock, '/v1/ops', { ...entry('tell', {}, 'x'), v: 2 })).status, 400);
     assert.equal((await post(sock, '/v1/ops', entry('tell', { to: 'rotem' }, 'eli-1:03'))).status, 400, 'missing body = permanent reject');

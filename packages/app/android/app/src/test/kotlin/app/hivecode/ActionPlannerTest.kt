@@ -61,7 +61,7 @@ class ActionPlannerTest {
     @Test fun go() {
         val plan = ActionPlanner.plan(input("go"))
         assertEquals(listOf(Op.GO, Op.SNOOZE, Op.OPEN), plan.map { it.op })
-        assertEquals(listOf("GO", "לא עכשיו", "פתיחה"), plan.map { it.label })
+        assertEquals(listOf("אישור", "לא עכשיו", "פתיחה"), plan.map { it.label })
         assertTrue(plan[0].needsUnlock)
         assertTrue(plan[0].hasUndo)
         assertFalse(plan[1].hasUndo) // "לא עכשיו" is not an answer
