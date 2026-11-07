@@ -1,5 +1,5 @@
-// The conversation model with the owner (docs/app/chat.md §2.3א), reproducing the 20/10 bug: after "היי" the
-// app showed two bubbles from yoav — a `tell` and the turn's own text ("ענית לרן…") — and the header said "נח".
+// The conversation model with the owner (docs/app/chat.md §2.3א): in a turn he started, the worker's text is the reply
+// (one bubble, not a `tell` on top of it), and a `tell` to him in that turn never replaces it (08/11).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, until, type TestEnv } from './helpers.ts';
@@ -42,18 +42,68 @@ test('owner-triggered turn: the final assistant text becomes exactly one stored 
   } finally { await env.cleanup(); }
 });
 
-test('owner-triggered turn that answered with tell(owner): the tell is the reply, the self-narration is not stored', async () => {
+test('08/11 adi: a tell to him in his turn is a separate message; the text written after it is still the stored reply', async () => {
+  const env = await makeEnv();
+  try {
+    const host = await ownerTurn(env, 'm-1794073849539-0', 'אני סוגר את האפליקציה תשלח את ההתראה ואז תגיד לי מה הוא נשאר פתוח לפני שמעלים בהשקה');
+    host.event({ kind: 'tool_use', toolUseId: 't1', name: 'mcp__company__tell', input: { to: 'owner', urgency: 'now', body: 'הודעת בדיקה' } });
+    env.hq.mailbox.tell({ msg_id: 'adi-12:mw6p91bn-026bffb8d7', from: 'eli', to: 'owner', body: 'הודעת בדיקה' }); // no ref, as in the DB
+    host.event({ kind: 'tool_result', toolUseId: 't1', isError: false, preview: '{"queued":true}' });
+    host.event({ kind: 'tool_use', toolUseId: 't2', name: 'Bash', input: { command: 'journalctl …' } });
+    host.event({ kind: 'tool_result', toolUseId: 't2', isError: false, preview: '' });
+    const text = 'שלחתי לך הודעת בדיקה.\n\n**מה נשאר לפני ההשקה:** …';
+    host.event({ kind: 'text', text, messageId: 'msg_launch' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text });
+    await until(() => toOwner(env).length === 2, 3000, 'reply stored next to the tell');
+    const r = env.hq.mailbox.get('m-1794073849539-0-reply')!;
+    assert.equal(r.body, text);
+    assert.equal(r.ref, 'm-1794073849539-0');
+    assert.equal(r.text_ref, 'msg_launch');
+    assert.equal(env.hq.mailbox.get('adi-12:mw6p91bn-026bffb8d7')!.body, 'הודעת בדיקה', 'the tell stays as it was');
+    assert.equal(env.hq.mailbox.get('m-1794073849539-0')!.state, 'handled');
+  } finally { await env.cleanup(); }
+});
+
+test('a tell stored with no tool call (the API from Bash) does not suppress the turn\'s text either', async () => {
   const env = await makeEnv();
   try {
     const host = await ownerTurn(env, 'm-hi2', 'היי');
-    // No tool_use and no ref on purpose (e.g. the API from Bash): the stored tell alone suppresses the text.
     env.hq.mailbox.tell({ msg_id: 'eli-1:tell', from: 'eli', to: 'owner', body: 'היי רן. לפתוח צוות?' });
     assert.equal(env.hq.mailbox.get('m-hi2')!.state, 'seen');
-    host.event({ kind: 'text', text: 'ענית לרן ושאלת אם לפתוח צוות. ההודעה נכנסה לתור המסירה.', messageId: 'msg_c' });
-    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'ענית לרן ושאלת אם לפתוח צוות. ההודעה נכנסה לתור המסירה.' });
-    await new Promise((r) => setTimeout(r, 100));
-    assert.deepEqual(toOwner(env).map((m) => m.id), ['eli-1:tell'], 'one owner-visible message, not two');
+    host.event({ kind: 'text', text: 'PR #17 מוזג.', messageId: 'msg_c' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'PR #17 מוזג.' });
+    await until(() => toOwner(env).length === 2, 3000, 'reply stored');
+    assert.deepEqual(toOwner(env).map((m) => m.id).sort(), ['eli-1:tell', 'm-hi2-reply']);
     assert.equal(env.hq.mailbox.get('m-hi2')!.state, 'handled');
+  } finally { await env.cleanup(); }
+});
+
+test('a tell to him with ref (his message handled on the spot) still leaves the text as the reply; another result stores no second', async () => {
+  const env = await makeEnv();
+  try {
+    const host = await ownerTurn(env, 'm-r', 'מה נשאר?');
+    host.event({ kind: 'tool_use', toolUseId: 't1', name: 'mcp__company__tell', input: { to: 'owner', ref: 'm-r', body: 'בדיקה' } });
+    env.hq.mailbox.tell({ msg_id: 'eli-1:t', from: 'eli', to: 'owner', body: 'בדיקה', ref: 'm-r' });
+    assert.equal(env.hq.mailbox.get('m-r')!.state, 'handled');
+    host.event({ kind: 'text', text: 'הנה מה שנשאר: X', messageId: 'msg_r' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'הנה מה שנשאר: X' });
+    await until(() => !!env.hq.mailbox.get('m-r-reply'), 3000, 'reply stored');
+    assert.equal(env.hq.mailbox.get('m-r-reply')!.body, 'הנה מה שנשאר: X');
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'הנה מה שנשאר: X' });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.deepEqual(toOwner(env).map((m) => m.id).sort(), ['eli-1:t', 'm-r-reply']);
+  } finally { await env.cleanup(); }
+});
+
+test('a tell to a name instead of an id ("רן") is rejected; the turn\'s text is still his reply', async () => {
+  const env = await makeEnv();
+  try {
+    const host = await ownerTurn(env, 'm-n', 'היי');
+    host.event({ kind: 'tool_use', toolUseId: 't1', name: 'mcp__company__tell', input: { to: 'רן', body: 'היי' } });
+    host.event({ kind: 'text', text: 'היי רן.', messageId: 'msg_n' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'היי רן.' });
+    await until(() => toOwner(env).length === 1, 3000, 'reply stored');
+    assert.equal(toOwner(env)[0]!.id, 'm-n-reply');
   } finally { await env.cleanup(); }
 });
 
@@ -83,18 +133,6 @@ test('ask seen only as a tool call (op not yet ingested) still suppresses the te
     host.event({ kind: 'tool_use', toolUseId: 't1', name: 'mcp__company__ask', input: { question: 'למזג?', options: ['כן', 'לא'] } });
     host.event({ kind: 'text', text: 'שאלתי את רן.', messageId: 'msg_d' });
     host.event({ kind: 'result', subtype: 'success', isError: false, text: 'שאלתי את רן.' });
-    await new Promise((r) => setTimeout(r, 100));
-    assert.equal(toOwner(env).length, 0);
-  } finally { await env.cleanup(); }
-});
-
-test('a tell to a name instead of an id ("רן") was meant for him: no text reply on top of the resend', async () => {
-  const env = await makeEnv();
-  try {
-    const host = await ownerTurn(env, 'm-n', 'היי');
-    host.event({ kind: 'tool_use', toolUseId: 't1', name: 'mcp__company__tell', input: { to: 'רן', body: 'היי' } });
-    host.event({ kind: 'text', text: 'שלחתי לרן.', messageId: 'msg_n' });
-    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'שלחתי לרן.' });
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(toOwner(env).length, 0);
   } finally { await env.cleanup(); }

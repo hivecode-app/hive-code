@@ -111,21 +111,76 @@ void main() {
     expect(d.waiting.firstWhere((w) => w.inboxId == 8).kind, WaitKind.go);
   });
 
-  // 20/10, yoav after "היי": a tell(owner) and then the turn's own self-narration were two bubbles (chat.md §2.3א).
-  test('a turn that told the owner shows the tell, not its own text', () {
+  // 08/11, adi: a test tell to him, then "מה נשאר לפני ההשקה". He watched it stream and it vanished at the end of the turn.
+  test('in a turn he opened, the text after a tell to him stays: it is the reply, the tell is a separate message', () {
     final items = <ChatItem>[];
-    final m = EngineModel(items: items, gender: Gender.m);
+    final m = EngineModel(items: items, gender: Gender.f);
     final events = [
-      ev(1, 'user_echo', {'uuid': 'u', 'text': '[הודעה מ-רן (owner) · דחיפות: רגילה · m-1]\nהיי'}),
-      ev(2, 'tool_use', {'toolUseId': 't1', 'name': 'mcp__company__tell', 'input': {'to': 'owner', 'ref': 'm-1', 'body': 'היי רן. לפתוח צוות?'}}),
+      ev(1, 'user_echo', {'uuid': 'u', 'text': '[הודעה מ-רן (owner) · דחיפות: רגילה · m-1]\nתשלחי התראה ואז תגידי מה נשאר'}),
+      ev(2, 'tool_use', {'toolUseId': 't1', 'name': 'mcp__company__tell', 'input': {'to': 'owner', 'body': 'הודעת בדיקה'}}),
       ev(3, 'tool_result', {'toolUseId': 't1', 'isError': false, 'preview': '{"queued":true}'}),
-      ev(4, 'text', {'text': 'ענית לרן ושאלת אם לפתוח צוות. ההודעה נכנסה לתור המסירה.', 'messageId': 'n'}),
+      ev(4, 'text', {'text': 'שלחתי לך הודעת בדיקה.\n\nמה נשאר לפני ההשקה: …', 'messageId': 'n'}),
       ev(5, 'result', {'subtype': 'success', 'isError': false}),
     ];
     for (final e in [...events, ...events]) {
       m.apply(e);
     }
-    expect(items.whereType<TextMsg>(), isEmpty, reason: 'the stored tell is the only bubble');
+    expect(items.whereType<TextMsg>().map((t) => t.text), ['שלחתי לך הודעת בדיקה.\n\nמה נשאר לפני ההשקה: …']);
+  });
+
+  test('his message read together with a teammate\'s, not first in the echo, still opens the turn', () {
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.f);
+    m.apply(ev(1, 'user_echo', {'uuid': 'u', 'text': '[הודעה מ-רותם (rotem) · דחיפות: רגילה · r-1]\nתבדקי\n\n[הודעה מ-רן (owner) · דחיפות: רגילה · m-2]\nמה נשאר?'}));
+    m.apply(ev(2, 'tool_use', {'toolUseId': 't1', 'name': 'mcp__company__tell', 'input': {'to': 'owner', 'body': 'בדיקה'}}));
+    m.apply(ev(3, 'text', {'text': 'מה נשאר: …', 'messageId': 'n'}));
+    m.apply(ev(4, 'result', {'subtype': 'success', 'isError': false}));
+    expect(items.whereType<TextMsg>().map((t) => t.text), ['מה נשאר: …']);
+  });
+
+  test('a tell with ref to his message cuts nothing either', () {
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.f);
+    m.apply(ev(1, 'user_echo', {'uuid': 'u', 'text': '[הודעה מ-רן (owner) · דחיפות: רגילה · m-1]\nמה נשאר?'}));
+    m.apply(ev(2, 'tool_use', {'toolUseId': 't1', 'name': 'mcp__company__tell', 'input': {'to': 'owner', 'ref': 'm-1', 'body': 'בדיקה'}}));
+    m.apply(ev(3, 'text', {'text': 'מה נשאר: …', 'messageId': 'n'}));
+    m.apply(ev(4, 'result', {'subtype': 'success', 'isError': false}));
+    expect(items.whereType<TextMsg>().map((t) => t.text), ['מה נשאר: …']);
+  });
+
+  test('his message joins a turn after its tell to him: the narration before it drops, the reply after it stays', () {
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.m);
+    m.apply(ev(1, 'user_echo', {'uuid': 'u', 'text': '[הודעה מ-רותם (rotem) · דחיפות: רגילה · r-1]\nתבדוק'}));
+    m.apply(ev(2, 'tool_use', {'toolUseId': 't1', 'name': 'mcp__company__tell', 'input': {'to': 'owner', 'body': 'השרת חזר.'}}));
+    m.apply(ev(3, 'text', {'text': 'עדכנתי את רן.', 'messageId': 'a'}));
+    m.apply(ev(4, 'user_echo', {'uuid': 'u2', 'text': '[הודעה מ-רן (owner) · דחיפות: רגילה · m-mid]\nמה קרה?'}));
+    m.apply(ev(5, 'text', {'text': 'הדיסק התמלא, ניקיתי.', 'messageId': 'b'}));
+    m.apply(ev(6, 'result', {'subtype': 'success', 'isError': false}));
+    expect(items.whereType<TextMsg>().map((t) => t.text), ['הדיסק התמלא, ניקיתי.']);
+  });
+
+  test('a tell, then an ask, then his message: the card still cuts everything after the tell, as hq stores nothing', () {
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.m);
+    m.apply(ev(1, 'user_echo', {'uuid': 'u', 'text': '[הודעה מ-רותם (rotem) · דחיפות: רגילה · r-1]\nתבדוק'}));
+    m.apply(ev(2, 'tool_use', {'toolUseId': 't1', 'name': 'mcp__company__tell', 'input': {'to': 'owner', 'body': 'השרת חזר.'}}));
+    m.apply(ev(3, 'tool_use', {'toolUseId': 't2', 'name': 'mcp__company__ask', 'input': {'question': 'לפרוס?'}}));
+    m.apply(ev(4, 'user_echo', {'uuid': 'u2', 'text': '[הודעה מ-רן (owner) · דחיפות: רגילה · m-mid]\nמה קרה?'}));
+    m.apply(ev(5, 'text', {'text': 'שאלתי אותך.', 'messageId': 'b'}));
+    m.apply(ev(6, 'result', {'subtype': 'success', 'isError': false}));
+    expect(items.whereType<TextMsg>(), isEmpty);
+  });
+
+  test('in a turn he did not open, the narration after a tell to him is dropped: the tell is what he gets', () {
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.m);
+    m.apply(ev(1, 'user_echo', {'uuid': 'u', 'text': '[הודעה מ-רותם (rotem) · דחיפות: רגילה · r-1]\nתבדוק'}));
+    m.apply(ev(2, 'tool_use', {'toolUseId': 't1', 'name': 'mcp__company__tell', 'input': {'to': 'owner', 'body': 'השרת חזר.'}}));
+    m.apply(ev(3, 'tool_result', {'toolUseId': 't1', 'isError': false}));
+    m.apply(ev(4, 'text', {'text': 'עדכנתי את רן.', 'messageId': 'n'}));
+    m.apply(ev(5, 'result', {'subtype': 'success', 'isError': false}));
+    expect(items.whereType<TextMsg>(), isEmpty);
     // The next turn (a plain text reply) is not affected.
     m.apply(ev(6, 'text', {'text': 'בטח.', 'messageId': 'o'}));
     m.apply(ev(7, 'result', {'subtype': 'success', 'isError': false}));

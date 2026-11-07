@@ -542,8 +542,9 @@ export class Mailbox {
    * The conversation model with the owner (chat.md §2.3א): in a turn he started, the worker's own final
    * assistant text IS the reply. It becomes one stored message worker → owner (ref = his message, text_ref =
    * the engine messageId), so it is in his conversation list, closes his message as handled, and the app shows
-   * the streamed bubble and the stored message as a single item. A turn that already reached him through
-   * `tell`/`ask`/`request_go` has no text reply: its text was internal and is not stored.
+   * the streamed bubble and the stored message as a single item. A `tell` to him in the same turn is a separate
+   * message and never replaces the reply (08/11: adi's "מה נשאר לפני ההשקה", written after a test tell, was lost).
+   * Only `ask`/`request_go` cut it: he answers those on their card, and the text after them narrates the send.
    * The turn is the event-log window after this shift's previous `engine.result` up to this one (indexed on
    * identity, seq). Its triggers are his messages dequeued (`seen`) inside that window and still unanswered, so a
    * message left over from an errored turn never turns a later, unrelated turn's text into a reply. Everything
@@ -577,7 +578,10 @@ export class Mailbox {
     const triggers = window
       .filter((e) => e.type === 'message.state' && e.data.state === 'seen' && e.data.from === OWNER)
       .map((e) => this.get(String(e.data.id)))
-      .filter((m): m is MessageRow => !!m && m.state === 'seen' && m.shift_id === row.id);
+      // A tell to him with `ref` marked his message handled on the spot; the turn's text is still the reply to it.
+      .filter((m): m is MessageRow => !!m && m.shift_id === row.id && (m.state === 'seen' || (m.state === 'handled' && !!db.prepare(
+        `SELECT 1 FROM messages WHERE from_identity = ? AND to_identity = ? AND kind = 'tell' AND ref = ? AND id != ? LIMIT 1`)
+        .get(row.identity, OWNER, m.id, `${m.id}-reply`))));
     if (!triggers.length) { this.saveNote(row, cur.seq, window, !!reached, start?.ts ?? 0); return; }
     // What it wrote before his message came mid-turn is not the reply to it, and stays in his conversation as such a note.
     const before = window.filter((e) => e.seq < firstTriggerSeq);
@@ -586,17 +590,18 @@ export class Mailbox {
     // (its op may be ingested after the result).
     const stored = db.prepare(`SELECT 1 FROM messages WHERE from_identity = ? AND to_identity = ? AND kind != 'note' AND created_at >= ? LIMIT 1`)
       .get(row.identity, OWNER, Math.min(...triggers.map((t) => t.seen_at ?? t.created_at)));
-    const told = !!stored || !!reached;
-    let answered = told;
-    if (!ev.isError && (!told || reached)) {
-      // All the text the worker wrote to him in the turn, in order, never only the block after the last tool. In a turn
-      // that reached him through a tool, the text before that call (already on his screen) is the reply; what follows
-      // it narrates the send and is not stored.
+    let answered = !!stored || !!reached;
+    // The ask or GO card of the turn: the text after it narrates the send and is not stored. A tell cuts nothing.
+    const carded = window.find((e) => e.type === 'engine.tool_use' && e.data.shift === row.id && !e.data.ev?.parentToolUseId
+      && OWNER_FACING_TOOLS.has(e.data.ev?.name ?? ''));
+    if (!ev.isError) {
+      // All the text the worker wrote to him in the turn, in order, never only the block after the last tool.
       const blocks = window
-        .filter((e) => e.type === 'engine.text' && e.data.shift === row.id && e.seq > firstTriggerSeq && (!reached || e.seq < reached.seq))
+        .filter((e) => e.type === 'engine.text' && e.data.shift === row.id && e.seq > firstTriggerSeq
+          && (!carded || e.seq < carded.seq))
         .map((e) => e.data.ev as { text?: string; messageId?: string })
         .filter((b) => (b.text ?? '').trim());
-      const body = blocks.length ? blocks.map((b) => b.text!.trim()).join('\n\n') : told ? '' : (ev.text ?? '').trim();
+      const body = blocks.length ? blocks.map((b) => b.text!.trim()).join('\n\n') : carded ? '' : (ev.text ?? '').trim();
       if (body) {
         const to = triggers.at(-1)!;
         this.tell({ msg_id: `${to.id}-reply`, from: row.identity, to: OWNER, body, ref: to.id, text_ref: blocks.at(-1)?.messageId });

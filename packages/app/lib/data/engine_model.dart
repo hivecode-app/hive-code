@@ -33,6 +33,9 @@ class EngineModel {
   String? _runShift; // the shift of the last engine event that names one (deltas, live-only, don't)
   final _turnTexts = <TextMsg>[];
   int? _toldAt; // how many of [_turnTexts] existed when the turn first reached the owner through a tool
+  bool _ownerTurn = false; // his message is in this turn: its text is the reply, and a tell to him cuts nothing (08/11)
+  bool _toldByCard = false; // [_toldAt] came from an ask or a GO, not a tell
+  final _narration = <TextMsg>{}; // a tell's narration that was cut before his message joined the turn
 
   /// Applies one hq event `{seq, ts, type, identity, data}`.
   void apply(Map<String, dynamic> e) {
@@ -51,6 +54,9 @@ class EngineModel {
       if (data['state'] != 'live' || id != _runShift) {
         _turnTexts.clear();
         _toldAt = null;
+        _ownerTurn = false;
+        _toldByCard = false;
+        _narration.clear();
         for (final s in _streams.values) {
           s.streaming = false;
         }
@@ -110,7 +116,10 @@ class EngineModel {
       case 'tool_use':
         if (ev['parentToolUseId'] != null) return; // subagent internals: only the Task line shows
         final name = ev['name'] as String? ?? '?';
-        if (reachesOwner(name, ev['input'])) _toldAt ??= _turnTexts.length;
+        if (reachesOwner(name, ev['input']) && !(_ownerTurn && name == 'mcp__company__tell')) {
+          _toldAt ??= _turnTexts.length;
+          if (name != 'mcp__company__tell') _toldByCard = true; // a card anywhere in the turn cuts, as in hq
+        }
         final id = ev['toolUseId'] as String? ?? '$seq';
         final input = (ev['input'] as Map?)?.cast<String, dynamic>() ?? const {};
         // A message to the owner, a question or a GO request shows as its own item, and tool
@@ -179,19 +188,26 @@ class EngineModel {
         _closeGroup(cut ? Outcome.interrupted : failed ? Outcome.error : Outcome.ok);
         _groupTools.clear(); // a row the turn ended on stays stopped
         final toldAt = _toldAt;
-        if (toldAt != null) {
-          final drop = _turnTexts.skip(toldAt).toSet();
-          items.removeWhere(drop.contains);
-        }
+        final drop = {..._narration, if (toldAt != null) ..._turnTexts.skip(toldAt)};
+        if (drop.isNotEmpty) items.removeWhere(drop.contains);
         _turnTexts.clear();
         _toldAt = null;
+        _ownerTurn = false;
+        _toldByCard = false;
+        _narration.clear();
         if (failed) {
           items.add(ErrorLine(id: 'r:$seq', ts: ts, text: UiCopy.copy.workEndedError(gender == Gender.f ? UiCopy.copy.theyWillTry : UiCopy.copy.theyWillTry2), textBuilder: () => UiCopy.copy.workEndedError(gender == Gender.f ? UiCopy.copy.theyWillTry : UiCopy.copy.theyWillTry2), seq: seq));
         }
         onLive?.call(const LiveState());
       case 'user_echo':
         // Delivery acks arrive as message.state; the echo itself is not a chat line.
-        break;
+        if (!_ownerHeader.hasMatch(ev['text'] as String? ?? '')) break;
+        _ownerTurn = true;
+        // His message joined after a tell: what follows is the reply to it (hq stores it), only the text before stays cut.
+        if (_toldAt != null && !_toldByCard) {
+          _narration.addAll(_turnTexts.skip(_toldAt!));
+          _toldAt = null;
+        }
       default:
         break;
     }
@@ -217,6 +233,9 @@ class EngineModel {
     _group = null;
   }
 }
+
+/// The header hq puts on his message (mailbox.ts `[הודעה מ-<שם> (owner) · …]`), on any line: messages read together share one echo.
+final _ownerHeader = RegExp(r'^\[[^\]\n]*\(owner\) · ', multiLine: true);
 
 /// No tool row for these: the owner sees their result as its own item, or they are bookkeeping.
 /// browser-memory's hand-over to him (B.9): a [HandoffCard] in the conversation.
