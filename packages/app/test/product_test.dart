@@ -332,7 +332,7 @@ void main() {
       expect(find.text(gone), findsNothing);
     }
     expect(find.byType(AccountSwitch), findsNothing);
-    final order = ['Claude subscription', 'Server', 'Notifications', 'Language', 'Appearance', 'Tools'];
+    final order = ['Claude subscription', 'Hive Code server', 'Notifications', 'Language', 'Appearance', 'Tools'];
     for (final t in order) {
       await tester.scrollUntilVisible(find.text(t), 200);
     }

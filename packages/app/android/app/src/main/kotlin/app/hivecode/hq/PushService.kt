@@ -81,7 +81,7 @@ object PushRegistration {
     private fun authFailed(app: Context) {
         val n = NotificationCompat.Builder(app, Channels.DIGEST)
             .setSmallIcon(R.drawable.ic_ms_link)
-            .setContentTitle("החיבור לחברה נעצר")
+            .setContentTitle("החיבור לשרת נעצר")
             .setContentText(Wording.ERR_AUTH)
             .setStyle(NotificationCompat.BigTextStyle().bigText(Wording.ERR_AUTH))
             .setContentIntent(NotificationPoster.openApp(app, "/", null))

@@ -75,3 +75,17 @@ test('a store opened again takes the new wording of a switch, and keeps whether 
     assert.equal(row.enabled, flipped, 'his choice stays');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('the Android disconnect notification is the ARB text: server_connection.xml is generated, and not left behind', () => {
+  const app = join(import.meta.dirname, '../../app');
+  const pairs = [['server_silent_title', 'serverSilentTitle'], ['server_silent_body', 'serverSilentBody'], ['server_silent_channel', 'serverSilentChannel']];
+  for (const [language, folder] of [['en', 'values'], ['he', 'values-he']]) {
+    const arb = JSON.parse(readFileSync(join(app, `lib/l10n/app_${language}.arb`), 'utf8')) as Record<string, string>;
+    const xml = readFileSync(join(app, `android/app/src/main/res/${folder}/server_connection.xml`), 'utf8');
+    for (const [key, value] of pairs) {
+      const m = xml.match(new RegExp(`<string name="${key}">([^<]*)</string>`));
+      const unescape = (x: string) => x.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+      assert.equal(unescape(m?.[1] ?? ''), arb[value], `${folder}/${key}: run tool/generate_server_copy.py`);
+    }
+  }
+});

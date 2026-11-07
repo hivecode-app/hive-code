@@ -17,7 +17,7 @@ export const systemCopy = {
   resumed: { en: 'Work resumed', he: 'העבודה נמשכת' },
   stopped: { en: 'Work stopped', he: 'העבודה נעצרה' },
   waiting: { en: 'Waiting for your answer', he: 'מחכה לתשובה שלך' },
-  offline: { en: 'No connection to the server', he: 'אין חיבור לשרת' },
+  offline: { en: 'No connection to the Hive Code server', he: 'אין חיבור לשרת' },
   release: { en: 'Release {title}?', he: 'לשחרר את {title}?' },
   approval: { en: 'Approve this action?', he: 'לאשר את הפעולה?' },
   question: { en: 'Question for you', he: 'שאלה אליך' },

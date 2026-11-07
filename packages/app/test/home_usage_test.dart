@@ -37,7 +37,7 @@ void main() {
 
   test('the kinds: the leads once, with their sum, and what woke them under it', () {
     final rows = kindRows(_u.kinds);
-    expect([for (final r in rows) r.$1], ['ראשי צוות', 'הודעות מעובדים', 'הודעות ממך', 'תזכורות מהמערכת', 'עבודה שחזרה', 'משימות']);
+    expect([for (final r in rows) r.$1], ['ראשי צוות', 'הודעות מעובדים', 'הודעות ממך', 'תזכורות מהשרת', 'עבודה שחזרה', 'משימות']);
     expect(rows.first.$2, closeTo(0.58, 1e-9));
     expect([for (final r in rows) r.$3], [false, true, true, true, true, false]);
     expect([for (final r in kindRows(const [('tasks', 0.7), ('leads_owner', 0.3)])) r.$1], ['משימות', 'ראשי צוות', 'הודעות ממך']);

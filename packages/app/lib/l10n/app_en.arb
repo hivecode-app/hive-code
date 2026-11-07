@@ -23,7 +23,7 @@
   "noRequests": "Nothing needs you.",
   "noChats": "Start a chat with your team.",
   "selectChat": "Select a chat",
-  "offline": "No connection to the server",
+  "offline": "No connection to the Hive Code server",
   "offlineDetail": "New messages will be sent when the connection is back.",
   "working": "Working",
   "resting": "Resting",
@@ -49,7 +49,7 @@
   "work": "Work",
   "account": "Account",
   "subscription": "Claude subscription",
-  "server": "Server",
+  "server": "Hive Code server",
   "thisDevice": "This device",
   "devices": "Devices and passkeys",
   "notifications": "Notifications",
@@ -107,7 +107,7 @@
       }
     }
   },
-  "systemUpdates": "{count, plural, =1{System update} other{{count} system updates}}",
+  "systemUpdates": "{count, plural, =1{Server update} other{{count} server updates}}",
   "@systemUpdates": {
     "placeholders": {
       "count": {
@@ -280,13 +280,13 @@
   "approvedCopy194": "Notes",
   "approvedCopy195": "Notes",
   "approvedCopy196": "Kofi · Crash when opening the map",
-  "approvedCopy202": "No connection to the server since 10:52",
+  "approvedCopy202": "No connection to the Hive Code server since 10:52",
   "approvedCopy203": "Work is paused. New messages will be sent when the connection is back. Retrying every minute.",
   "approvedCopy204": "Troubleshoot",
   "approvedCopy205": "Tests failed 3 times in a row with the same error. Tomas is looking into it.",
   "approvedCopy206": "Stuck 40 min · Export invoices to CSV",
   "approvedCopy207": "Nothing needs you. 5 tasks in progress.",
-  "enterServerAddress": "Enter the server address from your QR code or pairing link.",
+  "enterServerAddress": "Enter the Hive Code server address from your QR code or pairing link.",
   "thisDoesNot": "This does not look like a server address. For example, app.example.com.",
   "usePairingCode": "Use a pairing code from Settings on a connected device.",
   "company2": "Company",
@@ -1700,7 +1700,7 @@
   },
   "messagesFromWorkers": "Messages from workers",
   "yourMessages": "Your messages",
-  "systemReminders": "System reminders",
+  "systemReminders": "Hive Code server reminders",
   "repeatedWork": "Repeated work",
   "teamLeads": "Team leads",
   "lastHour": "Last hour: {p0}",
@@ -2330,7 +2330,7 @@
   "tasks4": "In tasks",
   "projectsNow": "In projects now",
   "quietNoTask": "Quiet, no task running",
-  "demoServerNot": "Demo · Server not connected, showing sample content",
+  "demoServerNot": "Demo · Hive Code server not connected, showing sample content",
   "since5": " since {p0}",
   "@since5": {
     "placeholders": {
@@ -2339,7 +2339,7 @@
       }
     }
   },
-  "noConnectionServer": "No connection to the server{p0}. New messages will be sent when the connection is back.",
+  "noConnectionServer": "No connection to the Hive Code server{p0}. New messages will be sent when the connection is back.",
   "@noConnectionServer": {
     "placeholders": {
       "p0": {
@@ -2376,7 +2376,7 @@
   "englishLanguage": "English",
   "hebrewLanguage": "עברית",
   "deviceRevoked": "This device was disconnected from the company. You can sign in again.",
-  "noCompanyServer": "No company server found at this address. Check the address and try again.",
+  "noCompanyServer": "No Hive Code server found at this address. Check the address and try again.",
   "noConnectionThis": "No connection to this server. Check the address and your internet connection.",
   "noConnectionServerTry": "No connection to the server. Try again.",
   "tooManyIncorrect": "Too many incorrect codes. Try again in a few minutes.",
@@ -2571,7 +2571,7 @@
   "messageNotDelivered": "Message not delivered",
   "workerDidNot": "Worker did not return after an error",
   "blocking": "Blocking",
-  "system": "System",
+  "system": "Hive Code server",
   "disabledManually": "Disabled manually · {p0}",
   "@disabledManually": {
     "placeholders": {
@@ -2692,9 +2692,9 @@
   },
   "companyOwner": "Company owner",
   "companyManager": "Company manager",
-  "system2": "System",
-  "messageFromServer": "Message from server",
-  "system3": "to the system",
+  "system2": "Hive Code server",
+  "messageFromServer": "Message from the Hive Code server",
+  "system3": "to the Hive Code server",
   "notWorking": "Not working",
   "noLongerRelevant": "No longer relevant",
   "n8Hours": "8 hours",
@@ -2821,7 +2821,7 @@
   },
   "setupContinue": "Continue",
   "setupAlmostReady": "Almost ready",
-  "setupServer": "Server connected",
+  "setupServer": "Hive Code server connected",
   "setupClaude": "Claude",
   "setupGithub": "GitHub",
   "setupConnected": "Connected",
@@ -2852,9 +2852,9 @@
   "workOffline": "Work settings need a server connection. Language and appearance can still be changed on this device.",
   "workForecastUnknown": "Not enough usage history for an estimate yet.",
   "workForecast": "Enough until {date}, at the last day’s rate.",
-  "serverSilentTitle": "Server connection lost",
-  "serverSilentBody": "The server has not responded for 10 minutes. Open the app to check the connection.",
-  "serverSilentChannel": "Server connection",
+  "serverSilentTitle": "Hive Code server connection lost",
+  "serverSilentBody": "The Hive Code server has not responded for 10 minutes. Open the app to check the connection.",
+  "serverSilentChannel": "Hive Code server connection",
   "@workForecast": {
     "placeholders": {
       "date": {
@@ -3337,9 +3337,9 @@
   "@stageTask": {"placeholders": {"stage": {"type": "String"}, "task": {"type": "String"}}},
   "stuckTask": "Stuck · {task}",
   "@stuckTask": {"placeholders": {"task": {"type": "String"}}},
-  "offlineSince": "No connection to the server since {time}",
+  "offlineSince": "No connection to the Hive Code server since {time}",
   "@offlineSince": {"placeholders": {"time": {"type": "String"}}},
-  "offlineNow": "No connection to the server",
+  "offlineNow": "No connection to the Hive Code server",
   "offlineBody": "New messages will be sent when the connection is back. Retrying every few seconds.",
   "troubleshoot": "Troubleshooting",
   "chatTab": "Chat",

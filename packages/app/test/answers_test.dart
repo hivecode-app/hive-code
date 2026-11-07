@@ -101,13 +101,13 @@ void main() {
     store.data!.waiting.insert(0, systemAsk());
     store.touch();
     await tester.pump();
-    expect(find.text('המערכת'), findsOneWidget);
+    expect(find.text('השרת'), findsOneWidget);
     expect(find.text('hq'), findsNothing);
     expect(find.byKey(const Key('answer-field-inbox:7')), findsOneWidget); // no options: the field at once
 
-    await tester.ensureVisible(find.text('המערכת'));
+    await tester.ensureVisible(find.text('השרת'));
     await tester.pump();
-    await tester.tap(find.text('המערכת'));
+    await tester.tap(find.text('השרת'));
     await tester.pumpAndSettle();
     expect(find.byType(WaitItemScreen), findsOneWidget);
 

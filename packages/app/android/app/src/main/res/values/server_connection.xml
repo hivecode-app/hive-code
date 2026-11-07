@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Generated from lib/l10n/app_en.arb by tool/generate_server_copy.py -->
 <resources>
-    <string name="server_silent_title">Server connection lost</string>
-    <string name="server_silent_body">The server has not responded for 10 minutes. Open the app to check the connection.</string>
-    <string name="server_silent_channel">Server connection</string>
+    <string name="server_silent_title">Hive Code server connection lost</string>
+    <string name="server_silent_body">The Hive Code server has not responded for 10 minutes. Open the app to check the connection.</string>
+    <string name="server_silent_channel">Hive Code server connection</string>
 </resources>

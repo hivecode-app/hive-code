@@ -70,7 +70,7 @@ void main() {
   testWidgets('retry only the failed connection, select repositories, start once and continue in conversation', (tester) async {
     final api = SetupApi()..failClaude = true; addTearDown(api.client.close);
     await productApp(tester, home: SetupScreen(client: api.client, initial: {...initial, 'consent': true}, onDone: () {}));
-    expect(find.text('Server connected'), findsOneWidget);
+    expect(find.text('Hive Code server connected'), findsOneWidget);
     expect(find.text('Connected'), findsOneWidget);
     final githubChecks = api.calls.where((c) => c.endsWith('/api/setup/check')).length;
     api.failClaude = false;

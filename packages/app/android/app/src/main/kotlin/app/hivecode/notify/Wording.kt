@@ -5,7 +5,7 @@ package app.hivecode.notify
  * gender-neutral Hebrew, one plain sentence per error, no codes). Pure, so it is unit tested.
  */
 object Wording {
-    const val SYSTEM_NAME = "המערכת" // hq itself as a sender; same name as in the app (#55)
+    const val SYSTEM_NAME = "השרת" // hq itself as a sender; same name as in the app (#55)
 
     const val GO = "אישור"
     const val NOT_NOW = "לא עכשיו"
@@ -23,9 +23,9 @@ object Wording {
     const val SUBTEXT_HANDOFF = "כניסה לאתר"
     const val BLOCKING_PREFIX = "חוסם: "
 
-    /** "לדנה". "המערכת" drops its article ("למערכת"); a non-Hebrew name gets a hyphen ("ל-Bob"). */
+    /** "לדנה". "השרת" drops its article ("לשרת"); a non-Hebrew name gets a hyphen ("ל-Bob"). */
     fun to(name: String): String = when {
-        name == SYSTEM_NAME -> "למערכת"
+        name == SYSTEM_NAME -> "לשרת"
         name.firstOrNull()?.let { it in 'א'..'ת' } == true -> "ל$name"
         else -> "ל-$name"
     }
@@ -51,10 +51,10 @@ object Wording {
 
     // One sentence each: what happened and what to do (design-taste §7, no HTTP codes).
     const val ERR_OFFLINE = "אין חיבור לרשת. אפשר לנסות שוב."
-    const val ERR_AUTH = "החיבור לחברה לא מאושר. צריך לחבר מחדש באפליקציה."
+    const val ERR_AUTH = "החיבור לשרת לא מאושר. צריך לחבר מחדש באפליקציה."
     const val ERR_GONE = "הפריט כבר נסגר ממקום אחר."
-    const val ERR_SERVER = "החברה לא ענתה. אפשר לנסות שוב בעוד רגע."
-    const val ERR_NOT_CONFIGURED = "החיבור לחברה עוד לא הוגדר באפליקציה."
+    const val ERR_SERVER = "השרת לא ענה. אפשר לנסות שוב בעוד רגע."
+    const val ERR_NOT_CONFIGURED = "החיבור לשרת עוד לא הוגדר באפליקציה."
     const val ERR_NO_SHIFT = "אין עבודה פעילה לעצור."
     const val ERR_LOCKED = "אישור נשלח רק כשהמכשיר פתוח. אפשר לפתוח ולנסות שוב."
 }
