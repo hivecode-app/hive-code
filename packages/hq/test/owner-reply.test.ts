@@ -107,7 +107,7 @@ test('a tell to a name instead of an id ("רן") is rejected; the turn\'s text i
   } finally { await env.cleanup(); }
 });
 
-test('text, then tools (request_go among them), then a round with no text: the text he saw is the stored reply', async () => {
+test('text, then tools (request_go among them), then a round with no text: every text he saw stream in is the stored reply', async () => {
   const env = await makeEnv();
   try {
     const host = await ownerTurn(env, 'm-long', 'מה המצב?');
@@ -120,21 +120,114 @@ test('text, then tools (request_go among them), then a round with no text: the t
     host.event({ kind: 'result', subtype: 'success', isError: false, text: '' });
     await until(() => toOwner(env).length === 1, 3000, 'reply stored');
     const [r] = toOwner(env);
-    assert.equal(r!.body, 'התשובה הארוכה על 4% ועצירות.\n\nGood — deploying.', 'text before the owner-facing call; the narration after it is not stored');
-    assert.equal(r!.text_ref, 'msg_l2');
+    assert.equal(r!.body, 'התשובה הארוכה על 4% ועצירות.\n\nGood — deploying.\n\nביקשתי GO.', 'a GO card cuts nothing');
+    assert.equal(r!.text_ref, 'msg_l3');
     assert.equal(env.hq.mailbox.get('m-long')!.state, 'handled');
   } finally { await env.cleanup(); }
 });
 
-test('ask seen only as a tool call (op not yet ingested) still suppresses the text reply', async () => {
+test('an ask alone, with no text: his message is answered by the card, and no empty reply is stored', async () => {
   const env = await makeEnv();
   try {
     const host = await ownerTurn(env, 'm-q', 'מה המצב?');
     host.event({ kind: 'tool_use', toolUseId: 't1', name: 'mcp__company__ask', input: { question: 'למזג?', options: ['כן', 'לא'] } });
-    host.event({ kind: 'text', text: 'שאלתי את רן.', messageId: 'msg_d' });
-    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'שאלתי את רן.' });
-    await new Promise((r) => setTimeout(r, 100));
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: '' });
+    await until(() => env.hq.mailbox.get('m-q')!.state === 'handled', 3000, 'handled by the card');
     assert.equal(toOwner(env).length, 0);
+  } finally { await env.cleanup(); }
+});
+
+// 07/11 21:01, dana-7: a teammate's message opened the turn, she sent him an ask, his two messages were read right after it,
+// he answered the ask mid-turn, and she wrote him two real answers. Nothing was stored, his messages were marked handled,
+// and the bubbles he watched stream in vanished.
+test('07/11 dana: his messages read after an ask, his answer to it mid-turn, then two answers: all stored, nothing lost', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    hq.mailbox.tell({ msg_id: 'b-1', from: 'rotem', to: 'eli', body: 'א1 וא2 מוזגו' });
+    await until(() => hq.mailbox.get('b-1')!.state === 'delivered');
+    const host = launcher.hosts.get('eli-1')!;
+    host.deliveryState('b-1', 'started');
+    await until(() => hq.mailbox.get('b-1')!.state === 'seen');
+    host.event({ kind: 'tool_use', toolUseId: 't0', name: 'mcp__company__tell', input: { to: 'rotem', ref: 'b-1', body: 'יופי' } });
+    hq.mailbox.tell({ msg_id: 'm-7', to: 'eli', body: 'רגע זה בעצם התיקון של יום שישי?' });
+    hq.mailbox.tell({ msg_id: 'm-9', to: 'eli', body: 'תנסה להבין מאיפה השגיאה' });
+    await until(() => hq.mailbox.get('m-7')!.state === 'delivered' && hq.mailbox.get('m-9')!.state === 'delivered');
+    host.event({ kind: 'tool_use', toolUseId: 't1', name: 'mcp__company__ask', input: { headline: 'להעביר ל-Hetzner?', question: 'הדוח' } });
+    host.deliveryState('m-7', 'started');
+    host.deliveryState('m-9', 'started');
+    await until(() => hq.mailbox.get('m-7')!.state === 'seen' && hq.mailbox.get('m-9')!.state === 'seen');
+    host.event({ kind: 'tool_use', toolUseId: 't2', name: 'Bash', input: { command: 'kubectl logs' } });
+    host.event({ kind: 'text', text: 'שתי תשובות.', messageId: 'msg_two' });
+    host.event({ kind: 'tool_use', toolUseId: 't3', name: 'mcp__company__open_team', input: {} });
+    hq.mailbox.tell({ msg_id: 'q-answer', to: 'eli', body: 'תשובה לשאלה: להעביר אם בדקת', ref: 'q' });
+    await until(() => hq.mailbox.get('q-answer')!.state === 'delivered');
+    host.deliveryState('q-answer', 'started');
+    await until(() => hq.mailbox.get('q-answer')!.state === 'seen');
+    host.event({ kind: 'text', text: 'בודקת את Hetzner באינטרנט ואת המחיר.', messageId: 'msg_chk' });
+    host.event({ kind: 'tool_use', toolUseId: 't4', name: 'WebSearch', input: { query: 'Hetzner' } });
+    const last = 'בדקתי את שני התנאים.';
+    host.event({ kind: 'text', text: last, messageId: 'msg_both' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: last });
+    await until(() => !!hq.mailbox.get('q-answer-reply'), 3000, 'reply stored');
+    const r = hq.mailbox.get('q-answer-reply')!;
+    assert.equal(r.body, 'שתי תשובות.\n\nבודקת את Hetzner באינטרנט ואת המחיר.\n\nבדקתי את שני התנאים.');
+    assert.equal(r.text_ref, 'msg_both');
+    for (const id of ['m-7', 'm-9', 'q-answer']) assert.equal(hq.mailbox.get(id)!.state, 'handled', id);
+  } finally { await env.cleanup(); }
+});
+
+test('his message read after all the text of the turn is not what the reply answers: it stays unanswered', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq } = env;
+    const host = await ownerTurn(env, 'm-1', 'מה המצב?');
+    host.event({ kind: 'text', text: 'המצב טוב.', messageId: 'msg_ok' });
+    hq.mailbox.tell({ msg_id: 'm-2', to: 'eli', body: 'ומה עם השרת?' });
+    await until(() => hq.mailbox.get('m-2')!.state === 'delivered');
+    host.deliveryState('m-2', 'started');
+    await until(() => hq.mailbox.get('m-2')!.state === 'seen');
+    host.event({ kind: 'tool_use', toolUseId: 't1', name: 'Bash', input: { command: 'true' } });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: '' });
+    await until(() => !!hq.mailbox.get('m-1-reply'), 3000, 'reply stored');
+    assert.equal(hq.mailbox.get('m-1-reply')!.ref, 'm-1');
+    assert.equal(hq.mailbox.get('m-2-reply'), undefined);
+    assert.equal(hq.mailbox.get('m-1')!.state, 'handled');
+    assert.equal(hq.mailbox.get('m-2')!.state, 'seen');
+    assert.deepEqual(hq.mailbox.unanswered('eli').map((m) => m.id), ['m-2']);
+
+    // His next message gets a reply: that answers the one left open before it too, and the task can close.
+    hq.mailbox.tell({ msg_id: 'm-3', to: 'eli', body: '?? השרת' });
+    await until(() => hq.mailbox.get('m-3')!.state === 'delivered');
+    host.deliveryState('m-3', 'started');
+    await until(() => hq.mailbox.get('m-3')!.state === 'seen');
+    host.event({ kind: 'text', text: 'השרת תקין, סליחה.', messageId: 'msg_srv' });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: 'השרת תקין, סליחה.' });
+    await until(() => !!hq.mailbox.get('m-3-reply'), 3000, 'second reply stored');
+    assert.deepEqual(hq.mailbox.unanswered('eli').map((m) => m.id), []);
+  } finally { await env.cleanup(); }
+});
+
+test('his message read after the last thing that reached him stays unanswered, even though the turn sent him an ask', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    hq.mailbox.tell({ msg_id: 'r-1', from: 'rotem', to: 'eli', body: 'תבדוק' });
+    await until(() => hq.mailbox.get('r-1')!.state === 'delivered');
+    const host = launcher.hosts.get('eli-1')!;
+    host.deliveryState('r-1', 'started');
+    await until(() => hq.mailbox.get('r-1')!.state === 'seen');
+    host.event({ kind: 'tool_use', toolUseId: 't1', name: 'mcp__company__ask', input: { question: 'לפרוס?' } });
+    hq.mailbox.tell({ msg_id: 'm-late', to: 'eli', body: 'ומה עם השרת?' });
+    await until(() => hq.mailbox.get('m-late')!.state === 'delivered');
+    host.deliveryState('m-late', 'started');
+    await until(() => hq.mailbox.get('m-late')!.state === 'seen');
+    host.event({ kind: 'tool_use', toolUseId: 't2', name: 'Bash', input: { command: 'true' } });
+    host.event({ kind: 'result', subtype: 'success', isError: false, text: '' });
+    await until(() => hq.shifts.get('eli-1')!.in_turn === 0, 3000, 'turn over');
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(hq.mailbox.get('m-late')!.state, 'seen');
+    assert.deepEqual(hq.mailbox.unanswered('eli').map((m) => m.id), ['m-late']);
   } finally { await env.cleanup(); }
 });
 

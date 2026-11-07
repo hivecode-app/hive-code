@@ -160,16 +160,30 @@ void main() {
     expect(items.whereType<TextMsg>().map((t) => t.text), ['הדיסק התמלא, ניקיתי.']);
   });
 
-  test('a tell, then an ask, then his message: the card still cuts everything after the tell, as hq stores nothing', () {
+  // 07/11, dana: an ask, then his messages, his answer to it mid-turn, and two answers. He watched them stream in and both vanished.
+  test('his message joins a turn after an ask to him: the narration before it drops, every answer after it stays', () {
+    final items = <ChatItem>[];
+    final m = EngineModel(items: items, gender: Gender.f);
+    m.apply(ev(1, 'user_echo', {'uuid': 'u', 'text': '[הודעה מ-ברק (lumo-t1485) · דחיפות: רגילה · b-1]\nמוזג'}));
+    m.apply(ev(2, 'tool_use', {'toolUseId': 't1', 'name': 'mcp__company__ask', 'input': {'question': 'להעביר ל-Hetzner?'}}));
+    m.apply(ev(3, 'text', {'text': 'שאלתי אותך.', 'messageId': 'a'}));
+    m.apply(ev(4, 'user_echo', {'uuid': 'u2', 'text': '[הודעה מ-רן (owner) · דחיפות: רגילה · m-7]\nרגע, זה התיקון של שישי?'}));
+    m.apply(ev(5, 'text', {'text': 'שתי תשובות.', 'messageId': 'b'}));
+    m.apply(ev(6, 'user_echo', {'uuid': 'u3', 'text': '[הודעה מ-רן (owner) · דחיפות: רגילה · q-answer · ref: q]\nתשובה לשאלה: להעביר אם בדקת'}));
+    m.apply(ev(7, 'text', {'text': 'בדקתי את שני התנאים.', 'messageId': 'c'}));
+    m.apply(ev(8, 'result', {'subtype': 'success', 'isError': false}));
+    expect(items.whereType<TextMsg>().map((t) => t.text), ['שתי תשובות.', 'בדקתי את שני התנאים.']);
+  });
+
+  test('in a turn he opened, an ask or a GO to him cuts nothing: every text he saw stays, as hq stores it', () {
     final items = <ChatItem>[];
     final m = EngineModel(items: items, gender: Gender.m);
-    m.apply(ev(1, 'user_echo', {'uuid': 'u', 'text': '[הודעה מ-רותם (rotem) · דחיפות: רגילה · r-1]\nתבדוק'}));
-    m.apply(ev(2, 'tool_use', {'toolUseId': 't1', 'name': 'mcp__company__tell', 'input': {'to': 'owner', 'body': 'השרת חזר.'}}));
-    m.apply(ev(3, 'tool_use', {'toolUseId': 't2', 'name': 'mcp__company__ask', 'input': {'question': 'לפרוס?'}}));
-    m.apply(ev(4, 'user_echo', {'uuid': 'u2', 'text': '[הודעה מ-רן (owner) · דחיפות: רגילה · m-mid]\nמה קרה?'}));
-    m.apply(ev(5, 'text', {'text': 'שאלתי אותך.', 'messageId': 'b'}));
-    m.apply(ev(6, 'result', {'subtype': 'success', 'isError': false}));
-    expect(items.whereType<TextMsg>(), isEmpty);
+    m.apply(ev(1, 'user_echo', {'uuid': 'u', 'text': '[הודעה מ-רן (owner) · דחיפות: רגילה · m-1]\nמה המצב?'}));
+    m.apply(ev(2, 'text', {'text': 'המצב: X.', 'messageId': 'a'}));
+    m.apply(ev(3, 'tool_use', {'toolUseId': 't1', 'name': 'mcp__company__request_go', 'input': {'what': 'פריסה'}}));
+    m.apply(ev(4, 'text', {'text': 'ועוד Y.', 'messageId': 'b'}));
+    m.apply(ev(5, 'result', {'subtype': 'success', 'isError': false}));
+    expect(items.whereType<TextMsg>().map((t) => t.text), ['המצב: X.', 'ועוד Y.']);
   });
 
   test('in a turn he did not open, the narration after a tell to him is dropped: the tell is what he gets', () {

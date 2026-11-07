@@ -6,9 +6,10 @@ import 'package:agent_company/l10n/ui_copy.dart';
 //   engine.delta (live only, seq 0), shift.state.
 // Pure: no IO. Feeding the same event twice is a no-op (dedupe by seq), so replay after a
 // reconnect (`/ws?after=<seq>`) never duplicates a line (chat.md §7).
-// The conversation model (chat.md §2.3א): a turn that reached the owner through `tell`/`ask`/`request_go`
-// shows that item, not its own narration of it: the text written after that call is dropped when the turn ends.
-// Text he saw before the call stays (hq stores it as the reply and the stored message replaces those bubbles).
+// The conversation model (chat.md §2.3א): in a turn he is in, every text the worker wrote after his message stays
+// (hq stores it as the reply); a `tell`, `ask` or `request_go` to him cuts nothing. A turn he is not in that reached him
+// through one of those shows that item, not its own narration of it: the text after the call is dropped when the turn
+// ends, and text he saw before the call stays.
 import '../model/company_time.dart';
 import '../model/models.dart';
 
@@ -33,9 +34,8 @@ class EngineModel {
   String? _runShift; // the shift of the last engine event that names one (deltas, live-only, don't)
   final _turnTexts = <TextMsg>[];
   int? _toldAt; // how many of [_turnTexts] existed when the turn first reached the owner through a tool
-  bool _ownerTurn = false; // his message is in this turn: its text is the reply, and a tell to him cuts nothing (08/11)
-  bool _toldByCard = false; // [_toldAt] came from an ask or a GO, not a tell
-  final _narration = <TextMsg>{}; // a tell's narration that was cut before his message joined the turn
+  bool _ownerTurn = false; // his message is in this turn: its text is the reply, and nothing to him cuts it (07/11, 08/11)
+  final _narration = <TextMsg>{}; // narration after a tell or card to him, cut before his message joined the turn
 
   /// Applies one hq event `{seq, ts, type, identity, data}`.
   void apply(Map<String, dynamic> e) {
@@ -55,7 +55,6 @@ class EngineModel {
         _turnTexts.clear();
         _toldAt = null;
         _ownerTurn = false;
-        _toldByCard = false;
         _narration.clear();
         for (final s in _streams.values) {
           s.streaming = false;
@@ -116,10 +115,7 @@ class EngineModel {
       case 'tool_use':
         if (ev['parentToolUseId'] != null) return; // subagent internals: only the Task line shows
         final name = ev['name'] as String? ?? '?';
-        if (reachesOwner(name, ev['input']) && !(_ownerTurn && name == 'mcp__company__tell')) {
-          _toldAt ??= _turnTexts.length;
-          if (name != 'mcp__company__tell') _toldByCard = true; // a card anywhere in the turn cuts, as in hq
-        }
+        if (!_ownerTurn && reachesOwner(name, ev['input'])) _toldAt ??= _turnTexts.length;
         final id = ev['toolUseId'] as String? ?? '$seq';
         final input = (ev['input'] as Map?)?.cast<String, dynamic>() ?? const {};
         // A message to the owner, a question or a GO request shows as its own item, and tool
@@ -193,7 +189,6 @@ class EngineModel {
         _turnTexts.clear();
         _toldAt = null;
         _ownerTurn = false;
-        _toldByCard = false;
         _narration.clear();
         if (failed) {
           items.add(ErrorLine(id: 'r:$seq', ts: ts, text: UiCopy.copy.workEndedError(gender == Gender.f ? UiCopy.copy.theyWillTry : UiCopy.copy.theyWillTry2), textBuilder: () => UiCopy.copy.workEndedError(gender == Gender.f ? UiCopy.copy.theyWillTry : UiCopy.copy.theyWillTry2), seq: seq));
@@ -203,8 +198,8 @@ class EngineModel {
         // Delivery acks arrive as message.state; the echo itself is not a chat line.
         if (!_ownerHeader.hasMatch(ev['text'] as String? ?? '')) break;
         _ownerTurn = true;
-        // His message joined after a tell: what follows is the reply to it (hq stores it), only the text before stays cut.
-        if (_toldAt != null && !_toldByCard) {
+        // His message joined after a tell or a card: what follows is the reply to it (hq stores it), only the text before stays cut.
+        if (_toldAt != null) {
           _narration.addAll(_turnTexts.skip(_toldAt!));
           _toldAt = null;
         }

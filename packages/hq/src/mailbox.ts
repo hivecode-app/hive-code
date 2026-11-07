@@ -539,12 +539,16 @@ export class Mailbox {
   }
 
   /**
-   * The conversation model with the owner (chat.md §2.3א): in a turn he started, the worker's own final
-   * assistant text IS the reply. It becomes one stored message worker → owner (ref = his message, text_ref =
-   * the engine messageId), so it is in his conversation list, closes his message as handled, and the app shows
-   * the streamed bubble and the stored message as a single item. A `tell` to him in the same turn is a separate
-   * message and never replaces the reply (08/11: adi's "מה נשאר לפני ההשקה", written after a test tell, was lost).
-   * Only `ask`/`request_go` cut it: he answers those on their card, and the text after them narrates the send.
+   * The conversation model with the owner (chat.md §2.3א): in a turn he is in, the worker's own text IS the reply. It
+   * becomes one stored message worker → owner (ref = his last message, text_ref = the engine messageId), so it is in
+   * his conversation list and the app shows the streamed bubble and the stored message as a single item.
+   * One rule, no exceptions by tool: every text block the worker wrote after his first message was read in the turn is
+   * stored, in order. A `tell`, an `ask` or a GO to him in the same turn are separate messages and cut nothing: he saw
+   * the text stream in, so it stays (08/11: adi's "מה נשאר לפני ההשקה" after a test tell; 07/11: dana's two answers,
+   * written after an ask he had answered mid-turn, vanished). The cost is a narration after a card ("שאלתי אותך") when
+   * a worker writes one, which the system prompt already tells it not to.
+   * His message is handled only when something reached him after he sent it in: text stored in the reply, a tool call
+   * to him, or a message stored to him. One that joined after the last of those stays unanswered.
    * The turn is the event-log window after this shift's previous `engine.result` up to this one (indexed on
    * identity, seq). Its triggers are his messages dequeued (`seen`) inside that window and still unanswered, so a
    * message left over from an errored turn never turns a later, unrelated turn's text into a reply. Everything
@@ -563,10 +567,8 @@ export class Mailbox {
     const window = (db.prepare(`SELECT seq, type, data FROM events WHERE identity = ? AND seq > ? AND seq < ? ORDER BY seq`)
       .all(row.identity, start?.seq ?? 0, cur.seq) as { seq: number; type: string; data: string }[])
       .map((r) => ({ seq: r.seq, type: r.type, data: JSON.parse(r.data) as Record<string, any> }));
-    // Text of work that began before his message arrived mid-turn is not part of the reply to it.
-    const firstTriggerSeq = window.find((e) => e.type === 'message.state' && e.data.state === 'seen' && e.data.from === OWNER)?.seq ?? 0;
-    // The first tool call of the turn that reached him; the turn's text before it he already saw.
-    const reached = window.find((e) => {
+    // Tool calls of the turn that reached him (its op may be ingested after the result).
+    const reaching = window.filter((e) => {
       if (e.type !== 'engine.tool_use' || e.data.shift !== row.id || e.data.ev?.parentToolUseId) return false;
       const { name, input } = e.data.ev as { name?: string; input?: { to?: unknown } };
       if (OWNER_FACING_TOOLS.has(name ?? '')) return true;
@@ -575,41 +577,47 @@ export class Mailbox {
       const to = typeof input?.to === 'string' ? input.to : '';
       return to === OWNER || (to !== 'hq' && !getIdentity(this.store, to));
     });
-    const triggers = window
-      .filter((e) => e.type === 'message.state' && e.data.state === 'seen' && e.data.from === OWNER)
-      .map((e) => this.get(String(e.data.id)))
+    const seenSeq = new Map<string, number>();
+    for (const e of window) if (e.type === 'message.state' && e.data.state === 'seen' && e.data.from === OWNER) seenSeq.set(String(e.data.id), e.seq);
+    const triggers = [...seenSeq.keys()]
+      .map((id) => this.get(id))
       // A tell to him with `ref` marked his message handled on the spot; the turn's text is still the reply to it.
       .filter((m): m is MessageRow => !!m && m.shift_id === row.id && (m.state === 'seen' || (m.state === 'handled' && !!db.prepare(
         `SELECT 1 FROM messages WHERE from_identity = ? AND to_identity = ? AND kind = 'tell' AND ref = ? AND id != ? LIMIT 1`)
         .get(row.identity, OWNER, m.id, `${m.id}-reply`))));
-    if (!triggers.length) { this.saveNote(row, cur.seq, window, !!reached, start?.ts ?? 0); return; }
+    if (!triggers.length) { this.saveNote(row, cur.seq, window, reaching.length > 0, start?.ts ?? 0); return; }
+    // Text of work that began before his message arrived mid-turn is not part of the reply to it.
+    const firstTriggerSeq = Math.min(...triggers.map((t) => seenSeq.get(t.id)!));
     // What it wrote before his message came mid-turn is not the reply to it, and stays in his conversation as such a note.
     const before = window.filter((e) => e.seq < firstTriggerSeq);
-    if (before.length) this.saveNote(row, cur.seq, before, !!reached && reached.seq < firstTriggerSeq, start?.ts ?? 0);
-    // Reached him in this turn: a stored message to him (any path: MCP, API from Bash), or the tool call itself
-    // (its op may be ingested after the result).
-    const stored = db.prepare(`SELECT 1 FROM messages WHERE from_identity = ? AND to_identity = ? AND kind != 'note' AND created_at >= ? LIMIT 1`)
-      .get(row.identity, OWNER, Math.min(...triggers.map((t) => t.seen_at ?? t.created_at)));
-    let answered = !!stored || !!reached;
-    // The ask or GO card of the turn: the text after it narrates the send and is not stored. A tell cuts nothing.
-    const carded = window.find((e) => e.type === 'engine.tool_use' && e.data.shift === row.id && !e.data.ev?.parentToolUseId
-      && OWNER_FACING_TOOLS.has(e.data.ev?.name ?? ''));
+    if (before.length) this.saveNote(row, cur.seq, before, reaching.some((e) => e.seq < firstTriggerSeq), start?.ts ?? 0);
+    // The last moment something reached him: a tool call to him, or a message stored to him (any path: MCP, the API from Bash).
+    let lastReachSeq = reaching.at(-1)?.seq ?? 0;
+    const lastStoredAt = (db.prepare(`SELECT MAX(created_at) FROM messages WHERE from_identity = ? AND to_identity = ? AND kind != 'note'
+      AND id NOT IN (${triggers.map(() => '?').join(',')}) AND created_at >= ?`).pluck()
+      .get(row.identity, OWNER, ...triggers.map((t) => `${t.id}-reply`), Math.min(...triggers.map((t) => t.seen_at ?? t.created_at))) as number | null) ?? 0;
     if (!ev.isError) {
-      // All the text the worker wrote to him in the turn, in order, never only the block after the last tool.
+      // All the text the worker wrote to him after his message was read, in order: nothing he saw stream in is cut.
       const blocks = window
-        .filter((e) => e.type === 'engine.text' && e.data.shift === row.id && e.seq > firstTriggerSeq
-          && (!carded || e.seq < carded.seq))
-        .map((e) => e.data.ev as { text?: string; messageId?: string })
+        .filter((e) => e.type === 'engine.text' && e.data.shift === row.id && e.seq > firstTriggerSeq)
+        .map((e) => ({ seq: e.seq, ...(e.data.ev as { text?: string; messageId?: string }) }))
         .filter((b) => (b.text ?? '').trim());
-      const body = blocks.length ? blocks.map((b) => b.text!.trim()).join('\n\n') : carded ? '' : (ev.text ?? '').trim();
+      // The result's own text only when the log has no text of the turn at all; else it is a block from before his message.
+      const body = blocks.length ? blocks.map((b) => b.text!.trim()).join('\n\n')
+        : window.some((e) => e.type === 'engine.text' && e.data.shift === row.id) ? '' : (ev.text ?? '').trim();
       if (body) {
-        const to = triggers.at(-1)!;
+        // The reply answers the last of his messages read before its last block, not one read after all of it.
+        const lastBlock = blocks.at(-1)?.seq ?? cur.seq;
+        const to = triggers.filter((t) => seenSeq.get(t.id)! < lastBlock).at(-1) ?? triggers[0]!;
         this.tell({ msg_id: `${to.id}-reply`, from: row.identity, to: OWNER, body, ref: to.id, text_ref: blocks.at(-1)?.messageId });
-        answered = true;
+        lastReachSeq = Math.max(lastReachSeq, lastBlock);
       }
     }
-    // Everything he sent into this turn is answered by what the turn showed him.
-    if (answered) for (const t of triggers) if (this.get(t.id)!.state === 'seen') this.setState(t.id, 'handled');
+    // Each message he sent into this turn is answered by what reached him after it was read; not by what came before.
+    for (const t of triggers) {
+      if (this.get(t.id)!.state !== 'seen') continue;
+      if (lastReachSeq > seenSeq.get(t.id)! || lastStoredAt >= (t.seen_at ?? t.created_at)) this.setState(t.id, 'handled');
+    }
   }
 
   /**
@@ -641,12 +649,14 @@ export class Mailbox {
 
   /**
    * His messages to this worker since [since] that nothing answered (#118), oldest first: not handled (a reply, a tell
-   * with ref, an ask or a GO all mark it), and no message of the worker to him after it.
+   * with ref, an ask or a GO all mark it), and no message of the worker to him after it (a turn's reply to another of
+   * his messages, read before this one, does not count).
    */
   unanswered(identity: string, since = 0): MessageRow[] {
     return (this.store.db.prepare(`SELECT * FROM messages m WHERE m.from_identity = @owner AND m.to_identity = @identity AND m.kind = 'tell'
       AND m.created_at >= @since AND m.state != 'handled' AND NOT EXISTS (SELECT 1 FROM messages r WHERE r.from_identity = m.to_identity
-        AND r.to_identity = @owner AND r.kind NOT IN ('system','note') AND r.created_at >= m.created_at)
+        AND r.to_identity = @owner AND r.kind NOT IN ('system','note') AND r.created_at >= m.created_at
+        AND NOT (r.id LIKE '%-reply' AND r.ref IS NOT m.id AND (SELECT q.rowid FROM messages q WHERE q.id = r.ref) < m.rowid))
       ORDER BY m.created_at, m.rowid`).all({ owner: OWNER, identity, since }) as StoredRow[]).map(r=>this.currentAttachments(hydrate(r)));
   }
 
