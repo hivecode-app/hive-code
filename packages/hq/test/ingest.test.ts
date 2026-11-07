@@ -141,6 +141,20 @@ test('open_team priority: explicit field, p0/p1 from the title, explicit beats t
   } finally { await env.cleanup(); }
 });
 
+test('open_team proposal waits for his start; about is the line he reads instead of the brief', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock } = env;
+    const r = await post(sock, '/v1/ops', entry('open_team', { name: 'רעיון', purpose: 'הוראות לעובד', project: 'agent-company', proposal: true, about: 'התראה כשנהג לא מאשר נסיעה' }, 'yoav-prop:1', 'yoav'));
+    assert.equal(r.status, 200);
+    const t = hq.scheduler.task(r.json.result.task as number)!;
+    assert.equal(t.state, 'proposal');
+    assert.equal(hq.store.getMeta(`task-about:${t.id}`), 'התראה כשנהג לא מאשר נסיעה');
+    const plain = await post(sock, '/v1/ops', entry('open_team', { name: 'רגילה', purpose: 'y', project: 'agent-company' }, 'yoav-prop:2', 'yoav'));
+    assert.notEqual(hq.scheduler.task(plain.json.result.task as number)!.state, 'proposal');
+  } finally { await env.cleanup(); }
+});
+
 test('open_team opens a task: queued under the project, the worker hears the task from the opener', async () => {
   const env = await ingestEnv();
   try {

@@ -321,7 +321,12 @@ export class Ingest {
             ...(a.local === true ? ['needs-local'] : []),
             ...(engine === 'codex' ? [CODEX_LABEL, ...(codexModel ? [`${CODEX_MODEL_LABEL}${codexModel}`] : [])] : [])],
           identity: worker?.id, for_owner: a.for_owner === true,
+          // A proposal waits for him: it starts only when he presses "התחלה" in the tasks tab (POST /api/tasks/:id/start).
+          ...(a.proposal === true ? { state: 'proposal' } : {}),
         });
+        // What the task changes for him, in his words: the task page shows it instead of the brief, which is for the worker.
+        const about = taskSummary(a.about);
+        if (about && !this.hq.store.getMeta(`task-about:${task.id}`)) this.hq.store.setMeta(`task-about:${task.id}`, about);
         return { ok: true, id: e.id, ref: `task-${task.id}`, result: { task: task.id, state: task.state } };
       }
       case 'close_team': {

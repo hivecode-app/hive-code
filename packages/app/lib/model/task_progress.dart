@@ -35,18 +35,28 @@ class TaskPr {
     this.ci = 'unknown',
     this.quote,
     this.stale = false,
+    this.state = 'OPEN',
+    this.merged = false,
   });
-  final String url, review, ci;
+  final String url, review, ci, state;
   final String? quote;
-  final bool stale;
+  final bool stale, merged;
+
+  /// Still open on GitHub (not merged, not closed). Unread evidence counts as open: nothing is invented.
+  bool get open => !merged && (state == 'OPEN' || state.isEmpty);
+  String get number => url.split('/').last;
   factory TaskPr.fromJson(Map<String, dynamic> j) => TaskPr(
     url: j['url'] as String,
     review: j['review'] as String? ?? 'pending',
     ci: j['ci'] as String? ?? 'unknown',
     quote: j['quote'] as String?,
     stale: j['error'] == true || j['checked_at'] == 0,
+    state: j['state'] as String? ?? '',
+    merged: j['merged'] == true,
   );
 }
+
+DateTime? _ms(dynamic v) => v is int ? DateTime.fromMillisecondsSinceEpoch(v) : null;
 
 class TaskProgress {
   const TaskProgress({
@@ -64,6 +74,10 @@ class TaskProgress {
     this.awaiting,
     this.requests = const [],
     this.prs = const [],
+    this.about,
+    this.createdAt,
+    this.startedAt,
+    this.updatedAt,
   });
   final int id;
   final String title, body, state;
@@ -74,6 +88,10 @@ class TaskProgress {
       summary,
       workerStatus,
       awaiting;
+
+  /// What the task changes for him, in his words (open_team `about`); null on tasks opened without one.
+  final String? about;
+  final DateTime? createdAt, startedAt, updatedAt;
   final TaskStage? stage;
   final List<TaskRequest> requests;
   final List<TaskPr> prs;
@@ -93,6 +111,10 @@ class TaskProgress {
     awaiting: j['awaiting'] as String?,
     requests: taskRows(j['requests']).map(TaskRequest.fromJson).toList(),
     prs: taskRows(j['prs']).map(TaskPr.fromJson).toList(),
+    about: j['about'] as String?,
+    createdAt: _ms(j['created_at']),
+    startedAt: _ms(j['started_at']),
+    updatedAt: _ms(j['updated_at']),
   );
 }
 

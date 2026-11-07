@@ -9,21 +9,27 @@ import '../../model/models.dart';
 import '../../model/task_progress.dart';
 import '../../theme/tokens.dart';
 import '../common.dart';
+import '../convs/head.dart' show HeadData;
 import '../nav.dart';
+import '../product/approval.dart' show showApproval;
 import '../product/product_theme.dart';
 import 'task_copy.dart';
 import 'task_screen.dart';
 
+/// The tasks tab (a-he-tasks): what waits for him first, then in review, in development and proposals. On a wide
+/// screen a board of five columns, the requests in a strip above it.
 class ProductTasks extends StatefulWidget {
   const ProductTasks({super.key});
   @override
   State<ProductTasks> createState() => _ProductTasksState();
 }
 
-class _ProductTasksState extends State<ProductTasks>
-    with WidgetsBindingObserver {
+class _ProductTasksState extends State<ProductTasks> with WidgetsBindingObserver {
   List<TaskProgress>? tasks;
   bool busy = false, failed = false;
+  /// The released column shows the latest few; the rest open on request, like the list's "including finished".
+  bool releasedAll = false;
+  final starting = <int>{};
   Timer? refresh;
   @override
   void initState() {
@@ -63,13 +69,26 @@ class _ProductTasksState extends State<ProductTasks>
 
   void open(TaskProgress t) async {
     StoreScope.read(context).selectedTask = t.id;
-    await Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => ProductTaskScreen(id: t.id, initial: t),
-      ),
-    );
+    await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => ProductTaskScreen(id: t.id, initial: t)));
     if (mounted) load();
+  }
+
+  void openRequest(WaitItem w) {
+    if (w.kind == WaitKind.go) return unawaited(showApproval(context, w));
+    if (w.kind == WaitKind.login) return Nav.handoff(context, w);
+    Nav.waitItem(context, w);
+  }
+
+  /// "התחלה" on a proposal: once, however many times it is pressed.
+  Future<void> start(TaskProgress t) async {
+    if (!starting.add(t.id)) return;
+    setState(() {});
+    final l = AppLocalizations.of(context), messenger = ScaffoldMessenger.of(context);
+    final r = await StoreScope.read(context).backend.startTask(t.id);
+    if (!mounted) return;
+    starting.remove(t.id);
+    if (!r.ok) messenger.showSnackBar(SnackBar(content: Text(l.progressStartFailed)));
+    await load();
   }
 
   Map<String, String> projectChoices(CompanyData d) => {
@@ -78,17 +97,11 @@ class _ProductTasksState extends State<ProductTasks>
     if (d.projects.isEmpty)
       for (final t in d.teams.values.where((t) => !t.permanent)) t.id: t.name,
     for (final t in tasks ?? <TaskProgress>[])
-      if (t.project != null)
-        t.project!:
-            d.projects.where((p) => p.id == t.project).firstOrNull?.name ??
-            d.teams[t.project]?.name ??
-            t.project!,
+      if (t.project != null) t.project!: projectName(d, t.project),
   };
 
   Future<void> newTask() async {
-    final store = StoreScope.read(context),
-        l = AppLocalizations.of(context),
-        d = store.data!;
+    final store = StoreScope.read(context), l = AppLocalizations.of(context), d = store.data!;
     var project = store.taskProject;
     project ??= await showDialog<String>(
       context: context,
@@ -98,231 +111,651 @@ class _ProductTasksState extends State<ProductTasks>
           for (final project in projectChoices(d).entries)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(c, project.key),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(project.value),
-              ),
+              child: Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(project.value)),
             ),
         ],
       ),
     );
     if (project == null || !mounted) return;
-    final team =
-        d.projects.where((p) => p.id == project).firstOrNull?.teamId ?? project;
+    final team = d.projects.where((p) => p.id == project).firstOrNull?.teamId ?? project;
     final lead = d.teams[team]?.leadId;
     if (lead == null || lead.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(l.progressLeadMissing)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l.progressLeadMissing)));
       return;
     }
-    final chat = d.chats.putIfAbsent(
-      lead,
-      () => Conversation(identityId: lead, items: []),
-    );
+    final chat = d.chats.putIfAbsent(lead, () => Conversation(identityId: lead, items: []));
     if (!chat.draft.endsWith(l.progressDraft)) {
-      store.setDraft(
-        lead,
-        '${chat.draft}${chat.draft.isEmpty ? '' : '\n\n'}${l.progressDraft}',
-      );
+      store.setDraft(lead, '${chat.draft}${chat.draft.isEmpty ? '' : '\n\n'}${l.progressDraft}');
     }
     Nav.chat(context, lead, focus: true);
   }
 
+  Future<void> options() async {
+    final store = StoreScope.read(context), l = AppLocalizations.of(context);
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      builder: (c) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            key: const Key('new-task'),
+            leading: const Ic('add'),
+            title: Text(l.progressNewTask),
+            onTap: () {
+              Navigator.pop(c);
+              newTask();
+            },
+          ),
+          StatefulBuilder(
+            builder: (c, set) => CheckboxListTile(
+              value: store.taskIncludeCompleted,
+              controlAffinity: ListTileControlAffinity.leading,
+              onChanged: (v) {
+                set(() => store.taskIncludeCompleted = v!);
+                setState(() {});
+              },
+              title: Text(l.progressShowCompleted),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  /// His requests, from the same list as the home and the chats: answered ones are gone from all of them.
+  List<WaitItem> requests(CompanyData d, String? project) => [
+    for (final w in d.waiting)
+      if (w.state != WaitState.answered && !d.superseded(w) && (project == null || requestTask(w)?.project == project || (requestTask(w) == null && d.identities[w.from]?.teamId == project)))
+        w,
+  ];
+
+  TaskProgress? requestTask(WaitItem w) =>
+      w.inboxId == null ? null : tasks?.where((t) => t.requests.any((r) => r.id == w.inboxId)).firstOrNull;
+
   @override
   Widget build(BuildContext context) {
-    final store = StoreScope.of(context),
-        d = store.data!,
-        p = context.p,
-        l = AppLocalizations.of(context);
+    final store = StoreScope.of(context), d = store.data!, p = context.p, l = AppLocalizations.of(context);
     final projects = projectChoices(d);
+    final now = CompanyTime.now();
+    final project = projects.containsKey(store.taskProject) ? store.taskProject : null;
     final list = [
       for (final t in tasks ?? <TaskProgress>[])
-        if ((store.taskProject == null || t.project == store.taskProject) &&
+        if ((project == null || t.project == project) &&
             t.outcome != 'cancelled' &&
-            (store.taskIncludeCompleted ||
-                t.outcome == null ||
-                t.awaiting != null ||
-                t.requests.isNotEmpty ||
-                t.stage == TaskStage.released))
+            // A finished task shows when it was released or waits for him. One without a stage (a report, an
+            // investigation: nothing shipped) is not "in development" either: it is finished, and stays out.
+            (t.outcome == null || (t.stage != null && (store.taskIncludeCompleted || t.stage == TaskStage.released || t.stage == TaskStage.approval))))
           t,
     ];
+    // Released this week; with "including finished", everything finished that is in the list.
+    bool recent(TaskProgress t) =>
+        store.taskIncludeCompleted || (t.updatedAt != null && now.difference(t.updatedAt!) < const Duration(days: 7));
+    List<TaskProgress> of(TaskStage? s) => [
+      for (final t in list)
+        if (t.stage == s && (s != TaskStage.released || recent(t))) t,
+    ];
+    final asks = requests(d, project);
+    // A task waiting on him shows as itself unless one of his requests on it is already shown.
+    final waiting = [for (final t in of(TaskStage.approval)) if (!asks.any((w) => t.requests.any((r) => r.id == w.inboxId))) t];
+    // Projects with something open, for the chips: the ones he moves between.
+    final active = {for (final t in list) if (t.outcome == null && t.project != null) t.project!};
     return Material(
       color: p.bg,
       child: LayoutBuilder(
         builder: (context, c) {
-          final board =
-              store.taskBoard &&
-              !list.any((t) => t.stage == null) &&
-              c.maxWidth >= 700 &&
-              MediaQuery.textScalerOf(context).scale(1) < 1.5;
+          final wide = c.maxWidth >= 900;
+          final board = wide && store.taskBoard && MediaQuery.textScalerOf(context).scale(1) < 1.5;
+          final header = wide
+              ? _DesktopHeader(
+                  projects: projects,
+                  project: project,
+                  board: store.taskBoard,
+                  onBoard: (v) => setState(() => store.taskBoard = v),
+                  onProject: (v) => setState(() => store.taskProject = v),
+                  onNew: newTask,
+                  onOptions: options,
+                )
+              : _PhoneHeader(
+                  projects: {for (final e in projects.entries) if (active.contains(e.key) || e.key == project) e.key: e.value},
+                  all: projects,
+                  project: project,
+                  onProject: (v) => setState(() => store.taskProject = v),
+                  onOptions: options,
+                );
+          final body = tasks == null && !failed
+              ? const SizedBox.shrink()
+              : list.isEmpty && asks.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(l.progressEmpty, textAlign: TextAlign.center),
+                      if (project != null)
+                        TextButton(onPressed: () => setState(() => store.taskProject = null), child: Text(l.progressReset)),
+                    ],
+                  ),
+                )
+              : board
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (asks.isNotEmpty) _RequestStrip(items: asks, taskOf: requestTask, onOpen: openRequest),
+                    Expanded(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final s in TaskStage.values) ...[
+                            if (s != TaskStage.proposal) VerticalDivider(width: 1, color: p.line),
+                            Expanded(
+                              child: _Column(
+                                stage: s,
+                                tasks: [...of(s), if (s == TaskStage.development) ...of(null)],
+                                selected: store.selectedTask,
+                                starting: starting,
+                                limit: s == TaskStage.released && !releasedAll ? 5 : null,
+                                onMore: () => setState(() => releasedAll = true),
+                                onOpen: open,
+                                onStart: start,
+                                onRequest: (t) {
+                                  final w = asks.where((w) => t.requests.any((r) => r.id == w.inboxId)).firstOrNull;
+                                  if (w != null) openRequest(w);
+                                },
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                )
+              : ListView(
+                  key: const PageStorageKey('task-list'),
+                  padding: const EdgeInsets.only(bottom: 24),
+                  children: [
+                    // What waits for him: his requests first, then tasks that wait on him with no request of their own.
+                    if (asks.isNotEmpty || waiting.isNotEmpty) ...[
+                      _Heading(label: l.needsYou, count: asks.length + waiting.length),
+                      for (final w in asks) _RequestRow(item: w, task: requestTask(w), onTap: () => openRequest(w)),
+                      for (final t in waiting)
+                        TaskRow(task: t, now: now, selected: store.selectedTask == t.id, onTap: () => open(t)),
+                    ],
+                    for (final (stage, rows) in [
+                      (TaskStage.review, of(TaskStage.review)),
+                      (TaskStage.development, [...of(TaskStage.development), ...of(null)]),
+                      (TaskStage.proposal, of(TaskStage.proposal)),
+                      (TaskStage.released, of(TaskStage.released)),
+                    ])
+                      if (rows.isNotEmpty) ...[
+                        _Heading(label: groupLabel(l, stage), count: rows.length),
+                        for (final t in rows)
+                          TaskRow(
+                            task: t,
+                            now: now,
+                            selected: store.selectedTask == t.id,
+                            onTap: () => open(t),
+                            onStart: t.canStart ? (starting.contains(t.id) ? () {} : () => start(t)) : null,
+                          ),
+                      ],
+                  ],
+                );
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text(l.tasks, style: T.bar.copyWith(color: p.text)),
-                    DropdownButton<String>(
-                      icon: const Ic('expand_more'),
-                      key: const Key('task-project'),
-                      value: projects.containsKey(store.taskProject)
-                          ? store.taskProject
-                          : null,
-                      hint: Text(l.progressAllProjects),
-                      onChanged: (v) => setState(() => store.taskProject = v),
-                      items: [
-                        DropdownMenuItem(
-                          value: null,
-                          child: Text(l.progressAllProjects),
-                        ),
-                        for (final e in projects.entries)
-                          DropdownMenuItem(value: e.key, child: Text(e.value)),
-                      ],
-                    ),
-                    if (c.maxWidth >= 700)
-                      SegmentedButton<bool>(
-                        segments: [
-                          ButtonSegment(
-                            value: false,
-                            icon: const Ic('list'),
-                            label: Text(l.progressList),
-                          ),
-                          ButtonSegment(
-                            value: true,
-                            icon: const Ic('view_kanban'),
-                            label: Text(l.progressBoard),
-                          ),
-                        ],
-                        selected: {store.taskBoard},
-                        onSelectionChanged: (s) =>
-                            setState(() => store.taskBoard = s.first),
-                      ),
-                    OutlinedButton.icon(
-                      key: const Key('new-task'),
-                      onPressed: newTask,
-                      icon: const Ic('add'),
-                      label: Text(l.progressNewTask),
-                    ),
-                    IBtn('refresh', tip: l.progressRefresh, onTap: load),
-                  ],
-                ),
-              ),
-              CheckboxListTile(
-                dense: true,
-                value: store.taskIncludeCompleted,
-                controlAffinity: ListTileControlAffinity.leading,
-                onChanged: (v) =>
-                    setState(() => store.taskIncludeCompleted = v!),
-                title: Text(l.progressShowCompleted),
-              ),
-              if (busy)
-                Semantics(
-                  label: l.loading,
-                  child: const LinearProgressIndicator(minHeight: 2),
-                ),
-              if (failed)
-                TextButton(onPressed: load, child: Text(l.progressLoadFailed)),
-              Expanded(
-                child: tasks == null && !failed
-                    ? const SizedBox.shrink()
-                    : list.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(l.progressEmpty, textAlign: TextAlign.center),
-                            TextButton(
-                              onPressed: () =>
-                                  setState(() => store.taskProject = null),
-                              child: Text(l.progressReset),
-                            ),
-                          ],
-                        ),
-                      )
-                    : board
-                    ? SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            for (final stage in TaskStage.values)
-                              SizedBox(
-                                width: 280,
-                                child: _column(stage, list, l, store),
-                              ),
-                          ],
-                        ),
-                      )
-                    : ListView(
-                        key: const PageStorageKey('task-list'),
-                        children: [
-                          for (final t in list.where((t) => t.stage == null))
-                            TaskRow(task: t, onTap: () => open(t)),
-                          for (final stage in TaskStage.values) ...[
-                            _heading(
-                              stage,
-                              list.where((t) => t.stage == stage).length,
-                              l,
-                            ),
-                            for (final t in list.where((t) => t.stage == stage))
-                              TaskRow(
-                                task: t,
-                                selected: store.selectedTask == t.id,
-                                onTap: () => open(t),
-                              ),
-                          ],
-                        ],
-                      ),
-              ),
+              header,
+              if (busy && tasks == null) Semantics(label: l.loading, child: const LinearProgressIndicator(minHeight: 2)),
+              if (failed) TextButton(onPressed: load, child: Text(l.progressLoadFailed)),
+              Expanded(child: body),
             ],
           );
         },
       ),
     );
   }
+}
 
-  Widget _heading(TaskStage stage, int count, AppLocalizations l) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-    child: Semantics(
-      header: true,
-      child: Row(
+class _PhoneHeader extends StatelessWidget {
+  const _PhoneHeader({required this.projects, required this.all, required this.project, required this.onProject, required this.onOptions});
+  final Map<String, String> projects, all;
+  final String? project;
+  final ValueChanged<String?> onProject;
+  final VoidCallback onOptions;
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context), p = context.p;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Ic(stageIcon(stage), size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              stageLabel(l, stage),
-              style: T.row2.copyWith(fontWeight: FontWeight.w600),
+          Row(
+            children: [
+              Expanded(child: Semantics(header: true, child: Text(l.tasks, style: T.big.copyWith(color: p.text)))),
+              IBtn('tune', key: const Key('task-options'), tip: l.progressOptions, onTap: onOptions),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _ProjectMenu(projects: all, project: project, onProject: onProject),
+                for (final e in projects.entries) ...[
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    key: Key('task-project-${e.key}'),
+                    label: Text(e.value),
+                    selected: project == e.key,
+                    showCheckmark: false,
+                    onSelected: (on) => onProject(on ? e.key : null),
+                  ),
+                ],
+              ],
             ),
           ),
-          Text('$count'),
         ],
       ),
-    ),
-  );
-  Widget _column(
-    TaskStage stage,
-    List<TaskProgress> tasks,
-    AppLocalizations l,
-    AppStore store,
-  ) {
-    final list = tasks.where((t) => t.stage == stage).toList();
+    );
+  }
+}
+
+/// "כל הפרויקטים ▾": every project, also the quiet ones.
+class _ProjectMenu extends StatelessWidget {
+  const _ProjectMenu({required this.projects, required this.project, required this.onProject});
+  final Map<String, String> projects;
+  final String? project;
+  final ValueChanged<String?> onProject;
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context), p = context.p;
+    return PopupMenuButton<String>(
+      key: const Key('task-project'),
+      tooltip: l.progressAllProjects,
+      onSelected: (v) => onProject(v.isEmpty ? null : v),
+      itemBuilder: (_) => [
+        PopupMenuItem(value: '', child: Text(l.progressAllProjects)),
+        for (final e in projects.entries) PopupMenuItem(value: e.key, child: Text(e.value)),
+      ],
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: project == null ? p.surface2 : p.surface,
+          border: Border.all(color: p.line),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(project == null ? l.progressAllProjects : projects[project] ?? project!, style: T.button.copyWith(color: p.text)),
+            const SizedBox(width: 6),
+            Ic('expand_more', size: 18, color: p.text2),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopHeader extends StatelessWidget {
+  const _DesktopHeader({
+    required this.projects,
+    required this.project,
+    required this.board,
+    required this.onBoard,
+    required this.onProject,
+    required this.onNew,
+    required this.onOptions,
+  });
+  final Map<String, String> projects;
+  final String? project;
+  final bool board;
+  final ValueChanged<bool> onBoard;
+  final ValueChanged<String?> onProject;
+  final VoidCallback onNew, onOptions;
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context), p = context.p;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 14, 24, 14),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+      child: Row(
+        children: [
+          Semantics(header: true, child: Text(l.tasks, style: T.bar.copyWith(color: p.text))),
+          const SizedBox(width: 20),
+          SegmentedButton<bool>(
+            showSelectedIcon: false,
+            segments: [
+              ButtonSegment(value: true, icon: const Ic('view_kanban', size: 18), label: Text(l.progressBoard)),
+              ButtonSegment(value: false, icon: const Ic('list', size: 18), label: Text(l.progressList)),
+            ],
+            selected: {board},
+            onSelectionChanged: (s) => onBoard(s.first),
+          ),
+          const Spacer(),
+          IBtn('tune', key: const Key('task-options'), tip: l.progressOptions, onTap: onOptions),
+          const SizedBox(width: 8),
+          _ProjectMenu(projects: projects, project: project, onProject: onProject),
+          const SizedBox(width: 12),
+          FilledButton.icon(key: const Key('new-task-wide'), onPressed: onNew, icon: const Ic('add', size: 18), label: Text(l.progressNewTask)),
+        ],
+      ),
+    );
+  }
+}
+
+class _Heading extends StatelessWidget {
+  const _Heading({required this.label, required this.count});
+  final String label;
+  final int count;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
+      decoration: BoxDecoration(color: p.bg, border: Border(top: BorderSide(color: p.line), bottom: BorderSide(color: p.line))),
+      child: Semantics(
+        header: true,
+        child: Row(
+          children: [
+            Text(label, style: T.section.copyWith(color: p.text)),
+            const SizedBox(width: 8),
+            Text('$count', style: T.secondary.copyWith(color: p.text2)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A request of his, as a row: the question itself, who asks, in which project, about which task.
+class _RequestRow extends StatelessWidget {
+  const _RequestRow({required this.item, required this.task, required this.onTap});
+  final WaitItem item;
+  final TaskProgress? task;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    final d = StoreScope.of(context).data!, p = context.p;
+    final who = [d.who(item.from).name, if (task?.project != null) projectName(d, task!.project)].join(' · ');
+    return Material(
+      color: p.surface,
+      child: InkWell(
+        key: ValueKey('task-request-${item.id}'),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Ic(item.kind == WaitKind.go ? 'front_hand' : 'help', size: 24, color: p.text, fill: item.kind == WaitKind.go),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ProductContentText(item.headline ?? item.short, style: T.name.copyWith(color: p.text)),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        ProjectMonogram.person(d, item.from, size: 22),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(text: who, style: T.small.copyWith(color: p.text2)),
+                                if (task != null) TextSpan(text: '   ${task!.title}', style: T.small.copyWith(color: p.text)),
+                              ],
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(item.time, style: T.meta.copyWith(color: p.text3)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class TaskRow extends StatelessWidget {
+  const TaskRow({super.key, required this.task, required this.onTap, required this.now, this.selected = false, this.onStart});
+  final TaskProgress task;
+  final VoidCallback onTap;
+  final VoidCallback? onStart;
+  final DateTime now;
+  final bool selected;
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context), d = StoreScope.of(context).data!, p = context.p;
+    final detail = task.stage == null ? l.progressUnknown : taskDetail(d, l, task);
+    final stuck = task.workerStatus == 'stuck' && task.outcome == null;
+    return Material(
+      color: selected ? p.accentSoft : p.surface,
+      child: InkWell(
+        key: ValueKey('task-${task.id}'),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Ic(
+                  stuck ? 'warning' : (task.stage == null ? 'progress_activity' : stageIcon(task.stage!)),
+                  key: const Key('task-row-icon'),
+                  size: 22,
+                  color: p.text2,
+                  fill: task.stage == TaskStage.approval,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ProductContentText(task.title, style: T.name.copyWith(color: p.text)),
+                    const SizedBox(height: 4),
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(text: taskWhere(d, l, task), style: T.small.copyWith(color: p.text2)),
+                          if (detail.isNotEmpty) TextSpan(text: '   $detail', style: T.small.copyWith(color: p.text)),
+                        ],
+                      ),
+                    ),
+                    if (onStart != null) ...[
+                      const SizedBox(height: 10),
+                      OutlinedButton(key: Key('start-${task.id}'), onPressed: onStart, child: Text(l.progressStart)),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(HeadData.ago(task.updatedAt, now), style: T.meta.copyWith(color: p.text3)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The board's strip of what waits for him (a-he-tasks-desktop): one card per request, with its action.
+class _RequestStrip extends StatelessWidget {
+  const _RequestStrip({required this.items, required this.taskOf, required this.onOpen});
+  final List<WaitItem> items;
+  final TaskProgress? Function(WaitItem) taskOf;
+  final ValueChanged<WaitItem> onOpen;
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context), d = StoreScope.of(context).data!, p = context.p;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+      decoration: BoxDecoration(color: p.surface, border: Border(bottom: BorderSide(color: p.line))),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Row(
+              children: [
+                Text(l.needsYou, style: T.section.copyWith(color: p.text)),
+                const SizedBox(width: 6),
+                Text('${items.length}', style: T.secondary.copyWith(color: p.text2)),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Wrap(
+              spacing: 16,
+              runSpacing: 12,
+              children: [
+                for (final w in items.take(4))
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 320, maxWidth: 520),
+                    child: Container(
+                      key: ValueKey('task-request-${w.id}'),
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      decoration: BoxDecoration(
+                        color: p.surface,
+                        border: Border.all(color: w.kind == WaitKind.go ? p.text : p.line, width: w.kind == WaitKind.go ? 1.5 : 1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Ic(w.kind == WaitKind.go ? 'front_hand' : 'help', size: 22, color: p.text, fill: w.kind == WaitKind.go),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                ProductContentText(w.headline ?? w.short, style: T.name.copyWith(color: p.text), maxLines: 2, overflow: TextOverflow.ellipsis),
+                                const SizedBox(height: 2),
+                                Text(
+                                  [d.who(w.from).name, taskOf(w)?.title].whereType<String>().join(' · '),
+                                  style: T.small.copyWith(color: p.text2),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          w.kind == WaitKind.go
+                              ? FilledButton(onPressed: () => onOpen(w), child: Text(l.progressView))
+                              : OutlinedButton(onPressed: () => onOpen(w), child: Text(l.answer)),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Column extends StatelessWidget {
+  const _Column({
+    required this.stage,
+    required this.tasks,
+    required this.selected,
+    required this.starting,
+    required this.onOpen,
+    required this.onStart,
+    required this.onRequest,
+    required this.onMore,
+    this.limit,
+  });
+  final TaskStage stage;
+  final List<TaskProgress> tasks;
+  final int? selected, limit;
+  final VoidCallback onMore;
+  final Set<int> starting;
+  final ValueChanged<TaskProgress> onOpen, onStart, onRequest;
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context), p = context.p;
+    final shown = limit == null ? tasks.length : tasks.length.clamp(0, limit!), more = tasks.length - shown;
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _heading(stage, list.length, l),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+          child: Semantics(
+            header: true,
+            child: Row(
+              children: [
+                Ic(stageIcon(stage), size: 20, color: p.text, fill: stage == TaskStage.approval),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    groupLabel(l, stage),
+                    style: T.section.copyWith(color: p.text),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text('${tasks.length}', style: T.secondary.copyWith(color: p.text2)),
+              ],
+            ),
+          ),
+        ),
+        if (tasks.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Text(
+              switch (stage) {
+                TaskStage.proposal => l.progressNoProposals,
+                TaskStage.released => l.progressNoneReleased,
+                _ => l.progressNoneHere,
+              },
+              style: T.secondary.copyWith(color: p.text3),
+            ),
+          ),
         Expanded(
           child: ListView.builder(
             key: PageStorageKey('task-board-${stage.name}'),
-            itemCount: list.length,
-            itemBuilder: (_, i) => TaskRow(
-              task: list[i],
-              selected: store.selectedTask == list[i].id,
-              onTap: () => open(list[i]),
-            ),
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+            itemCount: shown + (more > 0 ? 1 : 0),
+            itemBuilder: (_, i) {
+              if (i == shown) {
+                return Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton(key: Key('more-${stage.name}'), onPressed: onMore, child: Text(l.progressMore(more))),
+                );
+              }
+              final t = tasks[i];
+              return _Card(
+                task: t,
+                selected: selected == t.id,
+                onTap: () => onOpen(t),
+                action: t.canStart
+                    ? OutlinedButton(key: Key('start-${t.id}'), onPressed: starting.contains(t.id) ? null : () => onStart(t), child: Text(l.progressStart))
+                    : t.requests.any((r) => r.kind == 'go')
+                    ? FilledButton(onPressed: () => onRequest(t), child: Text(l.reviewAndRelease))
+                    : null,
+              );
+            },
           ),
         ),
       ],
@@ -330,55 +763,59 @@ class _ProductTasksState extends State<ProductTasks>
   }
 }
 
-class TaskRow extends StatelessWidget {
-  const TaskRow({
-    super.key,
-    required this.task,
-    required this.onTap,
-    this.selected = false,
-  });
+class _Card extends StatelessWidget {
+  const _Card({required this.task, required this.selected, required this.onTap, this.action});
   final TaskProgress task;
-  final VoidCallback onTap;
   final bool selected;
+  final VoidCallback onTap;
+  final Widget? action;
   @override
   Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context),
-        d = StoreScope.of(context).data!,
-        p = context.p;
-    return ListTile(
-      key: ValueKey('task-${task.id}'),
-      selected: selected,
-      selectedTileColor: p.accentSoft,
-      onTap: onTap,
-      leading: task.worker == null
-          ? Ic(
-              task.stage == null ? 'progress_activity' : stageIcon(task.stage!),
-            )
-          : ProjectMonogram.person(d, task.worker!, size: 28),
-      title: ProductContentText(
-        task.title,
-        style: T.row2.copyWith(color: p.text),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (task.project != null)
-            Text(
-              d.projects.where((p) => p.id == task.project).firstOrNull?.name ??
-                  d.teams[task.project]?.name ??
-                  task.project!,
-              style: T.meta,
+    final l = AppLocalizations.of(context), d = StoreScope.of(context).data!, p = context.p;
+    final detail = task.stage == null ? l.progressUnknown : taskDetail(d, l, task);
+    final waits = task.stage == TaskStage.approval;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: selected ? p.accentSoft : p.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: waits ? p.text : p.line, width: waits ? 1.5 : 1),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: ValueKey('task-${task.id}'),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ProductContentText(task.title, style: T.name.copyWith(color: p.text)),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(shape: BoxShape.circle, color: projectColor(context, projectTone(d, task.project))),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(child: Text(taskWhere(d, l, task), style: T.small.copyWith(color: p.text2))),
+                  ],
+                ),
+                if (detail.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(detail, style: T.small.copyWith(color: p.text)),
+                ],
+                if (action != null) ...[
+                  const SizedBox(height: 10),
+                  Align(alignment: AlignmentDirectional.centerEnd, child: action),
+                ],
+              ],
             ),
-          if (task.outcome == 'completed' && task.stage != TaskStage.released)
-            Text(
-              l.progressWorkCompleted,
-              style: T.meta.copyWith(color: p.text2),
-            ),
-          if (task.stage == null) Text(l.progressUnknown),
-          if (task.workerStatus == 'stuck')
-            StatusWord(icon: 'warning', word: l.stuck),
-          if (task.requests.isNotEmpty) Text(l.needsYou, style: T.small),
-        ],
+          ),
+        ),
       ),
     );
   }

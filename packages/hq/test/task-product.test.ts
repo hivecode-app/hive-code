@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeEnv } from './helpers.ts';
+import { charter, makeEnv } from './helpers.ts';
 import { ensureRuntimeIdentity } from '../src/org.ts';
 import { TaskCatalog, orgTree, prEvidence, sourceTask, taskRequests, taskStage, type PrEvidence } from '../src/task-product.ts';
 import { search } from '../src/search.ts';
+import { readCharter } from '../src/workspace.ts';
 
 const pr: PrEvidence = { url: 'https://github.com/example/project/pull/1', head: 'a'.repeat(40), state: 'OPEN', draft: false, merged: false, review: 'pending', ci: 'pending', quote: null, checked_at: 1 };
 
@@ -39,8 +40,76 @@ test('six tasks: proposals, development with an ask, review, approval, release, 
     assert.equal((await catalog.item(hq.scheduler.task(approval.id)!)).stage, 'approval');
     assert.equal((await catalog.item(released)).stage, 'released');
     const done = await catalog.item(report);
-    assert.equal(done.stage, 'development'); assert.equal(done.outcome, 'completed');
+    assert.equal(done.stage, null, 'a report shipped nothing: no stage, only its outcome'); assert.equal(done.outcome, 'completed');
+    assert(!(await catalog.list()).groups.some((g) => g.tasks.some((t) => t.id === report.id)), 'nor an unknown one');
     assert((await catalog.list()).groups.find((g) => g.stage === 'approval')!.tasks.some((t) => t.id === approval.id), 'completed implementation still awaiting release remains visible');
+  } finally { await env.cleanup(); }
+});
+
+test('only what waits on him is "approval": an approved PR is still in review, a merged one waits for nothing of his', async () => {
+  const env = await makeEnv({ noStart: true });
+  try {
+    const { hq } = env; await hq.start({ timers: false }); hq.store.setToggle('scheduler', false);
+    const t = hq.scheduler.addTask({ title: 'Work', project: 'agent-company', state: 'running' });
+    assert.equal(taskStage(t, [{ ...pr, review: 'approved', ci: 'passed' }], [], false), 'review');
+    assert.equal(taskStage(t, [{ ...pr, state: 'MERGED', merged: true }], [], false), 'development');
+    assert.equal(taskStage(t, [{ ...pr, checked_at: 0 }], [], false), null);
+    const go = { id: 9, task: t.id, kind: 'go', title: 'GO', asked_by: 'eli', ref: null, created_at: 1 };
+    assert.equal(taskStage(t, [pr], [go], false), 'approval');
+    const done = hq.scheduler.addTask({ title: 'Done', project: 'agent-company', state: 'done' });
+    assert.equal(taskStage(done, [{ ...pr, checked_at: 0 }], [], false), null, 'a finished task is not released before its merge is known');
+    assert.equal(taskStage(done, [{ ...pr, state: 'MERGED', merged: true }], [], false), 'released');
+    assert.equal(taskStage(done, [{ ...pr, state: 'CLOSED' }], [], false), null, 'a closed PR released nothing');
+    assert.equal(taskStage({ ...done, awaiting: 'check' }, [], [], false), 'approval');
+    assert.equal(taskStage({ ...done, awaiting: 'deploy' }, [], [], true), 'released');
+  } finally { await env.cleanup(); }
+});
+
+test("a PR from the task's own branch belongs to it: one read per repo, not per task", async () => {
+  const env = await makeEnv({ noStart: true, projects: { proj: charter('/srv/proj') } });
+  try {
+    const { hq } = env; await hq.start({ timers: false }); hq.store.setToggle('scheduler', false);
+    const ch = readCharter(hq.cfg.companyDir, 'proj')!;
+    const dir = join(ch.checkouts[0]!.path, ch.worktreeDir);
+    const t = hq.scheduler.addTask({ title: 'Branch', project: 'proj', state: 'running' });
+    const other = hq.scheduler.addTask({ title: 'Other', project: 'proj', state: 'running' });
+    hq.store.db.prepare('UPDATE tasks SET worktree = ? WHERE id = ?').run(join(dir, `company-t${t.id}`), t.id);
+    hq.store.db.prepare('UPDATE tasks SET worktree = ? WHERE id = ?').run(join(dir, `company-t${other.id}`), other.id);
+    const repo = ch.checkouts[0]!.repo!;
+    const url = `https://github.com/${repo}/pull/7`;
+    const catalog = new TaskCatalog(hq); let lists = 0;
+    catalog.readBranches = async () => { lists++; return [{ url, head: `company-t${t.id}` }, { url: `https://github.com/${repo}/pull/8`, head: `company-t${t.id}0` }]; };
+    catalog.readPr = async () => ({ ...pr, url });
+    await catalog.list();
+    await new Promise((r) => setTimeout(r, 20));
+    const listed = await catalog.list();
+    assert.equal(lists, 1, 'one gh read for the repo');
+    assert.deepEqual(listed.pipeline.find((p) => p.id === t.id)!.prs.map((p) => p.url), [url]);
+    assert.deepEqual(listed.pipeline.find((p) => p.id === other.id)!.prs, [], 'company-t<id>0 is another task');
+    assert.equal((await catalog.item(hq.scheduler.task(t.id)!)).stage, 'review');
+  } finally { await env.cleanup(); }
+});
+
+test('a repo that could not be read is said, once, and its tasks with no known PR have no stage instead of "development"', async () => {
+  const env = await makeEnv({ noStart: true, projects: { proj: charter('/srv/proj') } });
+  try {
+    const { hq } = env; await hq.start({ timers: false }); hq.store.setToggle('scheduler', false);
+    const t = hq.scheduler.addTask({ title: 'Branch', project: 'proj', state: 'running' });
+    const catalog = new TaskCatalog(hq); let lists = 0;
+    catalog.readBranches = async () => { lists++; throw new Error('gh: not logged in'); };
+    await catalog.list();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal((await catalog.item(hq.scheduler.task(t.id)!)).stage, null);
+    const row = hq.scheduler.task(t.id)!;
+    assert.equal(catalog.knownStage(row, catalog.context([row])), null, 'search says the same as the board');
+    const said = () => (hq.store.db.prepare("SELECT COUNT(*) n FROM events WHERE type = 'tasks.branches.error'").get() as { n: number }).n;
+    assert.equal(said(), 1);
+    env.clock.t += 200_000; await catalog.list(); await new Promise((r) => setTimeout(r, 20));
+    assert.equal(lists, 2, 'read again after the wait, not on every poll');
+    assert.equal(said(), 1, 'a failure that goes on is not said again');
+    catalog.readBranches = async () => [];
+    env.clock.t += 200_000; await catalog.list(); await new Promise((r) => setTimeout(r, 20));
+    assert.equal((await catalog.item(hq.scheduler.task(t.id)!)).stage, 'development', 'read again: no PR yet is development');
   } finally { await env.cleanup(); }
 });
 
@@ -134,7 +203,7 @@ test('API: start is idempotent, proposal survives failed requests, task and old 
     assert.equal(a.task.id, b.task.id);
     assert(!hq.openTasks().some((t) => t.id === a.task.id), 'unaccepted proposals are not in the legacy work queue');
     const groups = (await (await fetch(base + '/api/tasks', { headers })).json() as any).groups;
-    assert(!groups.some((g: any) => g.tasks.some((x: any) => x.id === done.id)), 'completion is not active development');
+    assert(!groups.some((g: any) => g.stage !== 'released' && g.tasks.some((x: any) => x.id === done.id)), 'completion is not active development');
   } finally { await env.cleanup(); }
 });
 

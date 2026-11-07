@@ -144,6 +144,11 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       for_owner: { type: 'boolean', description: 'true למשימה שהמשתמש ביקש: בסיום ה-summary נשלח למשתמש אוטומטית אם לא דיווחת בעצמך / requested by the owner; completion is reported automatically' },
       name: s('כותרת המשימה. חלק ממאמץ גדול: שם המאמץ קודם, e.g. "מוצר גנרי, שלב 4: …" / task title; part of a larger effort: the effort\'s name first'),
       purpose: s('מה בדיוק לעשות ואיך יודעים שזה גמור / what to do and the definition of done'),
+      about: s('שורה אחת במילים ' + G('שלו', 'שלה') + ': מה המשימה תשנה ' + G('אצלו', 'אצלה') + ', בלי מונחים טכניים, e.g. "התראה כשנהג לא מאשר נסיעה תוך 5 דקות". '
+        + 'זה מה ש' + G('הוא רואה', 'היא רואה') + ' בדף המשימה. ה-purpose הוא לעובד ולא מוצג ' + G('לו', 'לה')
+        + ' / one line in ' + G('his', 'her') + ' words on what the task will change for ' + G('him', 'her') + '; the task page shows it, the purpose is for the worker'),
+      proposal: { type: 'boolean', description: 'true להצעה: המשימה לא מתחילה עד ש' + O + ' ' + G('לוחץ', 'לוחצת') + ' "התחלה" בלשונית המשימות. לרעיון ש' + G('הוא לא ביקש', 'היא לא ביקשה') + ', לא למשימה ש' + G('ביקש', 'ביקשה') + ' '
+        + '/ a proposal: it does not start until the owner presses start in the tasks tab; for an idea nobody asked for, not for requested work' },
       priority: { type: 'integer', minimum: 0, maximum: 3, description: 'עדיפות 0-3, 0 הכי דחוף, ברירת מחדל 2. גובר על p0/p1 בכותרת / priority 0-3, 0 most urgent, default 2; overrides a p0/p1 title prefix' },
       project: s('הפרויקט, e.g. agent-company (ברירת מחדל: הפרויקט שלך) / project (default: yours)'),
       ref: s('טיקט, e.g. hivecode-app/hive-code#11 / issue reference'),

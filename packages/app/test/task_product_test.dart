@@ -34,7 +34,30 @@ class TaskBackend extends FakeBackend {
   Completer<CommandResult>? startReply;
   List<Map<String, dynamic>> eventLog = [];
   bool accepted = false;
+  int released = 0;
+  bool orphanGo = false;
   List<TaskProgress> get tasks => [
+    if (orphanGo)
+      const TaskProgress(id: 201, title: 'A finished report', project: 'lumo', state: 'done', outcome: 'completed'),
+    if (orphanGo)
+      TaskProgress(
+        id: 200,
+        title: 'Waits on a request not in the inbox',
+        project: 'lumo',
+        state: 'done',
+        stage: TaskStage.approval,
+        requests: [TaskRequest(id: 999, kind: 'go', title: 'GO', askedBy: 'ido', task: 200)],
+      ),
+    for (var i = 0; i < released; i++)
+      TaskProgress(
+        id: 100 + i,
+        title: 'Released $i',
+        project: 'lumo',
+        state: 'done',
+        stage: TaskStage.released,
+        outcome: 'completed',
+        updatedAt: kDemoNow.subtract(Duration(hours: i)),
+      ),
     TaskProgress(
       id: 1,
       title: he ? 'תיקון החיפוש' : 'Fix search',
@@ -260,6 +283,17 @@ Future<void> openByKeyboard(WidgetTester tester, Key key) async {
   fail('Keyboard focus did not reach $key');
 }
 
+Future<void> showTask(WidgetTester tester, int id) => tester.scrollUntilVisible(
+  find.byKey(Key('task-$id')),
+  200,
+  scrollable: find
+      .descendant(
+        of: find.byKey(const PageStorageKey('task-list')),
+        matching: find.byType(Scrollable),
+      )
+      .first,
+);
+
 void main() {
   testWidgets(
     'Tasks destination opens the task, back preserves project and selection; report is not Released',
@@ -268,6 +302,7 @@ void main() {
       await tester.tap(find.text('Tasks'));
       await tester.pumpAndSettle();
       expect(find.byType(ProductTasks), findsOneWidget);
+      await showTask(tester, 1);
       await tester.tap(find.byKey(const Key('task-1')));
       await tester.pumpAndSettle();
       expect(find.byType(ProductTaskScreen), findsOneWidget);
@@ -275,10 +310,8 @@ void main() {
       await tester.pageBack();
       await tester.pumpAndSettle();
       expect(store.selectedTask, 1);
-      expect(
-        tester.widget<ListTile>(find.byKey(const Key('task-1'))).selected,
-        true,
-      );
+      await showTask(tester, 1);
+      expect(find.byKey(const Key('task-1')), findsOneWidget);
       expect(find.text('Investigation report'), findsNothing);
     },
   );
@@ -340,6 +373,8 @@ void main() {
         backend: TaskBackend(),
         home: const Scaffold(body: ProductTasks()),
       );
+      await tester.tap(find.byKey(const Key('task-options')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('new-task')));
       await tester.pumpAndSettle();
       expect(find.text('Choose a project'), findsOneWidget);
@@ -393,20 +428,21 @@ void main() {
         backend: backend,
         scale: 2,
         home: const Scaffold(body: ProductTasks()),
+        prepare: (s) => s.taskProject = 'voice',
       );
       final semantics = tester.ensureSemantics();
 
       expect(
-        tester.getSemantics(find.byKey(const Key('task-1'))).label,
-        contains('Fix search'),
+        tester.getSemantics(find.byKey(const Key('task-3'))).label,
+        contains('Upload a file from the phone'),
       );
       var reached = false;
       for (var i = 0; i < 30; i++) {
         await tester.sendKeyEvent(LogicalKeyboardKey.tab);
         await tester.pump();
         final tile = FocusManager.instance.primaryFocus?.context
-            ?.findAncestorWidgetOfExactType<ListTile>();
-        if (tile?.key == const ValueKey('task-1')) {
+            ?.findAncestorWidgetOfExactType<InkWell>();
+        if (tile?.key == const ValueKey('task-3')) {
           reached = true;
           break;
         }
@@ -421,9 +457,6 @@ void main() {
       expect(find.byType(ProductTaskScreen), findsOneWidget);
       await tester.pageBack();
       await tester.pumpAndSettle();
-      store.taskProject = 'voice';
-      store.touch();
-      await tester.pumpAndSettle();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -432,13 +465,55 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
       expect(store.taskProject, 'voice');
-      expect(store.selectedTask, 1);
+      expect(store.selectedTask, 3);
       expect(find.byKey(const Key('task-3')), findsOneWidget);
       expect(find.byKey(const Key('task-1')), findsNothing);
       expect(tester.takeException(), isNull);
       semantics.dispose();
     },
   );
+
+  testWidgets('the released column shows the latest five and the rest on request', (tester) async {
+    await productApp(
+      tester,
+      backend: TaskBackend()..released = 8,
+      size: const Size(1440, 900),
+      home: const Scaffold(body: ProductTasks()),
+      prepare: (s) => s.taskBoard = true,
+    );
+    expect(find.text('Released 4'), findsOneWidget);
+    expect(find.text('Released 5'), findsNothing);
+    await tester.tap(find.byKey(const Key('more-released')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('more-released')), findsNothing);
+    expect(find.text('Released 7', skipOffstage: false), findsOneWidget);
+  });
+
+  testWidgets('a task waiting on him stays in the list when its request is not among his', (tester) async {
+    await productApp(tester, backend: TaskBackend()..orphanGo = true, home: const Scaffold(body: ProductTasks()));
+    expect(find.byKey(const ValueKey('task-200')), findsOneWidget);
+  });
+
+  testWidgets('a finished task that shipped nothing is not "in development", even with finished ones shown', (tester) async {
+    await productApp(
+      tester,
+      backend: TaskBackend()..orphanGo = true,
+      home: const Scaffold(body: ProductTasks()),
+      prepare: (s) => s.taskIncludeCompleted = true,
+    );
+    expect(find.byKey(const ValueKey('task-201'), skipOffstage: false), findsNothing);
+  });
+
+  testWidgets('an empty board column says so', (tester) async {
+    await productApp(
+      tester,
+      backend: TaskBackend(),
+      size: const Size(1440, 900),
+      home: const Scaffold(body: ProductTasks()),
+      prepare: (s) => s.taskBoard = true,
+    );
+    expect(find.text('Nothing released this week'), findsOneWidget);
+  });
 
   testWidgets('an unverified task remains visible without inventing a stage', (
     tester,
@@ -449,7 +524,10 @@ void main() {
       home: const Scaffold(body: ProductTasks()),
     );
     expect(find.byKey(const Key('task-3')), findsOneWidget);
-    expect(find.text('Progress is being verified'), findsOneWidget);
+    expect(
+      find.textContaining('Progress is being verified', findRichText: true),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(const Key('task-3')));
     await tester.pumpAndSettle();
     expect(find.text('Progress is being verified'), findsOneWidget);
@@ -549,19 +627,30 @@ void main() {
         backend: TaskBackend(),
         home: const Scaffold(body: ProductTasks()),
       );
-      final proposal = tester.widget<ListTile>(find.byKey(const Key('task-1')));
-      expect((proposal.leading as Ic).name, 'lightbulb');
+      final proposal = tester.widget<Ic>(
+        find.descendant(
+          of: find.byKey(const Key('task-1')),
+          matching: find.byKey(const Key('task-row-icon')),
+        ),
+      );
+      expect(proposal.name, 'lightbulb');
       expect(
         find.descendant(
           of: find.byKey(const Key('task-4')),
-          matching: find.text('Work completed'),
+          matching: find.textContaining(
+            'Merged, waiting for release',
+            findRichText: true,
+          ),
         ),
         findsOneWidget,
       );
       expect(
         find.descendant(
           of: find.byKey(const Key('task-5')),
-          matching: find.text('Work completed'),
+          matching: find.textContaining(
+            'Merged, waiting for release',
+            findRichText: true,
+          ),
         ),
         findsNothing,
       );
@@ -1058,6 +1147,7 @@ void main() {
         }
       }
       testWidgets('task board golden $language $dark', (tester) async {
+        // Its empty columns say so: no proposals accepted yet is in the list golden; nothing released this week is here.
         await productApp(
           tester,
           backend: TaskBackend(he: language == 'he'),

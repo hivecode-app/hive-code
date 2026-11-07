@@ -422,6 +422,14 @@
       "type": "string",
       "description": "מה בדיוק לעשות ואיך יודעים שזה גמור / what to do and the definition of done"
      },
+     "about": {
+      "type": "string",
+      "description": "שורה אחת במילים שלו: מה המשימה תשנה אצלו, בלי מונחים טכניים, e.g. \"התראה כשנהג לא מאשר נסיעה תוך 5 דקות\". זה מה שהוא רואה בדף המשימה. ה-purpose הוא לעובד ולא מוצג לו / one line in his words on what the task will change for him; the task page shows it, the purpose is for the worker"
+     },
+     "proposal": {
+      "type": "boolean",
+      "description": "true להצעה: המשימה לא מתחילה עד שרן לוחץ \"התחלה\" בלשונית המשימות. לרעיון שהוא לא ביקש, לא למשימה שביקש / a proposal: it does not start until the owner presses start in the tasks tab; for an idea nobody asked for, not for requested work"
+     },
      "priority": {
       "type": "integer",
       "minimum": 0,
