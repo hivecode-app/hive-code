@@ -84,7 +84,7 @@ test('standing worker: own worktree and a new session per task, one at a time, t
     await hq.shifts.stop('gal-1', 'rest');
     hq.scheduler.memInfo = () => ({ totalMb: 4096 + 450 + 2 * 1300 + 100, availableMb: 4096 + 2 * 1300 + 100 }); // 2 slots
 
-    const a = hq.scheduler.addTask({ title: 'ראשונה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'], priority: 1 });
+    const a = hq.scheduler.addTask({ title: 'ראשונה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'], priority: 2 });
     await until(() => hq.scheduler.task(a.id)!.state === 'running', 5000, 'first task running');
     const wa = join(r.checkout, '.worktrees', `company-t${a.id}`);
     const la = launcher.launches.at(-1)!;
@@ -97,8 +97,8 @@ test('standing worker: own worktree and a new session per task, one at a time, t
     assert.match(prompt.body, /`handoff`/, 'a standing worker hears how to close, with a handoff');
     assert.equal(prompt.from_identity, 'proj-ceo');
 
-    // Its second task waits (even at a better priority); a temporary worker's task takes the free slot.
-    const b = hq.scheduler.addTask({ title: 'שנייה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'], priority: 0 });
+    // Its second task waits (even at a better priority, short of p0: #408); a temporary worker's task takes the free slot.
+    const b = hq.scheduler.addTask({ title: 'שנייה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'], priority: 1 });
     const c = hq.scheduler.addTask({ title: 'של עובד זמני', project: 'proj' });
     await until(() => hq.scheduler.task(c.id)!.state === 'running', 5000, 'the slot goes on to the next task');
     await hq.scheduler.fill();
@@ -144,6 +144,116 @@ test('standing worker: own worktree and a new session per task, one at a time, t
     assert.equal(lm.cwd, r.checkout, 'the project checkout');
     assert.equal(lm.resume, false);
     assert.equal(lm.taskId, null);
+  } finally { await env.cleanup(); r.cleanup(); }
+});
+
+test('#408: a p0 for a busy standing worker does not wait: it starts now in a clean task worker, and everyone hears', async () => {
+  const r = repo();
+  const env = await makeEnv({ org: ORG, projects: { proj: charter(r.checkout) } });
+  try {
+    const { hq, launcher } = env;
+    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 450 + 2 * 1300 + 100, availableMb: 4096 + 2 * 1300 + 100 }); // 2 slots
+    const a = hq.scheduler.addTask({ title: 'ישנה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'], priority: 2 });
+    await until(() => hq.scheduler.task(a.id)!.state === 'running', 5000, 'first task running');
+    // A p1 waits for it, as before.
+    const p1 = hq.scheduler.addTask({ title: 'רגילה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'], priority: 1 });
+    const p0 = hq.scheduler.addTask({ title: 'הגיבוי נכשל', project: 'proj', identity: 'gal', labels: ['opened-by:yoav'], priority: 0 });
+    await until(() => hq.scheduler.task(p0.id)!.state === 'running', 5000, 'the p0 starts');
+    const t = hq.scheduler.task(p0.id)!;
+    assert.equal(t.identity, `proj-t${p0.id}`, 'a clean task worker');
+    assert.ok(JSON.parse(t.labels).includes('assigned-to:gal'));
+    const l = launcher.launches.at(-1)!;
+    assert.equal(l.identity, `proj-t${p0.id}`);
+    assert.equal(l.cwd, join(r.checkout, '.worktrees', `company-t${p0.id}`));
+    assert.match(hq.mailbox.list(`proj-t${p0.id}`).find((m) => m.id.startsWith(`task-${p0.id}-`))!.body, /הוקצתה לגל .*ישנה/);
+    assert.equal(hq.scheduler.task(p1.id)!.state, 'queued');
+    assert.equal(hq.scheduler.task(p1.id)!.identity, 'gal');
+    assert.equal(hq.scheduler.task(a.id)!.state, 'running', 'its own task is not cut');
+    for (const who of ['yoav', 'proj-ceo', 'gal']) assert.ok(hq.mailbox.get(`task-${p0.id}-p0-handoff-${who}`), who);
+  } finally { await env.cleanup(); r.cleanup(); }
+});
+
+test('#408: a p0 for a busy standing worker with no slot free stays its, and nobody hears it is starting', async () => {
+  const r = repo();
+  const env = await makeEnv({ org: ORG, projects: { proj: charter(r.checkout) } });
+  try {
+    const { hq } = env;
+    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 450 + 1300 + 100, availableMb: 4096 + 1300 + 100 }); // 1 slot
+    const a = hq.scheduler.addTask({ title: 'ישנה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'], priority: 2 });
+    await until(() => hq.scheduler.task(a.id)!.state === 'running', 5000, 'first task running');
+    const p0 = hq.scheduler.addTask({ title: 'הגיבוי נכשל', project: 'proj', identity: 'gal', labels: ['opened-by:yoav'], priority: 0 });
+    await hq.scheduler.fill();
+    assert.equal(hq.scheduler.task(p0.id)!.state, 'queued');
+    assert.equal(hq.scheduler.task(p0.id)!.identity, 'gal');
+    assert.equal(hq.mailbox.get(`task-${p0.id}-p0-handoff-yoav`), undefined);
+  } finally { await env.cleanup(); r.cleanup(); }
+});
+
+test('#408: a p0 for a busy standing worker in backoff or in a dormant project is not handed off', async () => {
+  const r = repo();
+  const env = await makeEnv({ org: ORG, projects: { proj: charter(r.checkout) } });
+  try {
+    const { hq } = env;
+    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 450 + 3 * 1300 + 100, availableMb: 4096 + 3 * 1300 + 100 }); // 3 slots
+    const a = hq.scheduler.addTask({ title: 'ישנה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'], priority: 2 });
+    await until(() => hq.scheduler.task(a.id)!.state === 'running', 5000, 'first task running');
+    const p0 = hq.scheduler.addTask({ title: 'הגיבוי נכשל', project: 'proj', identity: 'gal', labels: ['opened-by:yoav'], priority: 0 });
+    const kept = () => {
+      const t = hq.scheduler.task(p0.id)!;
+      assert.equal(t.identity, 'gal');
+      assert.ok(!JSON.parse(t.labels).includes('assigned-to:gal'));
+      assert.equal(hq.mailbox.get(`task-${p0.id}-p0-handoff-yoav`), undefined);
+    };
+    const s = hq.scheduler as unknown as { inBackoff: (id: number) => boolean; dormant: (p: string | null) => boolean };
+    const backoff = s.inBackoff.bind(hq.scheduler);
+    s.inBackoff = (id) => id === p0.id || backoff(id);
+    await hq.scheduler.fill();
+    kept();
+    s.inBackoff = backoff;
+    const dormant = s.dormant.bind(hq.scheduler);
+    s.dormant = (p) => p === 'proj' || dormant(p);
+    await hq.scheduler.fill();
+    kept();
+    s.dormant = dormant;
+    await hq.scheduler.fill();
+    await until(() => hq.scheduler.task(p0.id)!.state === 'running', 5000, 'handed off once it can start');
+    assert.equal(hq.scheduler.task(p0.id)!.identity, `proj-t${p0.id}`);
+  } finally { await env.cleanup(); r.cleanup(); }
+});
+
+test('#408: a p0 or p1 not started 10 minutes after it was opened: its opener and its lead hear why, once', async () => {
+  const r = repo();
+  const env = await makeEnv({ org: ORG, projects: { proj: charter(r.checkout) } });
+  try {
+    const { hq, clock } = env;
+    hq.scheduler.memInfo = () => ({ totalMb: 4096 + 450 + 2 * 1300 + 100, availableMb: 4096 + 2 * 1300 + 100 }); // 2 slots
+    const a = hq.scheduler.addTask({ title: 'ישנה', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'], priority: 2 });
+    await until(() => hq.scheduler.task(a.id)!.state === 'running', 5000, 'first task running');
+    const p1 = hq.scheduler.addTask({ title: 'דחופה', project: 'proj', identity: 'gal', labels: ['opened-by:yoav'], priority: 1 });
+    const p2 = hq.scheduler.addTask({ title: 'רגילה', project: 'proj', identity: 'gal', labels: ['opened-by:yoav'], priority: 2 });
+    const held = hq.scheduler.addTask({ title: 'מחכה להחלטה', project: 'proj', labels: ['opened-by:yoav', 'needs-decision'], priority: 0 });
+    assert.deepEqual(hq.scheduler.lateStarts(), [], 'not yet');
+    clock.t += 10 * 60_000 + 1;
+    assert.deepEqual(hq.scheduler.lateStarts(), [p1.id]);
+    const m = hq.mailbox.get(`task-${p1.id}-late-start-yoav`)!;
+    assert.match(m.body, /p1 עוד לא התחילה, 10 דקות/);
+    assert.match(m.body, /מחכה שגל יתפנה/);
+    assert.ok(hq.mailbox.get(`task-${p1.id}-late-start-proj-ceo`), 'the lead too');
+    assert.ok(hq.mailbox.get(`task-${p1.id}-late-start-gal`), 'and the worker it waits for');
+    assert.deepEqual(hq.scheduler.lateStarts(), [], 'once');
+    void p2; void held;
+    // Out of tonight's scope it is not meant to start: nobody hears.
+    const other = hq.scheduler.addTask({ title: 'לא הלילה', project: 'proj', identity: 'gal', labels: ['opened-by:yoav'], priority: 1 });
+    clock.t += 10 * 60_000 + 1;
+    hq.scheduler.scope = () => ['agent-company'];
+    assert.deepEqual(hq.scheduler.lateStarts(), []);
+    hq.scheduler.scope = () => null;
+    assert.deepEqual(hq.scheduler.lateStarts(), [other.id]);
+    // Switched off with escalation.
+    hq.scheduler.addTask({ title: 'כבוי', project: 'proj', identity: 'gal', labels: ['opened-by:yoav'], priority: 1 });
+    clock.t += 10 * 60_000 + 1;
+    hq.store.setToggle('escalation', false);
+    assert.deepEqual(hq.scheduler.lateStarts(), []);
   } finally { await env.cleanup(); r.cleanup(); }
 });
 

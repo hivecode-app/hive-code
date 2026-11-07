@@ -115,6 +115,9 @@ const BRIEF_FAILED = 'brief_failed';
 /** #224: briefs not taken (or launches failed) in a row before the monitoring lead hears of the task, once. */
 const BRIEF_FAILS = 3;
 
+/** #408: a p0 or p1 not started this long after it was opened: its opener and its lead hear why. */
+export const LATE_START_MS = 10 * 60_000;
+
 /** #224: a node's memory and load are read again before a start when the last read is older than this. */
 const NODE_FRESH_MS = 15_000;
 
@@ -126,6 +129,9 @@ const LEFT_ON = 'left-on:';
 
 /** unpin waits this long for the node's worktree to close before the task comes back anyway (#224). */
 const UNPIN_CLOSE_MS = 90_000;
+
+/** #408: a p0 that never started: nothing of it is its standing worker's yet, so it does not wait for that worker. */
+const p0NotStarted = (t: Pick<TaskRow, 'priority' | 'started_at' | 'worktree'>): boolean => t.priority === 0 && t.started_at == null && !t.worktree;
 
 /** A task's worktree is gone and its branch too (prepareWorktree). */
 class WorktreeGone extends Error { override name = 'WorktreeGone'; }
@@ -490,7 +496,7 @@ export class Scheduler {
         // A wait that is not in the queue now (closed, started, out of it) is over: back in it, it waits from the start.
         const queued = new Set(queue.map((t) => t.id));
         for (const id of this.noRoomSince.keys()) if (!queued.has(id)) this.noRoomSince.delete(id);
-        for (const t of queue) {
+        for (let t of queue) {
           if (this.starting.has(t.id) || this.fallingBack.has(t.id)) continue;
           // #224: placed on a node that is switched off now (or gone from the config): back to the queue, unplaced.
           if (t.machine && t.machine !== LOCAL && (!this.nodes?.get(t.machine) || !this.store.toggle(nodeToggle(t.machine)))) {
@@ -516,14 +522,21 @@ export class Scheduler {
           if ((machine === LOCAL ? free : nodeFree.get(machine) ?? 0) <= 0) continue;
           try {
             // Its next task waits in its own queue; the slot goes on to the next task in line.
-            if (t.identity && this.standing(t.identity)) {
-              if (busy.has(t.identity) || this.workerBusy(t.identity, t.id)) continue;
-              busy.add(t.identity);
-            }
+            const standing = !!t.identity && this.standing(t.identity);
+            const held = standing && (busy.has(t.identity!) || this.workerBusy(t.identity!, t.id));
+            // #408: a p0 does not wait behind its worker's other task (handed off below, once it can start).
+            if (held && !p0NotStarted(t)) continue;
+            if (standing && !held) busy.add(t.identity!);
             // A dormant project (charter status) gets no workers until it moves to the company (D phase 3).
             if (this.dormant(t.project)) continue;
             // Backoff: a task that just started (and crashed or failed to launch) waits before the next try.
             if (this.inBackoff(t.id)) continue;
+            if (held) {
+              // One that never started goes to a clean task worker now (dir-0012).
+              const moved = this.handOffP0(t);
+              if (!moved) continue;
+              t = { ...t, ...moved };
+            }
           } catch (e) {
             this.store.emit('scheduler.start_failed', t.identity, { task: t.id, error: (e as Error).message });
             continue;
@@ -568,7 +581,7 @@ export class Scheduler {
     if (this.starting.has(t.id)) return 'מתחילה עכשיו';
     if (this.fallingBack.has(t.id) && t.machine && t.machine !== LOCAL) return `חוזרת מ-${t.machine}`;
     if (this.dormant(t.project)) return 'הפרויקט לא פעיל';
-    if (t.identity && this.standing(t.identity) && this.workerBusy(t.identity, t.id)) {
+    if (t.identity && this.standing(t.identity) && this.workerBusy(t.identity, t.id) && !p0NotStarted(t)) {
       return `מחכה ${pre('ש', getIdentity(this.store, t.identity)?.name ?? t.identity)} יתפנה`;
     }
     if (this.inBackoff(t.id)) return 'ניסיון חוזר בעוד רגע';
@@ -585,6 +598,76 @@ export class Scheduler {
     }
     if (free > 0 || (there?.free ?? 0) > 0) return 'מתחילה עכשיו';
     return slots.pressure ? BUSY_REASON : 'מחכה למשבצת';
+  }
+
+  /** Who opened a task (`opened-by:`), and the lead it escalates to: its project's lead, else the standing worker's, else the manager. */
+  private openerAndLead(t: TaskRow, worker?: string | null): { opener: string | undefined; lead: string } {
+    const opener = (JSON.parse(t.labels || '[]') as string[]).find((l) => l.startsWith('opened-by:'))?.slice('opened-by:'.length);
+    const lead = (t.project ? projectLead(this.store, t.project) : undefined)
+      ?? (worker ? getIdentity(this.store, worker)?.reports_to ?? undefined : undefined) ?? this.cfg.managerId;
+    return { opener, lead };
+  }
+
+  /**
+   * #408: a p0 handed to a standing worker that is on another task does not wait for it (on 02/11 the prod backup
+   * waited 1.5 hours behind an open task, in silence). It never started, so nothing of it is the worker's yet: it
+   * runs now in a clean task worker (dir-0012), like any task opened without an assignee. The opener, the lead and
+   * the worker hear it; the task's brief says whose it was.
+   */
+  private handOffP0(t: TaskRow): TaskRow | null {
+    const worker = t.identity!;
+    const name = getIdentity(this.store, worker)?.name ?? worker;
+    const other = this.store.db.prepare(`SELECT id, ref, title FROM tasks WHERE identity = ? AND id != ? AND state IN ('queued','running','resting','open','interrupted')
+      AND (state != 'queued' OR started_at IS NOT NULL) ORDER BY started_at DESC LIMIT 1`).get(worker, t.id) as { id: number; ref: string | null; title: string } | undefined;
+    const on = other ? `${other.ref ?? `#${other.id}`} (${other.title})` : 'משימה אחרת';
+    const labels = [...new Set([...(JSON.parse(t.labels || '[]') as string[]), `assigned-to:${worker}`])];
+    const body = [`**הערת hq:** המשימה הוקצתה ${pre('ל', name)} (\`${worker}\`), שעסוק ב-${on}. היא ב-p0, ולכן עלתה מיד בעובד נקי ולא חיכתה לו. אם צריך ממנו ידע, שואלים אותו ב-\`tell\`.`, t.body].filter(Boolean).join('\n\n');
+    const r = this.store.db.prepare(`UPDATE tasks SET identity = NULL, labels = ?, body = ?, updated_at = ? WHERE id = ? AND identity = ? AND started_at IS NULL`)
+      .run(JSON.stringify(labels), body, this.store.now(), t.id, worker);
+    if (!r.changes) return null;
+    this.store.emit('task.p0_handed_off', worker, { id: t.id, from: worker, busy_with: other?.id ?? null });
+    const { opener, lead } = this.openerAndLead(t, worker);
+    const line = `משימה ${t.ref ?? `#${t.id}`} (${t.title}) ב-p0 הוקצתה ${pre('ל', name)}, שעסוק ב-${on}. כדי שלא תחכה, היא עולה עכשיו בעובד נקי.`;
+    for (const to of new Set([opener, lead].filter((x): x is string => !!x && x !== worker))) {
+      this.mailbox.tell({ msg_id: `task-${t.id}-p0-handoff-${to}`, from: 'hq', to, kind: 'system', priority: 'next', body: line });
+    }
+    this.mailbox.tell({ msg_id: `task-${t.id}-p0-handoff-${worker}`, from: 'hq', to: worker, kind: 'system', priority: 'next',
+      body: `${line} אם העובד שלה ישאל אותך משהו, זה בגללה.` });
+    return { ...t, identity: null, labels: JSON.stringify(labels), body };
+  }
+
+  /**
+   * #408: a p0 or p1 that has not started LATE_START_MS after it was opened is not silent: its opener, its lead and
+   * the standing worker it waits for hear once why it waits (waitReason). Out of the queue on purpose (needs-decision)
+   * or out of tonight's scope is not waiting: that was told, or was his call.
+   */
+  lateStarts(): number[] {
+    if (!this.store.toggle('escalation')) return [];
+    // Out of tonight's scope (night.ts) it is not meant to start: his scope is the command (dir-0003).
+    const scope = this.scope();
+    const rows = this.store.db.prepare(`SELECT * FROM tasks WHERE state = 'queued' AND started_at IS NULL AND priority <= 1 AND created_at <= @cutoff
+      AND NOT EXISTS (SELECT 1 FROM json_each(labels) WHERE value IN ('needs-decision', '${CANCELLED}'))
+      AND (@scope IS NULL OR project IN (SELECT value FROM json_each(@scope)))`).all({ cutoff: this.store.now() - LATE_START_MS, scope: scope ? JSON.stringify(scope) : null }) as TaskRow[];
+    const told: number[] = [];
+    if (!rows.length) return told;
+    const slots = this.slots();
+    for (const t of rows) {
+      if (this.starting.has(t.id)) continue;
+      const { opener, lead } = this.openerAndLead(t, t.identity);
+      // A standing worker it waits for hears it too: it may finish or hand over what holds it.
+      const worker = t.identity && this.standing(t.identity) ? t.identity : undefined;
+      const to = [...new Set([opener, lead].filter((x): x is string => !!x && x !== t.identity)), ...(worker ? [worker] : [])];
+      const ids = to.map((id) => `task-${t.id}-late-start-${id}`);
+      if (!ids.length || ids.every((id) => this.mailbox.get(id))) continue;
+      const mins = Math.round((this.store.now() - t.created_at) / 60_000);
+      const body = [`משימה ${t.ref ?? `#${t.id}`} (${t.title}) ב-p${t.priority} עוד לא התחילה, ${mins} דקות אחרי שנפתחה. למה: ${this.waitReason(t, slots)}.`,
+        'אם היא לא יכולה לחכות: מעבירים אותה ל-p0, מפנים את מי שהיא מחכה לו, או סוגרים ופותחים אותה בלי `assignee`.'].join('\n');
+      const own = `משימה ${t.ref ?? `#${t.id}`} (${t.title}) ב-p${t.priority} שהוקצתה לך מחכה ${mins} דקות שתתפנה. אם המשימה שאתה עליה רק מחכה, כדאי לסגור או להעביר אותה, או לכתוב לפותח שלא תגיע אליה בקרוב.`;
+      to.forEach((id, i) => { if (!this.mailbox.get(ids[i]!)) this.mailbox.tell({ msg_id: ids[i]!, from: 'hq', to: id, kind: 'system', priority: 'next', body: id === worker ? own : body }); });
+      this.store.emit('task.late_start', t.identity, { id: t.id, minutes: mins, to });
+      told.push(t.id);
+    }
+    return told;
   }
 
   private standing(identity: string): boolean {
@@ -1332,6 +1415,7 @@ export class Scheduler {
     this.wakeResting();
     await this.restOnPressure();
     await this.fill();
+    this.lateStarts();
     // Empty-slot measurement (metric.empty_slot) is night.ts: per interval, with its reason.
     await this.retryCloses();
     this.onSweep?.();
