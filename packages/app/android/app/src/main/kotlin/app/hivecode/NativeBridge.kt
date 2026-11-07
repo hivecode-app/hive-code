@@ -24,7 +24,7 @@ import androidx.core.content.IntentCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.net.toUri
 import app.hivecode.hq.HqClient
-import app.hivecode.hq.HqLinkService
+import app.hivecode.hq.PushRegistration
 import app.hivecode.hq.HqSync
 import app.hivecode.hq.Prefs
 import app.hivecode.update.AppUpdater
@@ -84,7 +84,8 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
                 }
                 Prefs(ctx).configure(base, token)
                 app.hivecode.hq.ServerWatch.configure(ctx)
-                HqLinkService.start(ctx, reconnect = true)
+                PushRegistration.sync(ctx, force = true)
+                HqSync.refresh(ctx)
                 result.success(null)
             }
             "imageAccessGranted" -> {
@@ -107,7 +108,7 @@ class NativeBridge(private val activity: Activity, messenger: BinaryMessenger) :
             }
             "clearConfig" -> {
                 app.hivecode.hq.ServerWatch.cancel(ctx)
-                HqLinkService.stop(ctx)
+                PushRegistration.forget(ctx)
                 Prefs(ctx).clearConfig()
                 ShortcutManagerCompat.removeAllDynamicShortcuts(ctx)
                 HqSync.refresh(ctx, fetch = false)

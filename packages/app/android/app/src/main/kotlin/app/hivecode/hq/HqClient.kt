@@ -20,7 +20,7 @@ class HqError(val sentence: String, cause: Throwable? = null, val code: Int = 0)
 
 /**
  * Blocking REST client for hq. Called from background threads only (receivers under goAsync, the
- * service's executor). The base URL is the Caddy prefix, e.g. https://app.hq.example.com/<secret>/hq.
+ * sync executor, FCM's thread). The base URL is the Caddy prefix, e.g. https://app.hq.example.com/<secret>/hq.
  */
 class HqClient(private val baseUrl: String, private val token: String) {
 
@@ -74,11 +74,18 @@ class HqClient(private val baseUrl: String, private val token: String) {
         return downloads.newCall(Request.Builder().url(url).header("Authorization", "Bearer $token").build())
     }
 
-    /** Null when the stored base URL is unusable (validated in [isValidBaseUrl] on configure). */
-    fun wsRequest(afterSeq: Long): Request? {
-        val q = if (afterSeq >= 0) "?after=$afterSeq" else ""
-        val url = "$baseUrl/ws$q".toHttpUrlOrNull() ?: return null
-        return Request.Builder().url(url).header("Authorization", "Bearer $token").build()
+    /** This phone's FCM token, so hq can push to it (PushService). */
+    fun registerFcm(fcmToken: String) {
+        post("/api/push/fcm", JSONObject().put("token", fcmToken))
+    }
+
+    fun unregisterFcm() {
+        send("DELETE", "/api/push/fcm", null)
+    }
+
+    /** The push arrived and the phone shows what hq has: without it hq sends Telegram after 2 minutes. */
+    fun fcmAck() {
+        post("/api/push/fcm/ack", JSONObject())
     }
 
     private fun get(path: String): String = send("GET", path, null)
@@ -130,16 +137,6 @@ class HqClient(private val baseUrl: String, private val token: String) {
         val http: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
             .callTimeout(8, TimeUnit.SECONDS)
-            .build()
-
-        /**
-         * The WebSocket needs no call timeout. Pings detect a dead link behind NAT or Caddy; 90 s
-         * keeps the radio mostly asleep (each ping wakes it) while still noticing a dead socket.
-         */
-        val ws: OkHttpClient = http.newBuilder()
-            .callTimeout(0, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.SECONDS)
-            .pingInterval(90, TimeUnit.SECONDS)
             .build()
 
         /** A 20 MB APK on a phone network: no call timeout, but a stalled read still fails. */

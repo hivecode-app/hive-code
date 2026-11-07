@@ -4,6 +4,8 @@ plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    // FCM (task 1474). google-services.json is the Firebase project's public config (no secret), committed next to this file.
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -71,8 +73,11 @@ flutter {
 dependencies {
     implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation("androidx.core:core-ktx:1.17.0")
-    // WebSocket + REST to hq from the service and receivers, without the Flutter engine.
+    // REST to hq from the push service and receivers, without the Flutter engine.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // hq's push (PushService, task 1474).
+    implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
+    implementation("com.google.firebase:firebase-messaging")
     // Passkeys (#23): Credential Manager, with Google Password Manager on Android 13 and older.
     implementation("androidx.credentials:credentials:1.5.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.5.0")

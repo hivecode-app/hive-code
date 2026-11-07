@@ -33,9 +33,27 @@ object HqSync {
         }
     }
 
-    private fun fetchIntoCache(app: Context) {
+    /**
+     * The same refresh, waited for (PushService, on FCM's own thread): true when hq answered, so what the phone shows
+     * is what hq has. Within FCM's ~10 s for a high-priority message.
+     */
+    fun refreshBlocking(context: Context, timeoutMs: Long = 9_000): Boolean {
+        val app = context.applicationContext
+        return try {
+            exec.submit<Boolean> {
+                val ok = fetchIntoCache(app)
+                try { render(app, snapshot(app)) } catch (_: Exception) {}
+                ok
+            }.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** False when hq did not answer (the cache stays as it was). */
+    private fun fetchIntoCache(app: Context): Boolean {
         val prefs = Prefs(app)
-        val hq = HqClient.from(app) ?: return
+        val hq = HqClient.from(app) ?: return false
         try {
             val inbox = hq.inboxJson()
             val asks = hq.asksJson()
@@ -48,12 +66,16 @@ object HqSync {
             prefs.togglesJson = toggles
         } catch (_: HqError) {
             // Offline or hq down: keep showing the last known picture.
+            return false
         }
         try {
             prefs.conversationsJson = hq.conversationsJson()
-        } catch (_: HqError) {
-            // Offline, or an hq from before conversations (404): messages just don't notify yet.
+        } catch (e: HqError) {
+            // An hq from before conversations (404): messages just don't notify yet. Otherwise a message push was not
+            // shown, so no ack: Telegram carries it.
+            if (e.code != 404) return false
         }
+        return true
     }
 
     /** The cached hq data. */

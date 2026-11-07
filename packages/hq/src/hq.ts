@@ -27,6 +27,7 @@ import { Watchdog } from './watchdog.ts';
 import { Rotator } from './rotation.ts';
 import { ProbeRunner } from './probes.ts';
 import { Pusher, loadOrCreateVapid, telegramVia, type TelegramSend, type WebPushSend } from './push.ts';
+import { fcmFromFile, type FcmSend } from './fcm.ts';
 import { backupOnce } from './backup.ts';
 import { board } from './board.ts';
 import { openedBy, openTasks } from './open-tasks.ts';
@@ -52,6 +53,10 @@ import { LoopWatch } from './loop-watch.ts';
 import { CodexQuota, type CodexLimitsReader } from './codex-quota.ts';
 import { LOCAL, Nodes, RoutingLauncher, nodeToggle, type RemoteNode, type SshRun } from './nodes.ts';
 
+/** A broken key file turns FCM off (the old socket and Telegram still work) rather than keeping hq down. */
+function fcmOrOff(file: string): FcmSend | null {
+  try { return fcmFromFile(file); } catch (e) { console.error(`fcm off: ${(e as Error).message}`); return null; }
+}
 /** The phone view's own diagnostics go to the journal, not the event log (frames and taps are not events). */
 const tabLog = (msg: string, data?: unknown) => console.log(`tab: ${msg}${data === undefined ? '' : ` ${JSON.stringify(data)}`}`);
 
@@ -61,6 +66,8 @@ export interface HqDeps {
   foreign?: ForeignInjector;
   telegram?: TelegramSend;
   webPush?: WebPushSend;
+  /** FCM HTTP v1 (fcm.ts); default: the key in stateDir/fcm-service-account.json, none = FCM off. null = off. */
+  fcm?: FcmSend | null;
   ticketer?: Ticketer;
   issues?: IssueSource;
   accounts?: AccountDeps;
@@ -173,7 +180,11 @@ export class Hq {
     this.watchdog.rotator = this.rotator;
     this.probes = new ProbeRunner(this.store, cfg, this.mailbox, this.inbox);
     this.pusher = new Pusher(this.store, this.inbox, this.auth, cfg, loadOrCreateVapid(cfg.stateDir, cfg.pushContact),
-      deps.telegram ?? telegramVia(cfg.telegramCmd, cfg.telegramChat), deps.webPush);
+      deps.telegram ?? telegramVia(cfg.telegramCmd, cfg.telegramChat), deps.webPush,
+      deps.fcm !== undefined ? deps.fcm : fcmOrOff(join(cfg.stateDir, 'fcm-service-account.json')));
+    this.store.onEvent((e) => this.pusher.onEvent(e.type));
+    // A revoked device's phone stops getting pushes at once, as its socket closes (api.ts).
+    this.auth.onRevoke((ids) => { for (const id of ids) this.pusher.unregisterFcm(id); });
     // The CDP connection is opened on first use, so an hq with no handoff never touches Chrome.
     this.tab = new TabHandoffs(this.store, this.inbox, this.mailbox, cfg.tab, deps.tabBrowser ?? new CdpTabBrowser(cfg.tab.cdpUrl, tabLog));
     this.ingest = new Ingest(this, deps.ticketer);
@@ -537,6 +548,7 @@ export class Hq {
 
   async stop(): Promise<void> {
     this.loopWatch.stop();
+    this.pusher.stop();
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     this.accounts.stop();

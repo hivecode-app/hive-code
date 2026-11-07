@@ -523,6 +523,18 @@ export function buildRoutes(hq: Hq): [string, RegExp, Handler][] {
     try { hq.pusher.subscribe(b as never); } catch (e) { throw new HttpError(400, (e as Error).message); }
     return { ok: true };
   });
+  // FCM (task 1474): the Android app's token, per device; ack: the phone got a push (push.ts fcmReachable).
+  const deviceOf = (caller: { kind: string; id?: string }) => {
+    if (caller.kind !== 'device' || !caller.id) throw new HttpError(403, 'a device only');
+    return caller.id;
+  };
+  route('POST', '/api/push/fcm', async ({ body, caller }) => {
+    const id = deviceOf(caller);
+    try { hq.pusher.registerFcm(id, str((await body()).token, 'token')!); } catch (e) { throw e instanceof HttpError ? e : new HttpError(400, (e as Error).message); }
+    return { ok: true };
+  });
+  route('DELETE', '/api/push/fcm', ({ caller }) => { hq.pusher.unregisterFcm(deviceOf(caller)); return { ok: true }; });
+  route('POST', '/api/push/fcm/ack', ({ caller }) => { hq.pusher.ackFcm(deviceOf(caller)); return { ok: true }; });
 
   // B.7 accounts: the view, "כולם ל-X" (name null = automatic), guided login, identity check, quota now.
   route('GET', '/api/accounts', () => hq.accounts.view());

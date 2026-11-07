@@ -19,11 +19,11 @@ test('store: WAL, migrations idempotent across reopen, toggles seeded once', () 
     const path = join(dir, 'hq.db');
     const s1 = new Store(path);
     assert.equal(s1.db.pragma('journal_mode', { simple: true }), 'wal');
-    assert.equal(s1.schemaVersion, 41);
+    assert.equal(s1.schemaVersion, 42);
     s1.setToggle('probes', false);
     s1.close();
     const s2 = new Store(path);
-    assert.equal(s2.schemaVersion, 41);
+    assert.equal(s2.schemaVersion, 42);
 
     assert.equal(s2.toggle('probes'), false, 'manual off survives restart');
     assert.equal(s2.toggle('scheduler'), true);
@@ -320,7 +320,7 @@ test('v24: an inbox with rows from before `links` upgrades, and they have none',
     s.db.pragma('user_version = 23');
     s.db.prepare(`INSERT INTO inbox (kind, title, body, urgency, blocking, created_at) VALUES ('go', 'GO: ישן', '', 'normal', 1, 100)`).run();
     (s as unknown as { migrate(): void }).migrate();
-    assert.equal(s.schemaVersion, 41);
+    assert.equal(s.schemaVersion, 42);
 
     const row = s.db.prepare('SELECT title, links FROM inbox').get() as { title: string; links: string | null };
     assert.deepEqual(row, { title: 'GO: ישן', links: null });
@@ -347,7 +347,7 @@ test('v25 (#331): an ask the manager "answered" with a plain tell goes back to i
     item.run('ask', 'dana', 'ask-explicit', 'resolved', 3);
     item.run('escalation_note', 'yoav', 'ask-explicit', 'open', null);
     (s as unknown as { migrate(): void }).migrate();
-    assert.equal(s.schemaVersion, 41);
+    assert.equal(s.schemaVersion, 42);
 
     const open = s.db.prepare(`SELECT kind, from_identity, ref FROM inbox WHERE state = 'open' ORDER BY ref, kind`).all();
     assert.deepEqual(open, [{ kind: 'escalation_note', from_identity: 'yoav', ref: 'ask-explicit' }, { kind: 'ask', from_identity: 'dana', ref: 'ask-plain' }]);

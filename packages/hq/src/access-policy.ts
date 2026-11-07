@@ -489,7 +489,7 @@ export function planBuild(res: BuildResource, argv: string[]): Verdict {
 
 // ── hq.db, read only ───────────────────────────────────────────────────────
 
-const SENSITIVE_TABLES = /\b(devices|passkeys|pair_codes|push_subscriptions|accounts|tab_handoffs)\b/i;
+const SENSITIVE_TABLES = /\b(devices|passkeys|pair_codes|push_subscriptions|fcm_tokens|accounts|tab_handoffs)\b/i;
 const WRITE_WORDS = /\b(insert|update|delete|drop|alter|create|replace|attach|detach|pragma|vacuum|reindex|load_extension|savepoint|begin|commit|rollback)\b/i;
 
 /** One SELECT (or WITH … SELECT) on hq.db. The connection is read-only as well; this keeps the card honest and the tokens out. */

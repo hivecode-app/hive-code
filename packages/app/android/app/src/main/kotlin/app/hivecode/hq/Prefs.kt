@@ -19,7 +19,7 @@ class Prefs(context: Context) {
     fun configure(baseUrl: String, token: String) = p.edit {
         // A different server means a different event log: start the cursor over.
         if (baseUrl.trimEnd('/') != this@Prefs.baseUrl) {
-            remove(K_SEQ); remove(K_INBOX); remove(K_ASKS); remove(K_BOARD); remove(K_TOGGLES); remove(K_CONVS)
+            remove(K_SEQ); remove(K_FCM); remove(K_FCM_AT); remove(K_INBOX); remove(K_ASKS); remove(K_BOARD); remove(K_TOGGLES); remove(K_CONVS)
             remove(K_DISMISSED); remove(K_ALERTED); remove(K_SNOOZE)
         }
         putString(K_BASE, baseUrl.trimEnd('/'))
@@ -27,7 +27,7 @@ class Prefs(context: Context) {
     }
 
     fun clearConfig() = p.edit {
-        remove(K_BASE); remove(K_TOKEN); remove(K_SEQ)
+        remove(K_BASE); remove(K_TOKEN); remove(K_SEQ); remove(K_FCM); remove(K_FCM_AT)
         remove(K_INBOX); remove(K_ASKS); remove(K_BOARD); remove(K_TOGGLES); remove(K_CONVS)
     }
 
@@ -40,10 +40,11 @@ class Prefs(context: Context) {
             p.edit(commit = true) { putString(K_NONCE, it) }
         }
 
-    /** Last hq event seq seen, for `/ws?after=`. -1 = never connected. */
-    var lastSeq: Long
-        get() = p.getLong(K_SEQ, -1L)
-        set(v) = p.edit { putLong(K_SEQ, v) }
+    /** The FCM token hq has for this phone, and when it took it (PushRegistration). */
+    var fcmRegistered: String? by string(K_FCM)
+    var fcmRegisteredAt: Long
+        get() = p.getLong(K_FCM_AT, 0L)
+        set(v) = p.edit { putLong(K_FCM_AT, v) }
 
     // Raw JSON of the last successful fetches. Parsed on read; the widget and tiles render from it.
     var inboxJson: String? by string(K_INBOX)
@@ -123,7 +124,9 @@ class Prefs(context: Context) {
         val LOCK = Any()
         const val K_BASE = "base_url"
         const val K_TOKEN = "token"
-        const val K_SEQ = "last_seq"
+        const val K_SEQ = "last_seq" // the old socket's cursor (HqLinkService, gone): only removed
+        const val K_FCM = "fcm_registered"
+        const val K_FCM_AT = "fcm_registered_at"
         const val K_NONCE = "intent_nonce"
         const val K_INBOX = "inbox_json"
         const val K_ASKS = "asks_json"

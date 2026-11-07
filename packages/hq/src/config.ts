@@ -56,6 +56,7 @@ export interface HqConfig {
     pushAckTimeoutMs: number;    // B.8: an urgent item he hasn't taken in 5 min → Telegram, even with the app connected
     telegramAfterMs: number;     // #204: a GO / login he hasn't taken in 15 min → Telegram, even with the app connected
     appSeenMs: number;           // #204: no live link and no device seen in 10 min = the app is not connected
+    fcmAckMs: number;            // task 1474: an FCM push the phone hasn't acked in 2 min = FCM does not reach him (Telegram may go)
     backupMs: number;            // B.11: hourly
     restAfterMs: number;         // B.2: 20 min idle → rest
     restBgMaxMs: number;         // #175: background work keeps a shift up, but not past this long without an event
@@ -226,6 +227,7 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       pushAckTimeoutMs: 5 * 60_000,
       telegramAfterMs: 15 * 60_000,
       appSeenMs: 10 * 60_000,
+      fcmAckMs: 2 * 60_000,
       backupMs: 60 * 60_000,
       restAfterMs: 20 * 60_000,
       restBgMaxMs: 3 * 60 * 60_000,

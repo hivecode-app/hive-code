@@ -637,6 +637,11 @@ const MIGRATIONS: string[] = [
   // v41, phase E: versioned acknowledgement, scoped to the device that gave it.
   `CREATE TABLE consents (version TEXT NOT NULL, device TEXT NOT NULL, language TEXT NOT NULL,
     accepted_at INTEGER NOT NULL, PRIMARY KEY(version, device));`,
+
+  // v42 (task 1474): the Android app's FCM token, one per device. acked_at: the phone said it got a push (proof the token
+  // works); pending_since: the oldest high-priority push it has not acked yet (push.ts fcmReachable).
+  `CREATE TABLE fcm_tokens (device TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL,
+    last_ok_at INTEGER, failures INTEGER NOT NULL DEFAULT 0, acked_at INTEGER, pending_since INTEGER);`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */

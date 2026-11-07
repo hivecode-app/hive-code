@@ -4,8 +4,6 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- The in-app update (update/AppUpdater.kt): Android still asks once, and confirms every install. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -86,14 +84,13 @@
               />
         </activity>
 
-        <!-- Holds the hq WebSocket (self-hosted push, see the comment at the top of HqLinkService). -->
+        <!-- hq's push through FCM: wakes the app to fetch and re-post (see the comment at the top of PushService). -->
         <service
-            android:name=".hq.HqLinkService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Holds the WebSocket to the owner's self-hosted company server so blocking questions arrive without Firebase." />
+            android:name=".hq.PushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
         </service>
 
         <receiver

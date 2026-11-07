@@ -11,7 +11,8 @@ object Channels {
     const val HANDOFF = "handoff"
     const val DIGEST = "digest"
     const val MESSAGES = "messages"
-    const val SERVICE = "service"
+    /** The old foreground service's channel ("חיבור"); deleted on start, so it leaves his notification settings too. */
+    private const val OLD_SERVICE = "service"
 
     /** A login handoff is only good for 10 minutes (§5.2, timeoutAfter). */
     const val HANDOFF_TIMEOUT_MS = 10 * 60_000L
@@ -31,9 +32,9 @@ object Channels {
                 ch(HANDOFF, NotificationManagerCompat.IMPORTANCE_HIGH, "כניסה לאתר", "בקשה להיכנס לאתר מהטלפון, בתוקף 10 דקות"),
                 ch(MESSAGES, NotificationManagerCompat.IMPORTANCE_HIGH, "הודעות", "הודעה מעובד, כמו בוואטסאפ. שיחה מושתקת לא מתריעה"),
                 ch(DIGEST, NotificationManagerCompat.IMPORTANCE_LOW, "סיכום", "סיכום הבוקר וסיום פוקוס"),
-                ch(SERVICE, NotificationManagerCompat.IMPORTANCE_MIN, "חיבור", "החיבור לחברה ברקע"),
             ),
         )
+        nm.deleteNotificationChannel(OLD_SERVICE)
     }
 
     /** Which channel a worker's conversation goes to, by its most pressing item. */

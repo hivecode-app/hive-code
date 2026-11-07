@@ -1,7 +1,8 @@
 package app.hivecode
 
 import android.content.Intent
-import app.hivecode.hq.HqLinkService
+import app.hivecode.hq.HqSync
+import app.hivecode.hq.PushRegistration
 import app.hivecode.notify.WaitingCount
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -30,8 +31,9 @@ open class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
-        // The app is in the foreground, so this start is always allowed; it heals a link the system killed.
-        HqLinkService.start(this)
+        // Back in front: the native surfaces catch up (a push may have been missed), and hq has this phone's token.
+        HqSync.refresh(this)
+        PushRegistration.sync(this)
     }
 
     @Deprecated("Flutter's embedding still routes permission results through this callback")
