@@ -14,6 +14,7 @@ import 'chats.dart';
 import 'product_theme.dart';
 import 'search_screen.dart';
 import 'settings.dart';
+import 'team.dart';
 
 /// Phase B owns this shell. Phase C can add its Tasks destination here without changing routing.
 class ProductShell extends StatelessWidget {
@@ -37,8 +38,8 @@ class ProductShell extends StatelessWidget {
             final selectedChat = store.selectedConversation ?? (store.data?.conversations.isNotEmpty == true ? store.currentConversation : null);
             Widget page() => switch (nav.tab) {
               AppTab.chats => ProductChats(onSettings: () => nav.go(AppTab.settings)),
-              AppTab.status => const ProductDirectory(),
-              AppTab.projects => const ProductDirectory(projects: true),
+              AppTab.status => const ProductTeam(),
+              AppTab.projects => const ProductDirectory(),
               AppTab.settings => const ProductSettings(embedded: true),
               AppTab.tasks => const ProductTasks(),
             };
@@ -306,8 +307,7 @@ List<Team> standingTeams(CompanyData d) => [
 ];
 
 class ProductDirectory extends StatelessWidget {
-  const ProductDirectory({super.key, this.projects = false});
-  final bool projects;
+  const ProductDirectory({super.key});
   @override
   Widget build(BuildContext context) {
     final d = StoreScope.of(context).data!, l = AppLocalizations.of(context);
@@ -317,21 +317,17 @@ class ProductDirectory extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.all(20),
-          child: Text(projects ? l.projects : l.team, style: T.big),
+          child: Text(l.projects, style: T.big),
         ),
         Expanded(
           child: ListView(
-            children: projects
-                ? [
-                    for (final x in d.activeProjects) _ProjectTile(project: x),
-                    if (standing.isNotEmpty) ...[
-                      Section(l.standingTeams),
-                      for (final t in standing) _TeamTile(team: t),
-                    ],
-                  ]
-                : [
-                    for (final g in teamGroups(d, standing)) ..._group(context, g.$1, g.$2),
-                  ],
+            children: [
+              for (final x in d.activeProjects) _ProjectTile(project: x),
+              if (standing.isNotEmpty) ...[
+                Section(l.standingTeams),
+                for (final t in standing) _TeamTile(team: t),
+              ],
+            ],
           ),
         ),
       ],
@@ -357,32 +353,6 @@ class ProductDirectory extends StatelessWidget {
       rest.putIfAbsent(project ?? team, () => (project != null ? d.projectName(project) : d.teams[team]?.name ?? team, [])).$2.add(who);
     }
     return [...groups, ...rest.values].where((g) => g.$2.isNotEmpty).toList();
-  }
-
-  List<Widget> _group(BuildContext context, String title, List<Identity> people) {
-    final d = StoreScope.of(context).data!, p = context.p;
-    return [
-      Section(title),
-      for (final who in people)
-        ListTile(
-          leading: ProjectMonogram.person(d, who.id),
-          title: Text(who.name),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(who.title),
-              Row(
-                children: [
-                  Ic(statusIcon(d.presence[who.id]?.status ?? WorkerStatus.free), size: 16, color: p.text2),
-                  const SizedBox(width: 4),
-                  Expanded(child: Text(productStatus(context, d.presence[who.id]?.status ?? WorkerStatus.free))),
-                ],
-              ),
-            ],
-          ),
-          onTap: () => Nav.chat(context, who.id),
-        ),
-    ];
   }
 }
 

@@ -1200,6 +1200,56 @@ void main() {
           matchesGoldenFile('golden/tasks/hierarchy-$language-$dark.png'),
         );
       });
+      testWidgets('the finished one in the chat stays out of the fold $language $dark', (tester) async {
+        final backend = TaskBackend(he: language == 'he')
+          ..customPeople = [
+            const OrgPerson(id: 'dana', name: 'Dana', title: 'Team lead', manager: 'yoav'),
+            for (var i = 0; i < 7; i++)
+              OrgPerson(id: 'done-$i', name: 'Done $i', title: 'Developer', manager: 'dana', tasks: [(id: 10 + i, title: 'Finished task $i', state: 'done')]),
+          ];
+        await productApp(
+          tester,
+          backend: backend,
+          language: language,
+          dark: dark,
+          home: const Scaffold(
+            body: ConversationHierarchy(identity: 'done-3', sidebar: true),
+          ),
+        );
+        expect(find.byKey(const ValueKey('org-person-done-3')), findsOneWidget);
+        expect(find.byKey(const ValueKey('org-person-done-0')), findsNothing);
+        expect(find.byKey(const PageStorageKey('org-finished-dana')), findsOneWidget);
+      });
+      testWidgets('hierarchy folds more than five finished $language $dark', (tester) async {
+        final backend = TaskBackend(he: language == 'he')
+          ..customPeople = [
+            const OrgPerson(id: 'dana', name: 'Dana', title: 'Team lead', manager: 'yoav'),
+            const OrgPerson(id: 'ido', name: 'Ido', title: 'Developer', manager: 'dana', tasks: [(id: 2, title: 'Improve map loading', state: 'running')]),
+            for (var i = 0; i < 7; i++)
+              OrgPerson(id: 'done-$i', name: 'Done $i', title: 'Developer', manager: 'dana', tasks: [(id: 10 + i, title: 'Finished task $i', state: 'done')]),
+          ];
+        await productApp(
+          tester,
+          backend: backend,
+          language: language,
+          dark: dark,
+          home: const Scaffold(
+            body: ConversationHierarchy(identity: 'dana', sidebar: true),
+          ),
+        );
+        expect(find.byKey(const ValueKey('org-person-done-0')), findsNothing);
+        expect(find.byKey(const ValueKey('org-person-ido')), findsOneWidget);
+        await expectLater(
+          find.byType(MaterialApp),
+          matchesGoldenFile('golden/tasks/hierarchy-folded-$language-$dark.png'),
+        );
+        await tester.tap(find.byKey(const PageStorageKey('org-finished-dana')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('org-person-done-0')));
+        await tester.pumpAndSettle();
+        expect(tester.widget<ChatScreen>(find.byType(ChatScreen).last).identityId, 'done-0');
+        expect(tester.takeException(), isNull);
+      });
       testWidgets('hierarchy large golden $language $dark', (tester) async {
         await productApp(
           tester,

@@ -3479,5 +3479,76 @@
   "notifBadgeTitle": "The number on the app",
   "notifBadgeBody": "What waits for you: approval requests and questions. In the browser it also counts worker messages you haven't read yet, without muted chats.",
   "notifTogetherTitle": "A few in a row",
-  "notifTogetherBody": "A regular message waits 20 seconds before it rings, so a few in a row ring once. An urgent one rings right away."
+  "notifTogetherBody": "A regular message waits 20 seconds before it rings, so a few in a row ring once. An urgent one rings right away.",
+  "advancedMode": "Advanced mode",
+  "advancedHint": "Company map, resources and automations",
+  "finishedToday": "Finished today · {count}",
+  "@finishedToday": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "teamColName": "Name",
+  "teamColRole": "Role",
+  "teamColState": "State",
+  "teamColTask": "Current task",
+  "teamChat": "Chat",
+  "finishedFold": "Finished · {count}",
+  "@finishedFold": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "teamSumWaiting": "{count, plural, =1{1 needs you} other{{count} need you}}",
+  "@teamSumWaiting": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "teamSumBlocked": "{count} blocked",
+  "@teamSumBlocked": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "teamSumWorking": "{count} working",
+  "@teamSumWorking": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "teamSumFree": "{count} available",
+  "@teamSumFree": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "teamSumResting": "{count} resting",
+  "@teamSumResting": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "teamChatWith": "Chat with {name}",
+  "@teamChatWith": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  }
 }

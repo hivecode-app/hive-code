@@ -1668,5 +1668,20 @@
   "notifBadgeTitle": "המספר על האפליקציה",
   "notifBadgeBody": "מה שמחכה לך: בקשות אישור ושאלות. בדפדפן נספרות בו גם הודעות של עובדים שעוד לא קראת, בלי שיחות מושתקות.",
   "notifTogetherTitle": "כמה ברצף",
-  "notifTogetherBody": "הודעה רגילה מחכה 20 שניות לפני הצלצול, כך שכמה הודעות ברצף מצלצלות פעם אחת. הודעה דחופה מצלצלת מיד."
+  "notifTogetherBody": "הודעה רגילה מחכה 20 שניות לפני הצלצול, כך שכמה הודעות ברצף מצלצלות פעם אחת. הודעה דחופה מצלצלת מיד.",
+  "advancedMode": "מצב מתקדם",
+  "advancedHint": "מפת החברה, משאבים ואוטומציות",
+  "finishedToday": "סיימו היום · {count}",
+  "teamColName": "שם",
+  "teamColRole": "תפקיד",
+  "teamColState": "מצב",
+  "teamColTask": "משימה נוכחית",
+  "teamChat": "צ'אט",
+  "finishedFold": "סיימו · {count}",
+  "teamSumWaiting": "{count, plural, =1{1 מחכה לך} other{{count} מחכים לך}}",
+  "teamSumBlocked": "{count, plural, =1{1 חסום} other{{count} חסומים}}",
+  "teamSumWorking": "{count} בעבודה",
+  "teamSumFree": "{count, plural, =1{1 פנוי} other{{count} פנויים}}",
+  "teamSumResting": "{count} במנוחה",
+  "teamChatWith": "צ'אט עם {name}"
 }

@@ -141,6 +141,14 @@ class _ConversationHierarchyState extends State<ConversationHierarchy>
           final members = list
               .where((x) => x.manager == heading.id && x.id != heading.id)
               .toList();
+          // A few who finished (every task done, or gone) stay in place, in the order hq gave, two taps from the chat.
+          // Past five they fold at the end, so the ones working now are not lost under them.
+          // The one in the chat never folds, so it stays in the tree beside its own conversation.
+          bool done(OrgPerson x) =>
+              x.id != widget.identity && (!x.active || (x.tasks.isNotEmpty && x.tasks.every((t) => t.state == 'done')));
+          final fold = members.where(done).length > 5;
+          final live = [for (final x in members) if (!fold || !done(x)) x];
+          final finished = [if (fold) ...members.where(done)];
           final supervisor = list
               .where((x) => x.id == heading.manager && x.id != heading.id)
               .firstOrNull;
@@ -176,10 +184,24 @@ class _ConversationHierarchyState extends State<ConversationHierarchy>
                       padding: const EdgeInsets.all(16),
                       child: Text(l.progressNoTeam),
                     ),
-                  for (final person in members)
+                  for (final person in live)
                     Padding(
                       padding: const EdgeInsetsDirectional.only(start: 24),
                       child: _branch(context, person, list, {heading.id}),
+                    ),
+                  if (finished.isNotEmpty)
+                    ExpansionTile(
+                      key: PageStorageKey('org-finished-${heading.id}'),
+                      expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+                      trailing: const Ic('expand_more'),
+                      title: Text(l.finishedFold(finished.length), style: T.section.copyWith(color: p.text2)),
+                      children: [
+                        for (final person in finished)
+                          Padding(
+                            padding: const EdgeInsetsDirectional.only(start: 24),
+                            child: _branch(context, person, list, {heading.id}),
+                          ),
+                      ],
                     ),
                 ],
               ),
