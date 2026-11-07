@@ -82,10 +82,10 @@ test('a task worker on Codex: task instructions, no browser (also not the one in
     p.sendUser('משימה');
     await until(() => events.some((e) => e.kind === 'result'));
     const start = readFileSync(join(root, 'rpc.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).find((x) => x.method === 'thread/start').params;
-    assert.match(start.developerInstructions, /# עובד משימה על Codex/);
-    assert.match(start.developerInstructions, /לא נוגעים בפרודקשן/);
-    assert.match(start.developerInstructions, /נכתב ב-Codex \(gpt-6-astra\), נסקר ב-Claude/);
-    assert.doesNotMatch(start.developerInstructions, /המשכיות רזה/);
+    assert.match(start.developerInstructions, /# Task worker on Codex/);
+    assert.match(start.developerInstructions, /Do not touch production/);
+    assert.match(start.developerInstructions, /written on Codex \(gpt-6-astra\) and reviewed on Claude/);
+    assert.doesNotMatch(start.developerInstructions, /Lean continuity mode/);
     assert.deepEqual(start.config.mcp_servers.browser, { command: 'true', enabled: false });
     assert.equal(start.config.mcp_servers.company.required, true);
     assert.equal(start.config['features.apps'], false);

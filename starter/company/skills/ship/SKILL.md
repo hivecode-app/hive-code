@@ -3,66 +3,66 @@ name: ship
 description: Take a finished task from branch to merged in the agent company, and prepare a production GO request. Use when a task's code is ready - it covers commit, push, PR, independent review, CI, worker squash-merge, worktree cleanup, and the GO summary for production.
 ---
 
-# משלוח: מענף למיזוג, ומשם ל-GO
+# Ship: from branch to merge, and from there to GO
 
-לפי אמנת ברירת המחדל ב-`company/company.md`. אם לפרויקט יש חריגה באמנה שלו (`company/projects/<p>.md`), החריגה גוברת. חריגה שלא כתובה לא קיימת.
+Per the default charter in `company/company.md`. If the project has a deviation in its charter (`company/projects/<p>.md`), the deviation wins. A deviation that is not written does not exist.
 
-## 1. לפני ה-PR
+## 1. Before the PR
 
-- עובדים ב-worktree של המשימה (`<repo>/.worktrees/<task>`), על ענף משלה. לא על `main`. hq פותח אותו ב-checkout שבאמנה, והנתיב מופיע בהודעת המשימה.
-- הרץ את [verify](../verify/SKILL.md). בלי אימות לא פותחים PR.
+- Work in the task's worktree (`<repo>/.worktrees/<task>`), on its own branch. Not on `main`. hq opens it in the charter's checkout, and the path appears in the task message.
+- Run [verify](../verify/SKILL.md). No PR without verification.
 
-## 2. קומיט ו-PR
+## 2. Commit and PR
 
-- קומיט עם הודעה שמסבירה למה, לא רק מה. בסוף ההודעה שורת ה-attribution שה-harness נותן.
+- Commit with a message that explains why, not only what. At the end of the message, the attribution line the harness gives.
 - `git push -u origin <branch>`.
-- `gh pr create` עם גוף בעברית: מה השתנה, למה, איך אומת, ומה לא אומת.
-- **משימה אחת היא PR אחד.** תוכן ונתונים (בנקי שאלות, קטלוגים, תרגומים, assets, קבצים שנוצרים אוטומטית) נכנסים ב-commit נפרד, או ב-PR נפרד אם זה נוח יותר. הסוקר בודק תוכן בדגימה ובולידציה, לא שורה-שורה.
-- **PR של יותר מכ-1,000 שורות קוד** (בלי תוכן): לפני הסקירה בודקים אם הוא מערבב שני דברים שלא תלויים זה בזה. אם כן, מפצלים לשני PRים. אם לא, משאירים אותו כמו שהוא.
+- `gh pr create` with a body in the owner's language: what changed, why, how it was verified, and what was not verified.
+- **One task is one PR.** Content and data (question banks, catalogs, translations, assets, generated files) go in a separate commit, or in a separate PR if that is more convenient. The reviewer checks content by sampling and validation, not line by line.
+- **A PR of more than about 1,000 lines of code** (excluding content): before review, check whether it mixes two things that do not depend on each other. If so, split it into two PRs. If not, leave it as it is.
 
-## 3. סקירה בלתי תלויה
+## 3. Independent review
 
-- `request_review(pr)` פותח סוקר בהקשר נקי ([reviewer](../reviewer/SKILL.md)). אם הכלי עוד לא קיים, פותחים subagent בהקשר נקי עם ה-skill של הסוקר, בלי כלי עריכה.
-- **סבב אחד, ותיקונים, וסבב מצומצם אחד** ([reviewer](../reviewer/SKILL.md#סבבים-מלאה-אחת-ומצומצמת-אחת)).
-- **changes בסקירה המלאה:** מתקנים. ממצא חמור או בינוני מתוקן עם בדיקה שנכשלת לפני התיקון. דוחפים, ומבקשים סקירה מצומצמת אחת על ה-diff של התיקונים בלבד.
-- **ממצא `### לטיקט` בסקירה המצומצמת** (חדש, ולא נובע מהתיקונים): לא חוסם. פותחים עליו טיקט ומקשרים אותו ב-PR.
-- **changes בסקירה המצומצמת:** אין סבב נוסף. מתקנים, מוסיפים בדיקה, מחכים ל-CI ירוק, וכותבים על ה-PR הערה עם `fixed-after-narrow: <headRefOid>` ומה תוקן.
-- **קוד חדש אחרי האישור** (פיצ'ר נוסף, או rebase עם התנגשויות אמיתיות): לא תיקון. מקבל סקירה משלו על הקוד החדש, באותו כלל.
-- **approve:** ממשיכים.
+- `request_review(pr)` opens a reviewer in a clean context ([reviewer](../reviewer/SKILL.md)). If the tool does not exist yet, open a subagent in a clean context with the reviewer skill, without edit tools.
+- **One round, fixes, and one narrow round** ([reviewer](../reviewer/SKILL.md#rounds-one-full-one-narrow)).
+- **changes in the full review:** fix. A high or medium finding is fixed with a test that fails before the fix. Push, and ask for one narrow review on the diff of the fixes only.
+- **A `### For a ticket` finding in the narrow review** (new, and not coming from the fixes): does not block. Open a ticket for it and link it in the PR.
+- **changes in the narrow review:** there is no further round. Fix, add a test, wait for green CI, and write a comment on the PR with `fixed-after-narrow: <headRefOid>` and what was fixed.
+- **New code after approval** (an extra feature, or a rebase with real conflicts): not a fix. It gets its own review of the new code, under the same rule.
+- **approve:** continue.
 
-## 4. CI ומיזוג
+## 4. CI and merge
 
-- **בדיקת ה-CI של הפרויקט** היא `ci_check` שבאמנה: השם של ה-check ב-GitHub שמיזוג מחכה לו.
-- מחכים לה עד שהיא נגמרת, ואז בודקים שהיא עברה על ה-commit האחרון של ה-PR:
+- **The project's CI check** is the charter's `ci_check`: the name of the GitHub check a merge waits for.
+- Wait for it until it finishes, then check that it passed on the PR's latest commit:
   ```bash
   gh pr checks <n> --watch --interval 20
-  gh pr checks <n> --json name,state --jq '[.[] | select(.name == "<ci_check>")] | last | .state'   # חייב להיות SUCCESS
+  gh pr checks <n> --json name,state --jq '[.[] | select(.name == "<ci_check>")] | last | .state'   # must be SUCCESS
   ```
-  - **FAILURE:** קוראים את הלוג (`gh run view <run> --log-failed`), מתקנים, דוחפים, ומחכים שוב.
-  - **אין בדיקה בשם הזה**, או שהיא תקועה ב-pending יותר מ-15 דקות: לא ממזגים. אם ה-CI רץ על runner מקומי, הוא כנראה למטה (`systemctl --user status` של ה-runner שבאמנה). מדווחים למי ששלח את המשימה.
-  - **באמנה כתוב `ci: none`:** אין מה לחכות לו. הסקירה היא השער.
-- **העובד ממזג בעצמו, רק כשהבדיקה ירוקה:** `gh pr merge <n> --squash --delete-branch`.
-- **ניקוי:** את ה-worktree של המשימה hq פתח, ו-hq גם סוגר אותו כשהמשימה נסגרת (`status` עם `state: "done"`). הוא שומר עבודה לא מקומטת ל-`refs/company/preserved/<task>` ומסיר בלי `--force`. לא מסירים אותו בעצמך: הוא ה-cwd של המשמרת. worktree שפתחת בעצמך (כשלא קיבלת אחד מ-hq) מסירים באותה דרך.
-- מה שנלמד נכנס לזיכרון הפרויקט (`remember`), והמשימה נסגרת עם סיכום קצר.
-- **"מה לבדוק":** אם המשימה עוד מחכה לבעל החברה, סוגרים אותה עם `awaiting` ו-`awaiting_note` (שורה במילים שלו) ו-`pr`: `deploy` כשמוזג ומחכה ל-GO או לפריסה, `check` כשהוא כבר בפרודקשן והוא צריך לבדוק משהו בעצמו, `verify` כשהוא צריך לבדוק לפני שחרור (למשל build ב-TestFlight). `check` ו-`verify` מופיעים אצלו מיד ב"מחכה לך" עם "בוצע" ו"נכשל". ראש הצוות יכול לסמן או לתקן ב-`close_team`, גם אחרי שהמשימה נסגרה.
+  - **FAILURE:** read the log (`gh run view <run> --log-failed`), fix, push, and wait again.
+  - **No check by that name**, or it is stuck in pending for more than 15 minutes: do not merge. If CI runs on a local runner, it is probably down (`systemctl --user status` of the runner in the charter). Report to whoever sent the task.
+  - **The charter says `ci: none`:** there is nothing to wait for. The review is the gate.
+- **The worker merges by itself, only when the check is green:** `gh pr merge <n> --squash --delete-branch`.
+- **Cleanup:** hq opened the task's worktree, and hq also closes it when the task closes (`status` with `state: "done"`). It saves uncommitted work to `refs/company/preserved/<task>` and removes without `--force`. Do not remove it yourself: it is the shift's cwd. A worktree you opened yourself (when you did not get one from hq) is removed the same way.
+- What was learned goes into the project's memory (`remember`), and the task closes with a short summary.
+- **"What to check":** if the task is still waiting for the owner, close it with `awaiting` and `awaiting_note` (one line in the owner's words) and `pr`: `deploy` when merged and waiting for GO or for a deploy, `check` when it is already in production and the owner needs to check something personally, `verify` when the owner needs to check before release (for example a build in TestFlight). `check` and `verify` show up for the owner immediately in the "Needs you" list with "Done" and "Failed". The team lead can mark or correct this in `close_team`, even after the task closed.
 
-## 5. פרודקשן: בקשת GO
+## 5. Production: the GO request
 
-פריסה לפרודקשן רק אחרי GO של בעל החברה, אלא אם האמנה כותבת חריגה. הבקשה נשלחת ב-`request_go`, בעברית, קצרה, ונקראת בטלפון:
+Deploy to production only after the owner's GO, unless the charter writes a deviation. The request is sent with `request_go`, in the owner's language, short, and read on the phone:
 
 ```
-GO לפרודקשן · <פרויקט> · <גרסה או PR>
-מה נכנס: <2–4 שורות, במונחי מוצר>
-סיכון: <מה יכול להישבר, ומי ירגיש>
-חזרה אחורה: <הפקודה או הגרסה הקודמת, וכמה זמן זה לוקח>
+GO to production · <project> · <version or PR>
+What goes in: <2–4 lines, in product terms>
+Risk: <what can break, and who will feel it>
+Rollback: <the command or the previous version, and how long it takes>
 ```
 
-- **בלילה:** לא פורסים בלי חריגה כתובה. הבקשה נכנסת ל"GO מחכה" לבוקר.
-- אחרי הפריסה: בודקים שהשירות עונה, ושה-probes של הפרויקט עוברים (כשהם קיימים). מדווחים בשורה אחת.
-- **הפריסה מדווחת ל-hq** מה נכנס: `POST /api/deploys` עם `project`, `sha`, `target` ו-`prs` (מספרי PR במאגר של הפרויקט) או `tasks` (מזהי משימות). משימות שחיכו לפריסה יורדות מ"מה לבדוק". הפרויקט קורא לזה מסקריפט הפריסה שלו, או שהעובד מדווח ידנית אחרי פריסה. משימה שעכשיו צריך לבדוק בפרודקשן עוברת ל-`check` ב-`close_team`.
+- **At night:** do not deploy without a written deviation. The request goes into "GO waiting" for the morning.
+- After the deploy: check that the service answers, and that the project's probes pass (when they exist). Report in one line.
+- **The deploy reports to hq** what went in: `POST /api/deploys` with `project`, `sha`, `target` and `prs` (PR numbers in the project's repo) or `tasks` (task ids). Tasks that waited for the deploy leave "What to check". The project calls this from its deploy script, or the worker reports manually after a deploy. A task that now needs checking in production moves to `check` in `close_team`.
 
-## מה לא עושים
+## What we do not do
 
-- לא ממזגים בלי approve (או `fixed-after-narrow` אחרי הסקירה המצומצמת) ובלי `ci_check` ירוקה על ה-commit האחרון.
-- לא דוחפים ל-`main` ישירות.
-- לא פורסים "רק תיקון קטן" בלי GO.
+- Do not merge without approve (or `fixed-after-narrow` after the narrow review) and without a green `ci_check` on the latest commit.
+- Do not push to `main` directly.
+- Do not deploy "just a small fix" without GO.

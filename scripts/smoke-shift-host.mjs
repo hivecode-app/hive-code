@@ -52,7 +52,7 @@ const check = (name, cond, detail = '') => { ok &&= !!cond; log(cond ? 'PASS' : 
 const a = connect('hq-smoke-a', null, 0);
 const hello = await a.wait((f) => f.t === 'hello');
 await a.wait((f) => f.t === 'live');
-a.send({ t: 'send', id: 'c1', msgId: 'm-smoke-1', text: '[הודעה מ-smoke · דחיפות: רגילה · m-smoke-1]\nCall the company MCP tool `status` with state "smoke" and then reply with exactly: SMOKE-OK', priority: 'next' });
+a.send({ t: 'send', id: 'c1', msgId: 'm-smoke-1', text: '[Message from smoke · urgency: normal · m-smoke-1]\nCall the company MCP tool `status` with state "smoke" and then reply with exactly: SMOKE-OK', priority: 'next' });
 for (const st of ['written', 'delivered', 'started']) {
   const d = await a.wait((f) => f.t === 'delivery' && f.msgId === 'm-smoke-1' && f.state === st);
   check(`delivery ${st}`, d, `seq ${d.seq}`);

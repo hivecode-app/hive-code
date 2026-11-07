@@ -1,9 +1,9 @@
-# זיכרון החברה (L3)
+# Company memory (L3)
 
-בעלים: מנהל החברה. עובדות קבועות שכל עובד עשוי להזדקק להן.
+Owner: the company manager. Permanent facts any worker may need.
 
-| קובץ | מה יש בו |
+| File | What is in it |
 |---|---|
-| [machines.md](machines.md) | המכונות שהחברה רצה עליהן: חומרה, קיבולת, שירותים ומלכודות |
-| [conventions.md](conventions.md) | מוסכמות: שפה, git, worktrees, תאריכים, איפה לא לשמור מצב |
-| [design-taste.md](design-taste.md) | ספר העיצוב: איך כל ממשק, מסמך והודעה צריכים להיראות, ורשימת "זבל של AI" |
+| [machines.md](machines.md) | The machines the company runs on: hardware, capacity, services and traps |
+| [conventions.md](conventions.md) | Conventions: language, git, worktrees, dates, where not to keep state |
+| [design-taste.md](design-taste.md) | The design book: how every interface, document and message should look, and the "AI slop" list |

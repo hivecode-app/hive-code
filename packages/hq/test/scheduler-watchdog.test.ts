@@ -500,7 +500,7 @@ test('#175: a rested task is not shown as running, and hq wakes it after restWak
     assert.equal(launcher.launches.at(-1)!.resume, true);
     const wake = hq.store.db.prepare(`SELECT body, from_identity FROM messages WHERE id LIKE ?`).get(`task-${t.id}-rest-wake-%`) as { body: string; from_identity: string };
     assert.equal(wake.from_identity, 'hq');
-    assert.match(wake.body, /בדוק את מה שחיכית לו ותמשיך/);
+    assert.match(wake.body, /Check what you were waiting for and carry on/);
     assert.equal(hq.openTasks().find((o) => o.id === t.id)!.state, 'running');
   } finally { await env.cleanup(); }
 });

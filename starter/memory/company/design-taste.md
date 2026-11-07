@@ -1,72 +1,72 @@
 ---
 name: design-taste
-description: ספר העיצוב של החברה. כללי בסיס לכל ממשק, מסמך והודעה שהחברה מוציאה, ורשימת "זבל של AI" שאסור לשלוח. חל על כל עובד, בכל פרויקט. ההעדפות של בעל החברה נכנסות לכאן כשהוא אומר אותן.
+description: The company's design book. Base rules for every interface, document and message the company puts out, and an "AI slop" list that must not be sent. Applies to every worker, in every project. The owner's preferences go in here when the owner states them.
 type: feedback
 scope: company
 ---
 
-# ספר העיצוב
+# The design book
 
-כללי בסיס. הם לא העדפה של אף אחד, אלא מה שמוצר בוגר עושה. כשבעל החברה אומר משהו על עיצוב, זה נכנס לסעיף "ההעדפות של בעל החברה" עם ציטוט ותאריך, וגובר על מה שכתוב כאן.
+Base rules. They are nobody's preference, but what a mature product does. When the owner says something about design, it goes into the section "The owner's preferences" with a quote and a date, and wins over what is written here.
 
-כשכלל כאן סותר את האיפיון של פרויקט מסוים (מסמך עיצוב, Figma, מערכת עיצוב קיימת), הפרויקט גובר.
+When a rule here contradicts a specific project's specification (a design document, Figma, an existing design system), the project wins.
 
-## 1. עשרת הכללים
+## 1. The ten rules
 
-1. **מעתיקים מוצר בוגר, לא ממציאים.** מוצאים את האפליקציה המוכרת שעושה את אותו דבר, ומעתיקים ממנה את הדפוס: התנהגות, תנועה, טעינה. הלוגו הוא היוצא מן הכלל: מקורי.
-2. **סטנדרטי ושקט עדיף על "מעוצב".** פלטה נייטרלית, רקע בהיר, טקסט כמעט שחור, קווים דקים, וצבע המותג רק על הפעולה הראשית ועל קישורים.
-3. **אין placeholder שמתחזה למשהו.** לוגו זמני, אייקון ברירת מחדל של framework, ריבוע עם אות: עדיף שלא יהיה כלום.
-4. **אימוג'י אינו אייקון.** לא בכפתור, לא בתפריט, לא בכותרת, לא כסמל של מצב.
-5. **סט אייקונים אחד לכל מוצר.** ספרייה בוגרת אחת, משקל קו אחד. בלי SVG שצויר ביד ובלי ערבוב סטים. בממשקי החברה: Material Symbols.
-6. **כל המתנה מקבלת משוב.** ספינר, התקדמות, או מסך שעולה לפני הנתונים. אף פעם לא מסך קפוא או כפתור שלא מגיב.
-7. **תנועה בשלה או בלי תנועה.** בלי קפיצות בטעינה, בלי הבהובים, בלי אנימציה בשביל אנימציה.
-8. **ניסוח פשוט וקצר, בלי ז'רגון ובלי קודים.** שגיאה היא משפט אחד: מה קרה ומה לעשות. הפרט הטכני הולך ללוג.
-9. **טקסט לא נשמע כמו AI** (סעיף 3).
-10. **שינוי עיצוב נשאר בהיקף שהתבקש.** החלפת אייקונים, גופן או צבעים לא נכנסת "על הדרך". בודקים על המכשיר האמיתי לפני שמוציאים.
+1. **Copy a mature product, do not invent.** Find the well-known app that does the same thing, and copy the pattern from it: behaviour, motion, loading. The logo is the exception: original.
+2. **Standard and quiet beats "designed".** A neutral palette, a light background, near-black text, thin lines, and the brand colour only on the primary action and on links.
+3. **No placeholder that pretends to be something.** A temporary logo, a framework's default icon, a square with a letter: better to have nothing.
+4. **An emoji is not an icon.** Not in a button, not in a menu, not in a heading, not as a state symbol.
+5. **One icon set per product.** One mature library, one stroke weight. No hand-drawn SVG and no mixing sets. In the company's interfaces: Material Symbols.
+6. **Every wait gets feedback.** A spinner, progress, or a screen that comes up before the data. Never a frozen screen or a button that does not respond.
+7. **Mature motion or no motion.** No jumps while loading, no flicker, no animation for the sake of animation.
+8. **Plain, short wording, no jargon and no codes.** An error is one sentence: what happened and what to do. The technical detail goes to the log.
+9. **Text does not sound like AI** (section 3).
+10. **A design change stays in the scope that was asked.** Swapping icons, font or colours does not go in "on the way". Check on the real device before shipping.
 
-## 2. "זבל של AI": מה אסור לשלוח
+## 2. "AI slop": what must not be sent
 
-עוברים על הרשימה לפני ששולחים לבעל החברה צילום מסך, גרסה או דף. אם פריט אחד מופיע, מתקנים לפני ששולחים.
+Go through the list before sending the owner a screenshot, a version or a page. If one item appears, fix it before sending.
 
-- [ ] גרדיאנט סגול-כחול, רקע "זוהר", glassmorphism, טשטוש מאחורי כרטיסים.
-- [ ] רקע כהה "דרמטי" בלי שהתבקש.
-- [ ] Hero גנרי: כותרת ענקית עם מילה בגרדיאנט, תת-כותרת סתמית, שני כפתורים ומוקאפ צף.
-- [ ] רשת של שלושה כרטיסים, בכל אחד אייקון בעיגול צבעוני, כותרת ושורה.
-- [ ] רשימת יתרונות עם וי ליד כל שורה ("✓ מהיר ✓ בטוח").
-- [ ] כרטיסים מעוגלים מדי עם צל רך וכבד על הכול.
-- [ ] אימוג'י כתבליטים, בכותרות או בתפקיד אייקון.
-- [ ] לוגו או אייקון זמני, או אייקון ברירת המחדל של ה-framework.
-- [ ] מיקרו-קופי ממלא מקום: "חוויה חלקה", "פתרון חכם ומתקדם", "ברוכים הבאים ל…".
-- [ ] Badge של "חדש!" או "AI" על דברים שאינם חדשים.
-- [ ] אנימציית כניסה לכל אלמנט בגלילה.
-- [ ] הודעת שגיאה עם קוד, `exception`, סטטוס HTTP או שם פנימי.
-- [ ] פעולה בלי חיווי: כפתור שלא מראה שהוא עובד.
-- [ ] מספרים מומצאים או המלצות לקוחות שלא קיימות.
+- [ ] A purple-blue gradient, a "glowing" background, glassmorphism, blur behind cards.
+- [ ] A "dramatic" dark background that was not asked for.
+- [ ] A generic hero: a huge heading with a gradient word, a vague subtitle, two buttons and a floating mockup.
+- [ ] A grid of three cards, each with an icon in a coloured circle, a heading and a line.
+- [ ] A list of benefits with a check mark next to each line ("✓ fast ✓ secure").
+- [ ] Over-rounded cards with a soft, heavy shadow on everything.
+- [ ] Emoji as bullets, in headings or in the role of an icon.
+- [ ] A temporary logo or icon, or the framework's default icon.
+- [ ] Filler micro-copy: "a seamless experience", "a smart, advanced solution", "welcome to…".
+- [ ] A "New!" or "AI" badge on things that are not new.
+- [ ] An entrance animation for every element on scroll.
+- [ ] An error message with a code, `exception`, an HTTP status or an internal name.
+- [ ] An action without feedback: a button that does not show it is working.
+- [ ] Made-up numbers or customer testimonials that do not exist.
 
-## 3. ניסוח
+## 3. Wording
 
-- קצר, ברור, בשפה של המשתמש. בעברית: לשון ניטרלית בממשק ("יש להמשיך"), אלא אם המוצר כבר פונה אחרת.
-- בלי סימנים של טקסט שנוצר במודל: מקף ארוך, "X, לא Y", שלילה כפולה, שאלה רטורית ואז תשובה, ניסוח תאגידי.
-- המטרה: כאילו כתב את זה קופירייטר מקצועי.
-- כשבעל החברה עורך טקסט בעצמו, הנוסח שלו גובר. לא משכתבים אחריו.
+- Short, clear, in the user's language.
+- No signs of model-generated text: em dash, "X, not Y", double negatives, a rhetorical question followed by its answer, corporate phrasing.
+- The goal: as if a professional copywriter wrote it.
+- When the owner edits a text personally, the owner's version wins. Do not rewrite after the owner.
 
-## 4. טיפוגרפיה וצבע
+## 4. Typography and colour
 
-- **באפליקציה:** הגופן של המכשיר, אלא אם יש סיבה.
-- **באתר:** משפחת גופן אחת לכל אתר.
-- **ריווח:** לא צפוף. טקסט לא נחתך ולא נשבר בפריסה.
-- **צבע:** נייטרלי, וצבע מותג אחד. אדום רק לפעולה הרסנית ולשגיאה. ניגודיות 4.5:1 לפחות לטקסט.
-- **כשצריך לבחור צבע או גופן:** מראים 2–3 אפשרויות על המסך האמיתי, ומשאירים לבעל החברה לבחור.
+- **In an app:** the device's font, unless there is a reason.
+- **On a website:** one font family per site.
+- **Spacing:** not cramped. Text is not cut off and does not break the layout.
+- **Colour:** neutral, and one brand colour. Red only for a destructive action and for an error. Contrast of at least 4.5:1 for text.
+- **When a colour or font has to be chosen:** show 2–3 options on the real screen, and leave the choice to the owner.
 
-## 5. ממשקי החברה עצמה
+## 5. The company's own interfaces
 
-- מצב מוצג במילה ובאייקון, לא בצבע ולא באמוג'י.
-- לכל זהות: `symbol` (שם אייקון מ-Material Symbols) ו-`monogram` של שתי אותיות. אין שדה צבע.
+- State is shown with a word and an icon, not a colour and not an emoji.
+- Every identity has a `symbol` (an icon name from Material Symbols) and a `monogram` of two letters. There is no colour field.
 
-## 6. ההעדפות של בעל החברה
+## 6. The owner's preferences
 
-עוד אין. כל העדפה נכנסת כאן עם ציטוט ותאריך, למשל:
+None yet. Every preference goes in here with a quote and a date, for example:
 
 ```
-- **<נושא>:** <הכלל>. «<המילים שלו>» (DD/MM/YYYY)
+- **<topic>:** <the rule>. «<the owner's words>» (DD/MM/YYYY)
 ```

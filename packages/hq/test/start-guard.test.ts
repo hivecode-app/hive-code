@@ -90,8 +90,8 @@ test('#224: a brief its worker never took (claude died): no delivery_failure for
     assert.ok(!hq.inbox.open().some((i) => i.kind === 'delivery_failure' && i.from_identity === who), 'nothing for him');
     const notes = hq.mailbox.list('rotem').filter((m) => m.to_identity === 'rotem' && m.from_identity === 'hq');
     assert.equal(notes.length, 1, 'one note to the monitoring lead');
-    assert.match(notes[0]!.body, /3 פעמים ברצף/);
-    assert.ok(!hq.mailbox.list('adi').some((m) => m.to_identity === 'adi' && /לא עלתה/.test(m.body)));
+    assert.match(notes[0]!.body, /3 times in a row/);
+    assert.ok(!hq.mailbox.list('adi').some((m) => m.to_identity === 'adi' && /failed to start/.test(m.body)));
 
     // It goes on trying; a brief taken ends the run of failures.
     launcher.mode = 'echo';

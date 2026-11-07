@@ -101,10 +101,12 @@ const MARKER = /(?<![\w-])reviewed:[ \t]*([0-9a-f]{7,40})\b|ship-step-4:[ \t]*re
 // a regression it found is fixed with a test, and the author marks that commit `fixed-after-narrow: <sha>` (01/11/2026).
 // Both only in the skill's exact shape: the heading on the comment's first line and `reviewed:` on its second, its decision
 // `changes`; the mark a whole line of its own. A quoted template or a sentence that mentions them counts for nothing.
-const NARROW = /^##[ \t]*סקירה מצומצמת(?![\u0590-\u05ff])[^\n]*\nreviewed:[ \t]*[0-9a-f]{7,40}[ \t]*\n/i;
+// Hebrew or English heading (t1541: worker instructions are English): `## סקירה מצומצמת` or `## Narrow review`.
+const NARROW = /^##[ \t]*(?:סקירה מצומצמת(?![\u0590-\u05ff])|narrow review\b)[^\n]*\nreviewed:[ \t]*[0-9a-f]{7,40}[ \t]*\n/i;
 const FIXED = /^[ \t]*`?fixed-after-narrow:[ \t]*([0-9a-f]{7,40})`?[ \t]*$/gim;
 // A whole line only: a `changes` comment that quotes the string inside a sentence must not pass.
-const DECISION = /^\*\*החלטה: (approve|changes)\*\*[ \t]*$/im;
+// `**החלטה: approve**` or `**Decision: approve**`.
+const DECISION = /^\*\*(?:החלטה|decision): (approve|changes)\*\*[ \t]*$/im;
 
 /** The verdict of the latest comment/review that names `oid`: 'approve', 'changes', or null when none does. */
 export function verdictFor(view: PrView): 'approve' | 'changes' | null {
@@ -131,27 +133,27 @@ export function verdictFor(view: PrView): 'approve' | 'changes' | null {
   return verdict;
 }
 
-const HOW = 'פותחים סוקר בלתי תלוי לפי `skills/reviewer` (סוכן משנה בלי כלי עריכה); הוא כותב הערה על ה-PR עם השורה '
-  + '`reviewed: <headRefOid>` ואחריה `**החלטה: approve**`. אחרי תיקונים: סקירה מצומצמת אחת על ה-diff של התיקונים, עם `reviewed:` חדש. '
-  + 'אחרי הסקירה המצומצמת אין סבב נוסף: מתקנים רגרסיה עם בדיקה, מחכים ל-CI, וכותבים על ה-PR הערה עם `fixed-after-narrow: <headRefOid>`.';
+const HOW = 'Launch an independent reviewer per `skills/reviewer` (a subagent with no edit tools); it writes a comment on the PR with the line '
+  + '`reviewed: <headRefOid>` followed by `**Decision: approve**`. After fixes: one narrow review of the fixes\' diff, with a new `reviewed:`. '
+  + 'After the narrow review there is no further round: fix a regression with a test, wait for CI, and write a comment on the PR with `fixed-after-narrow: <headRefOid>`.';
 
 export const defaultGh: GhRun = (args, cwd, env) => new Promise((res, rej) => {
   execFile('gh', args, { cwd, env: { ...process.env, ...env }, timeout: 6000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => (err ? rej(err) : res(stdout)));
 });
 
-/** Hebrew deny reason when the command merges a PR without an approve on its head commit; null otherwise.
+/** The deny reason when the command merges a PR without an approve on its head commit; null otherwise.
  *  A failed check blocks too (no fail-open). */
 export async function checkMerge(command: string, cwd: string, run: GhRun = defaultGh, exists: (p: string) => boolean = existsSync): Promise<string | null> {
   const targets = detectMerges(command, cwd);
   for (const t of targets) {
-    if (t.unverifiable) return 'מיזוג דרך `gh api graphql` נחסם: אי אפשר לקשור אותו ל-PR ולבדוק עליו סקירה. ממזגים עם `gh pr merge <n>`.';
-    const what = `${t.repo ?? 'ה-repo הנוכחי'}${t.ref ? `#${t.ref}` : ' (ה-PR של הענף הנוכחי)'}`;
+    if (t.unverifiable) return 'Merge through `gh api graphql` blocked: it cannot be tied to a PR to check its review. Merge with `gh pr merge <n>`.';
+    const what = `${t.repo ?? 'the current repo'}${t.ref ? `#${t.ref}` : " (the current branch's PR)"}`;
     // A `cd` into a directory that does not exist yet (a worktree about to be made): gh cannot start there.
     // Run it from the hook's own cwd when the repo is known without a directory; otherwise say exactly that.
     let runCwd = t.cwd;
     if (!exists(t.cwd)) {
       if (!t.repo && !t.env) {
-        return `מיזוג של ${what} נחסם: התיקייה ${t.cwd} לא קיימת, אי אפשר לזהות את ה-repo; מוסיפים \`-R owner/repo\`.`;
+        return `Merge of ${what} blocked: the directory ${t.cwd} does not exist, so the repo cannot be identified; add \`-R owner/repo\`.`;
       }
       runCwd = cwd;
     }
@@ -162,17 +164,17 @@ export async function checkMerge(command: string, cwd: string, run: GhRun = defa
     } catch (e) {
       if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
         return !exists(runCwd)
-          ? `מיזוג של ${what} נחסם: התיקייה ${runCwd} לא קיימת, ולכן בדיקת הסקירה לא רצה (זו לא תקלה ב-\`gh\`). מוסיפים \`-R owner/repo\` ורצים מתיקייה שקיימת.`
-          : `מיזוג של ${what} נחסם: \`gh\` לא נמצא ב-PATH, ולכן בדיקת הסקירה לא רצה. מתקינים אותו או מוסיפים אותו ל-PATH.`;
+          ? `Merge of ${what} blocked: the directory ${runCwd} does not exist, so the review check did not run (this is not a fault in \`gh\`). Add \`-R owner/repo\` and run from a directory that exists.`
+          : `Merge of ${what} blocked: \`gh\` is not on PATH, so the review check did not run. Install it or add it to PATH.`;
       }
-      return `מיזוג של ${what} נחסם: בדיקת הסקירה לא רצה (${e instanceof Error ? e.message.split('\n')[0] : String(e)}), ואין מיזוג בלי שהיא עברה. `
-        + 'בודקים ש-`gh` מחובר ושיש רשת, ומנסים שוב.';
+      return `Merge of ${what} blocked: the review check did not run (${e instanceof Error ? e.message.split('\n')[0] : String(e)}), and there is no merge without it passing. `
+        + 'Check that `gh` is logged in and the network is up, and try again.';
     }
     const v = verdictFor(view);
     if (v === 'approve') continue;
     const sha = (view.headRefOid ?? '?').slice(0, 7);
-    return `מיזוג של ${what} נחסם: אין approve רשום על ה-commit האחרון (\`${sha}\`). `
-      + (v === 'changes' ? 'הסקירה האחרונה על ה-commit הזה היא `changes`. מתקנים, דוחפים, ואז סקירה מצומצמת על התיקונים (או, אם זו כבר הייתה המצומצמת, הערת `fixed-after-narrow`). ' : 'לא נמצאה הערה או review עם `reviewed: <sha>` שמתאים ל-commit הזה. ')
+    return `Merge of ${what} blocked: there is no recorded approve on the latest commit (\`${sha}\`). `
+      + (v === 'changes' ? 'The latest review on this commit is `changes`. Fix, push, then a narrow review of the fixes (or, if that was already the narrow one, a `fixed-after-narrow` comment). ' : 'No comment or review was found with a `reviewed: <sha>` that matches this commit. ')
       + HOW;
   }
   return null;

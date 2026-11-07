@@ -18,6 +18,7 @@ version: 1
 owner: ran
 owner_name: רן
 owner_gender: male
+owner_language: he
 manager: yoav
 identities:
   - {id: yoav, name: יואב, title: מנהל החברה}
@@ -31,6 +32,7 @@ version: 1
 owner: dana
 owner_name: דנה
 owner_gender: female
+owner_language: en
 manager: mira
 identities:
   - {id: mira, name: מירה, title: מנהלת החברה, gender: female}
@@ -77,24 +79,26 @@ test('another org: its names, its genders, none of ours', () => {
     const t = texts(dir, 'mira');
     const all = JSON.stringify(t);
     assert.doesNotMatch(all, /(?<![א-ת])(?:רן|יואב|עדי)(?![א-ת])|Ran/); // the ticket example hivecode-app/hive-code#11 stays (an example of the format)
-    assert.match(t.plain, /בחברת הסוכנים של דנה\./);
-    assert.match(t.plain, /\*\*עברית בכל הודעה\*\*: לדנה, למירה ולכל עובד/);
-    assert.match(t.plain, /### כשדנה כתבה לך \(`owner`\)/);
-    assert.match(t.plain, /הוא מופיע אצלה באפליקציה/);
-    assert.match(t.plain, /\*\*לא עונים לה ב-`tell`\.\*\* כך היא מקבלת את התשובה/);
-    assert.match(t.plain, /לכל מי שאינה דנה עונים/);
-    assert.match(t.plain, /לדנה כותבים ב-`tell` רק כשהיא לא כתבה לך עכשיו: משימה שנגמרה, משהו שהיא צריכה לדעת/);
-    assert.doesNotMatch(t.plain, /אליו|אצלו|כשהוא/);
-    assert.match(t.worker, /במילים שלה על מה שהשתנה אצלה/);
-    assert.match(t.worker, /ודנה צריכה לבדוק משהו בעצמה/);
-    assert.match(t.helper, /כניסה שצריכה את דנה \(קוד, 2FA, QR\) מבקשים ממנה/);
-    assert.match(t.helper, /שליחת טופס בשמה/);
+    assert.match(t.plain, /in דנה's agent company\./);
+    // Her language is English: the one language line, and no Hebrew writing rules.
+    assert.match(t.plain, /\*\*Write every message to the owner in English\.\*\* דנה reads English/);
+    assert.doesNotMatch(t.plain, /### Writing in Hebrew/);
+    assert.match(t.plain, /### When דנה wrote to you \(`owner`\)/);
+    assert.match(t.plain, /It shows up in her app as you write/);
+    assert.match(t.plain, /\*\*Do not answer her with `tell`\.\*\* That way she gets the answer once/);
+    assert.match(t.plain, /To anyone who is not דנה, answer only/);
+    assert.match(t.plain, /Write to דנה with `tell` only when she did not just write to you: a task that finished, something she needs to know/);
+    assert.doesNotMatch(t.plain, /\b(?:him|his)\b/);
+    assert.match(t.worker, /in her words and in English, on what changed for her/);
+    assert.match(t.worker, /The PR body in English\./);
+    assert.match(t.worker, /and דנה needs to check something herself/);
+    assert.match(t.helper, /A sign-in that needs דנה \(a code, 2FA, a QR\) is asked of her directly/);
+    assert.match(t.helper, /submitting a form in her name/);
     const desc = (n: string) => t.tools.find((x) => x.name === n)!.description;
-    assert.match(desc('ask'), /^שאלה לדנה או למנהל\. מופיעה אצלה/);
-    assert.match(desc('ask'), /She sees it as a message in her chat/);
-    assert.match(desc('status'), /זו השורה שדנה רואה/);
-    assert.match(desc('close_team'), /המנהל של העובד או מירה\./);
-    assert.match(desc('compose_home'), /^הרכבת ראש מסך השיחות של דנה: .* רק לטל ולמירה\./);
+    assert.match(desc('ask'), /^Ask דנה or the manager a question\. She sees it as a message in her chat/);
+    assert.match(desc('status'), /it is the line דנה sees/);
+    assert.match(desc('close_team'), /the worker's manager or מירה\./);
+    assert.match(desc('compose_home'), /^Compose the head of דנה's conversations screen: .* Only טל and מירה\./);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -124,11 +128,11 @@ test("hq's messages: with the owner's org as today, with another org its names a
     .replace('{id: yoav, name: יואב,', '{id: yoav, name: מירה, gender: female,');
   for (const [o, want] of [[ORG_YAML, {
     label: 'רן', declined: 'רן סגר את השאלה בלי תשובה: לשלם?', done: 'רן סיים: ', reply: 'תשובה של רן על',
-    manager: 'יואב החליט במקום רן', note: 'יואב החליט במקומך', escalation: 'לא נענתה ע"י רן', leave: 'השאר אותה לרן.',
+    manager: 'יואב החליט במקום רן', note: 'יואב החליט במקומך', escalation: 'not answered by רן', leave: 'leave it for רן.',
     toggle: 'שאלה חוסמת שלא נענתה עוברת ליואב',
   }], [org, {
     label: 'דנה', declined: 'דנה סגרה את השאלה בלי תשובה: לשלם?', done: 'דנה סיימה: ', reply: 'תשובה של דנה על',
-    manager: 'מירה החליטה במקום דנה', note: 'מירה החליטה במקומך', escalation: 'לא נענתה ע"י דנה', leave: 'השאר אותה לדנה.',
+    manager: 'מירה החליטה במקום דנה', note: 'מירה החליטה במקומך', escalation: 'not answered by דנה', leave: 'leave it for דנה.',
     toggle: 'שאלה חוסמת שלא נענתה עוברת למירה',
   }]] as const) {
     const env = await makeEnv({ org: o });

@@ -23,6 +23,13 @@ test('GitHub review and CI refer to the current head and required check; no inve
   assert.equal(prEvidence(j, 1, 'company-ci').review, 'approved');
 });
 
+test('the English review markers count as the Hebrew ones (the instructions went English, 08/11/2026)', () => {
+  const j = { url: pr.url, headRefOid: pr.head, state: 'OPEN', comments: [{ body: `## Independent review · x\nreviewed: ${pr.head}\n\n**Decision: changes**` }], statusCheckRollup: [] };
+  assert.equal(prEvidence(j, 1, null).review, 'changes');
+  j.comments.push({ body: `## Narrow review · x\nreviewed: ${pr.head}\n\n**Decision: approve**` });
+  assert.equal(prEvidence(j, 1, null).review, 'approved');
+});
+
 test('six tasks: proposals, development with an ask, review, approval, release, completed report', async () => {
   const env = await makeEnv({ noStart: true });
   try {

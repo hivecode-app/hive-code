@@ -2,66 +2,66 @@
 project: example-app
 status: active
 repo: example-user/example-app
-machine: srv1                 # איפה העובדים רצים: אחת מ-machines ב-org.yaml
-checkouts:                    # hq פותח worktree לכל משימה ב-<path>/<worktree_dir>/<task>
+machine: srv1                 # where the workers run: one of machines in org.yaml
+checkouts:                    # hq opens a worktree for every task at <path>/<worktree_dir>/<task>
   - name: example-app
     path: ~/projects/example-app
     default_branch: main
-worktree_dir: .worktrees      # ב-.git/info/exclude של ה-checkout
-commands:                     # מה שה-repo עצמו אומר (CLAUDE.md, package.json), ואומת בהרצה בהקמה
+worktree_dir: .worktrees      # in the checkout's .git/info/exclude
+commands:                     # what the repo itself says (CLAUDE.md, package.json), validated by a run in setup
   install: pnpm install --frozen-lockfile
   test: pnpm test
   lint: pnpm lint
   build: pnpm build
-ceo: aviv                     # ראש הצוות
+ceo: aviv                     # the team lead
 model: strongest
 review: independent
 ci: required
-ci_check: ci-ok               # ה-job המסכם ב-.github/workflows/ci.yml, כפי שהופיע ב-PRs האחרונים
-merge: worker-squash          # או owner-approve, עם merge_instructions
+ci_check: ci-ok               # the summary job in .github/workflows/ci.yml, as it appeared in the latest PRs
+merge: worker-squash          # or owner-approve, with merge_instructions
 deploy: owner-go
 night_weight: 1
-deviations:                   # כל חריגה מאמנת ברירת המחדל, עם סיבה. חריגה שלא כתובה לא קיימת
-  - what: הבדיקות לא כוללות typecheck
-    reason: "אין tsconfig ב-repo (נכון להקמה). רעיון: צוות משימה שמוסיף"
-monitoring:                   # probes: GET בלבד, בלי טוקנים. רצים כשהאוטומציה prod-probes דולקת
+deviations:                   # every deviation from the default charter, with a reason. A deviation that is not written does not exist
+  - what: The tests do not include a typecheck
+    reason: "No tsconfig in the repo (as of setup). Idea: a task team that adds one"
+monitoring:                   # probes: GET only, no tokens. They run when the prod-probes automation is on
   - id: web-health
     http: https://app.example.com/healthz
     every: 1m
     expect: 200
     max_latency: 3s
-    fail_after: 3             # שלוש בדיקות כושלות ברצף לפני שמעירים את הניטור
-heavy:                        # מה כבד בפרויקט הזה: עובד עושה `reserve` לפני, ומריץ דרך `company-run`. מחלקה כאן גוברת על ברירת המחדל של החברה באותו שם
+    fail_after: 3             # three failed checks in a row before monitoring is woken
+heavy:                        # what is heavy in this project: a worker does `reserve` first, and runs through `company-run`. A class here wins over the company default of the same name
   - class: build
     mem: 4GB
     cpu: 2
     timeout: 20m
-grants: []                    # הרשאות פרודקשן: team, action, quote, date. ריק עד שבעל החברה נותן
+grants: []                    # production permissions: team, action, quote, date. Empty until the owner gives them
 ---
 
-# אמנת האפליקציה
+# The app charter
 
-ראש הצוות: [אביב](../identities/aviv.md).
+The team lead: [Aviv](../identities/aviv.md).
 
-## מה הפרויקט
+## What the project is
 
-אפליקציית web להזמנת תורים. שורה או שתיים, במילים של בעל החברה.
+A web app for booking appointments. A line or two, in the owner's words.
 
-## שיטת עבודה
+## Way of working
 
-לפי אמנת ברירת המחדל ב-`company/company.md`, עם החריגה שב-`deviations`.
+Per the default charter in `company/company.md`, with the deviation in `deviations`.
 
-## פריסה
+## Deploy
 
-- **איך:** workflow `deploy.yml` (הרצה ידנית, `workflow_dispatch`) פורס את `main` ל-Vercel. מריצים אותו רק אחרי GO: `gh workflow run deploy.yml`.
-- **חזרה אחורה:** `vercel rollback` לפריסה הקודמת, כדקה.
-- **כתובת:** `https://app.example.com`.
+- **How:** the workflow `deploy.yml` (a manual run, `workflow_dispatch`) deploys `main` to Vercel. Run it only after GO: `gh workflow run deploy.yml`.
+- **Rollback:** `vercel rollback` to the previous deploy, about a minute.
+- **URL:** `https://app.example.com`.
 
-## פקודות
+## Commands
 
-| מה | פקודה |
+| What | Command |
 |---|---|
-| התקנה | `pnpm install --frozen-lockfile` |
-| בדיקות | `pnpm test` |
+| Install | `pnpm install --frozen-lockfile` |
+| Tests | `pnpm test` |
 | lint | `pnpm lint` |
 | build | `pnpm build` |

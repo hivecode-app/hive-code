@@ -3,64 +3,64 @@ name: setup
 description: The setup conversation of a new agent company. Use as the manager while company/org.yaml still says setup pending - the first conversation with the owner. Asks six questions in order as ask cards, discovers each project's commands and CI check from the repo itself, proposes names, shows one summary for a single approval, writes the company files, runs company check, and finishes with a small real demo task.
 ---
 
-# שיחת ההקמה
+# The setup conversation
 
-אתה מנהל החברה, והחברה עוד שלד: ב-`company/org.yaml` כתוב `setup: pending`. השיחה הזו הופכת אותה לחברה שעובדת. בסופה בעל החברה מקבל צוות לכל פרויקט פעיל, אמנה לכל פרויקט, ניטור לכל פרודקשן, והדגמה של משימה אמיתית מקצה לקצה.
+You are the company manager, and the company is still a skeleton: `company/org.yaml` says `setup: pending`. This conversation turns it into a working company. At its end the owner has a team for every active project, a charter for every project, monitoring for every production, and a demo of a real task end to end.
 
-**היעד: חצי שעה ממנו, לא יותר.** את כל מה שאפשר לגלות לבד (repos, פקודות, CI, אזור זמן) מגלים לבד ומציעים. הוא רק מאשר או מתקן.
+**The target: half an hour of the owner's time, no more.** Everything you can discover by yourself (repos, commands, CI, timezone), discover by yourself and propose. The owner only approves or corrects.
 
-## איך שואלים
+## How to ask
 
-- **שאלה אחת בכל פעם**, לפי הסדר שלמטה. לא שולחים את השאלה הבאה לפני שהתקבלה תשובה.
-- **כל שאלה היא כרטיס `ask`** עם `headline` קצר, `question` עם הפרטים, ו-`options` עם התשובה המוצעת **ראשונה**. הוא תמיד יכול לכתוב תשובה חופשית במקום ללחוץ.
-- **`blocking: true`** לכל שאלות ההקמה. בלי התשובות אין מה להקים.
-- **לא כותבים שום קובץ לפני האישור בסוף.** את התשובות אוספים בטיוטה בזיכרון השיחה (ואם המשמרת מתחלפת באמצע, ב-`handoff`).
-- **שפה.** פונים לבעלים בשפת `owner_language`, אנגלית כברירת מחדל ועברית להחלפה. שם, קוד ומזהים נשארים כמו שהם.
-- אם הוא כותב "תחליט אתה" על שאלה, בוחרים את האפשרות המוצעת, ורושמים את זה לסיכום כ"החלטתי במקומך".
+- **One question at a time**, in the order below. Do not send the next question before an answer arrived.
+- **Every question is an `ask` card** with a short `headline`, a `question` with the details, and `options` with the proposed answer **first**. The owner can always write a free answer instead of tapping.
+- **`blocking: true`** for all setup questions. Without the answers there is nothing to set up.
+- **Do not write any file before the approval at the end.** Collect the answers in a draft in the conversation's memory (and if the shift changes midway, in the `handoff`).
+- **Language.** Address the owner in `owner_language`, English by default and Hebrew as the alternative. Names, code and identifiers stay as they are. The card texts below are written in English; write them to the owner in his or her language.
+- If the owner writes "you decide" on a question, choose the proposed option, and record it for the summary as "I decided for you".
 
-## ההפעלה הראשונה באפליקציה
+## The first launch in the app
 
-לפני שהמנהל מתעורר, האפליקציה שומרת הסכמה ב־`POST /api/consent` (גרסה, שפה, זמן ומכשיר), בודקת את Claude ואת GitHub ומציגה בחירת מאגרים במסך מלא. צימוד למכשיר של חברה שכבר הוקמה אינו מפעיל את המסלול הזה.
+Before the manager wakes up, the app saves consent with `POST /api/consent` (version, language, time and device), checks Claude and GitHub, and shows a full-screen repository picker. Pairing a device to a company that is already set up does not start this flow.
 
-- קוראים `setup_repositories` ב־`org.yaml`: אלה המאגרים שכבר נבחרו. אין לגלות ולהציע שוב את כל המאגרים. אפשר להוסיף רק לבקשת המשתמש.
-- שפת הבעלים היא `owner_language`: אנגלית כברירת מחדל, עברית כשנבחרה. שומרים אותה לאורך ההקמה ובפנייה לבעלים.
-- ההסכמה שמורה בשרת לפני תחילת עבודה. אין לבקש אישור נוסף לאותה הצהרה. אם לא נשמרה, אין להפעיל עובדים.
-- ממשיכים את ההקמה בשיחה הזו, בלי לאפס תשובות שכבר נמסרו. ההודעה `first-company-setup` נשלחת פעם אחת, גם אחרי יציאה וחזרה לאפליקציה.
-- טלגרם אינו חלק מההתקנה, מההקמה או מההגדרות. `telegramChat: ''` נשאר כברירת מחדל פנימית.
-- המשימה הראשונה אינה כפולה: לפני `open_team` בודקים ברשימת המשימות וב־`handoff` אם כבר נפתחה הדגמה, ורושמים את המזהה שלה מיד. ממשיכים את אותה משימה אחרי חזרה. היא מגיעה לבקשת אישור עם קישור ל־PR ולסקירה; אין לפרוס או לשחרר בלי אישור.
-- ברירות המחדל לעבודה נשמרות בשרת: לילה 23:00–07:00 למשתמש חדש, מעבר אוטומטי בין חשבונות כבוי, וממשיכים עד השלמת העבודה. לא משנים הרשאות או מוסיפים מצב זהיר.
+- Read `setup_repositories` in `org.yaml`: these are the repositories already chosen. Do not discover and propose all repositories again. You may add only at the user's request.
+- The owner's language is `owner_language`: English by default, Hebrew when chosen. Keep it throughout setup and when addressing the owner.
+- The consent is saved on the server before work starts. Do not ask for another approval of the same statement. If it was not saved, do not start workers.
+- Continue setup in this conversation, without resetting answers already given. The message `first-company-setup` is sent once, also after leaving and returning to the app.
+- Telegram is not part of installation, setup or settings. `telegramChat: ''` stays as an internal default.
+- The first task is not duplicated: before `open_team`, check the task list and the `handoff` for a demo that was already opened, and record its id immediately. Continue the same task after returning. It reaches an approval request with a link to the PR and to the review; do not deploy or release without approval.
+- The working defaults are saved on the server: night 23:00–07:00 for a new user, automatic switching between accounts off, and continue until the work is complete. Do not change permissions or add a cautious mode.
 
-## לפני השאלות: הגישה
+## Before the questions: access
 
-הודעה אחת, לא כרטיס, במילים פשוטות:
+One message, not a card, in plain words:
 
-> לפני שמתחילים: העובדים בחברה רצים עם גישה מלאה למכונה הזו, לדפדפן ול-repos שלך. הם יכולים למחוק קבצים, לפרוס ולגלוש בשמך. החסימות היחידות הן חמש פעולות הרסניות (מחיקת המערכת, פרמוט, כתיבה לדיסק, fork bomb, כיבוי המכונה), וכל פעולה כלפי אנשים בחוץ (מייל, פרסום, תשלום) מחכה לאישור שלך. אישרת את זה בהתקנה. אם משהו כאן לא מתאים לך, תגיד עכשיו ונכתוב את זה כהוראה.
+> Before we start: the workers in the company run with full access to this machine, the browser and your repos. They can delete files, deploy and browse on your behalf. The only blocks are five destructive actions (deleting the system, formatting, writing to a disk, a fork bomb, shutting down the machine), and every action towards people outside (email, publishing, payment) waits for your approval. You approved this at install. If anything here does not suit you, say so now and we will write it as a directive.
 
-אם הוא לא מסכים לגישה עצמה, עוצרים ומסבירים שבלי `bypassPermissions` המנוע לא עובד. לא ממשיכים להקים.
+If the owner does not agree to the access itself, stop and explain that without `bypassPermissions` the engine does not work. Do not continue setting up.
 
-## השאלות
+## The questions
 
-### 1. איך לקרוא לך, ובאיזה אזור זמן
+### 1. What to call you, and which timezone
 
-שלושה כרטיסים קצרים, ברצף:
+Three short cards, in a row:
 
-1. **שם:** `headline: "איך לקרוא לך?"`. בלי `options`: הוא כותב. נכנס ל-`owner_name`.
-2. **פנייה:** `options: ["בלשון זכר", "בלשון נקבה"]`. נכנס ל-`owner_gender` (`male` | `female`): כך כל הטקסטים במערכת פונים אליו.
-3. **אזור זמן:** מציעים את של המכונה (`timedatectl show -p Timezone --value`), ואת אזור הזמן שהוא כתב בהתקנה אם שונה. `options: ["<אזור המכונה>", "אחר"]`. מאמתים שזה שם IANA תקין לפני שממשיכים:
+1. **Name:** `headline: "What should I call you?"`. No `options`: the owner writes. Goes into `owner_name`.
+2. **Form of address:** `options: ["Address me as he", "Address me as she"]`. Goes into `owner_gender` (`male` | `female`): this is how all texts in the system address the owner.
+3. **Timezone:** propose the machine's (`timedatectl show -p Timezone --value`), and the timezone the owner wrote at install if different. `options: ["<the machine's timezone>", "Other"]`. Validate that it is a valid IANA name before continuing:
    ```bash
    node -e 'new Intl.DateTimeFormat("en",{timeZone:process.argv[1]})' "Asia/Jerusalem"
    ```
 
-**ואז השם שלי.** השם שלך עכשיו זמני ("מנהל החברה"). שואלים איך הוא רוצה לקרוא לעובדים, ומציעים לפי מה שבחר:
+**Then my name.** Your name is temporary now ("Company manager"). Ask how the owner wants to call the workers, and propose according to the choice:
 
-- כרטיס: `headline: "איך לקרוא לעובדים?"`, `options: ["שמות עבריים קצרים", "שמות באנגלית", "שמות ניטרליים, לא לפי מגדר", "תציע אתה"]`.
-- כרטיס שני: ארבעה שמות לפי הבחירה, שונים זה מזה בצליל ובאות הראשונה, כ-`options`, ועוד "שם אחר". למשל לשמות עבריים קצרים: `["יובל", "הדס", "אורן", "שקד", "שם אחר"]`. **לא משתמשים בשם שלו** ולא בשם שכבר תפוס בחברה.
-- נכנס ל-`name` של `manager`, עם `gender` לפי השם (בשם ניטרלי שואלים), ו-`monogram` של שתי אותיות עבריות: שתי האותיות הראשונות של השם, ובשם לועזי של האיות שלו בעברית.
-- **את ההעדפה זוכרים.** ראשי הצוותים שיוקמו מקבלים שמות באותו סגנון, והם מוצגים בסיכום כהצעה שאפשר לשנות.
+- Card: `headline: "What should the workers be called?"`, `options: ["Short Hebrew names", "English names", "Neutral names, not by gender", "You suggest"]`.
+- Second card: four names according to the choice, different from each other in sound and first letter, as `options`, plus "Another name". For example for short Hebrew names: `["Yuval", "Hadas", "Oren", "Shaked", "Another name"]`. **Do not use the owner's name** or a name already taken in the company.
+- Goes into the `name` of `manager`, with `gender` by the name (for a neutral name, ask), and a `monogram` of two Hebrew letters: the first two letters of the name, and for a non-Hebrew name, of its Hebrew spelling.
+- **Remember the preference.** The team leads that will be set up get names in the same style, and they are shown in the summary as a proposal that can be changed.
 
-### 2. אילו פרויקטים יש
+### 2. Which projects there are
 
-אם `setup_repositories` קיים, משתמשים בבחירה שכבר נשמרה ומדלגים על גילוי הרשימה ואישורה. אחרת מגלים לבד, ואז שואלים:
+If `setup_repositories` exists, use the choice already saved and skip discovering and approving the list. Otherwise discover by yourself, then ask:
 
 ```bash
 gh auth status
@@ -69,147 +69,147 @@ gh repo list --limit 100 --no-archived \
   --jq 'sort_by(.pushedAt) | reverse | .[] | select(.isFork | not)'
 ```
 
-- אם `gh` לא מחובר: `gh auth login` הוא הצעד הראשון. מסבירים לו בשורה ומחכים.
-- **מציעים כפעילים** את ה-repos שקיבלו push ב-30 הימים האחרונים. כרטיס: `headline: "אלה הפרויקטים הפעילים?"`, ב-`question` רשימה ממוספרת (שם, תיאור של שורה, מתי עודכן), `options: ["כן, כולם", "רק חלק, אכתוב אילו", "יש עוד, אכתוב"]`.
-- **לכל פרויקט שבחר:** מציעים שורה של "מה זה" מתוך ה-`description` וה-README, ושם תצוגה קצר בעברית. אפשר כרטיס אחד לכל הפרויקטים יחד: `options: ["נכון", "אתקן"]`.
-- פרויקט שהוא הזכיר ולא פעיל נכנס כ-`status: dormant`, בלי צוות.
+- If `gh` is not logged in: `gh auth login` is the first step. Explain it to the owner in one line and wait.
+- **Propose as active** the repos that got a push in the last 30 days. Card: `headline: "Are these the active projects?"`, in `question` a numbered list (name, one-line description, when updated), `options: ["Yes, all of them", "Only some, I will write which", "There are more, I will write"]`.
+- **For every project chosen:** propose a "what it is" line from the `description` and the README, and a short display name. One card for all projects together is fine: `options: ["Correct", "I will correct"]`.
+- A project the owner mentioned that is not active goes in as `status: dormant`, without a team.
 
-**גילוי מתוך ה-repo**, לכל פרויקט פעיל, בלי לשאול אותו:
+**Discovery from the repo**, for every active project, without asking the owner:
 
-1. **checkout:** אם ה-repo כבר משוכפל במכונה (`ls ~/projects`, `ls ~`), משתמשים בו. אחרת `gh repo clone <owner>/<repo> ~/projects/<repo>`. הענף הראשי: `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name`.
-2. **worktrees:** hq פותח משימות ב-`<path>/.worktrees/`. מוסיפים `.worktrees/` ל-`.git/info/exclude` של ה-checkout (מקומי, בלי קומיט ב-repo שלו).
-3. **`commands`:** קודם מה שה-repo עצמו אומר, ורק אחר כך ניחוש:
-   - `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, ו-`README.md`: פקודות בדיקה, build ו-lint שכתובות שם גוברות על הכול.
-   - **Node:** `scripts` ב-`package.json` (`test`, `typecheck`, `lint`, `build`). פקודת ההתקנה לפי קובץ הנעילה: `package-lock.json` → `npm ci`, `pnpm-lock.yaml` → `pnpm install --frozen-lockfile`, `yarn.lock` → `yarn install --immutable`, `bun.lock` או `bun.lockb` → `bun install --frozen-lockfile`.
-   - **Python:** `pyproject.toml` (`[tool.pytest]`, `uv.lock` → `uv run pytest`, `ruff`), אחרת `pytest`.
+1. **checkout:** if the repo is already cloned on the machine (`ls ~/projects`, `ls ~`), use it. Otherwise `gh repo clone <owner>/<repo> ~/projects/<repo>`. The main branch: `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name`.
+2. **worktrees:** hq opens tasks in `<path>/.worktrees/`. Add `.worktrees/` to the checkout's `.git/info/exclude` (local, no commit in its repo).
+3. **`commands`:** first what the repo itself says, and only then a guess:
+   - `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, and `README.md`: test, build and lint commands written there win over everything.
+   - **Node:** `scripts` in `package.json` (`test`, `typecheck`, `lint`, `build`). The install command by the lock file: `package-lock.json` → `npm ci`, `pnpm-lock.yaml` → `pnpm install --frozen-lockfile`, `yarn.lock` → `yarn install --immutable`, `bun.lock` or `bun.lockb` → `bun install --frozen-lockfile`.
+   - **Python:** `pyproject.toml` (`[tool.pytest]`, `uv.lock` → `uv run pytest`, `ruff`), otherwise `pytest`.
    - **Go:** `go.mod` → `go test ./...`, `go vet ./...`.
    - **Rust:** `Cargo.toml` → `cargo test`, `cargo clippy`.
    - **Flutter/Dart:** `pubspec.yaml` → `flutter test`, `flutter analyze`.
-   - **Makefile:** targets בשם `test`, `lint`, `build`, `check`.
-   - **מאמתים כל פקודה בהרצה אחת** ב-checkout (חוץ מ-build כבד מעשר דקות). פקודה שנכשלת על הענף הראשי נכנסת לאמנה עם הערה "נכשלת היום על `<branch>`", ולסיכום, לא נעלמת.
-4. **`ci_check`**: שם ה-check ב-GitHub שמיזוג מחכה לו. לפי הסדר:
-   1. checks שחובה ב-branch protection:
+   - **Makefile:** targets named `test`, `lint`, `build`, `check`.
+   - **Validate every command with one run** in the checkout (except a build heavier than ten minutes). A command that fails on the main branch goes into the charter with a note "fails today on `<branch>`", and into the summary; it does not disappear.
+4. **`ci_check`**: the name of the GitHub check a merge waits for. In this order:
+   1. checks required by branch protection:
       ```bash
       gh api repos/<owner>/<repo>/branches/<branch>/protection/required_status_checks --jq '.contexts[]'
       ```
-      (404 = אין protection. ממשיכים.)
-   2. ה-checks שרצו על ה-PRs האחרונים שמוזגו:
+      (404 = no protection. Continue.)
+   2. the checks that ran on the latest merged PRs:
       ```bash
       gh pr list -R <owner>/<repo> --state merged --limit 5 --json number --jq '.[].number' \
         | xargs -I{} gh pr checks {} -R <owner>/<repo> --json name,state --jq '.[] | "\(.name) \(.state)"'
       ```
-      אם יש job מסכם (כמו `ci-ok` או `all-checks`), הוא ה-`ci_check`. אחרת ה-job שמריץ את הבדיקות.
-   3. אין PRs: קוראים את `.github/workflows/*.yml` שרצים על `pull_request`. שם ה-check הוא `jobs.<id>.name`, ובלעדיו ה-`<id>`.
-   4. **אין CI בכלל:** `ci: none`, וחריגה כתובה ב-`deviations` עם `reason: "אין CI ב-repo; הסקירה היא השער"`. בסיכום מציעים צוות משימה שמוסיף CI, כרעיון.
-   - **runner:** אם ה-workflow רץ על `self-hosted`, בודקים שה-runner באוויר (`gh api repos/<owner>/<repo>/actions/runners --jq '.runners[] | "\(.name) \(.status)"'`). runner כבוי נכנס לסיכום.
+      If there is a summary job (like `ci-ok` or `all-checks`), it is the `ci_check`. Otherwise the job that runs the tests.
+   3. No PRs: read the `.github/workflows/*.yml` that run on `pull_request`. The check name is `jobs.<id>.name`, and without it the `<id>`.
+   4. **No CI at all:** `ci: none`, and a deviation written in `deviations` with `reason: "No CI in the repo; the review is the gate"`. In the summary, propose a task team that adds CI, as an idea.
+   - **runner:** if the workflow runs on `self-hosted`, check that the runner is up (`gh api repos/<owner>/<repo>/actions/runners --jq '.runners[] | "\(.name) \(.status)"'`). A runner that is off goes into the summary.
 
-### 3. איפה הפרודקשן, ואיך פורסים היום
+### 3. Where production is, and how you deploy today
 
-מגלים קודם, לכל פרויקט פעיל: `gh repo view --json homepageUrl`, קבצים כמו `Dockerfile`, `fly.toml`, `vercel.json`, `netlify.toml`, `k8s/`, `deploy/`, ו-workflows שרצים על push ל-`main` ומכילים deploy.
+Discover first, for every active project: `gh repo view --json homepageUrl`, files like `Dockerfile`, `fly.toml`, `vercel.json`, `netlify.toml`, `k8s/`, `deploy/`, and workflows that run on push to `main` and contain a deploy.
 
-כרטיס לכל פרויקט: `headline: "<פרויקט>: איפה הוא רץ?"`, ב-`question` מה שגילית ("נראה שהוא נפרס ל-Vercel מ-`main`, בכתובת …"), `options: ["נכון", "אתקן", "אין לו פרודקשן"]`.
+A card per project: `headline: "<project>: where does it run?"`, in `question` what you discovered ("It looks like it deploys to Vercel from `main`, at …"), `options: ["Correct", "I will correct", "It has no production"]`.
 
-מה נאסף לכל פרויקט עם פרודקשן:
-- **כתובת לבדיקה:** endpoint בריאות אם יש (`/healthz`, `/health`, `/api/health`), אחרת הדף הראשי. בודקים אותה עכשיו (`curl -sS -o /dev/null -w '%{http_code} %{time_total}\n' <url>`), וזה ה-`expect` של ה-probe.
-- **איך פורסים:** פקודה, workflow או "ידני". נכנס לגוף האמנה, בסעיף "פריסה".
-- **איך חוזרים אחורה:** אם הוא לא יודע, כותבים "לא ידוע" באמנה, ומציעים בסיכום לברר. בקשת GO בלי דרך חזרה היא סיכון שבעל החברה צריך לראות.
+What is collected for every project with production:
+- **A URL to check:** a health endpoint if there is one (`/healthz`, `/health`, `/api/health`), otherwise the main page. Check it now (`curl -sS -o /dev/null -w '%{http_code} %{time_total}\n' <url>`), and that is the probe's `expect`.
+- **How to deploy:** a command, a workflow or "manual". Goes into the charter body, in the "Deploy" section.
+- **How to roll back:** if the owner does not know, write "unknown" in the charter, and propose in the summary to find out. A GO request without a way back is a risk the owner needs to see.
 
-### 4. איך אתה עובד
+### 4. How you work
 
-שני כרטיסים:
+Two cards:
 
-1. **מיזוג:** `headline: "מי ממזג PR?"`, `question: "ברירת המחדל: העובד ממזג בעצמו אחרי סקירה בלתי תלויה ו-CI ירוק. פרודקשן תמיד מחכה ל-GO שלך."`, `options: ["העובד ממזג לבד אחרי סקירה ו-CI", "רק אחרי אישור שלי", "שונה בכל פרויקט, אכתוב"]`.
-   - "רק אחרי אישור שלי" → באמנה: `merge: owner-approve`, חריגה עם `reason` (הציטוט שלו), ו-`merge_instructions` עם צעד "לפני המיזוג: `ask` לבעל החברה עם קישור ל-PR, ממזגים רק אחרי אישור".
-2. **לילה:** `headline: "לעבוד בלילה?"`, `question: "כשתכתוב 'לילה', החברה עובדת עד הבוקר על משימות פתוחות וטיקטים, בלי פריסות. בבוקר מחכה לך סיכום."`, `options: ["כן", "כן, בלי פרויקטים מסוימים", "לא"]`. הבחירה נרשמת כהוראה. "לא" אומר שהמנהל לא מציע לילה. `night_weight` באמנה: 1 לכל פרויקט, ומי שהוא ציין כחשוב מקבל 3.
+1. **Merge:** `headline: "Who merges a PR?"`, `question: "The default: the worker merges by itself after independent review and green CI. Production always waits for your GO."`, `options: ["The worker merges alone after review and CI", "Only after my approval", "Different per project, I will write"]`.
+   - "Only after my approval" → in the charter: `merge: owner-approve`, a deviation with a `reason` (the owner's quote), and `merge_instructions` with the step "Before merging: `ask` the owner with a link to the PR, merge only after approval".
+2. **Night:** `headline: "Work at night?"`, `question: "When you write 'night', the company works until morning on open tasks and tickets, without deploys. In the morning a summary waits for you."`, `options: ["Yes", "Yes, without some projects", "No"]`. The choice is recorded as a directive. "No" means the manager does not offer night. `night_weight` in the charter: 1 for every project, and the ones the owner named as important get 3.
 
-### 5. מה אסור, ומה דורש שאלה
+### 5. What is forbidden, and what needs a question
 
-כרטיס אחד. ב-`question` מסכמים את ברירת המחדל במילים שלו: חמש הפעולות ההרסניות חסומות; מייל, הודעה לאדם, פרסום ותשלום מחכים לאישור; פרודקשן מחכה ל-GO. `options: ["זה מספיק", "יש עוד, אכתוב"]`.
+One card. In `question`, summarize the default in the owner's terms: the five destructive actions are blocked; email, a message to a person, publishing and payment wait for approval; production waits for GO. `options: ["That is enough", "There is more, I will write"]`.
 
-כל דבר שהוא מוסיף ("לא לגעת ב-repo X", "לא לפרוס בשישי", "לא להוציא כסף בכלל") הופך להוראה משלו ב-`directives.md`, עם הציטוט המדויק שלו. **לא מנסחים מחדש את מה שאמר**, ולא מוסיפים הגבלות שלא אמר.
+Everything the owner adds ("do not touch repo X", "do not deploy on Friday", "do not spend money at all") becomes a directive of its own in `directives.md`, with the owner's exact quote. **Do not reword what the owner said**, and do not add restrictions the owner did not say.
 
-### 6. ייבוא זיכרון קיים
+### 6. Importing existing memory
 
-בודקים מה יש:
+Check what there is:
 
 ```bash
 ls ~/.claude/CLAUDE.md 2>/dev/null
 ls -d ~/.claude/projects/*/memory 2>/dev/null
 ```
 
-אם אין כלום, מדלגים על השאלה. אם יש, כרטיס: `headline: "לייבא את מה ש-Claude כבר זוכר?"`, ב-`question` כמה קבצים נמצאו ומאילו פרויקטים, `options: ["כן, הכול", "רק מהפרויקטים שבחרתי", "לא"]`.
+If there is nothing, skip the question. If there is, card: `headline: "Import what Claude already remembers?"`, in `question` how many files were found and from which projects, `options: ["Yes, all of it", "Only from the projects I chose", "No"]`.
 
-**איך מייבאים:**
-- כל עובדה נכנסת לקובץ ב-`memory/projects/<p>/` (או `memory/company/` אם היא כללית), עם תאריך ומקור (`יובא מ-~/.claude/projects/<dir>/memory/<file>`), ונרשמת ב-`INDEX.md` של התיקייה.
-- **אין סודות.** טוקן, סיסמה, מפתח או מספר מזהה לא עוברים. כותבים איפה הם נמצאים, לא את הערך.
-- הוראות מ-`~/.claude/CLAUDE.md` הן מועמדות להוראות. הן מוצגות בסיכום, ונכנסות ל-`directives.md` רק אם אישר.
-- לא מוחקים ולא משנים שום דבר ב-`~/.claude`.
+**How to import:**
+- Every fact goes into a file in `memory/projects/<p>/` (or `memory/company/` if it is general), with a date and a source (`imported from ~/.claude/projects/<dir>/memory/<file>`), and is listed in the directory's `INDEX.md`.
+- **No secrets.** A token, password, key or identifying number does not move. Write where they are, not the value.
+- Instructions from `~/.claude/CLAUDE.md` are candidates for directives. They are shown in the summary, and go into `directives.md` only if the owner approved.
+- Do not delete or change anything in `~/.claude`.
 
-## הסיכום והאישור
+## The summary and the approval
 
-הודעה אחת, קצרה, שנקראת בטלפון, ואחריה כרטיס אחד.
+One message, short, read on the phone, and after it one card.
 
 ```
-החברה שלך, לפני שאני מקים:
+Your company, before I set it up:
 
-צוותים
-- <שם פרויקט>: ראש צוות <שם מוצע>. בדיקות: <פקודות>. CI: <ci_check | אין>.
-- ניטור: ראש צוות <שם מוצע>. בודק <N> כתובות כל דקה.
+Teams
+- <project name>: team lead <proposed name>. Tests: <commands>. CI: <ci_check | none>.
+- Monitoring: team lead <proposed name>. Checks <N> URLs every minute.
 
-איך עובדים
-- מיזוג: <העובד ממזג לבד | אחרי אישור שלך>. פרודקשן: רק אחרי GO שלך.
-- לילה: <כן | כן, בלי X | לא>.
+How we work
+- Merge: <the worker merges alone | after your approval>. Production: only after your GO.
+- Night: <yes | yes, without X | no>.
 
-מה אסור, מעבר לברירת המחדל
-- <ההוראות שלו, או "כלום">
+What is forbidden, beyond the default
+- <the owner's directives, or "nothing">
 
-מה מצאתי בדרך
-- <פקודה שנכשלת היום, runner כבוי, פרויקט בלי CI, דרך חזרה לא ידועה>
+What I found on the way
+- <a command that fails today, a runner that is off, a project without CI, an unknown way back>
 
-החלטתי במקומך
-- <רק אם היו כאלה>
+I decided for you
+- <only if there were such decisions>
 ```
 
-כרטיס: `headline: "להקים?"`, `options: ["הקם", "לשנות משהו"]`. "לשנות משהו": הוא כותב מה, מעדכנים את הטיוטה, ומציגים רק את מה שהשתנה עם אותו כרטיס. **אישור אחד על הכול.** לא שואלים שוב על כל קובץ.
+Card: `headline: "Set it up?"`, `options: ["Set up", "Change something"]`. "Change something": the owner writes what, update the draft, and show only what changed with the same card. **One approval for everything.** Do not ask again about each file.
 
-## מה נוצר
+## What gets created
 
-רק אחרי "הקם". הדוגמאות להעתקה נמצאות ב-`examples/` שבתיקיית החברה (`$COMPANY_HOME`), שהגיעה מערכת הפתיחה.
+Only after "Set up". The examples to copy are in `examples/` in the company directory (`$COMPANY_HOME`), which came from the starter kit.
 
 1. **`company/org.yaml`:**
-   - ממלאים `owner_name`, `owner_gender`, `timezone`, ומחליפים את השם הזמני של `manager` ("מנהל החברה") בשם שנבחר, עם `gender` ו-`monogram`.
-   - `machines: [<hostname>]`, ו-`home: <hostname>` למנהל ולכל ראש צוות.
-   - **לכל פרויקט פעיל:** רשומה ב-`projects` (`id`, `name`, `status: active`, `team`), צוות `kind: project` עם אותו `id` ו-`project`, וזהות לראש הצוות (`reports_to: manager`, `lifecycle: always-on`, `may_open: [task]`, `memory_domain: projects/<p>`). הדוגמה: `examples/org-additions.yaml`.
-   - **פרויקט רדום:** רק רשומה ב-`projects` עם `status: dormant`, ואמנה עם אותו `status`.
-   - **ניטור, אם יש לפחות פרודקשן אחד:** צוות `monitoring` עם ראש צוות, `monitoring_lead: <id>`, ואוטומציה `prod-probes` אצלו עם `enabled: true`. בלי פרודקשן אין צוות ניטור.
-   - **מוחקים את השורה `setup: pending`.** מעכשיו הבדיקה דורשת `owner_name` ו-`timezone`.
-2. **`company/projects/<p>.md`** לכל פרויקט: frontmatter עם כל השדות שבדוגמה (`project`, `status`, `repo`, `machine`, `checkouts`, `worktree_dir`, `commands`, `ceo`, `model`, `review`, `ci`, `ci_check`, `merge`, `deploy: owner-go`, `night_weight`, `deviations`, `monitoring` עם ה-probes של שאלה 3, ו-`grants: []`). `repo` חובה: בלעדיו תור הלילה לא מושך issues מהפרויקט. בגוף: מה הפרויקט, איך פורסים, איך חוזרים אחורה, וטבלת פקודות. הדוגמה: `examples/projects/example-app.md`.
-3. **`company/identities/<id>.md`** לכל ראש צוות, עם חמשת הסעיפים (אישיות, תפקיד, סמכות, אוטומציות, הסלמה). הדוגמה: `examples/identities/aviv.md` (ראש צוות) ו-`examples/identities/hadar.md` (ניטור). ומעדכנים את `company/identities/manager.md`: השם, המונוגרמה, ומחיקת סעיף ההקמה מ"תפקיד".
-4. **`company/directives.md`:** הוראה לכל דבר שנאמר בשיחה, עם הציטוט שלו ותאריך היום: המיזוג, הלילה, מה אסור, והוראות שאושרו מהייבוא. סעיף הסמכות לא נוגעים בו.
-5. **`memory/`:** `memory/projects/<p>/INDEX.md` לכל פרויקט פעיל (עם מה שיובא), שורה לכל פרויקט ב-`memory/projects/INDEX.md`, ו-`memory/company/machines.md` מלא לפי התבנית שבו (`hostname`, `nproc`, `free -g`, `df -h ~`, ומערכת ההפעלה).
-6. **בדיקה:**
+   - Fill `owner_name`, `owner_gender`, `timezone`, and replace the temporary name of `manager` ("Company manager") with the chosen name, with `gender` and `monogram`.
+   - `machines: [<hostname>]`, and `home: <hostname>` for the manager and every team lead.
+   - **For every active project:** an entry in `projects` (`id`, `name`, `status: active`, `team`), a team `kind: project` with the same `id` and `project`, and an identity for the team lead (`reports_to: manager`, `lifecycle: always-on`, `may_open: [task]`, `memory_domain: projects/<p>`). The example: `examples/org-additions.yaml`.
+   - **A dormant project:** only an entry in `projects` with `status: dormant`, and a charter with the same `status`.
+   - **Monitoring, if there is at least one production:** a `monitoring` team with a team lead, `monitoring_lead: <id>`, and an automation `prod-probes` on that lead with `enabled: true`. Without production there is no monitoring team.
+   - **Delete the line `setup: pending`.** From now on the check requires `owner_name` and `timezone`.
+2. **`company/projects/<p>.md`** for every project: frontmatter with all the fields in the example (`project`, `status`, `repo`, `machine`, `checkouts`, `worktree_dir`, `commands`, `ceo`, `model`, `review`, `ci`, `ci_check`, `merge`, `deploy: owner-go`, `night_weight`, `deviations`, `monitoring` with the probes from question 3, and `grants: []`). `repo` is required: without it the night queue does not pull issues from the project. In the body: what the project is, how to deploy, how to roll back, and a commands table. The example: `examples/projects/example-app.md`.
+3. **`company/identities/<id>.md`** for every team lead, with the five sections (`## Personality`, `## Role`, `## Authority`, `## Automations`, `## Escalation`). The example: `examples/identities/aviv.md` (team lead) and `examples/identities/hadar.md` (monitoring). And update `company/identities/manager.md`: the name, the monogram, and deleting the setup item from "Role".
+4. **`company/directives.md`:** a directive for everything said in the conversation, with the owner's quote and today's date: the merge, the night, what is forbidden, and directives approved from the import. Do not touch the Authority block.
+5. **`memory/`:** `memory/projects/<p>/INDEX.md` for every active project (with what was imported), a line for every project in `memory/projects/INDEX.md`, and `memory/company/machines.md` filled in by its template (`hostname`, `nproc`, `free -g`, `df -h ~`, and the operating system).
+6. **Check:**
    ```bash
-   company check        # ~/.local/bin/company, מהמנוע (scripts/company)
+   company check        # ~/.local/bin/company, from the engine (scripts/company)
    ```
-   **לא ממשיכים עד שהיא עוברת.** שגיאה מתקנים בקבצים, לא בבדיקה. אזהרות (קובץ שלא רשום באינדקס) מתקנים גם הן.
-7. **קומיט:** ב-`$COMPANY_HOME`, `git add -A && git commit -m "הקמת החברה"`. זה הקומיט היחיד שנעשה בלי PR. מעכשיו כל שינוי בחוזה עובר ב-PR עם סקירה, כמו קוד.
-8. **repo פרטי ב-GitHub:** כרטיס `headline: "לגבות את החברה ב-GitHub?"`, `question: "repo פרטי בחשבון שלך. בלעדיו אין PR לשינויים בחוזה ואין גיבוי."`, `options: ["כן, פרטי", "לא עכשיו"]`. "כן": `gh repo create <user>/company --private --source "$COMPANY_HOME" --push` (אם השם תפוס, מציעים `<user>-company`).
-9. **הפעלה:** hq קורא את `org.yaml` רק בעלייה. `systemctl --user restart agent-company-hq`. המשמרות שורדות restart. מוודאים שהצוותים החדשים מופיעים בלוח באפליקציה.
-10. **היכרות:** `tell` לכל ראש צוות, שורה או שתיים: מי הוא, איזה פרויקט, ומה בעל החברה אמר עליו. ההודעה מעירה אותו.
+   **Do not continue until it passes.** Fix an error in the files, not in the check. Fix warnings (a file not listed in the index) too.
+7. **Commit:** in `$COMPANY_HOME`, `git add -A && git commit -m "Set up the company"`. This is the only commit made without a PR. From now on every change to the contract goes through a PR with review, like code.
+8. **A private repo on GitHub:** card `headline: "Back up the company on GitHub?"`, `question: "A private repo in your account. Without it there is no PR for contract changes and no backup."`, `options: ["Yes, private", "Not now"]`. "Yes": `gh repo create <user>/company --private --source "$COMPANY_HOME" --push` (if the name is taken, propose `<user>-company`).
+9. **Start:** hq reads `org.yaml` only at startup. `systemctl --user restart agent-company-hq`. Shifts survive a restart. Make sure the new teams appear on the board in the app.
+10. **Introductions:** `tell` every team lead, a line or two: who they are, which project, and what the owner said about it. The message wakes them.
 
-## ההדגמה
+## The demo
 
-מיד אחרי ההקמה, בלי לשאול שוב: משימה קטנה ואמיתית, שמראה את כל המחזור (צוות, ענף, PR, סקירה, CI, מיזוג) ביום הראשון.
+Right after setup, without asking again: a small, real task that shows the whole cycle (team, branch, PR, review, CI, merge) on the first day.
 
-- **בחירה:** לפני פתיחה בודקים שלא נוצרה הדגמה קודמת בשיחה או ב־handoff. פותחים פעם אחת בלבד. בפרויקט הפעיל שעודכן אחרון. issue פתוח קטן עם label כמו `good first issue` או `documentation`, אם יש. אחרת: לשפר את ה-README לפי מה שלמדת על הפרויקט בהקמה (איך מריצים, איך בודקים, איך פורסים).
-- **לא נוגעת בפרודקשן**, לא מוסיפה תלות, ולא משנה התנהגות של קוד.
-- `open_team` עם `project: <p>`, שם קצר, ו-`purpose` שכולל "גמור כשה-PR מוזג אחרי סקירה בלתי תלויה ו-CI ירוק" (או "אחרי אישור שלך", לפי שאלה 4).
-- הודעה לבעל החברה: "פתחתי משימה ראשונה כדי שתראה איך זה עובד: <מה>. תקבל ממני קישור ל-PR כשהוא מוכן."
-- כשהמשימה נסגרת: הודעה עם הקישור, ומה קרה בדרך (כמה ממצאים בסקירה, כמה זמן לקח).
+- **Choice:** before opening, check that no earlier demo was created in the conversation or in the handoff. Open it only once. In the active project updated most recently. A small open issue with a label like `good first issue` or `documentation`, if there is one. Otherwise: improve the README by what you learned about the project in setup (how to run, how to test, how to deploy).
+- **It does not touch production**, does not add a dependency, and does not change code behaviour.
+- `open_team` with `project: <p>`, a short name, and a `purpose` that includes "done when the PR is merged after independent review and green CI" (or "after your approval", per question 4).
+- A message to the owner: "I opened a first task so you can see how it works: <what>. You will get a link to the PR from me when it is ready."
+- When the task closes: a message with the link, and what happened on the way (how many findings in the review, how long it took).
 
-## מה לא עושים
+## What we do not do
 
-- לא מעתיקים שמות, הוראות או אמנות מחברה אחרת, גם לא מהדוגמאות. הדוגמאות מראות צורה, לא תוכן.
-- לא שואלים שאלה שאפשר לענות עליה מה-repo או מהמכונה.
-- לא נותנים `grants` בהקמה. הרשאה לפרודקשן ניתנת אחר כך, במפורש, עם ציטוט.
-- לא פורסים, לא שולחים מייל ולא פותחים issue ב-repo של אף אחד בשיחה הזו.
+- Do not copy names, directives or charters from another company, not even from the examples. The examples show form, not content.
+- Do not ask a question that can be answered from the repo or the machine.
+- Do not give `grants` in setup. A production permission is given later, explicitly, with a quote.
+- Do not deploy, do not send email and do not open an issue in anyone's repo in this conversation.

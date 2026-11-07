@@ -428,8 +428,8 @@ export class Scheduler {
     this.store.emit('task.start_not_taken', t.identity, { id: taskId, n: f.n, why });
     if (f.n !== BRIEF_FAILS) return;
     this.mailbox.tell({ msg_id: `hq-start-failing-t${taskId}-${f.since}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system', priority: 'next',
-      body: [`משימה ${t.ref ?? `#${taskId}`} (${t.title}) לא עלתה ${BRIEF_FAILS} פעמים ברצף: ${why.slice(0, 300)}.`,
-        what ?? `העובד (\`${t.identity ?? '—'}\`) לא קיבל את הבריף, או שהמשמרת לא עלתה. hq ממשיך לנסות עם המתנה ארוכה יותר. כדאי לבדוק את השרת (עומס, זיכרון) ואת היומן של המשמרת.`].join('\n') });
+      body: [`Task ${t.ref ?? `#${taskId}`} (${t.title}) failed to start ${BRIEF_FAILS} times in a row: ${why.slice(0, 300)}.`,
+        what ?? `The worker (\`${t.identity ?? '—'}\`) did not take the brief, or the shift did not come up. hq keeps trying with a longer wait. Check the server (load, memory) and the shift's log.`].join('\n') });
   }
 
   /** The brief of one run of a task's shift (start()'s prompt id). */
@@ -451,7 +451,7 @@ export class Scheduler {
     if (getIdentity(this.store, m.to_identity)?.team_kind !== 'task' && !this.standing(m.to_identity)) return false;
     // Every brief of the task still waiting (an older run's too): one failure, and none of them reaches the next run.
     this.mailbox.dropTaskPrompts(m.to_identity, id, 'brief not taken: the task starts again', `task-${id}-${m.to_identity}-`);
-    this.startFailed(id, m.error ?? 'הבריף לא התקבל');
+    this.startFailed(id, m.error ?? 'brief not taken');
     const cur = this.shifts.current(m.to_identity);
     if (cur && cur.kind !== 'foreign' && cur.task_id === id) await this.shifts.stop(cur.id, BRIEF_FAILED, cur.started_at).catch(() => {});
     return true;
@@ -619,20 +619,20 @@ export class Scheduler {
     const name = getIdentity(this.store, worker)?.name ?? worker;
     const other = this.store.db.prepare(`SELECT id, ref, title FROM tasks WHERE identity = ? AND id != ? AND state IN ('queued','running','resting','open','interrupted')
       AND (state != 'queued' OR started_at IS NOT NULL) ORDER BY started_at DESC LIMIT 1`).get(worker, t.id) as { id: number; ref: string | null; title: string } | undefined;
-    const on = other ? `${other.ref ?? `#${other.id}`} (${other.title})` : 'משימה אחרת';
+    const on = other ? `${other.ref ?? `#${other.id}`} (${other.title})` : 'another task';
     const labels = [...new Set([...(JSON.parse(t.labels || '[]') as string[]), `assigned-to:${worker}`])];
-    const body = [`**הערת hq:** המשימה הוקצתה ${pre('ל', name)} (\`${worker}\`), שעסוק ב-${on}. היא ב-p0, ולכן עלתה מיד בעובד נקי ולא חיכתה לו. אם צריך ממנו ידע, שואלים אותו ב-\`tell\`.`, t.body].filter(Boolean).join('\n\n');
+    const body = [`**הערת hq:** המשימה הוקצתה ${pre('ל', name)} (\`${worker}\`), שעסוק ב-${other ? on : 'משימה אחרת'}. היא ב-p0, ולכן עלתה מיד בעובד נקי ולא חיכתה לו. אם צריך ממנו ידע, שואלים אותו ב-\`tell\`.`, t.body].filter(Boolean).join('\n\n');
     const r = this.store.db.prepare(`UPDATE tasks SET identity = NULL, labels = ?, body = ?, updated_at = ? WHERE id = ? AND identity = ? AND started_at IS NULL`)
       .run(JSON.stringify(labels), body, this.store.now(), t.id, worker);
     if (!r.changes) return null;
     this.store.emit('task.p0_handed_off', worker, { id: t.id, from: worker, busy_with: other?.id ?? null });
     const { opener, lead } = this.openerAndLead(t, worker);
-    const line = `משימה ${t.ref ?? `#${t.id}`} (${t.title}) ב-p0 הוקצתה ${pre('ל', name)}, שעסוק ב-${on}. כדי שלא תחכה, היא עולה עכשיו בעובד נקי.`;
+    const line = `Task ${t.ref ?? `#${t.id}`} (${t.title}) at p0 was assigned to ${name}, who is busy with ${on}. So it does not wait, it starts now in a clean worker.`;
     for (const to of new Set([opener, lead].filter((x): x is string => !!x && x !== worker))) {
       this.mailbox.tell({ msg_id: `task-${t.id}-p0-handoff-${to}`, from: 'hq', to, kind: 'system', priority: 'next', body: line });
     }
     this.mailbox.tell({ msg_id: `task-${t.id}-p0-handoff-${worker}`, from: 'hq', to: worker, kind: 'system', priority: 'next',
-      body: `${line} אם העובד שלה ישאל אותך משהו, זה בגללה.` });
+      body: `${line} If its worker asks you something, that is why.` });
     return { ...t, identity: null, labels: JSON.stringify(labels), body };
   }
 
@@ -660,9 +660,9 @@ export class Scheduler {
       const ids = to.map((id) => `task-${t.id}-late-start-${id}`);
       if (!ids.length || ids.every((id) => this.mailbox.get(id))) continue;
       const mins = Math.round((this.store.now() - t.created_at) / 60_000);
-      const body = [`משימה ${t.ref ?? `#${t.id}`} (${t.title}) ב-p${t.priority} עוד לא התחילה, ${mins} דקות אחרי שנפתחה. למה: ${this.waitReason(t, slots)}.`,
-        'אם היא לא יכולה לחכות: מעבירים אותה ל-p0, מפנים את מי שהיא מחכה לו, או סוגרים ופותחים אותה בלי `assignee`.'].join('\n');
-      const own = `משימה ${t.ref ?? `#${t.id}`} (${t.title}) ב-p${t.priority} שהוקצתה לך מחכה ${mins} דקות שתתפנה. אם המשימה שאתה עליה רק מחכה, כדאי לסגור או להעביר אותה, או לכתוב לפותח שלא תגיע אליה בקרוב.`;
+      const body = [`Task ${t.ref ?? `#${t.id}`} (${t.title}) at p${t.priority} has not started yet, ${mins} minutes after it was opened. Why: ${this.waitReason(t, slots)}.`,
+        'If it cannot wait: move it to p0, free whoever it waits for, or close it and open it again without `assignee`.'].join('\n');
+      const own = `Task ${t.ref ?? `#${t.id}`} (${t.title}) at p${t.priority}, assigned to you, has waited ${mins} minutes for you to be free. If the task you are on is only waiting, close or hand it over, or write to the opener that you will not get to it soon.`;
       to.forEach((id, i) => { if (!this.mailbox.get(ids[i]!)) this.mailbox.tell({ msg_id: ids[i]!, from: 'hq', to: id, kind: 'system', priority: 'next', body: id === worker ? own : body }); });
       this.store.emit('task.late_start', t.identity, { id: t.id, minutes: mins, to });
       told.push(t.id);
@@ -704,8 +704,8 @@ export class Scheduler {
       this.onTaskFrozen?.(t.id, 'hq');
       this.store.emit('codex.task_refused', null, { task: t.id, why: codexWhy });
       this.mailbox.tell({ msg_id: `task-${t.id}-codex-quota-${this.store.now()}`, from: 'hq', to: openedBy ?? lead ?? this.cfg.managerId, priority: 'next',
-        body: `משימה ${t.ref ?? `#${t.id}`} (${t.title}) לא התחילה על Codex: ${codexWhy}. היא סומנה needs-decision ויצאה מהתור, ולא עברה ל-Claude. `
-          + 'אם להריץ אותה על Claude, סוגרים אותה (`close_team`) ופותחים שוב בלי `engine`.' });
+        body: `Task ${t.ref ?? `#${t.id}`} (${t.title}) did not start on Codex: ${codexWhy}. It was marked needs-decision and left the queue, and did not move to Claude. `
+          + 'To run it on Claude, close it (`close_team`) and open it again without `engine`.' });
       return false;
     }
     if (!t.identity) {
@@ -740,7 +740,7 @@ export class Scheduler {
         if (e instanceof BaseFetchFailed) {
           if (!t.worktree) this.store.db.prepare('UPDATE tasks SET machine = NULL WHERE id = ? AND worktree IS NULL').run(t.id);
           this.store.emit('task.base_fetch_failed', t.identity, { id: t.id, machine: t.machine ?? LOCAL, why: e.message.slice(0, 400) });
-          this.startFailed(t.id, `fetch: ${e.message}`, `ה-worktree לא נפתח: ה-\`git fetch\` של הענף הראשי נכשל, ו-hq לא פותח משימה מהענף המקומי, שיכול לפגר. hq ממשיך לנסות עם המתנה ארוכה יותר. כדאי לבדוק את ה-remote ואת ההתחברות ל-GitHub ב-\`${t.machine ?? LOCAL}\`.`);
+          this.startFailed(t.id, `fetch: ${e.message}`, `The worktree was not created: the \`git fetch\` of the main branch failed, and hq does not start a task from the local branch, which may be behind. hq keeps trying with a longer wait. Check the remote and the GitHub login on \`${t.machine ?? LOCAL}\`.`);
           throw e;
         }
         // #224: on a node, its worktree there is gone and its branch too: nothing there to go back to. It goes back to
@@ -755,7 +755,7 @@ export class Scheduler {
         this.store.db.prepare('UPDATE tasks SET labels = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(labels), this.store.now(), t.id);
         this.onTaskFrozen?.(t.id, 'hq');
         this.mailbox.tell({ msg_id: `task-${t.id}-worktree-failed-${this.store.now()}`, from: 'hq', to: openedBy ?? lead ?? this.cfg.managerId, priority: 'next',
-          body: `משימה ${t.ref ?? `#${t.id}`} (${t.title}) לא התחילה: ${(e as Error).message}. היא סומנה needs-decision ויצאה מהתור.` });
+          body: `Task ${t.ref ?? `#${t.id}`} (${t.title}) did not start: ${(e as Error).message}. It was marked needs-decision and left the queue.` });
         throw e;
       }
       // Closed (done, closed on GitHub…) during a long worktree_setup: no worker, and the worktree goes.
@@ -793,14 +793,14 @@ export class Scheduler {
     this.store.emit('task.state', identity, { id: t.id, state: 'running', shift: row.id });
     // One prompt per run of the shift: a resumed run gets the task again (the old prompt id would be a no-op).
     this.mailbox.tell({ msg_id: `task-${t.id}-${row.id}-${row.started_at}`, from: openedBy ?? lead ?? 'hq', to: identity, priority: 'next',
-      body: [`משימה ${t.ref ?? `#${t.id}`}: ${t.title}`, ws?.note, assigned ? this.standingNote(t, openedBy ?? lead) : null, t.body, this.promptNote()]
+      body: [`Task ${t.ref ?? `#${t.id}`}: ${t.title}`, ws?.note, assigned ? this.standingNote(t, openedBy ?? lead) : null, t.body, this.promptNote()]
         .filter(Boolean).join('\n\n') });
     return true;
   }
 
   /** A standing worker has no task-worker prompt: how this task is done and closed comes with the task. */
   private standingNote(t: TaskRow, opener: string | undefined): string {
-    return ['**איך סוגרים את המשימה:**', ...taskSteps(t.project, this.cfg.companyDir, { standing: true, opener })].join('\n');
+    return ['**How to close the task:**', ...taskSteps(t.project, this.cfg.companyDir, { standing: true, opener })].join('\n');
   }
 
   private invalidReported = new Map<string, number>();
@@ -855,7 +855,7 @@ export class Scheduler {
     if (!t.project || !t.identity) return '';
     const i = getIdentity(this.store, t.identity);
     if (!i || i.project === t.project) return '';
-    return `\n**האמנה:** המשימה בפרויקט \`${t.project}\`. קרא את האמנה שלו לפני שמתחילים: \`${join(this.cfg.companyDir, 'projects', `${t.project}.md`)}\`.`;
+    return `\n**The charter:** the task is in the project \`${t.project}\`. Read its charter before you start: \`${join(this.cfg.companyDir, 'projects', `${t.project}.md`)}\`.`;
   }
 
   /**
@@ -1134,7 +1134,7 @@ export class Scheduler {
       const last = this.finishing.get(id)!;
       if (waiting.length) {
         this.mailbox.tell({ msg_id: `${last.opId}-waiting`, from: 'hq', to: identity, kind: 'system', priority: 'now', ref: waiting.at(-1)!.id,
-          body: `המשימה לא נסגרה: ${waitingLine(waiting, this.mailbox.names.owner.name)}. ענה ${g(this.mailbox.names.owner, 'לו', 'לה')} ב-\`tell\` ל-\`owner\`, ואז \`status\` עם \`state: "done"\` שוב.` });
+          body: `The task was not closed: ${waitingLine(waiting, this.mailbox.names.owner.name, true)}. Answer ${g(this.mailbox.names.owner, 'him', 'her')} with \`tell\` to \`owner\`, then \`status\` with \`state: "done"\` again.` });
         this.store.emit('task.close_waiting', identity, { id, messages: waiting.map((m) => m.id) });
         return 'waiting';
       }
@@ -1142,8 +1142,8 @@ export class Scheduler {
       const gos = this.mailbox.openGos(identity, t.started_at ?? t.created_at);
       if (gos.length) {
         this.mailbox.tell({ msg_id: `${last.opId}-go-open`, from: 'hq', to: identity, kind: 'system', priority: 'now', ref: `inbox-${gos[0]!.id}`,
-          body: `המשימה לא נסגרה: בקשת ה-GO "${gos[0]!.headline ?? gos[0]!.title}" (inbox ${gos[0]!.id}) עדיין פתוחה אצל ${this.mailbox.names.owner.name}. `
-            + `חכה לתשובה (היא תגיע אליך כהודעה), פעל לפיה, ואז \`status\` עם \`state: "done"\` שוב.` });
+          body: `The task was not closed: the GO request "${gos[0]!.headline ?? gos[0]!.title}" (inbox ${gos[0]!.id}) is still open with ${this.mailbox.names.owner.name}. `
+            + `Wait for the answer (it reaches you as a message), act on it, then \`status\` with \`state: "done"\` again.` });
         this.store.emit('task.close_waiting', identity, { id, go: gos.map((x) => x!.id) });
         return 'waiting';
       }
@@ -1221,8 +1221,8 @@ export class Scheduler {
     const to = gos.length ? this.mailbox.responsibleFor(t.identity) : null;
     if (!to || to === t.identity) return;
     this.mailbox.tell({ msg_id: `task-${t.id}-go-handover`, from: 'hq', to, kind: 'system', priority: 'next',
-      body: `${this.mailbox.label(t.identity)} נסגר כשבקשת ה-GO שלו עוד פתוחה: ${gos.map((x) => `"${x!.headline ?? x!.title}" (inbox ${x!.id})`).join(', ')}. `
-        + `התשובה של ${this.mailbox.names.owner.name} עליה (וכל מה שיכתוב לעובד שנסגר) תגיע אליך, והפעולה אחריה עליך.` });
+      body: `${this.mailbox.label(t.identity)} was closed while its GO request is still open: ${gos.map((x) => `"${x!.headline ?? x!.title}" (inbox ${x!.id})`).join(', ')}. `
+        + `${this.mailbox.names.owner.name}'s answer on it (and anything written to the closed worker) will reach you, and acting on it is yours.` });
   }
 
   /**
@@ -1243,8 +1243,8 @@ export class Scheduler {
       this.store.db.prepare('UPDATE tasks SET labels = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(labels), this.store.now(), id);
     }
     this.mailbox.tell({ msg_id: `task-${id}-closing`, from: by, to: t.identity, kind: 'system', priority: 'now',
-      body: [`המשימה ${t.ref ?? `#${id}`} (${t.title}) נסגרת${reason ? `: ${reason}` : ''}.`,
-        `כתוב עכשיו \`handoff\` (מה נעשה, מה נשאר, מה למדת), ואז \`status\` עם \`state: "done"\`. בעוד ${Math.round(this.cfg.timers.handoffGraceMs / 60_000)} דקות המשמרת נעצרת בכל מקרה.`].join('\n') });
+      body: [`Task ${t.ref ?? `#${id}`} (${t.title}) is closing${reason ? `: ${reason}` : ''}.`,
+        `Write a \`handoff\` now (what was done, what is left, what you learned), then \`status\` with \`state: "done"\`. In ${Math.round(this.cfg.timers.handoffGraceMs / 60_000)} minutes the shift stops in any case.`].join('\n') });
     return true;
   }
 
@@ -1272,9 +1272,9 @@ export class Scheduler {
       const n = (this.store.db.prepare(`SELECT COUNT(*) n FROM messages WHERE id LIKE ?`).get(`task-${t.id}-rest-wake-%`) as { n: number }).n;
       if (n >= REST_WAKES) continue;
       this.mailbox.tell({ msg_id: msgId, from: 'hq', to: t.identity, kind: 'system', priority: 'next',
-        body: [`נחת באמצע המשימה ${Math.round(this.cfg.timers.restWakeMs / 60_000)} דקות, ואף אחד לא עבד עליה. בדוק את מה שחיכית לו ותמשיך.`,
-          'עבודה שהרצת ברקע לפני שנחת כבר לא רצה, וההודעה על הסיום שלה לא תגיע: בדוק את התוצאה בעצמך (למשל `gh pr checks`), או הרץ אותה מחדש.',
-          'אם המשימה גמורה, סגור אותה עם `status`. אם אתה מחכה למישהו, כתוב לו ב-`tell` או ב-`ask`.'].join('\n') });
+        body: [`You rested in the middle of the task for ${Math.round(this.cfg.timers.restWakeMs / 60_000)} minutes, and no one worked on it. Check what you were waiting for and carry on.`,
+          'Work you ran in the background before you rested is no longer running, and the notice that it finished will not come: check the result yourself (for example `gh pr checks`), or run it again.',
+          'If the task is finished, close it with `status`. If you are waiting for someone, write to them with `tell` or `ask`.'].join('\n') });
       this.store.emit('scheduler.rest_wake', t.identity, { task: t.id, msg: msgId });
       woke.push(t.id);
     }
@@ -1396,8 +1396,8 @@ export class Scheduler {
       if (this.mailbox.get(msgId)) continue;
       this.mailbox.tell({ msg_id: msgId, from: 'hq', to: r.id, kind: 'system', priority: 'next',
         body: [
-          `קמת לראשונה: נוספת ל-\`org.yaml\` בתור ${r.title || 'ראש צוות'}, ו-hq העיר אותך אחרי שנטען.`,
-          `כתוב ${pre('ל', this.mailbox.names.owner.name)} ב-\`tell\` (\`to: "owner"\`) משפט-שניים: שקמת, מי אתה ומה הצוות שלך עושה. אחר כך המשך לפי התיק שלך.`,
+          `You are up for the first time: you were added to \`org.yaml\` as ${r.title || 'team lead'}, and hq woke you once it loaded.`,
+          `Write ${this.mailbox.names.owner.name} a sentence or two with \`tell\` (\`to: "owner"\`), in ${g(this.mailbox.names.owner, 'his', 'her')} language: that you are up, who you are and what your team does. Then carry on per your dossier.`,
         ].join('\n') });
       this.store.emit('scheduler.lead_woken', r.id, { msg: msgId });
       woke.push(r.id);
@@ -1427,25 +1427,25 @@ export class Scheduler {
 function worktreeNote(path: string, ch: ReturnType<typeof readCharter>, branch?: string, base?: string): string {
   const cmds = Object.entries(ch?.commands ?? {}).map(([k, v]) => `${k}: \`${v}\``).join(' · ');
   return [
-    `**איפה עובדים:** hq פתח לך worktree ב-\`${path}\`${branch ? ` על הענף \`${branch}\` (מ-\`${base}\`)` : ''}. זה ה-cwd שלך. לא פותחים worktree נוסף ולא מסירים אותו: hq שומר ומסיר אותו כשהמשימה נסגרת.`,
-    cmds ? `**פקודות מהאמנה:** ${cmds}` : '',
-    ch?.ciCheck ? `**CI:** ממזגים רק כשהבדיקה \`${ch.ciCheck}\` ירוקה ב-PR.` : '',
+    `**Where you work:** hq opened a worktree for you at \`${path}\`${branch ? ` on the branch \`${branch}\` (from \`${base}\`)` : ''}. It is your cwd. Do not open another worktree and do not remove it: hq keeps it and removes it when the task closes.`,
+    cmds ? `**Commands from the charter:** ${cmds}` : '',
+    ch?.ciCheck ? `**CI:** merge only when the check \`${ch.ciCheck}\` is green on the PR.` : '',
   ].filter(Boolean).join('\n');
 }
 
 /** A task on a node: what is not there, and how it moves to the main server when it needs that (moveLocal). */
 function nodeNote(machine?: string | null): string {
   if (!machine || machine === LOCAL) return '';
-  return `\n**רץ בשרת השני (\`${machine}\`).** יש בו את ה-checkouts וה-toolchains. אין בו מפתחות ssh, \`.env\`, kubectl וסודות של hq-host: את מה שהם נותנים מבקשים מ-hq עם \`request_access\`, והוא מריץ בשמך ומחזיר לך את הפלט. `
-    + 'דוגמאות: `resource: "kube:lumo-dev", argv: ["rollout","status","deploy/api"]` · `resource: "ssh:ci-host"` עם פקודה מהרשימה · `resource: "hq:query", argv: ["select …"]`. הרשימות סגורות: מה שלא ברשימה חוזר עם `unfit` והצעה, ושינוי בפרודקשן מגיע לרן ככרטיס בכל פעם (ממשיכים במה שלא תלוי בו וחוזרים עם `request`). '
-    + 'מה שנשאר רק בשרת הראשי: דפדפן, סימולטור, flutter, קובץ מקומי, וסוד שנמצא בקובץ (`.env`). כשהמשימה צריכה אחד מהם, או ש-`request_access` אומר שאין חלופה: קודם `commit` למה שיש (גם WIP), ואז `status` עם `state: "needs-local"` ו-`note` שאומר מה חסר. המשמרת כאן נגמרת, והמשימה ממשיכה בשרת הראשי מהענף שלך.';
+  return `\n**Running on the second server (\`${machine}\`).** It has the checkouts and the toolchains. It has no ssh keys, \`.env\`, kubectl or hq-host secrets: what they give, ask hq for with \`request_access\`, and it runs it on your behalf and returns the output to you. `
+    + 'Examples: `resource: "kube:lumo-dev", argv: ["rollout","status","deploy/api"]` · `resource: "ssh:ci-host"` with a command from the list · `resource: "hq:query", argv: ["select …"]`. The lists are closed: what is not on the list comes back with `unfit` and a suggestion, and a change in production reaches Ran as a card every time (carry on with what does not depend on it and come back with `request`). '
+    + 'What stays on the main server only: a browser, a simulator, flutter, a local file, and a secret kept in a file (`.env`). When the task needs one of them, or `request_access` says there is no alternative: first `commit` what you have (WIP too), then `status` with `state: "needs-local"` and a `note` that says what is missing. The shift here ends, and the task continues on the main server from your branch.';
 }
 
 /** Repos the worktree reads beside it (lumo's server/) that stayed behind on the node (RemoteWorkspaces.create). */
 function staleNote(stale?: string[]): string {
   if (!stale?.length) return '';
-  return `\n**repos שנשארו מאחור בשרת הזה** (לא באותו commit כמו בשרת הראשי): ${stale.map((l) => `\`${l}\``).join(' · ')}. `
-    + 'אם המשימה תלויה בהם: `status` עם `state: "needs-local"` ו-`note`, והיא ממשיכה בשרת הראשי.';
+  return `\n**Repos that stayed behind on this server** (not at the same commit as on the main server): ${stale.map((l) => `\`${l}\``).join(' · ')}. `
+    + 'If the task depends on them: `status` with `state: "needs-local"` and a `note`, and it continues on the main server.';
 }
 
 /** A task that started on a node and came back (unpin): where its work from there is now (fetched back on close). */
@@ -1456,11 +1456,11 @@ function movedNote(t: { id: number; labels: string }): string {
     const [node, ...rest] = left.split(':');
     const path = rest.join(':');
     const name = path.split('/').pop();
-    return `\n**המשימה התחילה ב-\`${node}\` וחזרה לכאן, וייתכן שהעבודה משם לא נמשכה** (הסגירה שם נכשלה או לא ענתה). אם היא לא כאן, היא ב-\`${node}\`: ב-worktree \`${path}\`, או בענף \`${name}\` וב-\`refs/company/preserved/${name}\` שם. בדוק קודם אם הענף וה-ref הגיעו לכאן, ואם צריך את העבודה משם, כתוב למי ששלח את המשימה לפני שמתחילים מחדש.`;
+    return `\n**The task started on \`${node}\` and came back here, and the work from there may not have been fetched** (the close there failed or did not answer). If it is not here, it is on \`${node}\`: in the worktree \`${path}\`, or in the branch \`${name}\` and in \`refs/company/preserved/${name}\` there. First check whether the branch and the ref arrived here, and if you need the work from there, write to whoever sent the task before starting over.`;
   }
   const moved = labels.find((l) => l.startsWith(MOVED_FROM))?.slice(MOVED_FROM.length);
   if (!moved) return '';
   const [from, ...rest] = moved.split(':');
   const name = rest.join(':').split('/').pop() || `company-t${t.id}`;
-  return `\n**המשימה התחילה ב-\`${from}\` וחזרה לכאן.** מה שנעשה שם נמשך ל-checkout הזה: הענף \`${name}\` (אם היו בו commits) ו-\`refs/company/preserved/${name}\` (שינויים שלא קומטו). בדוק אותם והמשך מהם, לא מאפס.`;
+  return `\n**The task started on \`${from}\` and came back here.** What was done there was fetched into this checkout: the branch \`${name}\` (if it had commits) and \`refs/company/preserved/${name}\` (uncommitted changes). Check them and continue from them, not from scratch.`;
 }

@@ -5,15 +5,15 @@ import { mkdirp } from './spool.ts';
 import { ADDITIONAL_CONTEXT_CAP, PRIME_BUDGETS } from '@company/shared';
 import type { PrimeFile } from '@company/shared';
 
-export const TRUNCATION_MARK = '…[קוצץ, ראה recall]';
+export const TRUNCATION_MARK = '…[truncated, see recall]';
 
 const SECTIONS: ReadonlyArray<{ key: keyof typeof PRIME_BUDGETS; heading: string }> = [
-  { key: 'handoff', heading: '## העברה מהמשמרת הקודמת' },
-  { key: 'directives', heading: '## הוראות חדשות' },
-  { key: 'topRecord', heading: '## הרשומה הרלוונטית ביותר' },
-  { key: 'memoryIndex', heading: '## אינדקס זיכרון' },
-  { key: 'inbox', heading: '## הודעות שלא טופלו' },
-  { key: 'pointers', heading: '## מצביעים' },
+  { key: 'handoff', heading: '## Handoff from the previous shift' },
+  { key: 'directives', heading: '## New directives' },
+  { key: 'topRecord', heading: '## Most relevant record' },
+  { key: 'memoryIndex', heading: '## Memory index' },
+  { key: 'inbox', heading: '## Unhandled messages' },
+  { key: 'pointers', heading: '## Pointers' },
 ];
 
 /**
@@ -33,7 +33,7 @@ export function truncate(text: string, max: number): string {
 
 export function buildAdditionalContext(prime: PrimeFile, source: string): string {
   const parts: string[] = [
-    `# הקשר משמרת · זהות: ${prime.identity} · משמרת: ${prime.shift} · source: ${source || 'unknown'} · עודכן: ${prime.updatedAt}`,
+    `# Shift context · identity: ${prime.identity} · shift: ${prime.shift} · source: ${source || 'unknown'} · updated: ${prime.updatedAt}`,
   ];
   for (const { key, heading } of SECTIONS) {
     const body = prime[key];

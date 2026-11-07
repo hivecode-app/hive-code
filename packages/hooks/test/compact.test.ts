@@ -22,7 +22,7 @@ test('topRecord section is injected and the full prime stays under the cap', () 
   const big = 'z'.repeat(9000);
   const out = buildAdditionalContext({ v: 1, shift: 's-1', identity: 's', updatedAt: '', handoff: big, directives: big,
     topRecord: `personal/health-insurance-policy\n${big}`, memoryIndex: big, inbox: big, pointers: big }, 'startup');
-  assert.ok(out.includes('## הרשומה הרלוונטית ביותר'));
+  assert.ok(out.includes('## Most relevant record'));
   assert.ok(out.includes('personal/health-insurance-policy'));
   assert.ok(out.length <= ADDITIONAL_CONTEXT_CAP);
   const sum = Object.values(PRIME_BUDGETS).reduce((a, b) => a + b, 0);

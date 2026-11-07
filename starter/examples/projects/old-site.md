@@ -1,12 +1,12 @@
 ---
 project: old-site
-status: dormant               # רדום: אין צוות ואין עבודה. מעירים בשינוי status ובצוות ב-org.yaml
+status: dormant               # dormant: no team and no work. Woken by changing status and adding a team in org.yaml
 repo: example-user/old-site
 deviations: []
 monitoring: []
 grants: []
 ---
 
-# אמנת האתר הישן
+# The old site charter
 
-רדום מאז ההקמה. בעל החברה הזכיר אותו, אבל אין בו עבודה פעילה.
+Dormant since setup. The owner mentioned it, but there is no active work in it.

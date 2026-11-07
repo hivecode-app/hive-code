@@ -6,7 +6,7 @@
 import { artifactInfo, type ArtifactInfo } from './artifacts.ts';
 import { ownerSystemCopy } from './system-copy.ts';
 import { randomUUID } from 'node:crypto';
-import { g, loadNames, OWNER, pre, type CompanyNames, type AskDTO, type InboxItemDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency, type WaitingOn } from '@company/shared';
+import { g, loadNames, OWNER, type CompanyNames, type AskDTO, type InboxItemDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency, type WaitingOn } from '@company/shared';
 import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
 import type { Inbox } from './inbox.ts';
@@ -77,7 +77,7 @@ export const noForeignInjector: ForeignInjector = {
 /** The manager's explicit decision on an escalated ask, as the escalation message asks for it. */
 const MANAGER_DECISION = /^\s*החלטתי במקומך\s*[:,\-–]?\s*/;
 
-const URGENCY_HE: Record<Urgency, string> = { urgent: 'דחופה', normal: 'רגילה', low: 'נמוכה' };
+const URGENCY_WORD: Record<Urgency, string> = { urgent: 'urgent', normal: 'normal', low: 'low' };
 
 interface AskRow { id: string; from_identity: string; question: string; headline: string | null; options: string; blocking: number; urgency: Urgency;
   state: AskDTO['state']; answer: string | null; answered_by: AskDTO['answered_by']; created_at: number; escalated_at: number | null; manager_note: string | null }
@@ -197,9 +197,9 @@ export class Mailbox {
    */
   envelope(m: Pick<MessageRow, 'id' | 'from_identity' | 'urgency' | 'body' | 'kind' | 'ref'> & { attachments?: AttachmentDTO[] | null }): string {
     const ref = m.ref ? ` · ref: ${m.ref}` : '';
-    const files = (m.attachments ?? []).map((a) => this.uploads?.description(a.id) ?? '[קובץ מצורף: הקובץ לא נמצא בשרת]');
+    const files = (m.attachments ?? []).map((a) => this.uploads?.description(a.id) ?? '[attached file: the file is not on the server]');
     const body = [m.body, ...files].filter(Boolean).join('\n');
-    return `[הודעה מ-${this.label(m.from_identity)} (${m.from_identity}) · דחיפות: ${URGENCY_HE[m.urgency]} · ${m.id}${ref}]\n${body}`;
+    return `[Message from ${this.label(m.from_identity)} (${m.from_identity}) · urgency: ${URGENCY_WORD[m.urgency]} · ${m.id}${ref}]\n${body}`;
   }
 
   get(id: string): MessageRow | undefined {
@@ -832,7 +832,7 @@ export class Mailbox {
       return;
     }
     this.tell({ msg_id: `${m.id}-failed`, from: 'hq', to: m.from_identity, kind: 'system', ref: m.id, priority: 'next',
-      body: `ההודעה שלך ${m.id} ל-${this.label(m.to_identity)} לא נמסרה: ${why}, והעובד לא מוקם מחדש. אם צריך להמשיך את העבודה, פותחים צוות חדש (open_team).` });
+      body: `Your message ${m.id} to ${this.label(m.to_identity)} was not delivered: the task is already closed, and the worker is not brought back. If the work needs to continue, open a new team (open_team).` });
   }
 
   /** His message to a worker whose task closed, passed on to the one responsible for it. False: nobody to pass it to. */
@@ -871,10 +871,10 @@ export class Mailbox {
       if (m.kind !== 'system') {
         // Where it went (task 986): the manager down is the owner's; any other is the manager's.
         const manager = this.cfg.managerId;
-        const where = m.to_identity === manager ? ` היא מופיעה אצל ${this.names.owner.name} ב"מחכה לך".`
-          : m.from_identity === manager ? '' : ` הודעה עליה עברה ל-${this.label(manager)}.`;
+        const where = m.to_identity === manager ? ` It shows in ${this.names.owner.name}'s "Needs you" list.`
+          : m.from_identity === manager ? '' : ` A notice about it went to ${this.label(manager)}.`;
         this.tell({ msg_id: `${m.id}-failed`, from: 'hq', to: m.from_identity, kind: 'system', ref: m.id, priority: 'next',
-          body: `ההודעה שלך ${m.id} ל-${this.label(m.to_identity)} לא נמסרה${why}.${where}` });
+          body: `Your message ${m.id} to ${this.label(m.to_identity)} was not delivered${why}.${where}` });
       }
     }
   }
@@ -1024,16 +1024,16 @@ export class Mailbox {
   returnToManager(item: InboxItemDTO): void {
     const a = item.kind === 'ask' && item.ref ? this.getAsk(item.ref) : undefined;
     if (a?.state === 'open') this.store.db.prepare(`UPDATE asks SET state = 'escalated', escalated_at = ? WHERE id = ?`).run(this.store.now(), a.id);
-    const who = item.from_identity ? this.label(item.from_identity) : 'המערכת';
+    const who = item.from_identity ? this.label(item.from_identity) : 'the system';
     const owner = this.names.owner.name;
     const what = item.headline ?? item.title;
     const how = a && item.from_identity && item.from_identity !== this.cfg.managerId
-      ? `אם זה בסמכותך: tell(to="${item.from_identity}", ref="${a.id}", body="החלטתי במקומך: X, כי Y"). אם לא: מנסחים ${pre('ל', owner)} מחדש, שורה אחת של מה מבקשים ממנו.`
+      ? `If it is within your authority: tell(to="${item.from_identity}", ref="${a.id}", body="החלטתי במקומך: X, כי Y") (the opening "החלטתי במקומך:" is a fixed marker, keep it as is). If not: word it again for ${owner}, one line of what is asked of ${g(this.names.owner, 'him', 'her')}.`
       : item.kind === 'go'
-        ? `אם זה עדיין צריך GO: מאחדים עם שאר מה שמחכה בפרויקט לבקשת GO אחת, ו-${who} סוגר/ת את הישנה (withdraw_go).`
-        : `אם זה עדיין שלו: מנסחים מחדש, שורה אחת של מה מבקשים ממנו.`;
+        ? `If it still needs a GO: combine it with whatever else waits in the project into one GO request, and ${who} closes the old one (withdraw_go).`
+        : `If it is still ${g(this.names.owner, 'his', 'hers')}: word it again, one line of what is asked of ${g(this.names.owner, 'him', 'her')}.`;
     this.tell({ msg_id: `inbox-${item.id}-returned`, from: 'hq', to: this.cfg.managerId, kind: 'system', ref: item.ref ?? `inbox-${item.id}`, priority: 'next',
-      body: [`${item.kind === 'go' ? 'בקשת GO' : 'שאלה'} של ${who} חיכתה ${pre('ל', owner)} 48 שעות בלי תשובה, ולכן ירדה מ"מחכות לך" וחזרה אליך: "${what}"`,
+      body: [`A ${item.kind === 'go' ? 'GO request' : 'question'} from ${who} waited 48 hours for ${owner} with no answer, so it left the "Needs you" list and came back to you: "${what}"`,
         item.body && item.body !== what ? item.body.slice(0, 1500) : '', how].filter(Boolean).join('\n') });
   }
 
@@ -1052,10 +1052,10 @@ export class Mailbox {
     this.store.db.prepare(`UPDATE asks SET state = 'escalated', escalated_at = ? WHERE id = ? AND state = 'open'`).run(this.store.now(), a.id);
     this.tell({ msg_id: `${a.id}-escalation`, from: 'hq', to: this.cfg.managerId, kind: 'escalation', ref: a.id, urgency: a.urgency,
       priority: 'next', body: [
-        `תפסתי תקלה (${a.id}). היא מגיעה אליך ולא ${pre('ל', this.names.owner.name)}: תקלות מערכת הן שלך.`,
+        `I caught a fault (${a.id}). It comes to you, not to ${this.names.owner.name}: system faults are yours.`,
         a.headline ?? '',
         a.question,
-        `לטפל: tell(to="hq", ref="${a.id}", body="החלטתי במקומך: לטפל"), ונפתחת משימה. לא עכשיו: אותו דבר עם "החלטתי במקומך: לא עכשיו". אם זה חוסם על ${this.names.owner.name}, מעבירים לו שאלה משלך.`,
+        `To handle it: tell(to="hq", ref="${a.id}", body="החלטתי במקומך: לטפל"), and a task opens. Not now: the same with "החלטתי במקומך: לא עכשיו". These answers are fixed markers hq reads: write them exactly. If it blocks on ${this.names.owner.name}, pass ${g(this.names.owner, 'him', 'her')} a question of your own.`,
       ].filter(Boolean).join('\n') });
     this.store.emit('ask.escalated', a.from_identity, { id: a.id, why: 'caught-fault' });
   }
@@ -1138,36 +1138,36 @@ export class Mailbox {
       ? this.store.db.prepare(`SELECT id FROM inbox WHERE kind = 'go' AND id = ?`).get(Number(num))
       : this.store.db.prepare(`SELECT id FROM inbox WHERE kind = 'go' AND ref = ? ORDER BY id DESC LIMIT 1`).get(ref)) as { id: number } | undefined;
     const item = row ? this.inbox.get(row.id) : undefined;
-    if (!item) return fail(404, `withdraw_go: no GO ${ref}`, `אין בקשת GO עם המזהה ${ref} (ה-ref שחזר מ-request_go, או inbox-<מספר>)`);
+    if (!item) return fail(404, `withdraw_go: no GO ${ref}`, `There is no GO request with the id ${ref} (the ref request_go returned, or inbox-<number>)`);
     if (item.ref?.startsWith('acc-')) {
-      return fail(409, `withdraw_go: ${ref} is an access request`, 'זו בקשת גישה (request_access): היא נסגרת רק בהחלטה שלו בכרטיס, לא דרך withdraw_go');
+      return fail(409, `withdraw_go: ${ref} is an access request`, `This is an access request (request_access): it closes only by ${g(this.names.owner, 'his', 'her')} decision on the card, not through withdraw_go`);
     }
     const requester = item.from_identity;
     const allowed = new Set([requester, this.cfg.managerId, requester ? getIdentity(this.store, requester)?.reports_to : null,
       requester ? this.responsibleFor(requester) : null].filter((x): x is string => !!x && x !== OWNER && x !== 'hq'));
     if (!allowed.has(by)) {
-      return fail(403, `withdraw_go: ${by} may not close GO ${ref}`, 'רק מי שפתח את בקשת ה-GO, המנהל שלו או המנהל של החברה יכולים לסגור אותה');
+      return fail(403, `withdraw_go: ${by} may not close GO ${ref}`, 'Only whoever opened the GO request, their manager or the company manager can close it');
     }
     if (item.state !== 'open') return { item, already: true, quote: null };
     let quote: string | null = null;
     if (outcome === 'approved_in_chat') {
-      if (!messageId) return fail(400, 'withdraw_go: message is required for approved_in_chat', 'חסר `message`: ה-msg_id של ההודעה של רן שאישרה. בלי הודעה אמיתית שלו אי אפשר לאשר בשם שיחה');
+      if (!messageId) return fail(400, 'withdraw_go: message is required for approved_in_chat', `\`message\` is missing: the msg_id of ${this.names.owner.name}'s message that approved. Without a real message of ${g(this.names.owner, 'his', 'hers')}, it cannot be approved in the name of a conversation`);
       const m = this.get(messageId);
       if (!m || m.from_identity !== OWNER) {
-        return fail(400, `withdraw_go: ${messageId} is not a message from the owner`, `\`${messageId}\` היא לא הודעה של ${this.names.owner.name}. ה-msg_id הוא מה שבסוגריים בכותרת ההודעה שלו`);
+        return fail(400, `withdraw_go: ${messageId} is not a message from the owner`, `\`${messageId}\` is not a message from ${this.names.owner.name}. The msg_id is what is in the brackets in the header of ${g(this.names.owner, 'his', 'her')} message`);
       }
       // A message he wrote to this worker's conversation (or its responsible one's), as himself: not one hq wrote in his name.
       if (m.kind !== 'tell' || ![requester, by, requester ? this.responsibleFor(requester) : null].includes(m.to_identity)) {
-        return fail(400, `withdraw_go: ${messageId} is not a message of his in this conversation`, `\`${messageId}\` לא נכתבה בשיחה הזו. צריך הודעה ישירה של ${this.names.owner.name} אליך`);
+        return fail(400, `withdraw_go: ${messageId} is not a message of his in this conversation`, `\`${messageId}\` was not written in this conversation. It needs a direct message from ${this.names.owner.name} to you`);
       }
       if (m.created_at < item.created_at) {
-        return fail(400, `withdraw_go: ${messageId} was written before the card opened`, 'ההודעה נכתבה לפני שהכרטיס נפתח, ולכן היא לא אישור שלו עליו');
+        return fail(400, `withdraw_go: ${messageId} was written before the card opened`, `The message was written before the card opened, so it is not ${g(this.names.owner, 'his', 'her')} approval of it`);
       }
       quote = ownerWords(m.body);
-      if (!quote) return fail(400, `withdraw_go: ${messageId} has no text`, 'בהודעה אין טקסט שאפשר לצטט כראיה');
+      if (!quote) return fail(400, `withdraw_go: ${messageId} has no text`, 'The message has no text that can be quoted as evidence');
       // The same bar as his own words on the card (reply): only a bare yes closes it, anything else stays open.
       if (goVerdict(quote) !== 'yes') {
-        return fail(409, `withdraw_go: ${messageId} is not a clear yes`, `ההודעה «${quote.slice(0, 80)}» היא לא אישור ברור, ולכן הכרטיס נשאר פתוח. אם הוא התכוון לאשר, ${this.names.owner.name} יכול ללחוץ GO או לכתוב "אשר"`);
+        return fail(409, `withdraw_go: ${messageId} is not a clear yes`, `The message «${quote.slice(0, 80)}» is not a clear approval, so the card stays open. If ${g(this.names.owner, 'he', 'she')} meant to approve, ${this.names.owner.name} can press GO or write a clear yes (e.g. "אשר" or "approve")`);
       }
     }
     const approved = outcome === 'approved_in_chat';
@@ -1180,7 +1180,7 @@ export class Mailbox {
     // The asker hears it when someone else closed its card (a manager): it may be waiting on the answer.
     if (requester && by !== requester && getIdentity(this.store, requester)) {
       this.tell({ msg_id: `inbox-${item.id}-closed-by-${by}`, from: 'hq', to: requester, kind: 'tell', ref: item.ref ?? `inbox-${item.id}`, priority: 'next',
-        body: `${this.label(by)} סגר/ה את בקשת ה-GO "${item.headline ?? item.title}": ${approved ? `אושרה בשיחה («${quote}»)` : 'בוטלה'}.` });
+        body: `${this.label(by)} closed the GO request "${item.headline ?? item.title}": ${approved ? `approved in the conversation («${quote}»)` : 'withdrawn'}.` });
     }
     return { item: this.inbox.get(item.id)!, already: false, quote };
   }
@@ -1191,16 +1191,16 @@ export class Mailbox {
     this.store.db.prepare(`UPDATE asks SET state = 'escalated', escalated_at = ? WHERE id = ? AND state = 'open'`).run(this.store.now(), a.id);
     this.tell({ msg_id: `${a.id}-escalation`, from: 'hq', to: this.cfg.managerId, kind: 'escalation', ref: a.id, urgency: a.urgency,
       priority: 'next', body: [
-        `שאלה חוסמת מ-${this.label(a.from_identity)} לא נענתה ע"י ${this.names.owner.name} (${why}).`,
-        `שאלה (${a.id}): ${a.question}`,
-        a.options.length ? `אפשרויות: ${a.options.join(' / ')}` : '',
-        `אם זה בסמכותך: ענה עם tell(to="${a.from_identity}", ref="${a.id}", body="החלטתי במקומך: X, כי Y"). אם לא: השאר אותה ${pre('ל', this.names.owner.name)}. כל tell אחר עם ה-ref הזה לא עונה על השאלה: הוא נשאר הערה קטנה בכרטיס, והכרטיס נשאר של ${this.label(a.from_identity)} עם הכפתורים שלו.`,
+        `A blocking question from ${this.label(a.from_identity)} was not answered by ${this.names.owner.name} (${why}).`,
+        `Question (${a.id}): ${a.question}`,
+        a.options.length ? `Options: ${a.options.join(' / ')}` : '',
+        `If it is within your authority: answer with tell(to="${a.from_identity}", ref="${a.id}", body="החלטתי במקומך: X, כי Y") (the opening "החלטתי במקומך:" is a fixed marker, keep it as is). If not: leave it for ${this.names.owner.name}. Any other tell with this ref does not answer the question: it stays a small note on the card, and the card stays ${this.label(a.from_identity)}'s with its buttons.`,
       ].filter(Boolean).join('\n') });
     this.store.emit('ask.escalated', a.from_identity, { id: a.id, why });
   }
 }
 
-/** A rejected `withdraw_go`: a 4xx with the Hebrew reason (ingest.ts turns it into the IngestError the worker hears). */
+/** A rejected `withdraw_go`: a 4xx with the reason the worker reads (ingest.ts turns it into the IngestError the worker hears). */
 export class GoCloseError extends Error {
   status: number;
   he: string;
@@ -1221,10 +1221,12 @@ function askDTO(r: AskRow): AskDTO {
   return { ...r, options: JSON.parse(r.options) as string[], blocking: r.blocking === 1 };
 }
 
-/** "רן מחכה לתשובה על «…»" for his unanswered messages (#118): the latest one quoted, one line. `owner`: his name (names.ts). */
-export function waitingLine(msgs: Pick<MessageRow, 'body'>[], owner: string): string {
+/** "רן מחכה לתשובה על «…»" / "Ran is waiting for an answer to «…»" for his unanswered messages (#118): the latest one
+ *  quoted, one line. `owner`: his name (names.ts). `en`: for a sentence to a worker (worker instructions are English, t1541). */
+export function waitingLine(msgs: Pick<MessageRow, 'body'>[], owner: string, en = false): string {
   const last = msgs.at(-1)?.body.replace(/\s+/g, ' ').trim() ?? '';
   const quote = last.length > 80 ? `${last.slice(0, 79)}…` : last;
+  if (en) return `${owner} is waiting for an answer to «${quote}»${msgs.length > 1 ? ` (and ${msgs.length - 1} more)` : ''}`;
   return `${owner} מחכה לתשובה על «${quote}»${msgs.length > 1 ? ` (ועוד ${msgs.length - 1})` : ''}`;
 }
 

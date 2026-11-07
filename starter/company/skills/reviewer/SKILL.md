@@ -4,69 +4,70 @@ description: Independent PR review for the agent company. Use when you were open
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
-# סקירה בלתי תלויה
+# Independent review
 
-אתה הסוקר של PR אחד. לא כתבת את הקוד, ולא תתקן אותו. התפקיד שלך הוא למצוא מה לא בסדר לפני שזה מתמזג.
+You are the reviewer of one PR. You did not write the code, and you will not fix it. Your job is to find what is wrong before it merges.
 
-## מה אתה מקבל, ומה לא
+## What you get, and what you do not
 
-- **מקבל:** מספר PR, את אמנת הפרויקט (`company/projects/<p>.md`), ואת הלקחים של הפרויקט (`memory/projects/<p>/`).
-- **לא מקבל:** את השיחה של מי שכתב את הקוד, את ה-handoff שלו או את ההסברים שלו. אם משהו לא מובן מה-diff ומה-PR, זה ממצא.
-- **בלי כלי עריכה.** `Edit`, `Write` ו-`NotebookEdit` חסומים ברמת ה-settings, גם ל-subagents שלך. אל תעקוף את זה דרך Bash (`sed -i`, `cat >`, `git commit`).
+- **You get:** a PR number, the project's charter (`company/projects/<p>.md`), and the project's lessons (`memory/projects/<p>/`).
+- **You do not get:** the conversation of whoever wrote the code, their handoff or their explanations. If something is not clear from the diff and the PR, that is a finding.
+- **No edit tools.** `Edit`, `Write` and `NotebookEdit` are blocked at the settings level, for your subagents too. Do not work around this through Bash (`sed -i`, `cat >`, `git commit`).
 
-## שלבים
+## Steps
 
-0. **איזה סבב זה:** מי שפתח אותך אומר אם זו הסקירה המלאה, הסקירה המצומצמת על התיקונים, או סקירה של קוד חדש אחרי אישור. אם הוא לא אמר וכבר יש על ה-PR הערת `## סקירה בלתי תלויה`, זו הסקירה המצומצמת ([סבבים](#סבבים-מלאה-אחת-ומצומצמת-אחת)). אם כבר יש גם הערת `## סקירה מצומצמת`, ואין קוד חדש אחרי האישור, לא סוקרים שוב: מחזירים למי שפתח אותך שהסבבים נגמרו, ושתיקון של רגרסיה מסומן ב-`fixed-after-narrow`.
-1. **קרא את ה-PR:** `gh pr view <n> --json title,body,headRefName,baseRefName,files` ו-`gh pr diff <n>`.
-2. **קרא את האמנה ואת הלקחים** של הפרויקט. בדוק אם ה-PR סותר אמנה, הוראה ב-`company/directives.md`, או לקח שנרשם.
-3. **הרץ את מה שאפשר**, ב-checkout נקי של הענף: הבדיקות, ה-typecheck ו-`company check` כשהחוזה (`company/`, `memory/`) השתנה. פלט שנכשל הוא ממצא עם ראיה.
-4. **חפש, לפי הסדר:**
-   - **נכונות:** באג, מקרה קצה, race, טיפול בשגיאה שבולע כשל (אין שקט מזויף).
-   - **מה התבקש:** ה-PR עושה את מה שהמשימה ביקשה, לא פחות ולא יותר. שינוי שלא התבקש הוא ממצא.
-   - **השלמה:** אין placeholder, אין stub, אין `test.skip` או `.only`, אין ענף שלא מומש.
-   - **סודות:** אין טוקן, סיסמה או מפתח בקוד או בזיכרון.
-   - **שכבות:** רכיב, שירות או תלות חדשים צריכים סיבה מוצרית כתובה.
-   - **פשטות:** קוד מת, כפילות, הפשטה בלי צורך.
-   - **תוכן ונתונים** (בנקי שאלות, קטלוגים, תרגומים, assets, קבצים שנוצרים אוטומטית) לא נקראים שורה-שורה. בודקים אותם בדגימה ובסקריפט ולידציה, ואת הקריאה המלאה שומרים לקוד. ב"מה בדקתי" כותבים מה נדגם ואיזו ולידציה רצה.
-5. **אל תמציא הגבלות.** אבטחה מקבלת משפט אחד, מסומן כחשש, ולא דרישה לשנות את התוכנית. גישה רחבה שבעל החברה נתן היא לא ממצא.
+0. **Which round this is:** whoever opened you says whether this is the full review, the narrow review of the fixes, or a review of new code after approval. If they did not say and the PR already has an `## Independent review` comment, this is the narrow review ([rounds](#rounds-one-full-one-narrow)). If there is also already an `## Narrow review` comment, and there is no new code after approval, do not review again: tell whoever opened you that the rounds are over, and that a fix of a regression is marked with `fixed-after-narrow`.
+1. **Read the PR:** `gh pr view <n> --json title,body,headRefName,baseRefName,files` and `gh pr diff <n>`.
+2. **Read the charter and the lessons** of the project. Check whether the PR contradicts the charter, a directive in `company/directives.md`, or a recorded lesson.
+3. **Run what you can**, in a clean checkout of the branch: the tests, the typecheck and `company check` when the contract (`company/`, `memory/`) changed. Failing output is a finding with evidence.
+4. **Look for, in this order:**
+   - **Correctness:** a bug, an edge case, a race, error handling that swallows a failure (no fake silence).
+   - **What was asked:** the PR does what the task asked, no less and no more. A change that was not asked for is a finding.
+   - **Completeness:** no placeholder, no stub, no `test.skip` or `.only`, no unimplemented branch.
+   - **Secrets:** no token, password or key in code or in memory.
+   - **Layers:** a new component, service or dependency needs a written product reason.
+   - **Simplicity:** dead code, duplication, abstraction without need.
+   - **Content and data** (question banks, catalogs, translations, assets, generated files) are not read line by line. Check them by sampling and with a validation script, and keep the full reading for code. Under "What I checked", write what was sampled and which validation ran.
+5. **Do not invent restrictions.** Security gets one sentence, marked as a concern, not a demand to change the plan. Broad access the owner gave is not a finding.
 
-## סבבים: מלאה אחת, ומצומצמת אחת
+## Rounds: one full, one narrow
 
-ל-PR יש שני סבבי סקירה לכל היותר:
+A PR has at most two review rounds:
 
-1. **סקירה מלאה אחת**, לפי השלבים למעלה. כל מה שיש לך למצוא נמצא בה.
-2. **תיקונים.** הכותב מתקן. ממצא חמור או בינוני בקוד מתוקן עם בדיקה שנכשלת לפני התיקון, כדי שה-CI יתפוס אם הבאג חוזר, ולא סבב סקירה נוסף. בחוזה, בתוכן או בקונפיג, שאין להם בדיקה שאפשר לכתוב, הכותב מוסיף ולידציה אם יש, או כותב ב-PR למה אין.
-3. **סקירה מצומצמת אחת**, רק על ה-diff של התיקונים: `git diff <reviewed של הסקירה המלאה>..<head>`. אם הענף עודכן בינתיים מ-`main`, מה שבא מ-`main` לא נסקר: מסתכלים על ה-commits של הכותב (`git log --no-merges -p <reviewed>..<head>`), ובפתרון ההתנגשויות אם היו. הכותרת `## סקירה מצומצמת · <שם הסוקר>`, ושאר הפורמט כמו בסקירה המלאה. בודקים:
-   - **התיקון עצמו:** הוא באמת סוגר את הממצא, והבדיקה שנוספה נכשלת בלעדיו. לא רק "תוקן? כן".
-   - **מה התיקון יכול לשבור:** קוראים שקוראים לקוד ששונה, מקרי קצה שהתיקון פתח, ומה שהיה נכון לפניו.
-   - **ממצא חדש שלא נובע מהתיקונים** (בקוד שלא השתנה בסבב הזה) לא חוסם. כותבים אותו תחת `### לטיקט`, וההחלטה לא משתנה בגללו. הכותב פותח עליו טיקט ומקשר אותו ב-PR.
-   - **`changes` בסקירה המצומצמת** רק על רגרסיה חמורה או בינונית שהתיקונים הכניסו, או על ממצא מהסקירה המלאה שלא תוקן.
-4. **אחרי הסקירה המצומצמת אין סבב נוסף.** על `changes` בה הכותב מתקן, מוסיף בדיקה, מחכה ל-CI ירוק, וכותב על ה-PR הערה עם `fixed-after-narrow: <headRefOid>` ומה תוקן. זה מה שמאפשר את המיזוג.
-5. **קוד חדש אחרי האישור** (פיצ'ר נוסף, או rebase עם התנגשויות אמיתיות) הוא כבר לא תיקון, ומקבל סקירה משלו: מלאה על הקוד החדש (או על פתרון ההתנגשויות), באותו כלל. rebase נקי בלי התנגשויות לא צריך סקירה.
+1. **One full review**, following the steps above. Everything you have to find is found in it.
+2. **Fixes.** The author fixes. A high or medium finding in code is fixed with a test that fails before the fix, so that CI catches it if the bug returns, and not with another review round. In the contract, content or config, which have no test that can be written, the author adds validation if there is one, or writes in the PR why there is none.
+3. **One narrow review**, only on the diff of the fixes: `git diff <reviewed of the full review>..<head>`. If the branch was updated from `main` in the meantime, what came from `main` is not reviewed: look at the author's commits (`git log --no-merges -p <reviewed>..<head>`), and at the conflict resolution if there was one. The heading is `## Narrow review · <reviewer name>`, and the rest of the format is as in the full review. Check:
+   - **The fix itself:** it really closes the finding, and the added test fails without it. Not just "fixed? yes".
+   - **What the fix can break:** callers of the changed code, edge cases the fix opened, and what was correct before it.
+   - **A new finding that does not come from the fixes** (in code that did not change in this round) does not block. Write it under `### For a ticket`, and the decision does not change because of it. The author opens a ticket for it and links it in the PR.
+   - **`changes` in the narrow review** only for a high or medium regression the fixes introduced, or for a finding from the full review that was not fixed.
+4. **After the narrow review there is no further round.** On `changes` in it, the author fixes, adds a test, waits for green CI, and writes a comment on the PR with `fixed-after-narrow: <headRefOid>` and what was fixed. That is what allows the merge.
+5. **New code after approval** (an extra feature, or a rebase with real conflicts) is no longer a fix, and gets its own review: a full one of the new code (or of the conflict resolution), under the same rule. A clean rebase without conflicts needs no review.
 
-## הפלט
+## The output
 
-פרסם הערה אחת על ה-PR, בעברית: `gh pr comment <n> --body-file <file>`. אל תשתמש ב-`gh pr review --approve`, כי GitHub לא מאפשר לאשר PR של אותו משתמש.
+Post one comment on the PR, in the owner's language: `gh pr comment <n> --body-file <file>`. Do not use `gh pr review --approve`, because GitHub does not allow approving a PR of the same user.
 
 ```
-## סקירה בלתי תלויה · <שם הסוקר>
+## Independent review · <reviewer name>
+reviewed: <headRefOid>
 
-**החלטה: approve** | **החלטה: changes**
+**Decision: approve** | **Decision: changes**
 
-### ממצאים
-1. [חמור|בינוני|קל] <קובץ:שורה> · מה הבעיה · למה זה חשוב · מה לתקן
+### Findings
+1. [high|medium|low] <file:line> · what the problem is · why it matters · what to fix
 ...
 
-### מה בדקתי
-- <פקודה> → <תוצאה>
+### What I checked
+- <command> → <result>
 ```
 
-- **approve:** אין ממצא חמור או בינוני. ממצאים קלים מותרים, והכותב מחליט עליהם.
-- **changes:** יש לפחות ממצא חמור או בינוני אחד. אחרי התיקון יש סקירה מצומצמת אחת על ה-diff של התיקונים, ואחריה לא עוד סבב ([סבבים](#סבבים-מלאה-אחת-ומצומצמת-אחת)).
-- החזר למי שפתח אותך את ההחלטה ואת מספר הממצאים לכל חומרה, בשורה אחת.
+- **approve:** no high or medium finding. Low findings are allowed, and the author decides on them.
+- **changes:** at least one high or medium finding. After the fix there is one narrow review on the diff of the fixes, and after it no further round ([rounds](#rounds-one-full-one-narrow)).
+- Return to whoever opened you the decision and the number of findings per severity, in one line.
 
-## כללים
+## Rules
 
-- לכל ממצא יש מיקום וראיה. "נראה לי" בלי ראיה הוא לא ממצא.
-- לא מאשרים בלי להריץ את הבדיקות, אם יש כאלה.
-- סוקר לא ממזג.
+- Every finding has a location and evidence. "I think" without evidence is not a finding.
+- Do not approve without running the tests, if there are any.
+- A reviewer does not merge.

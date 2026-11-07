@@ -99,7 +99,7 @@ test('SessionStart prints hookSpecificOutput from prime.json', async () => {
   const ctx = out.hookSpecificOutput.additionalContext;
   assert.match(ctx, /source: compact/);
   assert.match(ctx, /עבדתי על X/);
-  assert.ok(ctx.indexOf('## העברה מהמשמרת הקודמת') < ctx.indexOf('## הודעות שלא טופלו'));
+  assert.ok(ctx.indexOf('## Handoff from the previous shift') < ctx.indexOf('## Unhandled messages'));
   assert.equal(spoolLines(root, 'yoav-3').length, 1);
 });
 
@@ -114,13 +114,13 @@ test('SessionStart without prime.json prints nothing but still spools', async ()
 test('sections are truncated to their budgets at line boundaries', () => {
   const long = Array.from({ length: 400 }, (_, i) => `line ${i} ${'y'.repeat(20)}`).join('\n');
   const ctx = buildAdditionalContext(prime({ handoff: long, directives: long, pointers: 'recall dir-0142' }), 'startup');
-  const handoff = ctx.split('## העברה מהמשמרת הקודמת\n')[1]!.split('\n\n## ')[0]!;
+  const handoff = ctx.split('## Handoff from the previous shift\n')[1]!.split('\n\n## ')[0]!;
   assert.ok(handoff.length <= PRIME_BUDGETS.handoff, `handoff ${handoff.length}`);
   assert.ok(handoff.endsWith(TRUNCATION_MARK));
   assert.match(handoff.split('\n').at(-2)!, /^line \d+ y{20}$/); // whole line kept before the mark
-  const directives = ctx.split('## הוראות חדשות\n')[1]!.split('\n\n## ')[0]!;
+  const directives = ctx.split('## New directives\n')[1]!.split('\n\n## ')[0]!;
   assert.ok(directives.length <= PRIME_BUDGETS.directives);
-  assert.match(ctx, /## מצביעים\nrecall dir-0142$/);
+  assert.match(ctx, /## Pointers\nrecall dir-0142$/);
 });
 
 test('total is hard-capped at ADDITIONAL_CONTEXT_CAP, cut from the end', () => {
@@ -129,7 +129,7 @@ test('total is hard-capped at ADDITIONAL_CONTEXT_CAP, cut from the end', () => {
     handoff: big, directives: big, memoryIndex: big, inbox: big, pointers: big,
   }), 'resume');
   assert.ok(ctx.length <= ADDITIONAL_CONTEXT_CAP, `len ${ctx.length}`);
-  assert.ok(ctx.startsWith('# הקשר משמרת'));
+  assert.ok(ctx.startsWith('# Shift context'));
   assert.ok(ctx.endsWith(TRUNCATION_MARK));
   assert.equal(truncate('short', 100), 'short');
 });

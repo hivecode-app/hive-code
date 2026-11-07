@@ -2,9 +2,9 @@
 // server. Transport-free: feed it lines, it returns reply lines.
 import { randomBytes } from 'node:crypto';
 import { COMPANY_API_VERSION } from '@company/shared';
-import type { OpName, WalEntry } from '@company/shared';
+import type { OpName, OwnerLanguage, WalEntry } from '@company/shared';
 import type { RecallQuery, RecallResult } from './recall.ts';
-import { hebrewProblem, TOOL_BY_NAME, TOOLS, validateArgs } from './tools.ts';
+import { languageProblem, TOOL_BY_NAME, TOOLS, validateArgs } from './tools.ts';
 import type { ToolDef } from './tools.ts';
 import type { Settled } from './wal.ts';
 
@@ -20,6 +20,8 @@ export interface Ctx { identity: string; shift: string; sessionId: string | null
 
 export interface ServerDeps {
   ctx: Ctx;
+  /** The owner's language (org.yaml `owner_language`): text a person reads in another language goes back for a rewrite. Without it (tests that build the server directly): `he`. server.ts always passes the company's. */
+  language?: OwnerLanguage;
   /** Durable append; must not return before the entry is on disk. */
   append: (entry: WalEntry) => void;
   /** Waits for hq to settle an appended entry (null on timeout). Used by ops whose rejection the caller must see now. */
@@ -66,8 +68,8 @@ export function createServer(deps: ServerDeps) {
     const args = (params.arguments ?? {}) as Record<string, unknown>;
     const invalid = validateArgs(def, args);
     if (invalid) return text(`invalid arguments: ${invalid}`, true);
-    const english = hebrewProblem(def, args);
-    if (english) return text(english, true);
+    const wrong = languageProblem(def, args, deps.language ?? 'he');
+    if (wrong) return text(wrong, true);
 
     if (def.name === 'recall') {
       const queries = Array.isArray(args.queries) ? (args.queries as string[]).filter((q) => q.trim()) : [];

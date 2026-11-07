@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { englishLines, isEnglishTitle } from '../src/index.ts';
+import { englishLines, hebrewLines, isEnglishTitle, isWrongLanguageTitle, languageReason, wrongLanguageLines } from '../src/index.ts';
 
 test('englishLines: English prose is caught, Hebrew with technical terms and code is not (#51)', () => {
   assert.equal(englishLines('Done. PR #52 is merged, CI is green and the deploy went fine.').length, 1);
@@ -26,4 +26,19 @@ test('isEnglishTitle: the t11 and t12 titles are English, Hebrew titles with ter
   for (const ok of ['העברת ה-handoff של הטאב ל-hq', 'תיקון ל-company-ci ב-PR', '#22 מצב לילה וסיכום בוקר', 'pretest: לזהות @company/shared שנטען מחוץ ל-worktree', 'CI',
     'מחקר: Claude Code hooks API', 'fix: Stop hook ב-cli'])
     assert.equal(isEnglishTitle(ok), false, ok);
+});
+
+test('wrongLanguageLines: by the owner\'s language, he blocks English prose and en blocks Hebrew prose', () => {
+  const en = 'Done. PR #52 is merged, CI is green and the deploy went fine.';
+  const he = 'PR #52 מוזג, ה-CI ירוק והפריסה עברה בלי תקלות';
+  assert.equal(wrongLanguageLines(en, 'he').length, 1);
+  assert.deepEqual(wrongLanguageLines(he, 'he'), []);
+  assert.equal(wrongLanguageLines(he, 'en').length, 1);
+  assert.deepEqual(wrongLanguageLines(en, 'en'), []);
+  for (const ok of ["Merged, and רן's logo is in the app now", 'Ran `npm test` on the branch: green', 'OK']) assert.deepEqual(hebrewLines(ok), [], ok);
+  assert.equal(isWrongLanguageTitle('תיקון ההתחברות בטלפון', 'en'), true);
+  assert.equal(isWrongLanguageTitle('Fix the phone login', 'en'), false);
+  assert.equal(isWrongLanguageTitle('Fix the phone login', 'he'), true);
+  assert.match(languageReason('tell.body', [en], 'he'), /must be in Hebrew/);
+  assert.match(languageReason('tell.body', [he], 'en'), /must be in English/);
 });

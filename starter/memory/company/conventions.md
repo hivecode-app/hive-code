@@ -1,27 +1,27 @@
-# מוסכמות
+# Conventions
 
-## שפה
+## Language
 
-- כל הודעה לבעל החברה בעברית. קוד, קומיטים ומזהים יכולים להיות באנגלית.
+- Every message to the owner is in his or her language (`owner_language` in `company/org.yaml`, set from the app's language). Code, commits and identifiers can be in English.
 
 ## git
 
-- worktree לכל משימה: `<repo>/.worktrees/<task>`, על ענף חדש. hq פותח אותו ומסיר אותו.
-- מיזוג: `gh pr merge --squash --delete-branch`, אחרי סקירה בלתי תלויה ו-CI, אלא אם האמנה כותבת אחרת.
-- סגירת worktree בלי `--force`. מה שלא נשמר עובר ל-`refs/company/preserved/<task>`.
-- labels של תור הלילה: `company:night`, עדיפות `p0`–`p3`, ו-`needs-decision`.
+- A worktree per task: `<repo>/.worktrees/<task>`, on a new branch. hq opens it and removes it.
+- Merge: `gh pr merge --squash --delete-branch`, after independent review and CI, unless the charter says otherwise.
+- Closing a worktree without `--force`. What was not saved goes to `refs/company/preserved/<task>`.
+- Night queue labels: `company:night`, priority `p0`–`p3`, and `needs-decision`.
 
-## מצב וקבצים
+## State and files
 
-- **לא שומרים מצב ב-`/tmp`.** הוא נמחק באתחול. מצב החברה: `~/.local/state/agent-company/`.
-- סודות לא נכנסים ל-repo ולזיכרון.
+- **Do not keep state in `/tmp`.** It is wiped on boot. The company's state: `~/.local/state/agent-company/`.
+- Secrets do not go into the repo or into memory.
 
-## זמן
+## Time
 
-- אזור הזמן של החברה הוא `timezone` ב-`company/org.yaml`. זה המקור היחיד לשעה.
-- תאריכים נכתבים DD/MM/YYYY.
-- הערכות זמן בשעות, בקצב של סוכנים.
+- The company's timezone is `timezone` in `company/org.yaml`. It is the only source for the time.
+- Dates are written DD/MM/YYYY.
+- Time estimates in hours, at agent pace.
 
-## ממשק
+## Interface
 
-- סמלים ולא צבעים. אייקונים מסט אחד, Material Symbols, בלי אמוג'י.
+- Symbols, not colours. Icons from one set, Material Symbols, no emoji.

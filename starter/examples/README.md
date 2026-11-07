@@ -1,15 +1,15 @@
-# דוגמאות להעתקה
+# Examples to copy
 
-מה שהמנהל מעתיק ומתאים בשיחת ההקמה ([skills/setup](../company/skills/setup/SKILL.md)), ומה שכל עובד מעתיק כשהוא מוסיף פרויקט או זהות אחר כך. הדוגמאות מראות צורה, לא תוכן: השמות, הכתובות והפקודות כאן מומצאים.
+What the manager copies and adapts in the setup conversation ([skills/setup](../company/skills/setup/SKILL.md)), and what any worker copies when adding a project or an identity later. The examples show form, not content: the names, URLs and commands here are made up.
 
-| קובץ | מה יש בו |
+| File | What is in it |
 |---|---|
-| [org-additions.yaml](org-additions.yaml) | מה נכנס ל-`company/org.yaml` לכל פרויקט פעיל: רשומה ב-`projects`, צוות, ראש צוות. ובנוסף צוות ניטור |
-| [projects/example-app.md](projects/example-app.md) | אמנת פרויקט: `checkouts`, `commands`, `ci_check`, חריגה עם סיבה, ו-probe בסיסי |
-| [projects/old-site.md](projects/old-site.md) | אמנה של פרויקט רדום: בלי צוות ובלי checkouts |
-| [identities/aviv.md](identities/aviv.md) | תיק של ראש צוות פרויקט, עם חמשת הסעיפים שהבדיקה דורשת |
-| [identities/hadar.md](identities/hadar.md) | תיק של ראש צוות הניטור |
+| [org-additions.yaml](org-additions.yaml) | What goes into `company/org.yaml` for every active project: an entry in `projects`, a team, a team lead. And in addition a monitoring team |
+| [projects/example-app.md](projects/example-app.md) | A project charter: `checkouts`, `commands`, `ci_check`, a deviation with a reason, and a basic probe |
+| [projects/old-site.md](projects/old-site.md) | A charter of a dormant project: no team and no checkouts |
+| [identities/aviv.md](identities/aviv.md) | A dossier of a project team lead, with the five sections the check requires |
+| [identities/hadar.md](identities/hadar.md) | A dossier of the monitoring team lead |
 
-**ה-probe** יושב באמנה של הפרויקט, ברשימה `monitoring`. ה-probe-runner של hq מריץ אותו כשהאוטומציה `prod-probes` של ראש צוות הניטור דולקת. היום הוא תומך ב-`http` בלבד (GET, בלי טוקנים). סוג אחר נרשם כ"לא נתמך" ולא נבלע בשקט.
+**The probe** sits in the project's charter, in the `monitoring` list. hq's probe-runner runs it when the `prod-probes` automation of the monitoring team lead is on. Today it supports only `http` (GET, no tokens). Any other kind is recorded as "not supported" and is not swallowed silently.
 
-`company check` רץ על הדוגמאות האלה בבדיקות של המנוע (`scripts/check-contract.test.mjs`): הן מוכנסות לשלד, והחוזה שנוצר חייב לעבור.
+`company check` runs on these examples in the engine's tests (`scripts/check-contract.test.mjs`): they are inserted into the skeleton, and the resulting contract must pass.

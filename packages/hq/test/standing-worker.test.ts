@@ -93,7 +93,7 @@ test('standing worker: own worktree and a new session per task, one at a time, t
     assert.equal(la.resume, false, 'a new session');
     assert.equal(la.shiftId, 'gal-2');
     const prompt = hq.mailbox.list('gal').find((m) => m.id.startsWith(`task-${a.id}-gal-2-`))!;
-    assert.match(prompt.body, /איפה עובדים/);
+    assert.match(prompt.body, /Where you work/);
     assert.match(prompt.body, /`handoff`/, 'a standing worker hears how to close, with a handoff');
     assert.equal(prompt.from_identity, 'proj-ceo');
 
@@ -236,7 +236,7 @@ test('#408: a p0 or p1 not started 10 minutes after it was opened: its opener an
     clock.t += 10 * 60_000 + 1;
     assert.deepEqual(hq.scheduler.lateStarts(), [p1.id]);
     const m = hq.mailbox.get(`task-${p1.id}-late-start-yoav`)!;
-    assert.match(m.body, /p1 עוד לא התחילה, 10 דקות/);
+    assert.match(m.body, /p1 has not started yet, 10 minutes/);
     assert.match(m.body, /מחכה שגל יתפנה/);
     assert.ok(hq.mailbox.get(`task-${p1.id}-late-start-proj-ceo`), 'the lead too');
     assert.ok(hq.mailbox.get(`task-${p1.id}-late-start-gal`), 'and the worker it waits for');
@@ -270,12 +270,12 @@ test('a company-level standing worker (no project) runs a project task in that p
     assert.equal(l.resume, false);
     // It has no project, so no charter in its system prompt: the task points at the project's.
     const prompt = hq.mailbox.list('amit').find((m) => m.id.startsWith(`task-${t.id}-`))!;
-    assert.match(prompt.body, /\*\*האמנה:\*\* המשימה בפרויקט `proj`/);
+    assert.match(prompt.body, /\*\*The charter:\*\* the task is in the project `proj`/);
     assert.ok(prompt.body.includes(join(env.cfg.companyDir, 'projects', 'proj.md')));
     // A worker of the project hears nothing new.
     const g = hq.scheduler.addTask({ title: 'שרת', project: 'proj', identity: 'gal', labels: ['opened-by:proj-ceo'] });
     await until(() => hq.scheduler.task(g.id)!.state === 'running', 5000, 'gal running');
-    assert.doesNotMatch(hq.mailbox.list('gal').find((m) => m.id.startsWith(`task-${g.id}-`))!.body, /\*\*האמנה:\*\*/);
+    assert.doesNotMatch(hq.mailbox.list('gal').find((m) => m.id.startsWith(`task-${g.id}-`))!.body, /\*\*The charter:\*\*/);
   } finally { await env.cleanup(); r.cleanup(); }
 });
 

@@ -1,30 +1,30 @@
-# עץ הצוותים והזהויות של החברה.
-# משנים רק ב-PR. הבדיקה: company check (במנוע: npm run check:contract)
+# The company's tree of teams and identities.
+# Change only in a PR. The check: company check (in the engine: npm run check:contract)
 #
-# זה השלד שההתקנה יוצרת: מנהל אחד עם שם זמני, בלי צוותים ובלי פרויקטים.
-# המנהל משלים אותו בשיחת ההקמה (skills/setup/SKILL.md), ובסוף מוחק את השורה setup: pending.
-# כל עוד היא כאן, הבדיקה מקבלת owner_name ו-timezone ריקים.
+# This is the skeleton the installer creates: one manager with a temporary name, no teams and no projects.
+# The manager completes it in the setup conversation (skills/setup/SKILL.md), and at the end deletes the line setup: pending.
+# As long as it is here, the check accepts an empty owner_name and timezone.
 #
-# kind:       permanent | project | task      (סוג הצוות)
-# lifecycle:  always-on | dormant | ephemeral (רק resident:true מחזיק תהליך חי)
-# may_open:   אילו סוגי צוותים הזהות פותחת מתחתיה בלי לשאול
-# grants:     הרשאות פרודקשן שבעל החברה נתן מראש, עם ציטוט ותאריך. ריק עד שהוא נותן
-# automations: כל מה שקורה מעצמו. enabled הוא המתג בלוח
-# symbol:     שם אייקון מ-Material Symbols (fonts.google.com/icons). לא אמוג'י ולא צבע
-# monogram:   שתי אותיות עבריות לכל זהות. אין שדה צבע בשום מקום. כללי העיצוב: memory/company/design-taste.md
+# kind:       permanent | project | task      (the team's kind)
+# lifecycle:  always-on | dormant | ephemeral (only resident:true keeps a live process)
+# may_open:   which team kinds the identity opens under it without asking
+# grants:     production permissions the owner gave in advance, with a quote and a date. Empty until he or she gives them
+# automations: everything that happens on its own. enabled is the switch on the board
+# symbol:     an icon name from Material Symbols (fonts.google.com/icons). Not an emoji and not a colour
+# monogram:   two Hebrew letters per identity. There is no colour field anywhere. The design rules: memory/company/design-taste.md
 
 version: 1
 setup: pending
 owner: owner
-owner_language: en      # en | he: initial app language and server notifications
-owner_name:             # איך הטקסטים קוראים לבעל החברה. נקבע בשאלה הראשונה של ההקמה
-owner_gender: male      # male | female: ההטיות בטקסטים (אליו/אליה, סגר/סגרה)
-manager: manager        # מקבל הסלמות ושאלות שלא נענו. שמו (name, gender) בטקסטים
-timezone:               # IANA, למשל Asia/Jerusalem. המקור היחיד לשעה: לילה, מסך הבית, השעות באפליקציה
+owner_language: en      # en | he: the owner's language, set from the app's language. Every message to the owner is in it
+owner_name:             # what the texts call the owner. Set by the first setup question
+owner_gender: male      # male | female: the grammatical forms in texts that address the owner
+manager: manager        # receives escalations and unanswered questions. Its name (name, gender) appears in texts
+timezone:               # IANA, e.g. Asia/Jerusalem. The only source for the time: night, home screen, times in the app
 
 teams:
   - id: management
-    name: הנהלה
+    name: Management
     kind: permanent
     symbol: account_tree
     lead: manager
@@ -33,15 +33,15 @@ teams:
 
 identities:
   - id: manager
-    name: מנהל החברה    # שם זמני. בעל החברה בוחר שם בהקמה, מתוך שמות שהמנהל מציע
-    gender: male        # לפי השם שנבחר
-    title: מנהל החברה
+    name: Company manager    # temporary name. The owner chooses a name in setup, from names the manager proposes
+    gender: male        # according to the chosen name
+    title: Company manager
     symbol: explore
     team: management
     reports_to: owner
     kind: permanent
     lifecycle: always-on
-    resident: true      # היחיד שמחזיק תהליך חי תמיד
+    resident: true      # the only one that always keeps a live process
     may_open: [permanent, project, task]
     memory_domain: company
     grants: []

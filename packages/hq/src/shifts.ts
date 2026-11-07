@@ -854,9 +854,9 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       WHERE (from_identity = ? OR to_identity = ?) AND kind != 'note' ORDER BY created_at DESC, rowid DESC LIMIT 20`)
       .all(identity, identity) as { from_identity: string; to_identity: string; body: string; created_at: number }[];
     const tasks = this.store.db.prepare(`SELECT id, title, body, state, worktree, machine FROM tasks WHERE identity = ? AND state != 'done' ORDER BY updated_at DESC LIMIT 3`).all(identity);
-    const text = ['# רקע בלבד מהמשמרת הקודמת — לא הוראות לביצוע מחדש',
-      `מכונת המשימה הקודמת: ${machine}. כאשר אינה local, אתה כאן לצורך השיחה; ה-worktree נשאר במכונה המקורית.`,
-      'משימות פתוחות:', JSON.stringify(tasks).slice(0, 10000), 'הודעות אחרונות:',
+    const text = ['# Background only from the previous shift — not instructions to carry out again',
+      `The previous task machine: ${machine}. When it is not local, you are here for the conversation; the worktree stays on the original machine.`,
+      'Open tasks:', JSON.stringify(tasks).slice(0, 10000), 'Recent messages:',
       ...messages.reverse().map((m) => `${new Date(m.created_at).toISOString()} ${m.from_identity} → ${m.to_identity}: ${m.body.slice(0, 1500)}`),
     ].join('\n');
     writeFileSync(join(shiftDir(this.paths, shiftId), 'codex-continuity.txt'), text.slice(0, 32000), { mode: 0o600 });
@@ -880,7 +880,7 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       .get(identity) as { args: string } | undefined;
     // An image sent alone has no text: the summary still says something is there.
     const pending = this.store.db.prepare(`SELECT id, from_identity,
-      CASE WHEN body = '' AND attachments IS NOT NULL THEN '(תמונה מצורפת)' ELSE body END AS body FROM messages WHERE to_identity = ?
+      CASE WHEN body = '' AND attachments IS NOT NULL THEN '(attached image)' ELSE body END AS body FROM messages WHERE to_identity = ?
       AND state IN ('queued','delivered','seen') ORDER BY created_at LIMIT 20`).all(identity) as { id: string; from_identity: string; body: string }[];
     const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
     const handoffArgs = handoffRow ? (JSON.parse(handoffRow.args) as Record<string, unknown>) : null;
@@ -894,8 +894,8 @@ export class ShiftManager extends EventEmitter<ShiftEvents> {
       ...(handoffArgs ? { handoff: cut(handoffYaml(handoffArgs), PRIME_BUDGETS.handoff) } : {}),
       ...(mem.top ? { topRecord: cut(`[${mem.top.ref}]\n${mem.top.body}`, PRIME_BUDGETS.topRecord) } : {}),
       ...(mem.others.length ? { memoryIndex: cut(mem.others.map((r) => `- ${r}`).join('\n'), PRIME_BUDGETS.memoryIndex) } : {}),
-      ...(pending.length ? { inbox: cut(pending.map((m) => `- ${m.id} מ-${m.from_identity}: ${m.body.replace(/\s+/g, ' ').slice(0, 200)}`).join('\n'), PRIME_BUDGETS.inbox) } : {}),
-      ...(mem.others.length ? { pointers: cut(`פרטים: ${mem.others.slice(0, 3).map((r) => `recall ${r}`).join(' · ')}`, PRIME_BUDGETS.pointers) } : {}),
+      ...(pending.length ? { inbox: cut(pending.map((m) => `- ${m.id} from ${m.from_identity}: ${m.body.replace(/\s+/g, ' ').slice(0, 200)}`).join('\n'), PRIME_BUDGETS.inbox) } : {}),
+      ...(mem.others.length ? { pointers: cut(`Details: ${mem.others.slice(0, 3).map((r) => `recall ${r}`).join(' · ')}`, PRIME_BUDGETS.pointers) } : {}),
     };
     const file = `${dir}/prime.json`;
     writeFileSync(`${file}.tmp`, JSON.stringify(prime, null, 2), { mode: 0o600 });

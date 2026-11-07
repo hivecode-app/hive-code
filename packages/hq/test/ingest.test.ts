@@ -247,7 +247,7 @@ test('close_team closes the task for real: reason first, shift stopped, task don
     hq.mailbox.tell({ msg_id: 'late-1', from: 'eli', to: worker, body: 'עוד משהו?' });
     await until(() => hq.mailbox.get('late-1')!.state === 'failed', 15_000, 'message to a closed task fails');
     assert.match(hq.mailbox.get('late-1')!.error ?? '', /המשימה כבר נסגרה/);
-    assert.match(hq.mailbox.get('late-1-failed')!.body, /המשימה כבר נסגרה/, 'the sender hears it is closed');
+    assert.match(hq.mailbox.get('late-1-failed')!.body, /the task is already closed/, 'the sender hears it is closed');
     clock.advance(hq.cfg.timers.deliveryTimeoutMs * 3);
     await hq.mailbox.sweep();
     await hq.scheduler.sweep();
@@ -279,7 +279,7 @@ test('delivery sweep never resurrects a worker whose task closed while its shift
     await until(() => !hq.shifts.current(worker), 3000, 'the closed worker\'s shift stops');
     assert.equal(launcher.launches.filter((l) => l.identity === worker).length, before, 'no resurrect for a closed task');
     assert.equal(hq.mailbox.get('stuck-1')!.state, 'failed');
-    assert.match(hq.mailbox.get('stuck-1-failed')!.body, /המשימה כבר נסגרה/);
+    assert.match(hq.mailbox.get('stuck-1-failed')!.body, /the task is already closed/);
   } finally { await env.cleanup(); }
 });
 

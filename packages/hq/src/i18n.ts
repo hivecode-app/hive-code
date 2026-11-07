@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 
-export type OwnerLanguage = 'en' | 'he';
+import type { OwnerLanguage } from '@company/shared';
+export type { OwnerLanguage };
 export function productPreferences(companyDir: string): { owner_language: OwnerLanguage } {
   try {
     const org = parse(readFileSync(join(companyDir, 'org.yaml'), 'utf8')) as Record<string, unknown> | null;

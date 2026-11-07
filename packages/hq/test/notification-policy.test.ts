@@ -108,7 +108,7 @@ test('GO action titles and worker notification instructions', () => {
   assert.equal(goHeadline('release', 'photo fix'), 'Release photo fix?');
   assert.equal(goHeadline(undefined, 'העדכון'), 'לשחרר העדכון?');
   const prompt = readFileSync(new URL('../src/system-prompt.ts', import.meta.url), 'utf8');
-  for (const text of ['הודעה אחת, לא שתיים', 'for_owner: true', 'באדג׳ בלבד', 'eta_done', 'שולחים `tell`']) assert.ok(prompt.includes(text), text);
+  for (const text of ['One message, not two', 'for_owner: true', 'badge only', 'eta_done', 'send a `tell`']) assert.ok(prompt.includes(text), text);
 });
 
 test('owner system lines omit routing keys and machines while retaining structured references', async () => {

@@ -87,19 +87,19 @@ test('task worker prompt: absolute skill paths by default; merge_instructions re
     assert.ok(plain.includes(`\`${join(d, 'skills', 'reviewer', 'SKILL.md')}\``));
     assert.ok(plain.includes(`\`${join(d, 'skills', 'ship', 'SKILL.md')}\``));
     assert.match(plain, /gh pr merge --squash --delete-branch/);
-    assert.match(plain, /\(`app`\) ירוקה/);
-    assert.match(plain, /^5\. מדווחים/m);
+    assert.match(plain, /\(`app`\) is green/);
+    assert.match(plain, /^5\. Report/m);
 
     const own = buildSystemPrompt(d, { ...w, id: 'own-t1', project: 'own' }, 'yoav').split('\n---\n')[0]!;
     assert.match(own, /ship-step-4: reviewed <sha>/);
     assert.match(own, /gh api -X PUT/);
     assert.doesNotMatch(own, /gh pr merge|skills\/reviewer|skills\/ship/, 'no second, conflicting set of steps');
-    assert.match(own, /^3\. סקירה ומיזוג לפי האמנה.*diff-reviewer/m);
+    assert.match(own, /^3\. Review and merge by the project's charter.*diff-reviewer/m);
     assert.match(own, /^4\. הערה `ship-step-4/m);
-    assert.match(own, /^5\. מדווחים/m);
+    assert.match(own, /^5\. Report/m);
     const one = buildSystemPrompt(d, { ...w, id: 'one-t1', project: 'one' }, 'yoav').split('\n---\n')[0]!;
     assert.match(one, /^3\. .*\.claude\/skills\/ship/m);
-    assert.match(one, /^4\. מדווחים/m);
+    assert.match(one, /^4\. Report/m);
     assert.doesNotMatch(one, /gh pr merge/);
     assert.equal(readCharter(d, 'plain')!.mergeInstructions, null);
   } finally { rmSync(d, { recursive: true, force: true }); }
@@ -116,13 +116,13 @@ test('design_review: a PR in those paths also goes to the designer, before the m
     const w = { id: 'ui-t1', name: 'דנה', title: 'מפתחת', symbol: 'build', team: null, team_kind: 'task', project: 'ui',
       reports_to: 'adi', lifecycle: 'ephemeral', source: 'runtime', active: 1, data: '{}', updated_at: 0 } as IdentityRow;
     const ui = buildSystemPrompt(d, w, 'yoav').split('\n---\n')[0]!;
-    assert.match(ui, /^3\. PR שנוגע ב-`packages\/app\/lib\/` מקבל גם סקירת עיצוב של `noa`.*`tell` ל-`noa`.*30 דקות.*פחות מ-50 שורות.*git diff --numstat origin\/main\.\.\.HEAD -- packages\/app\/lib\//m);
-    assert.match(ui, /^4\. סקירה בלתי תלויה/m);
-    assert.match(ui, /^5\. ממזגים בעצמך/m);
-    assert.match(ui, /דוחפים ושולחים שוב ל-`noa`/);
-    assert.match(ui, /^6\. מדווחים/m);
+    assert.match(ui, /^3\. A PR that touches `packages\/app\/lib\/` also gets a design review from `noa`.*`tell` to `noa`.*30 minutes.*under 50 lines.*git diff --numstat origin\/main\.\.\.HEAD -- packages\/app\/lib\//m);
+    assert.match(ui, /^4\. An independent review/m);
+    assert.match(ui, /^5\. Merge yourself/m);
+    assert.match(ui, /push and send it to `noa` again/);
+    assert.match(ui, /^6\. Report/m);
     const plain = buildSystemPrompt(d, { ...w, id: 'plain-t1', project: 'plain' }, 'yoav').split('\n---\n')[0]!;
-    assert.doesNotMatch(plain, /סקירת עיצוב/);
+    assert.doesNotMatch(plain, /design review/);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 

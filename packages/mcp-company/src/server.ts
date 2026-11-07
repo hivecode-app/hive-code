@@ -31,10 +31,12 @@ wal.start();
 
 // The company (memory/ for recall, company/org.yaml for the names): COMPANY_HOME; without it COMPANY_REPO or the cwd (the engine: no company there since the split).
 const repo = env[ENV.home] || env[ENV.repo] || process.cwd();
+const names = loadNames(join(repo, 'company'));
 const server = createServer({
   ctx: { identity, shift, sessionId: env[ENV.sessionId] || null },
+  language: names.language,
   // The names in the tool descriptions (the owner, the manager) come from the company's org.yaml.
-  tools: buildTools(loadNames(join(repo, 'company'))),
+  tools: buildTools(names),
   resources: async () => {
     const r = await postJson(target, '/v1/resources', {}, 20_000);
     if (r.status >= 200 && r.status < 300) return String((r.body as { text?: unknown }).text ?? '');

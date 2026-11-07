@@ -15,7 +15,7 @@ const bash = (command: string, cwd = WT, e: Record<string, string> = env) => che
 
 test('Write/Edit/NotebookEdit into the main checkout are blocked, worktrees and elsewhere pass', () => {
   assert.match(write(`${ROOT}/memory/projects/lumo-bot/open-ron.md`)!, /remember/);
-  assert.match(write('~/projects/agent-company/company/identities/ron.md')!, /checkout הראשי/);
+  assert.match(write('~/projects/agent-company/company/identities/ron.md')!, /main checkout/);
   assert.ok(write('open-ron.md', `${ROOT}/memory/projects/lumo-bot`), 'relative path resolved against cwd');
   assert.ok(write(ROOT + '/x/../README.md'));
   assert.ok(checkToolUse({ tool_name: 'Edit', tool_input: { file_path: `${ROOT}/README.md`, old_string: 'a', new_string: 'b' } }, env));
@@ -129,7 +129,7 @@ test('git that moves HEAD in the main checkout is blocked with what to do instea
     assert.match(r!, /worktree/);
     assert.match(r!, /shift-host/);
     assert.ok(bash(`git -C ~/projects/agent-company ${sub}`, '/tmp', e), `should block: git -C ${ROOT} ${sub}`);
-    assert.match(bash(`git -C ${CO} ${sub}`, WT, e)!, /של החברה/, `should block: git -C ${CO} ${sub}`);
+    assert.match(bash(`git -C ${CO} ${sub}`, WT, e)!, /of the company/, `should block: git -C ${CO} ${sub}`);
     assert.equal(bash(`git ${sub}`, WT, e), null, `should pass in a worktree: git ${sub}`);
     assert.equal(bash(`git -C ${CO}/.worktrees/t1 ${sub}`, ROOT, e), null);
   }
@@ -173,7 +173,7 @@ test('CLI: a write into the main checkout is denied with the Hebrew reason and s
   assert.equal(denied.code, 0);
   const out = JSON.parse(denied.stdout) as { hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string } };
   assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(out.hookSpecificOutput.permissionDecisionReason, /`remember` עם `file`/);
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /`remember` with `file`/);
   const spool = join(state, 'shifts', 'ron-2', 'spool');
   const lines = readdirSync(spool).flatMap((f) => readFileSync(join(spool, f), 'utf8').split('\n').filter(Boolean));
   assert.equal(lines.length, 1);

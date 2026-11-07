@@ -1,6 +1,6 @@
-# הפרויקטים (L3)
+# The projects (L3)
 
-תיקייה לכל פרויקט, עם `INDEX.md` משלה. הבעלים: ראש הצוות של הפרויקט. נוצרות בשיחת ההקמה.
+A directory per project, with its own `INDEX.md`. The owner: the project's team lead. Created in the setup conversation.
 
-| פרויקט | מה יש בו |
+| Project | What is in it |
 |---|---|

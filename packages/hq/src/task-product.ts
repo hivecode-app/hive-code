@@ -149,12 +149,17 @@ export function reviewQuote(body: string | null | undefined): string | null {
 
 /** Parse GitHub facts. A review comment approves only the exact head it names. A green check for a
  * different head, a stale approve, an empty rollup or a failed read never becomes "passed". */
+// The decision line of a review comment, in either language: the reviewer skill writes `**Decision: …**` since the
+// instructions went English (08/11/2026), and older comments `**החלטה: …**`.
+const said = (body: string | undefined, word: 'approve' | 'changes'): boolean =>
+  !!body && (body.includes(`**החלטה: ${word}**`) || new RegExp(`\\*\\*Decision: ${word}\\*\\*`, 'i').test(body));
+
 export function prEvidence(j: Record<string, any>, now: number, requiredCheck: string | null): PrEvidence {
   const comments = (j.comments ?? []) as { body: string; createdAt?: string }[];
   const current = comments.filter((c) => c.body.split('\n').some((line) => line.trim() === `reviewed: ${j.headRefOid}`)).at(-1)?.body;
   const formal = (j.reviews ?? []).filter((r: any) => r.commit?.oid === j.headRefOid).at(-1);
-  const review = current?.includes('**החלטה: changes**') || formal?.state === 'CHANGES_REQUESTED' ? 'changes'
-    : current?.includes('**החלטה: approve**') || formal?.state === 'APPROVED' ? 'approved' : 'pending';
+  const review = said(current, 'changes') || formal?.state === 'CHANGES_REQUESTED' ? 'changes'
+    : said(current, 'approve') || formal?.state === 'APPROVED' ? 'approved' : 'pending';
   const checks = (j.statusCheckRollup ?? []).filter((c: any) => !requiredCheck || c.name === requiredCheck || c.context === requiredCheck);
   const states = checks.map((c: any) => c.conclusion || c.state || c.status);
   const ci = !states.length ? 'unknown' : states.some((s: string) => ['FAILURE','ERROR','CANCELLED','TIMED_OUT','ACTION_REQUIRED'].includes(s)) ? 'failed'
@@ -162,7 +167,7 @@ export function prEvidence(j: Record<string, any>, now: number, requiredCheck: s
   const ms = (v: unknown) => typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? Date.parse(v) : null;
   const decided = review === 'pending' ? null : current
     ? ms(comments.filter((c) => c.body === current).at(-1)?.createdAt) : ms(formal?.submittedAt);
-  const decision = (body: string) => body.includes('**החלטה: changes**') ? 'changes' as const : body.includes('**החלטה: approve**') ? 'approved' as const : null;
+  const decision = (body: string) => said(body, 'changes') ? 'changes' as const : said(body, 'approve') ? 'approved' as const : null;
   const reviews = [
     ...comments.flatMap((c) => { const r = decision(c.body), at = ms(c.createdAt); return r && at != null ? [{ at, review: r, quote: reviewQuote(c.body) }] : []; }),
     ...(j.reviews ?? []).flatMap((r: any) => {

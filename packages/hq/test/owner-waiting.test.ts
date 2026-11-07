@@ -69,7 +69,7 @@ test('#118: a turn that ends without answering him keeps the task open, and the 
     await until(() => !!hq.mailbox.get(`${sid}:01-waiting`), 3000, 'worker told');
     const told = hq.mailbox.get(`${sid}:01-waiting`)!;
     assert.equal(told.to_identity, worker);
-    assert.match(told.body, /רן מחכה לתשובה על «תשלח לי מה הבעיה»/);
+    assert.match(told.body, /רן is waiting for an answer to «תשלח לי מה הבעיה»/);
     assert.equal(hq.scheduler.task(t.id)!.state, 'running');
     assert.equal(stops(host), 0);
     assert.equal(hq.awaiting.get(t.id), null, '"מה לבדוק" only once it really closes');

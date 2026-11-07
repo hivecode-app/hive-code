@@ -1,20 +1,20 @@
-# מה מוסיפים ל-company/org.yaml בשיחת ההקמה. כל רשימה כאן מתמזגת לרשימה באותו שם שם.
-# id של צוות פרויקט = id של הפרויקט. id של זהות: אותיות קטנות באנגלית, לפי השם (avivit, hadar).
+# What to add to company/org.yaml in the setup conversation. Every list here merges into the list of the same name there.
+# The id of a project team = the id of the project. The id of an identity: lowercase English letters, by the name (avivit, hadar).
 
-monitoring_lead: hadar     # רק אם יש לפחות פרודקשן אחד
+monitoring_lead: hadar     # only if there is at least one production
 
 projects:
   - id: example-app
-    name: האפליקציה         # שם התצוגה בלוח, במילים של בעל החברה
+    name: The app            # the display name on the board, in the owner's words
     status: active
     team: example-app
   - id: old-site
-    name: האתר הישן
-    status: dormant          # רדום: בלי צוות. האמנה קיימת, עם status: dormant
+    name: The old site
+    status: dormant          # dormant: no team. The charter exists, with status: dormant
 
 teams:
   - id: example-app
-    name: האפליקציה
+    name: The app
     kind: project
     project: example-app
     symbol: smartphone
@@ -23,7 +23,7 @@ teams:
     helpers: ephemeral
 
   - id: monitoring
-    name: צוות הניטור
+    name: Monitoring team
     kind: permanent
     symbol: monitor_heart
     lead: hadar
@@ -32,25 +32,25 @@ teams:
 
 identities:
   - id: aviv
-    name: אביב
+    name: Aviv
     gender: male
-    title: ראש צוות האפליקציה
+    title: App team lead
     symbol: smartphone
     monogram: אב
     team: example-app
     reports_to: manager
     kind: project
     lifecycle: always-on
-    home: srv1              # אחת מ-machines
+    home: srv1              # one of machines
     may_open: [task]
     memory_domain: projects/example-app
     grants: []
     automations: []
 
   - id: hadar
-    name: הדר
+    name: Hadar
     gender: female
-    title: ראשת צוות הניטור
+    title: Monitoring team lead
     symbol: shield
     monogram: הד
     team: monitoring
@@ -60,9 +60,9 @@ identities:
     home: srv1
     may_open: [task]
     memory_domain: company
-    grants: []              # הניטור רק צופה ומדווח, עד שבעל החברה נותן הרשאה במפורש
+    grants: []              # monitoring only watches and reports, until the owner gives a permission explicitly
     automations:
       - id: prod-probes
-        what: probe-runner מריץ את בדיקות הפרודקשן מהאמנות (GET בלבד, בלי טוקנים). חריגה מעירה את ראשת הניטור
-        when: לפי every של כל probe באמנת הפרויקט
+        what: probe-runner runs the production checks from the charters (GET only, no tokens). An anomaly wakes the monitoring lead
+        when: by the every of each probe in the project charter
         enabled: true

@@ -11,5 +11,5 @@ export {
 export type { KeywordCache, Keywords, L3Hit, L3Index, L3Record, L3Source, ParsedMd, Prime, SearchOptions } from './l3.ts';
 export { createServer, newEntryId, SERVER_NAME, SERVER_VERSION, DEFAULT_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from './rpc.ts';
 export type { Ctx, ServerDeps } from './rpc.ts';
-export { buildTools, TOOLS, TOOL_BY_NAME, hebrewProblem, validateArgs } from './tools.ts';
+export { buildTools, TOOLS, TOOL_BY_NAME, languageProblem, validateArgs } from './tools.ts';
 export type { ToolDef } from './tools.ts';

@@ -8,11 +8,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LineSplitter } from '@company/shared';
 import type { WalEntry } from '@company/shared';
-import { hebrewProblem, TOOL_BY_NAME } from '../src/tools.ts';
+import { languageProblem, TOOL_BY_NAME } from '../src/tools.ts';
 
 const SERVER = new URL('../src/server.ts', import.meta.url).pathname;
 
 interface Rpc { id?: number; result?: any; error?: { code: number; message: string } }
+
+// A company whose owner reads Hebrew (owner_language: he), as ours: the language guard sends English back.
+const HE_HOME = mkdtempSync(join(tmpdir(), 'mcp-home-'));
+mkdirSync(join(HE_HOME, 'company'));
+writeFileSync(join(HE_HOME, 'company', 'org.yaml'), 'version: 1\nowner: owner\nowner_language: he\n');
 
 class Client {
   readonly child: ChildProcessWithoutNullStreams;
@@ -21,7 +26,7 @@ class Client {
   stdoutLines: string[] = [];
   stderr = '';
   constructor(env: Record<string, string>) {
-    this.child = spawn(process.execPath, [SERVER], { env: { PATH: process.env.PATH ?? '', HOME: tmpdir(), ...env } });
+    this.child = spawn(process.execPath, [SERVER], { env: { PATH: process.env.PATH ?? '', HOME: tmpdir(), COMPANY_HOME: HE_HOME, ...env } });
     const split = new LineSplitter((l) => {
       this.stdoutLines.push(l);
       const m = JSON.parse(l) as Rpc;
@@ -85,20 +90,28 @@ test('handshake, tools/list, write tools queue to WAL while hq is down', async (
     // Hebrew everywhere (#51): English text or titles are sent back for a rewrite, never queued.
     const en = await c.call('tools/call', { name: 'tell', arguments: { to: 'yoav', body: 'Done. The PR is merged and the deploy went fine, see the link.' } });
     assert.equal(en.result.isError, true);
-    assert.match(en.result.content[0].text, /בעברית/);
+    assert.match(en.result.content[0].text, /must be in Hebrew/);
     const enTitle = await c.call('tools/call', { name: 'open_team', arguments: { name: 'Tab handoff into hq', purpose: 'להעביר את ה-handoff של הטאב ל-hq' } });
     assert.equal(enTitle.result.isError, true);
     const enTicket = await c.call('tools/call', { name: 'open_ticket', arguments: { repo: 'a/b', title: 'Fix login flow', body: 'תיקון' } });
     assert.equal(enTicket.result.isError, true);
     assert.equal(walLines(root, 'yoav-3', 'wal.ndjson').length, 1, 'none of them reached the WAL');
     const open = TOOL_BY_NAME.get('open_team')!;
-    assert.equal(hebrewProblem(open, { name: 'העברת ה-handoff של הטאב ל-hq', purpose: 'PR עם `company-ci` ירוק' }), null);
+    assert.equal(languageProblem(open, { name: 'העברת ה-handoff של הטאב ל-hq', purpose: 'PR עם `company-ci` ירוק' }, 'he'), null);
     // compose_home: blocks are objects, and the words in them are his too.
     const home = TOOL_BY_NAME.get('compose_home')!;
-    assert.equal(hebrewProblem(home, { blocks: [{ type: 'headline', text: 'בוקר שקט' }, { type: 'since', items: ['התמונות עולות'] }] }), null);
-    assert.match(hebrewProblem(home, { blocks: [{ type: 'since', items: ['Images upload from the phone now'] }] }) ?? '', /blocks\[0\]/);
-    assert.match(hebrewProblem(home, { blocks: [{ type: 'since', items: [{ text: 'Images upload from the phone now', task: 3 }] }] }) ?? '', /blocks\[0\]/);
-    assert.equal(hebrewProblem(home, { blocks: [{ type: 'since', items: [{ text: 'התמונות עולות', task: 3 }] }] }), null);
+    assert.equal(languageProblem(home, { blocks: [{ type: 'headline', text: 'בוקר שקט' }, { type: 'since', items: ['התמונות עולות'] }] }, 'he'), null);
+    assert.match(languageProblem(home, { blocks: [{ type: 'since', items: ['Images upload from the phone now'] }] }, 'he') ?? '', /blocks\[0\]/);
+    assert.match(languageProblem(home, { blocks: [{ type: 'since', items: [{ text: 'Images upload from the phone now', task: 3 }] }] }, 'he') ?? '', /blocks\[0\]/);
+    assert.equal(languageProblem(home, { blocks: [{ type: 'since', items: [{ text: 'התמונות עולות', task: 3 }] }] }, 'he'), null);
+    // An English-speaking owner (owner_language: en): the same guard turns around, and Hebrew goes back for a rewrite.
+    const tellDef = TOOL_BY_NAME.get('tell')!;
+    assert.match(languageProblem(tellDef, { to: 'owner', body: 'השינוי מוזג והפריסה עברה, הקישור למטה' }, 'en') ?? '', /must be in English/);
+    assert.equal(languageProblem(tellDef, { to: 'owner', body: 'Merged, and the deploy went fine. The link is below.' }, 'en'), null);
+    assert.match(languageProblem(open, { name: 'העברת הטאב לשרת', purpose: 'Move the tab' }, 'en') ?? '', /open_team\.name/);
+    // The fixed answers hq parses stay Hebrew in any company: the manager of an English company can still answer them.
+    for (const body of ['החלטתי במקומך: לטפל', 'החלטתי במקומך: לא עכשיו', 'החלטתי במקומך: ship it tonight, because the fix is small'])
+      assert.equal(languageProblem(tellDef, { to: 'hq', body }, 'en'), null, body);
     const notObjects = await c.call('tools/call', { name: 'compose_home', arguments: { blocks: ['headline'] } });
     assert.match(notObjects.result.content[0].text, /array of objects/);
 
@@ -272,7 +285,7 @@ test('request_access goes to hq /v1/access with the shift, and its answer is the
     assert.equal(empty.result.isError, true);
     const en = await c.call('tools/call', { name: 'request_access', arguments: { resource: 'kube:lumo-dev', argv: ['get', 'pods'], why: 'Checking the rollout of the new image on dev please' } });
     assert.equal(en.result.isError, true);
-    assert.match(en.result.content[0].text, /בעברית/);
+    assert.match(en.result.content[0].text, /must be in Hebrew/);
     assert.equal(seen.length, 2, 'the last two never reached hq');
     assert.equal(walLines(root, 'x-1', 'wal.ndjson').length, 0, 'not a WAL op');
   } finally { await c.close(); }
@@ -343,7 +356,7 @@ test('reserve and release go to hq /v1/lease with the shift, and their answers a
     assert.equal(empty.result.isError, true);
     const en = await c.call('tools/call', { name: 'reserve', arguments: { class: 'build', note: 'Building the debug APK for the release candidate' } });
     assert.equal(en.result.isError, true);
-    assert.match(en.result.content[0].text, /בעברית/);
+    assert.match(en.result.content[0].text, /must be in Hebrew/);
     const rel = await c.call('tools/call', { name: 'release', arguments: { lease: 'lease-4' } });
     assert.equal(rel.result.isError, true);
     assert.match(rel.result.content[0].text, /no lease lease-4/);

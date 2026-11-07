@@ -190,8 +190,10 @@ const AUTHORITY_END = '<!-- /RAN:AUTHORITY -->';
 const AUTHORITY_SHA256 = '56ec6097c8334b54d9450898aeeaa08570d6f5bd0237eb79028a4c675efc2220';
 
 // A company set up from the starter kit has no CLAUDE.md to copy from: its Authority block is the engine's own,
-// in Hebrew, describing what the hook refuses. It must equal starter/company/directives.md of this engine.
-const GENERIC_AUTHORITY_HEADING = '# סמכות: קרא את זה לפני שאתה מחליט שאסור לך';
+// in English (like every worker instruction, 08/11/2026), describing what the hook refuses. It must equal
+// starter/company/directives.md of this engine.
+const GENERIC_AUTHORITY_HEADING = '# Authority: read this before you decide you are not allowed';
+const DOSSIER_SECTIONS = [['## Personality', '## אישיות'], ['## Role', '## תפקיד'], ['## Authority', '## סמכות'], ['## Automations', '## אוטומציות'], ['## Escalation', '## הסלמה']];
 const GENERIC_AUTHORITY_END = '<!-- /AUTHORITY -->';
 const STARTER_DIRECTIVES = join(dirname(fileURLToPath(import.meta.url)), '..', 'starter', 'company', 'directives.md');
 
@@ -424,8 +426,10 @@ export function main() {
       else {
         const text = readFileSync(file, 'utf8');
         if (EMOJI.test(text.split('\n')[0])) err(`company/identities/${p.id}.md: heading uses an emoji; use the icon name in the symbol line`);
-        for (const h of ['## אישיות', '## תפקיד', '## סמכות', '## אוטומציות', '## הסלמה']) {
-          if (!text.split('\n').includes(h)) err(`company/identities/${p.id}.md: missing section "${h}"`);
+        // The instructions are English (08/11/2026); a dossier still in Hebrew passes until it is translated.
+        const lines = text.split('\n');
+        for (const [h, he] of DOSSIER_SECTIONS) {
+          if (!lines.includes(h) && !lines.includes(he)) err(`company/identities/${p.id}.md: missing section "${h}"`);
         }
       }
     }

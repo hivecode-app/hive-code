@@ -1,7 +1,7 @@
 // Tool catalogue of the `company` MCP server (B.4, B.3, B.6). Every tool but
 // recall is a write: it goes to the local WAL and is answered {queued:true}.
-import { DEFAULT_NAMES, englishLines, g, hebrewReason, isEnglishTitle, pre, UI_TERMS, uiTermsLine } from '@company/shared';
-import type { CompanyNames, OpName } from '@company/shared';
+import { DEFAULT_NAMES, g, isWrongLanguageTitle, languageReason, wrongLanguageLines, UI_TERMS, uiTermsLine } from '@company/shared';
+import type { CompanyNames, OpName, OwnerLanguage } from '@company/shared';
 
 type Schema = Record<string, unknown>;
 
@@ -22,246 +22,212 @@ function tool(name: ToolDef['name'], description: string, properties: Record<str
 /** The catalogue, its texts naming the owner, the manager and the composer from org.yaml (CompanyNames). */
 export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
   const O = n.owner.name;
+  // English pronouns by the owner's gender (names.owner.gender).
   const G = (male: string, female: string) => g(n.owner, male, female);
+  const he = G('he', 'she'), He = G('He', 'She'), him = G('him', 'her'), his = G('his', 'her'), himself = G('himself', 'herself');
   // What the interface shows him has no internal term (owner, 08/11). One dictionary: packages/shared/src/ui-terms.json.
-  const WORDS = ' בלי מונחים פנימיים וראשי תיבות, אלא במילים ' + G('שלו', 'שלה') + ': ' + uiTermsLine() + '. ';
-  const NO_TERMS = ' בלי מונחים פנימיים כמו ' + UI_TERMS.slice(0, 3).map((t) => t.term).join(', ') + '. ';
-  // "מה לבדוק" (#108): what a finished task still waits for, shown to him until a deploy or his "בדקתי" clears it.
+  const WORDS = ' no internal terms or acronyms, in ' + his + ' words: ' + uiTermsLine() + '. ';
+  const NO_TERMS = ' no internal terms like ' + UI_TERMS.slice(0, 3).map((t) => t.term).join(', ') + '. ';
+  // "What to check" (#108): what a finished task still waits for, shown to him until a deploy or his "checked" clears it.
   const awaitingArgs: Record<string, Schema> = {
-    awaiting: oneOf(['deploy', 'check', 'verify', 'none'], 'מה המשימה עוד מחכה ' + G('לו', 'לה') + ': deploy = מוזג ומחכה ל-GO או לפריסה (מתנקה לבד: hq קורא מה רץ בפרודקשן לפי `live:` באמנת הפרויקט, ומנקה כשכל חלק שה-PR נוגע בו מריץ אותו; גם דיווח פריסה שמזכיר אותה מנקה), '
-      + 'check = כבר בפרודקשן ' + pre('ו', O) + ' ' + G('צריך', 'צריכה') + ' לבדוק משהו ' + G('בעצמו', 'בעצמה') + ' (מתנקה ' + G('כשהוא מסמן', 'כשהיא מסמנת') + ' "בוצע"), verify = לבדוק לפני שחרור, למשל build ב-TestFlight, none = כלום, מנקה. בלי: לא מחכה לכלום. '
-      + 'check ו-verify מגיעים מיד ' + G('אליו', 'אליה') + ' כהודעה בשיחה איתך, עם "עובד" ו"לא עובד", ו"לא עובד" מגיע לפותח המשימה. deploy לא מגיע ' + G('אליו', 'אליה') + ' אף פעם: מאחדים פריסות לבקשת GO אחת לפרויקט (request_go), ואחרי 6 שעות בלי פריסה ובלי בקשת GO hq מזכיר לך. '
-      + 'רק מה שבאמת מחכה ' + G('לו', 'לה') + ' וחוסם: בלי ' + G('הבדיקה שלו', 'הבדיקה שלה') + ' או בלי הפריסה העבודה לא גמורה. הצעה, "אם בא לך" או משהו שאפשר לעשות בלי ' + G('אותו', 'אותה') + ' לא נכנסים ל-awaiting: כותבים אותם ב-tell. '
-      + '/ only what truly waits on ' + G('him', 'her') + ' and blocks; a suggestion or an optional check goes in a tell. deploy = merged, waits for GO or a deploy; check = live, ' + G('he has', 'she has') + ' to check something ' + G('himself', 'herself') + '; verify = to check before release (a TestFlight build); none = clears'),
-    awaiting_note: s('עם awaiting: שורה אחת במילים ' + G('שלו', 'שלה') + ', מה מחכה או מה לבדוק, פותחים במה מבקשים,' + NO_TERMS + 'e.g. "לבדוק בטלפון שתמונה נשלחת ועולה בצ\'אט" '
-      + '/ with awaiting: one line in ' + G('his', 'her') + ' words, what waits or what to check'),
-    pr: s('ה-PR שמוזג. קישור מלא עדיף: בפרויקט עם כמה repos מספר לבד לא אומר באיזה. כשהוא בפרודקשן deploy יורד לבד / the merged PR; a full url is best (a number alone is ambiguous in a project with several repos). deploy clears once production runs it'),
+    awaiting: oneOf(['deploy', 'check', 'verify', 'none'], 'What the task still waits on ' + him + ' for: deploy = merged, waits for GO or a deploy (clears by itself: hq reads what runs in production from `live:` in the project charter, and clears once every part the PR touches runs it; a deploy report that mentions it also clears it), '
+      + 'check = already in production and ' + O + ' has to check something ' + himself + ' (clears when ' + he + ' marks "Done"), verify = to check before release, e.g. a TestFlight build, none = nothing, clears. Without it: waits on nothing. '
+      + 'check and verify reach ' + him + ' at once as a message in ' + his + ' chat with you, with "Works" and "Doesn\'t work", and "Doesn\'t work" goes to whoever opened the task. deploy never reaches ' + him + ': deploys are combined into one GO request per project (request_go), and after 6 hours with no deploy and no GO request hq reminds you. '
+      + 'Only what truly waits on ' + him + ' and blocks: without ' + his + ' check or without the deploy the work is not finished. A suggestion, an "if you like", or anything that can be done without ' + him + ' does not go in awaiting: put it in a tell.'),
+    awaiting_note: s('With awaiting: one line in ' + his + ' words, what waits or what to check, opening with what is asked,' + NO_TERMS + 'e.g. "Check on the phone that a photo is sent and shows up in the chat"'),
+    pr: s('The merged PR. A full url is best: in a project with several repos a number alone does not say which. Once it runs in production, deploy clears by itself'),
   };
 
-  // הערכות זמן (estimates.ts): a promise of "X יהיה מוכן תוך Y" goes in these fields, not only in the text. hq keeps the register,
+  // Time estimates (estimates.ts): a promise of "X will be ready in Y" goes in these fields, not only in the text. hq keeps the register,
   // answers with the company's calibration in a message, and closes it with the real time.
   // eta_at's "Israel time" is hq's default etaTimeZone (hq.config.json, #301); a company that changes it changes this text too.
   const etaArgs: Record<string, Schema> = {
-    eta_min: { type: 'number', description: 'הערכה: בעוד כמה דקות יהיה מוכן מה שב-eta_what. או eta_at / estimate: minutes until eta_what is ready (or eta_at)' },
-    eta_at: s('הערכה: באיזו שעה יהיה מוכן, HH:MM או תאריך ושעה מלאים. שעה בלי אזור זמן נקראת לפי שעון ישראל (Asia/Jerusalem), לא לפי שעון השרת. או eta_min / estimate: the time it will be ready, HH:MM or full ISO; a time with no zone is Israel time (Asia/Jerusalem), not the server\'s (or eta_min)'),
+    eta_min: { type: 'number', description: 'Estimate: in how many minutes what is in eta_what will be ready. Or eta_at' },
+    eta_at: s('Estimate: at what time it will be ready, HH:MM or a full date and time (ISO). A time with no zone is read as Israel time (Asia/Jerusalem), not the server\'s clock. Or eta_min'),
     eta_kind: oneOf(['small-fix', 'feature', 'investigation', 'report', 'build', 'deploy', 'release'],
-      'סוג העבודה של ההערכה. release = שחרור לחנויות או שרשרת release, deploy = rollout לשרת, build = build או CI / kind of work; release = store release chain, deploy = server rollout'),
-    eta_what: s('מה יהיה מוכן, בשורה אחת בעברית,' + NO_TERMS + 'e.g. "השינוי מוכן לסקירה" / what will be ready, one line'),
-    eta_done: { type: 'boolean', description: 'מה שהובטח ב-eta_what מוכן: סוגר את ההערכה הפתוחה עם הזמן האמיתי (בלי eta_what: האחרונה) / what was promised is ready: closes the open estimate with the real time' },
+      'The kind of work the estimate is for. release = store release or a release chain, deploy = server rollout, build = a build or CI'),
+    eta_what: s('What will be ready, one line in the owner\'s language,' + NO_TERMS + 'e.g. "The change is ready for review"'),
+    eta_done: { type: 'boolean', description: 'What was promised in eta_what is ready: closes the open estimate with the real time (without eta_what: the latest one)' },
   };
 
   return [
-    tool('show', 'להראות למשתמש HTML, דוח או הדמיה: מעתיק קובץ או תיקייה ומחזיר קישור חתום ל-12 שעות. בקשות חיצוניות חסומות כברירת מחדל; ניווט וקישורים עשויים לצאת לרשת, נשמר 30 יום מהעדכון האחרון. במקום פרסום ב-/qa/. עם id קיים מתעדכן אותו כרטיס / show a private versioned artifact', {
-      path: s('נתיב מוחלט לקובץ או לתיקייה עם index.html, מתוך תיקיית המשימה או /tmp / absolute file or directory path'),
-      html: s('או HTML ישירות, במקום path / inline HTML instead of path'),
-      title: s('שם הדוח או ההדמיה שהמשתמש רואה / artifact title'),
-      id: s('artifact קיים לעדכון גרסה / existing artifact id'),
-      note: s('מה השתנה בגרסה / version note'),
-      network: { type: 'boolean', description: 'ברירת מחדל false; true פותח פנייה לרשת ומסמן אותה בכרטיס / allow network access, visibly' },
+    tool('show', 'Show the user an HTML page, report or mockup: copies a file or directory and returns a link signed for 12 hours. External requests are blocked by default; navigation and links may reach the network. Kept 30 days from the last update. Use it instead of publishing under /qa/. With an existing id the same card is updated (a private, versioned artifact)', {
+      path: s('Absolute path to a file, or to a directory with index.html, inside the task directory or /tmp'),
+      html: s('Or inline HTML, instead of path'),
+      title: s('The report or mockup title the user sees'),
+      id: s('An existing artifact to update with a new version'),
+      note: s('What changed in this version'),
+      network: { type: 'boolean', description: 'Default false; true allows network access and marks it on the card' },
     }, ['title']),
-    tool('tell', 'שליחת הודעה לעובד לפי identity. כשההודעה מבטיחה זמן ("יהיה מוכן בעוד שעה"), רושמים אותו בשדות eta_min או eta_at, eta_kind ו-eta_what, לא רק בטקסט; '
-      + 'hq מחזיר הצעה לפי איך שהערכות כאלה יוצאות בפועל. כשזה מוכן: eta_done. Send a message to a teammate by identity. A message that promises a time goes in the eta_* fields, not only in the text.', {
-      files: strs('עד 20 נתיבים לקבצים: תיקיית המשימה, /tmp או קבצי ההודעה שעליה עונים. מועתקים לשיחה; אם חזר queued שומרים את המקור עד לאישור / up to 20 allowed file paths; keep sources until acknowledgment'),
-      to: s('identity של הנמען / recipient identity, e.g. "dana"'),
-      body: s('תוכן ההודעה / message text'),
-      urgency: oneOf(['now', 'next', 'later'], 'now מעיר מיד (לא קוטע סבב שרץ), next ברירת מחדל, later לסוף התור / delivery priority'),
-      fyi: { type: 'boolean', description: pre('ל', O) + ': באדג׳ בלבד, בלי צליל ובלי התראה. בין עובדים: לא מעיר ונמסר בסבב הבא. עדכון שלא מבקש מהנמען כלום ושאף אחד לא מחכה לו ("מחכה ל-X", "העברתי לדנה"). לא מעיר אותו, '
-        + 'ונמסר בסבב הבא שלו. לא לשאלה, לבקשה, ל-"מוזג" או לכל דבר שמישהו מחכה לו / for the record only: never wakes the recipient, goes in with its next turn' },
-      ref: s('מזהה הודעה שעליה עונים, e.g. m-8812 / message id being answered'),
+    tool('tell', 'Send a message to a teammate by identity. When the message promises a time ("ready in an hour"), record it in the eta_min or eta_at, eta_kind and eta_what fields, not only in the text; '
+      + 'hq answers with a suggestion based on how such estimates turn out in practice. When it is ready: eta_done.', {
+      files: strs('Up to 20 file paths: the task directory, /tmp, or the files of the message you are answering. They are copied into the chat; if it came back queued, keep the sources until acknowledged'),
+      to: s('Recipient identity, e.g. "dana"'),
+      body: s('Message text'),
+      urgency: oneOf(['now', 'next', 'later'], 'now wakes at once (does not cut a running turn), next is the default, later goes to the end of the queue'),
+      fyi: { type: 'boolean', description: 'To ' + O + ': a badge only, no sound and no notification. Between workers: does not wake, delivered with the next turn. For an update that asks nothing of the recipient and nobody waits on ("waiting on X", "passed it to Dana"). It does not wake the recipient, '
+        + 'and is delivered with its next turn. Not for a question, a request, a "merged" or anything someone waits on' },
+      ref: s('Id of the message being answered, e.g. m-8812'),
       ...etaArgs,
     }, ['to', 'body']),
-    tool('ask', 'שאלה ' + pre('ל', O) + ' או למנהל. מופיעה ' + G('אצלו', 'אצלה') + ' כהודעה בשיחה איתך: קודם headline, מתחתיה כפתורים מ-options, '
-      + 'והפרטים (question) מקופלים. מה ' + G('שהוא כותב', 'שהיא כותבת') + ' בשיחה כשהשאלה פתוחה הוא התשובה. '
-      + 'Ask the owner/manager a question. ' + G('He sees', 'She sees') + ' it as a message in ' + G('his', 'her') + ' chat with you: the headline first, '
-      + 'buttons from options under it, the question folded as details. Whatever ' + G('he types', 'she types') + ' in that chat while it is open is the answer.', {
-      headline: s('שורה ראשונה קצרה במילים ' + G('שלו', 'שלה') + ': מה משתנה ' + G('אצלו', 'אצלה') + ' או מה צריך ' + G('ממנו', 'ממנה') + ',' + WORDS
-        + 'e.g. "עדכון לאפליקציה: תמונות בצ\'אט" / one short line in ' + G('his', 'her') + ' words: what changes for ' + G('him', 'her')),
-      question: s('השאלה עם הפרטים (מקופלים מתחת ל-headline) / the question with the details, folded under the headline'),
-      blocking: { type: 'boolean', description: 'האם העבודה עוצרת עד תשובה / work is blocked until answered' },
-      options: strs('תשובות אפשריות / suggested answers'),
-      ref: s('הקשר / related message or task id'),
+    tool('ask', 'Ask ' + O + ' or the manager a question. ' + He + ' sees it as a message in ' + his + ' chat with you: the headline first, buttons from options under it, '
+      + 'and the details (question) folded. Whatever ' + he + ' types in that chat while the question is open is the answer.', {
+      headline: s('A short first line in ' + his + ' words: what changes for ' + him + ' or what is needed from ' + him + ',' + WORDS
+        + 'e.g. "App update: photos in the chat"'),
+      question: s('The question with the details (folded under the headline)'),
+      blocking: { type: 'boolean', description: 'Whether work stops until answered' },
+      options: strs('Suggested answers'),
+      ref: s('Context: a related message or task id'),
     }, ['headline', 'question']),
-    tool('remember', 'שמירת ידע בזיכרון החברה. Store knowledge in company memory.', {
-      scope: oneOf(['company', 'project', 'personal'], 'היקף / scope'),
-      kind: oneOf(['directive', 'lesson', 'decision', 'fact', 'trap', 'command'], 'סוג / kind'),
-      text: s('הידע עצמו / the knowledge'),
-      quote: s('ציטוט מקור מילה במילה / verbatim source quote'),
-      source: s('מקור, e.g. m-8812 / source reference'),
-      project: s('פרויקט כש-scope=project / project when scope=project'),
-      domain: s('תחום כש-scope=personal / domain when scope=personal'),
-      file: s('עדכון לקובץ זיכרון: נתיב יחסי תחת memory/, למשל memory/projects/lumo-bot/open-ron.md. רישומים של הפרויקט שלך '
-        + '(open-*.md, *-actions.md, customers.md), וה-open-*.md של צוות חברה בתחום שלך (memory/company/<team>/), נכנסים ל-main מיד; שאר הקבצים נכנסים ל-PR מאוחד לסקירה. לא עורכים קבצים ב-checkout הראשי / '
-        + 'update a memory file (path under memory/): your project\'s registries land on main at once, other files go to one rolling PR'),
-      mode: oneOf(['append', 'replace'], 'עם file: append מוסיף את text לסוף הקובץ (ברירת מחדל), replace מחליף את כל הקובץ ב-text. '
-        + 'לפני replace קוראים את הקובץ ב-recall עם הנתיב כ-query: הוא חוזר שלם, כולל עדכונים שעוד מחכים, ועם base_sha / '
-        + 'with file: append adds text at the end (default), replace makes text the whole file; before replace, recall the path (it returns base_sha)'),
-      base_sha: s('עם replace לרישום: ה-base_sha שחזר ב-recall עם הנתיב. אם הקובץ השתנה מאז, העדכון לא נכנס ו-hq שולח לך את התוכן החדש / '
-        + 'with replace on a registry: the base_sha recall returned; if the file moved since, hq sends you the new text to try again'),
+    tool('remember', 'Store knowledge in company memory.', {
+      scope: oneOf(['company', 'project', 'personal'], 'Scope'),
+      kind: oneOf(['directive', 'lesson', 'decision', 'fact', 'trap', 'command'], 'Kind'),
+      text: s('The knowledge itself'),
+      quote: s('Verbatim source quote'),
+      source: s('Source reference, e.g. m-8812'),
+      project: s('Project, when scope=project'),
+      domain: s('Domain, when scope=personal'),
+      file: s('Update a memory file: a relative path under memory/, e.g. memory/projects/lumo-bot/open-ron.md. Your project\'s registries '
+        + '(open-*.md, *-actions.md, customers.md), and the open-*.md of a company team in your domain (memory/company/<team>/), land on main at once; other files go to one rolling PR for review. Do not edit files in the main checkout'),
+      mode: oneOf(['append', 'replace'], 'With file: append adds text at the end of the file (default), replace makes text the whole file. '
+        + 'Before replace, read the file with recall using the path as query: it comes back whole, including updates still pending, and with base_sha'),
+      base_sha: s('With replace on a registry: the base_sha recall returned for the path. If the file changed since, the update does not land and hq sends you the new content'),
     }, ['scope', 'kind', 'text']),
-    tool('recall', 'חיפוש בזיכרון החברה. בקריאה אחת שלחו ב-queries גם ניסוח בעברית וגם ניסוח באנגלית של אותה שאלה (הזיכרון כתוב בשתי השפות). '
-      + 'Search company memory. In ONE call pass both a Hebrew and an English phrasing in `queries` '
+    tool('recall', 'Search company memory. In ONE call pass both a Hebrew and an English phrasing of the same question in `queries` (memory is written in both languages) '
       + '(e.g. ["מספר החירום של ביטוח הבריאות", "health insurance emergency number"]); do not retry with another language. '
       + 'The first item comes with the full record, the rest as snippets.', {
-      query: s('מילות חיפוש או מזהה רשומה / search terms or a record id'),
-      queries: strs('ניסוחים חלופיים: לפחות אחד בעברית ואחד באנגלית / reformulations: at least one Hebrew and one English'),
+      query: s('Search terms or a record id'),
+      queries: strs('Reformulations: at least one Hebrew and one English'),
       scope: s('company | project:<p> | personal:<domain> | archive'),
-      limit: { type: 'integer', minimum: 1, maximum: 50, description: 'מספר תוצאות מרבי / max results (default 8)' },
+      limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Max results (default 8)' },
     }, []),
-    tool('handoff', 'העברת משמרת: מצב, החלטות והמשך. Shift handoff for the next session.', {
-      state: s('מצב נוכחי בשורה / current state'),
-      done: strs('מה הושלם / done'),
-      decisions: strs('החלטות שהתקבלו / decisions made'),
-      next: strs('הצעדים הבאים / next steps'),
-      waiting_on: strs('על מי/מה מחכים / blocked on'),
-      open_questions: strs('שאלות פתוחות / open questions'),
-      warnings: strs('אזהרות / warnings'),
-      confidence: oneOf(['low', 'medium', 'high'], 'ביטחון / confidence'),
-      reason: s('סיבת ההעברה, e.g. context, end_of_day / why handing off'),
-      task: s('מזהה משימה / task id'),
+    tool('handoff', 'Shift handoff for the next session: state, decisions and what comes next.', {
+      state: s('Current state, one line'),
+      done: strs('What was done'),
+      decisions: strs('Decisions made'),
+      next: strs('Next steps'),
+      waiting_on: strs('Who or what it waits on'),
+      open_questions: strs('Open questions'),
+      warnings: strs('Warnings'),
+      confidence: oneOf(['low', 'medium', 'high'], 'Confidence'),
+      reason: s('Why handing off, e.g. context, end_of_day'),
+      task: s('Task id'),
     }, ['state']),
-    tool('status', 'עדכון מצב העובד. עם state: "done" המשימה נסגרת, ותמיד כותבים summary: זו השורה ' + pre('ש', O) + ' רואה ב"מאז שהיית פה" וב"מה הסתיים". '
-      + 'בלי summary ' + G('הוא רואה', 'היא רואה') + ' רק את שם המשימה. '
-      + 'אם משהו עוד מחכה ' + G('לו', 'לה') + ' (פריסה אחרי אישור, או משהו ' + G('שהוא צריך', 'שהיא צריכה') + ' לבדוק ' + G('בעצמו', 'בעצמה') + '), מוסיפים awaiting ו-awaiting_note, ו-check או verify מגיעים ' + G('אליו', 'אליה') + ' כהודעה בשיחה עם "עובד" ו"לא עובד". '
-      + 'המשימה נסגרת כשהסבב נגמר, ורק אם ענית על כל מה ' + pre('ש', O) + ' ' + G('שלח', 'שלחה') + ' לך. אחרת hq כותב לך "' + O + ' מחכה לתשובה על…" והיא נשארת פתוחה. '
-      + 'The task closes when the turn ends, and only if every message ' + G('he', 'she') + ' sent you was answered; else hq tells you so and it stays open. '
-      + 'Update your working status. With state "done" the task closes; always give summary: it is the line ' + G('he sees', 'she sees') + ' under "since you were here" '
-      + 'and "what finished"; without it ' + G('he sees', 'she sees') + ' only the task title. '
-      + 'If it still waits on something (a deploy, or something ' + G('he', 'she') + ' must check), add awaiting and awaiting_note: it shows under "what to check". '
-      + 'הערכת זמן ("יהיה מוכן בעוד 40 דקות") נרשמת בשדות eta_min או eta_at, eta_kind ו-eta_what; אחרי done או eta_done היא נסגרת עם הזמן האמיתי. '
-      + 'A time estimate goes in the eta_* fields; done or eta_done closes it with the real time.', {
-      state: s('מצב, e.g. working | blocked | idle | done. בשרת השני: needs-local כשחסר משהו שיש רק בשרת הראשי, והמשימה עוברת לשם / state; on the second server, needs-local moves the task to the main one'),
-      note: s('הערה קצרה / short note'),
-      summary: s('ב-done: שורה אחת במילים ' + G('שלו', 'שלה') + ', מה השתנה ' + G('אצלו', 'אצלה') + ', בלי מספרים של שינויים ומשימות.' + WORDS + 'e.g. "התמונות בצ\'אט עולות גם מהטלפון" '
-        + '/ with done: one line in ' + G('his', 'her') + ' words on what changed for ' + G('him', 'her') + ', no PR numbers or jargon'),
+    tool('status', 'Update your working status. With state "done" the task closes; always give summary: it is the line ' + O + ' sees under "Since you were here" and "What finished". '
+      + 'Without summary ' + he + ' sees only the task title. '
+      + 'If something still waits on ' + him + ' (a deploy after approval, or something ' + he + ' must check ' + himself + '), add awaiting and awaiting_note; check or verify reach ' + him + ' as a message in the chat with "Works" and "Doesn\'t work". '
+      + 'The task closes when the turn ends, and only if you answered every message ' + O + ' sent you. Otherwise hq tells you "' + O + ' is waiting for an answer on…" and it stays open. '
+      + 'A time estimate ("ready in 40 minutes") goes in the eta_min or eta_at, eta_kind and eta_what fields; after done or eta_done it closes with the real time.', {
+      state: s('State, e.g. working | blocked | idle | done. On the second server: needs-local when something only the main server has is missing, and the task moves there'),
+      note: s('Short note'),
+      summary: s('With done: one line in ' + his + ' words on what changed for ' + him + ', no PR or task numbers.' + WORDS + 'e.g. "Photos in the chat upload from the phone too"'),
       ...awaitingArgs,
       ...etaArgs,
     }, ['state']),
-    tool('open_team', 'פתיחת צוות משימה: נכנס לתור, עובד חדש נפתח במשבצת פנויה ומדווח לך בסיום. עם assignee המשימה הולכת לעובד הקבוע שהתחום שלו: '
-      + 'worktree משלה ו-session נקי, ואם הוא באמצע משימה אחרת היא מחכה בתור שלו. אם hq דוחה (למשל פרויקט רדום או assignee לא חוקי), הדחייה והסיבה חוזרות כשגיאה. '
-      + 'משימה שהיא חלק ממאמץ גדול: name מתחיל בשם המאמץ, e.g. "מוצר גנרי, שלב 4: אפליקציה אחת לכל שרת". המאמץ שייך לך, והשיחה איתך היא הבית שלו. '
-      + 'Open a task team: queued; a fresh worker starts in a free slot and reports back to you when done. With assignee it goes to that standing '
-      + 'worker (own worktree, fresh session, one task at a time). A rejection by hq comes back as an error with the reason. '
-      + 'A task that is part of a larger effort starts its name with the effort\'s name. '
-      + 'עדיפות: priority 0-3 (0 הכי דחוף, ברירת מחדל 2). בלי priority, כותרת שמתחילה ב-p0 או p1 (גם p0: או אחרי רווח או סוגריים) מקבלת אותה עדיפות. '
-      + 'Priority: priority 0-3 (0 most urgent, default 2). Without priority, a name starting with p0 or p1 (also "p0:", after a space or bracket) gets that priority.', {
-      for_owner: { type: 'boolean', description: 'true למשימה שהמשתמש ביקש: בסיום ה-summary נשלח למשתמש אוטומטית אם לא דיווחת בעצמך / requested by the owner; completion is reported automatically' },
-      name: s('כותרת המשימה, כמו שהיא מופיעה ' + G('לו', 'לה') + ' בלשונית המשימות:' + NO_TERMS + 'עדיפות ב-priority, לא p0 בכותרת. חלק ממאמץ גדול: שם המאמץ קודם, e.g. "מוצר גנרי, שלב 4: …" / task title; part of a larger effort: the effort\'s name first'),
-      purpose: s('מה בדיוק לעשות ואיך יודעים שזה גמור / what to do and the definition of done'),
-      about: s('שורה אחת במילים ' + G('שלו', 'שלה') + ': מה המשימה תשנה ' + G('אצלו', 'אצלה') + ',' + NO_TERMS + 'e.g. "התראה כשנהג לא מאשר נסיעה תוך 5 דקות". '
-        + 'זה מה ש' + G('הוא רואה', 'היא רואה') + ' בדף המשימה. ה-purpose הוא לעובד ולא מוצג ' + G('לו', 'לה')
-        + ' / one line in ' + G('his', 'her') + ' words on what the task will change for ' + G('him', 'her') + '; the task page shows it, the purpose is for the worker'),
-      proposal: { type: 'boolean', description: 'true להצעה: המשימה לא מתחילה עד ש' + O + ' ' + G('לוחץ', 'לוחצת') + ' "התחלה" בלשונית המשימות. לרעיון ש' + G('הוא לא ביקש', 'היא לא ביקשה') + ', לא למשימה ש' + G('ביקש', 'ביקשה') + ' '
-        + '/ a proposal: it does not start until the owner presses start in the tasks tab; for an idea nobody asked for, not for requested work' },
-      priority: { type: 'integer', minimum: 0, maximum: 3, description: 'עדיפות 0-3, 0 הכי דחוף, ברירת מחדל 2. גובר על p0/p1 בכותרת / priority 0-3, 0 most urgent, default 2; overrides a p0/p1 title prefix' },
-      project: s('הפרויקט, e.g. agent-company (ברירת מחדל: הפרויקט שלך) / project (default: yours)'),
-      ref: s('טיקט, e.g. hivecode-app/hive-code#11 / issue reference'),
-      repo: s('ה-checkout מהאמנה (name), אם יש בפרויקט יותר מאחד. ברירת מחדל: הראשון / charter checkout name, default the first'),
-      assignee: s('העובד הקבוע בפרויקט שהתחום שלו, e.g. ido. בלי: עובד זמני / standing worker of the project; default a temporary worker'),
-      members: strs('identities של חברי הצוות / member identities'),
-      local: { type: 'boolean', description: 'true כשהמשימה צריכה משהו שיש רק בשרת הראשי: מפתחות ssh, `.env`, kubectl, סודות של hq-host, דפדפן או סימולטור. בלי: רצה בשרת הפנוי, גם בשרת השני '
-        + '/ true when the task needs what only the main server has (ssh keys, .env, kubectl, hq-host secrets, browser, simulator); default: whichever server has room, the second one included' },
-      engine: { type: 'string', enum: ['claude', 'codex'], description: 'על מה העובד רץ. ברירת מחדל claude. codex רק בפרויקט שהאמנה שלו מדליקה אותו (`codex: { tasks: on-request }`), בלי assignee, '
-        + 'ולמשימת קוד עם קריטריון ברור (בדיקות, typecheck). לא לפרודקשן, לדפדפן או לשיחה. כשמכסת Codex נגמרה, hq דוחה עם הסיבה ולא מעביר ל-Claude '
-        + '/ which engine the worker runs on, default claude; codex only where the charter turns it on, with no assignee, for code work with a clear check' },
-      model: s('רק עם engine codex: מודל Codex, e.g. gpt-6-astra. ברירת מחדל: מהאמנה / with engine codex only: the Codex model, default the charter\'s'),
+    tool('open_team', 'Open a task team: it is queued, a fresh worker starts in a free slot and reports back to you when done. With assignee the task goes to the standing worker whose domain it is: '
+      + 'its own worktree and a fresh session, and if that worker is in the middle of another task it waits in their queue. If hq rejects it (e.g. a dormant project or an invalid assignee), the rejection and the reason come back as an error. '
+      + 'A task that is part of a larger effort: name starts with the effort\'s name, e.g. "Generic product, phase 4: one app per server". The effort is yours, and your chat is its home. '
+      + 'Priority: priority 0-3 (0 most urgent, default 2). Without priority, a name starting with p0 or p1 (also "p0:", or after a space or bracket) gets that priority.', {
+      for_owner: { type: 'boolean', description: 'true for a task the user asked for: when done, the summary is sent to the user automatically if you did not report yourself' },
+      name: s('The task title, as it appears to ' + him + ' in the tasks tab:' + NO_TERMS + 'Priority goes in priority, not p0 in the title. Part of a larger effort: the effort\'s name first, e.g. "Generic product, phase 4: …"'),
+      purpose: s('What exactly to do and how you know it is done'),
+      about: s('One line in ' + his + ' words: what the task will change for ' + him + ',' + NO_TERMS + 'e.g. "A notification when a driver does not confirm a ride within 5 minutes". '
+        + 'This is what ' + he + ' sees on the task page. The purpose is for the worker and is not shown to ' + him),
+      proposal: { type: 'boolean', description: 'true for a proposal: the task does not start until ' + O + ' presses "Start" in the tasks tab. For an idea ' + he + ' did not ask for, not for a task ' + he + ' asked for' },
+      priority: { type: 'integer', minimum: 0, maximum: 3, description: 'Priority 0-3, 0 most urgent, default 2. Overrides a p0/p1 title prefix' },
+      project: s('The project, e.g. agent-company (default: yours)'),
+      ref: s('Ticket, e.g. hivecode-app/hive-code#11'),
+      repo: s('The checkout from the charter (name), if the project has more than one. Default: the first'),
+      assignee: s('The standing worker of the project whose domain it is, e.g. ido. Without: a temporary worker'),
+      members: strs('Identities of the team members'),
+      local: { type: 'boolean', description: 'true when the task needs something only the main server has: ssh keys, `.env`, kubectl, hq-host secrets, a browser or a simulator. Without: runs on whichever server has room, the second one included' },
+      engine: { type: 'string', enum: ['claude', 'codex'], description: 'Which engine the worker runs on. Default claude. codex only in a project whose charter turns it on (`codex: { tasks: on-request }`), with no assignee, '
+        + 'and for code work with a clear check (tests, typecheck). Not for production, a browser or a conversation. When the Codex quota is used up, hq rejects with the reason and does not fall back to Claude' },
+      model: s('With engine codex only: the Codex model, e.g. gpt-6-astra. Default: the charter\'s'),
     }, ['name', 'purpose']),
-    tool('close_team', 'סגירת צוות משימה: המשימה נסגרת, המשמרת נעצרת והעבודה נשמרת. רק מי שפתח, המנהל שלו, המנהל של העובד או ' + n.manager.name + '. '
-      + 'awaiting ו-awaiting_note גוברים על מה שהעובד סימן, ואפשר לסמן אותם גם על משימה שכבר נסגרה. '
-      + 'Close a task team: the task is done, its shift stops, uncommitted work is preserved.', {
-      team: s('מזהה המשימה (t22), ה-identity של העובד (lumo-t22) או השם שלו / task id, worker identity or name'),
-      reason: s('סיבה, נשלחת לעובד לפני העצירה / reason, sent to the worker before the stop'),
-      summary: s('שורה אחת במילים ' + G('שלו', 'שלה') + ', מה השתנה ' + G('אצלו', 'אצלה') + ', בלי מספרים של שינויים ומשימות,' + NO_TERMS + 'e.g. "מיכל בצוות של לומו בוט". '
-        + 'גוברת על מה שהעובד כתב. כתבו אותה כשהעובד לא כתב, אחרת ' + G('הוא רואה', 'היא רואה') + ' רק את שם המשימה '
-        + '/ one line in ' + G('his', 'her') + ' words on what changed for ' + G('him', 'her') + ', no PR numbers or jargon; overrides the worker\'s. Give it when the worker gave none, '
-        + 'or ' + G('he sees', 'she sees') + ' only the task title'),
-      force: { type: 'boolean', description: 'לסגור גם ' + pre('כש', O) + ' מחכה לתשובה מהעובד (hq מזהיר ולא סוגר בלי זה) '
-        + '/ close even though the owner is still waiting for an answer from the worker (without it hq warns and does not close)' },
+    tool('close_team', 'Close a task team: the task closes, its shift stops and the work is preserved. Only whoever opened it, their manager, the worker\'s manager or ' + n.manager.name + '. '
+      + 'awaiting and awaiting_note override what the worker marked, and can be set on a task that is already closed.', {
+      team: s('The task id (t22), the worker\'s identity (lumo-t22) or its name'),
+      reason: s('Reason, sent to the worker before the stop'),
+      summary: s('One line in ' + his + ' words on what changed for ' + him + ', no PR or task numbers,' + NO_TERMS + 'e.g. "Michal is on the Lumo Bot team". '
+        + 'Overrides what the worker wrote. Give it when the worker gave none, or ' + he + ' sees only the task title'),
+      force: { type: 'boolean', description: 'Close even when ' + O + ' is still waiting for an answer from the worker (without it hq warns and does not close)' },
       ...awaitingArgs,
     }, ['team']),
-    tool('withdraw_ask', 'סגירת שאלה שלך שההחלטה בה התקבלה בדרך אחרת, כדי שלא תישאר אצל ' + O + ' ב"מחכות לך". הקריאה מוחקת את הכרטיס ולא שולחת תשובה. '
-      + 'Withdraw an ask of yours that was decided another way, so it does not stay in ' + O + '\'s decisions tab. The card is closed; no answer is sent.', {
-      ask: s('מזהה השאלה (ה-ref שחזר מ-ask) / the ask id (the ref ask returned)'),
-      note: s('למה נסגרה, שורה אחת בעברית / why it closed, one line in Hebrew'),
+    tool('withdraw_ask', 'Close an ask of yours that was decided another way, so it does not stay in ' + O + '\'s "Needs you" list. The card is removed; no answer is sent.', {
+      ask: s('The ask id (the ref ask returned)'),
+      note: s('Why it closed, one line in the owner\'s language'),
     }, ['ask']),
-    tool('withdraw_go', 'סגירת בקשת GO שלך שההחלטה בה כבר התקבלה, כדי שלא תישאר אצל ' + O + ' ב"מחכה לך". '
-      + 'approved_in_chat: ' + G('הוא אישר', 'היא אישרה') + ' בשיחה (למשל "יאללה נתקן") ואין צורך בלחיצה: חובה message, ה-msg_id של ההודעה ' + G('שלו', 'שלה') + ' שנכתבה אחרי שהכרטיס נפתח. '
-      + 'hq בודק שההודעה אכן ' + pre('מ', O) + ' ושומר את הציטוט שלה כראיה ל-GO; הודעה שנקראת כדחייה לא מאשרת. '
-      + 'withdrawn: הבקשה כבר לא רלוונטית, הכרטיס יורד ולא נרשם GO. רק מי שפתח את הבקשה, המנהל שלו או ' + n.manager.name + '. בקשת גישה (request_access) לא נסגרת כך. '
-      + 'Close a GO request of yours that was already decided. approved_in_chat needs message = the msg_id of ' + G('his', 'her') + ' own message written after the card opened; hq checks it is from ' + G('him', 'her')
-      + ' and keeps its quote as the evidence. withdrawn: no longer relevant, no GO is recorded.', {
-      ref: s('מזהה הבקשה (ה-ref שחזר מ-request_go, או inbox-<מספר>) / the GO id (the ref request_go returned, or inbox-<n>)'),
-      outcome: oneOf(['approved_in_chat', 'withdrawn'], 'approved_in_chat = אושר בשיחה, withdrawn = בוטל / approved in chat, or withdrawn'),
-      message: s('עם approved_in_chat: ה-msg_id של ההודעה של ' + O + ' (מה שבסוגריים בכותרת ההודעה שהגיעה אליך) / with approved_in_chat: the msg_id of the owner\'s message'),
-      note: s('למה, שורה אחת בעברית / why, one line in Hebrew'),
+    tool('withdraw_go', 'Close a GO request of yours that was already decided, so it does not stay in ' + O + '\'s "Needs you" list. '
+      + 'approved_in_chat: ' + he + ' approved in the chat (e.g. "go ahead, let\'s fix it") and no tap is needed: message is required, the msg_id of ' + his + ' own message written after the card opened. '
+      + 'hq checks the message is really from ' + him + ' and keeps its quote as the evidence for the GO; a message that reads as a refusal does not approve. '
+      + 'withdrawn: the request is no longer relevant, the card goes away and no GO is recorded. Only whoever opened the request, their manager or ' + n.manager.name + '. An access request (request_access) is not closed this way.', {
+      ref: s('The GO id (the ref request_go returned, or inbox-<n>)'),
+      outcome: oneOf(['approved_in_chat', 'withdrawn'], 'approved_in_chat = approved in the chat, withdrawn = cancelled'),
+      message: s('With approved_in_chat: the msg_id of ' + O + '\'s message (what is in brackets in the header of the message you got)'),
+      note: s('Why, one line in the owner\'s language'),
     }, ['ref', 'outcome']),
-    tool('request_go', 'בקשת אישור לפעולה. מופיעה ' + G('אצלו', 'אצלה') + ' כהודעה בשיחה איתך עם כפתור "אישור": קודם headline, והפרטים (what) מקופלים. '
-      + 'אישור או דחייה ברורים בשיחה (או הכפתור) סוגרים את הבקשה; כל מה אחר ' + G('שהוא כותב', 'שהיא כותבת') + ' מגיע אליך כהודעה רגילה והבקשה נשארת פתוחה. אם ההחלטה כבר התקבלה בשיחה ' + G('והוא', 'והיא') + ' לא לחץ/לחצה על הכרטיס, סוגרים אותו ב-withdraw_go. לא סוגרים את המשימה כל עוד היא פתוחה. '
-      + 'Request a go-ahead before acting. ' + G('He sees', 'She sees') + ' it as a message in ' + G('his', 'her') + ' chat with you with an approve button: the headline first, '
-      + 'the details (what) folded. Only a clear yes or no closes it; anything else ' + G('he types', 'she types') + ' reaches you as an ordinary message and the request stays open. The task is not closed while it is open.', {
-      action: oneOf(['release', 'deploy', 'publish', 'run'], 'מה מבקשים לעשות; קובע כותרת כשאין headline / requested action; default deploy'),
-      headline: s('שורה ראשונה קצרה שאומרת מה מבקשים ' + G('ממנו', 'ממנה') + ': מתחילה ב"להחליט אם…". היא גם הכותרת של ההתראה.' + WORDS
-        + 'e.g. "להחליט אם לשחרר את עדכון האפליקציה: תמונות בצ\'אט" / one short line in ' + G('his', 'her') + ' words that says what is asked, starting "להחליט אם…"'),
-      what: s('הפרטים: מה נכנס, סיכון ואיך חוזרים אחורה (מקופלים) / details: what ships, risk, rollback (folded)'),
-      pr: s('קישור או מספר PR. קישור מלא הופך לכפתור "השינוי בקוד" בהחלטה / PR url or number; a full https link becomes the code-change button'),
-      report: s('קישור לדוח המלא (https), אם יש. כפתור "הדוח המלא" בהחלטה / link to the full report (https), if any'),
-      risk: oneOf(['low', 'medium', 'high'], 'רמת סיכון / risk level'),
+    tool('request_go', 'Request a go-ahead before acting. ' + He + ' sees it as a message in ' + his + ' chat with you with an "Approve" button: the headline first, and the details (what) folded. '
+      + 'A clear yes or no in the chat (or the button) closes the request; anything else ' + he + ' types reaches you as an ordinary message and the request stays open. If the decision was already made in the chat and ' + he + ' did not tap the card, close it with withdraw_go. Do not close the task while it is open.', {
+      action: oneOf(['release', 'deploy', 'publish', 'run'], 'What you ask to do; sets the title when there is no headline'),
+      headline: s('A short first line that says what is asked of ' + him + ': it starts with "Decide whether…" (in the owner\'s language). It is also the notification title.' + WORDS
+        + 'e.g. "Decide whether to release the app update: photos in the chat"'),
+      what: s('The details: what ships, risk and how to roll back (folded)'),
+      pr: s('PR url or number. A full link becomes the "Code change" button on the decision'),
+      report: s('Link to the full report (https), if any. The "Full report" button on the decision'),
+      risk: oneOf(['low', 'medium', 'high'], 'Risk level'),
     }, ['what']),
-    tool('compose_home', 'הרכבת ראש מסך השיחות של ' + O + ': אילו בלוקים, באיזה סדר ובאיזה ניסוח. רק ' + (n.composer ? `${pre('ל', n.composer.name)} ${pre('ו', pre('ל', n.manager.name))}` : pre('ל', n.manager.name)) + '. '
-      + 'האפליקציה מציירת כל בלוק מקומפוננטה קבועה וממלאת אותו מנתונים חיים, ולכן מפנים לנתונים לפי מזהה, והטקסט בעברית,' + WORDS
-      + 'אוצר הבלוקים: '
-      + 'headline {text} משפט אחד. מה שמחכה ' + G('לו', 'לה') + ' מוצג בשורה נעוצה משלו בראש השיחות ("3 מחכות לך"), ולכן לא כותבים בו כמה מחכה ' + G('לו', 'לה') + ' · alert {shift: מזהה משמרת} תקלה שאין עליה החלטה, למשל משמרת תקועה · '
-      + 'tasks {tasks: [מזהי משימות] או "open"} בעבודה ובתור: משימות פתוחות עם מי פתח, מי עובד והמצב. "open" מציג את כולן, ורשימה מציגה משימה מסוימת (למשל דחופה) · '
-      + 'lanes {projects: [ids]} פסי היום · '
-      + 'project {project, note?} שתי שורות · quiet {projects: [ids]} שורה אחת בסוף, "שקט גם ב: …", לפרויקטים שלא זזו · people {identities: [ids], caption?} · since {items: [עד 3: משפט, או {text, task: מזהה משימה}]}, עם task השורה מובילה לשיחה עם מי שעשה את המשימה · '
-      + 'note {text, icon} הערה שלך, icon הוא שם של Material Symbol. לכל בלוק אפשר emphasis: normal|quiet|strong (טיפוגרפיה בלבד). '
-      + 'ההחלטות (בקשות אישור, שאלות, בדיקות, תקלות עם תשובה) לא בבית: הן בשורה "מחכות לך" בראש השיחות, ו-waiting, asked, awaiting ו-alert על inbox לא מוצגים (אם הם מגיעים, מדלגים עליהם בשקט). '
-      + 'בלוק לא מוכר, שדה חסר או הפניה שלא קיימת נדחים עם הסיבה. מה שנסגר נעלם לבד. '
-      + 'מתכון ישן מ-30 דקות מתחלף בברירת המחדל של hq. '
-      + 'דוגמה: [{"type":"headline","text":"בוקר שקט, שתי משימות רצות"},'
-      + '{"type":"lanes","projects":["agent-company","lumo"]},{"type":"project","project":"lumo","note":"מחכה לאישור לשחרור 2.6.10"},'
-      + '{"type":"note","text":"שווה לבדוק את השחרור של 2.6.10","icon":"rocket_launch","emphasis":"quiet"}] '
-      + "Compose the head of the owner's conversations screen from the fixed block vocabulary above (Hebrew text, data by reference).", {
-      blocks: { type: 'array', items: { type: 'object' }, description: 'הבלוקים לפי הסדר / the blocks, in order' },
-      reason: s('למה ההרכבה הזו, בשורה / why this composition, one line'),
+    tool('compose_home', 'Compose the head of ' + O + '\'s conversations screen: which blocks, in what order and with what wording. Only ' + (n.composer ? `${n.composer.name} and ${n.manager.name}` : n.manager.name) + '. '
+      + 'The app draws each block from a fixed component and fills it from live data, so data is referenced by id, and the text is in the owner\'s language,' + WORDS
+      + 'The block vocabulary: '
+      + 'headline {text} one sentence. What waits on ' + him + ' is shown in its own pinned row at the top of the conversations ("3 need you"), so do not write in it how much waits on ' + him + ' · alert {shift: shift id} a fault with no decision, e.g. a stuck shift · '
+      + 'tasks {tasks: [task ids] or "open"} in progress and queued: open tasks with who opened them, who works on them and the state. "open" shows all of them, a list shows specific tasks (e.g. an urgent one) · '
+      + 'lanes {projects: [ids]} the day\'s lanes · '
+      + 'project {project, note?} two lines · quiet {projects: [ids]} one line at the end, "Also quiet: …", for projects that did not move · people {identities: [ids], caption?} · since {items: [up to 3: a sentence, or {text, task: task id}]}, with task the line leads to the chat with whoever did the task · '
+      + 'note {text, icon} a note of yours, icon is a Material Symbol name. Any block can have emphasis: normal|quiet|strong (typography only). '
+      + 'Decisions (GO requests, questions, checks, faults with an answer) are not on the home: they are in the "Needs you" row at the top of the conversations, and waiting, asked, awaiting and alert on inbox are not shown (if they come, they are skipped quietly). '
+      + 'An unknown block, a missing field or a reference that does not exist is rejected with the reason. What closes disappears by itself. '
+      + 'A recipe older than 30 minutes is replaced by hq\'s default. '
+      + 'Example: [{"type":"headline","text":"A quiet morning, two tasks running"},'
+      + '{"type":"lanes","projects":["agent-company","lumo"]},{"type":"project","project":"lumo","note":"Waiting for approval to release 2.6.10"},'
+      + '{"type":"note","text":"Worth checking the 2.6.10 release","icon":"rocket_launch","emphasis":"quiet"}]', {
+      blocks: { type: 'array', items: { type: 'object' }, description: 'The blocks, in order' },
+      reason: s('Why this composition, one line'),
     }, ['blocks']),
-    tool('request_access', 'הרצת פקודה על שרת, קלאסטר או מסד של החברה בשמך, בלי שיהיו לך המפתחות. hq בונה את הפקודה בעצמו מרשימות סגורות, מריץ אותה ומחזיר את הפלט. '
-      + 'resource: `kube:<שם>` (kubectl ב-namespace כפוי), `ssh:<שם>` (פקודה מרשימה), `build:<שם>` (docker build ו-push של קומיט ל-ghcr.io/hive-owner/*; argv = [repo, sha מלא, נתיב Dockerfile, תג מלא, context אופציונלי]; מחזיר digest, ו-push אינו פריסה) או `hq:query` (SELECT על hq.db). argv: המילים של הפקודה, בלי הקידומת (`["get","pods"]`, לא `kubectl get pods`). '
-      + 'מותר: get, describe, logs --tail, rollout status|history|restart|undo, set image, scale, delete pod/<name>, exec <pod> -- <פקודה>. לא נתמך: `-f`, port-forward, apply, מעטפת אינטראקטיבית. הדגלים --kubeconfig, --token, --as ו-`-n` של namespace אחר נדחים תמיד. '
-      + 'מחוץ לפרודקשן (dev, ci, hq:query) הכול רץ מיד. בפרודקשן קריאה רצה מיד, וכל שינוי או exec, בכל פעם, מגיע ' + pre('ל', O) + ' ככרטיס עם הפקודה המדויקת: התשובה היא status pending, ממשיכים במה שלא תלוי בה, וחוזרים עם request. '
-      + 'לא יודעים איזה משאב? לא מנחשים: שם שלא קיים חוזר עם unfit, וה-hint שלו מונה את המשאבים שפתוחים למשימה ואת הפקודות שמותרות בכל אחד. '
-      + 'פקודה ארוכה חוזרת אחרי עד 90 שניות עם status running ו-request, וממשיכים לקרוא באותו request (הפלט נשמר). פקודה שלא ברשימה חוזרת עם unfit והצעה: לא מנסים לעקוף, ואם אין חלופה, `status` עם needs-local. '
-      + 'Run a command on a company server, cluster or database in your name, without holding the keys. hq builds it from closed lists and returns the output. Pending approval or a long run: come back with `request`.', {
+    tool('request_access', 'Run a command on a company server, cluster or database in your name, without holding the keys. hq builds the command itself from closed lists, runs it and returns the output. '
+      + 'resource: `kube:<name>` (kubectl in a forced namespace), `ssh:<name>` (a command from a list), `build:<name>` (docker build and push of a commit to ghcr.io/hive-owner/*; argv = [repo, full sha, Dockerfile path, full tag, optional context]; returns a digest, and a push is not a deploy) or `hq:query` (SELECT on hq.db). argv: the words of the command, without the prefix (`["get","pods"]`, not `kubectl get pods`). '
+      + 'Allowed: get, describe, logs --tail, rollout status|history|restart|undo, set image, scale, delete pod/<name>, exec <pod> -- <command>. Not supported: `-f`, port-forward, apply, an interactive shell. The flags --kubeconfig, --token, --as and `-n` of another namespace are always rejected. '
+      + 'Outside production (dev, ci, hq:query) everything runs at once. In production a read runs at once, and every change or exec, every time, reaches ' + O + ' as a card with the exact command: the answer is status pending; carry on with what does not depend on it, and come back with request. '
+      + 'Do not know which resource? Do not guess: a name that does not exist comes back unfit, and its hint lists the resources open to the task and the commands allowed on each. '
+      + 'A long command comes back after up to 90 seconds with status running and request; keep calling with the same request (the output is kept). A command not on the list comes back unfit with a suggestion: do not try to work around it, and if there is no alternative, `status` with needs-local.', {
       resource: s('kube:<name> | ssh:<name> | build:<name> | hq:query'),
-      argv: strs('מילות הפקודה בלי הקידומת, למשל ["rollout","status","deploy/api","--timeout=5m"]; ב-hq:query מחרוזת SQL אחת / the words of the command without the prefix; for hq:query one SQL string'),
-      why: s('למה, שורה בעברית: ' + G('הוא', 'היא') + ' רואה את זה בכרטיס / why, one line in Hebrew'),
-      request: s('acc-N: ממשיכים בקשה שחזרה pending או running / continue a request that came back pending or running'),
-      cancel: s('acc-N: מבטלים בקשה שמחכה או רצה / cancel a request that waits or runs'),
-      wait: { type: 'number', description: 'כמה שניות להמתין לתוצאה או לאישור, עד 100 (ברירת מחדל 90) / seconds to wait for the result or approval, up to 100 (default 90)' },
+      argv: strs('The words of the command without the prefix, e.g. ["rollout","status","deploy/api","--timeout=5m"]; for hq:query one SQL string'),
+      why: s('Why, one line in the owner\'s language: ' + he + ' sees it on the card'),
+      request: s('acc-N: continue a request that came back pending or running'),
+      cancel: s('acc-N: cancel a request that waits or runs'),
+      wait: { type: 'number', description: 'Seconds to wait for the result or approval, up to 100 (default 90)' },
     }, []),
-    tool('resources', 'מצב המשאבים של השרתים, קריאה בלבד: בכל מכונה זיכרון, עומס ודיסק, מי מחזיק בהם לפי פרויקט (כולל "לא מזוהה" עם שם ה-cgroup או הקונטיינר), ומי מחכה למקום. '
-      + 'קוראים לפני build מלא, `flutter test` מלא, docker או smoke, ואחרי שמשהו נתקע על "השרת עמוס". חלק שלא נמדד כתוב "לא נמדד", ואין לקרוא אותו כתקין. הזיכרון לפי פרויקט הוא anon של ה-cgroup (בלי page cache), ולכן הסכום קרוב ל"בשימוש". '
-      + 'Read-only: per machine memory, load and disk, who holds them by project (unidentified ones with their cgroup/container name), and who waits for room. Call before a heavy build, full test run, docker or smoke.', {}, []),
-    tool('reserve', 'הזמנת מקום לפני פקודה כבדה בשרת המשותף: build מלא, `flutter test` מלא, `docker build`/`compose up` או smoke. hq מחזיר אחת משלוש תשובות: '
-      + 'granted (יש מקום: מריצים דרך `company-run --lease <lease> -- <הפקודה>`, וההזמנה משתחררת לבד כשהפקודה נגמרת), '
-      + 'queued (אין מקום עכשיו: התשובה חוזרת תוך עד 90 שניות עם מי מחזיק, המקום בתור והערכה; ממשיכים במה שלא תלוי בזה וחוזרים עם `lease` כדי להמשיך מאותו מקום בתור) '
-      + 'או unavailable (לא יהיה מקום, או שהמחלקה לא מוגדרת; עם חלופה). משימה דחופה (p0) לא נעקפת, ו-hq לא עוצר הזמנה קיימת בשבילה. '
-      + 'הזמנה משתחררת לבד בסוף הפקודה, אחרי התקרה של המחלקה (ברירת מחדל 30 דקות) ובסגירת המשמרת. '
-      + 'Reserve a place before a heavy command on the shared server (full build, full flutter test, docker, smoke). granted → run it with company-run; queued → come back with `lease` to keep your place; unavailable → see the alternative.', {
-      class: s('המחלקה: build | test-full | docker | smoke, או מחלקה שהאמנה של הפרויקט מגדירה בבלוק heavy / the class of work'),
-      machine: s('המכונה (ברירת מחדל: זו של המשמרת שלך), local או שם של node / the machine, default: your shift\'s'),
-      note: s('מה מריצים, שורה בעברית: מופיע למי שמחכה / what you run, one line in Hebrew'),
-      lease: s('lease-N: ממשיכים הזמנה שחזרה queued, באותו מקום בתור / continue a queued lease from the same place in the queue'),
-      wait: { type: 'number', description: 'כמה שניות להמתין למקום, עד 100 (ברירת מחדל 90) / seconds to wait for a place, up to 100 (default 90)' },
+    tool('resources', 'The servers\' resource state, read-only: per machine memory, load and disk, who holds them by project (including unidentified ones with their cgroup or container name), and who waits for room. '
+      + 'Call it before a full build, a full `flutter test`, docker or smoke, and after something got stuck on "the server is busy". A part that was not measured says so, and must not be read as healthy. Memory by project is the cgroup\'s anon memory (no page cache), so the sum is close to "used".', {}, []),
+    tool('reserve', 'Reserve a place before a heavy command on the shared server: a full build, a full `flutter test`, `docker build`/`compose up` or smoke. hq returns one of three answers: '
+      + 'granted (there is room: run it with `company-run --lease <lease> -- <command>`, and the reservation is released by itself when the command ends), '
+      + 'queued (no room now: the answer comes back within up to 90 seconds with who holds it, the place in the queue and an estimate; carry on with what does not depend on it and come back with `lease` to keep the same place in the queue) '
+      + 'or unavailable (there will be no room, or the class is not defined; with an alternative). An urgent task (p0) is not overtaken, and hq does not stop an existing reservation for it. '
+      + 'A reservation is released by itself at the end of the command, after the class\'s ceiling (default 30 minutes) and when the shift closes.', {
+      class: s('The class: build | test-full | docker | smoke, or a class the project charter defines in its heavy block'),
+      machine: s('The machine (default: your shift\'s), local or a node name'),
+      note: s('What you run, one line in the owner\'s language: shown to whoever waits'),
+      lease: s('lease-N: continue a lease that came back queued, from the same place in the queue'),
+      wait: { type: 'number', description: 'Seconds to wait for a place, up to 100 (default 90)' },
     }, []),
-    tool('release', 'שחרור הזמנה (`reserve`) כשהמקום לא נחוץ יותר, או ביטול הזמנה שמחכה בתור. לא חובה אחרי `company-run`: הוא משחרר לבד בסוף הפקודה. '
-      + 'Release a lease, or leave the queue. Not needed after company-run: it releases when the command ends.', {
-      lease: s('lease-N / the lease id'),
+    tool('release', 'Release a reservation (`reserve`) when the place is no longer needed, or leave the queue. Not needed after `company-run`: it releases by itself when the command ends.', {
+      lease: s('lease-N, the lease id'),
     }, ['lease']),
-    tool('open_ticket', 'פתיחת כרטיס ב-repo. Open an issue in a repo.', {
+    tool('open_ticket', 'Open an issue in a repo.', {
       repo: s('owner/repo'),
-      title: s('כותרת / title'),
-      body: s('תוכן / body'),
-      labels: strs('תוויות / labels'),
+      title: s('Title'),
+      body: s('Body'),
+      labels: strs('Labels'),
     }, ['repo', 'title', 'body']),
   ];
 }
@@ -305,33 +271,37 @@ export function validateArgs(def: ToolDef, args: unknown): string | null {
   return null;
 }
 
-/** Everything a person reads goes out in Hebrew (dir-0002, #51): message text by line, titles whole. */
-const HEBREW_TEXT: Partial<Record<ToolDef['name'], string[]>> = {
+/** Everything a person reads goes out in the owner's language (dir-0002, #51): message text by line, titles whole. */
+const PERSON_TEXT: Partial<Record<ToolDef['name'], string[]>> = {
   show: ['note'], tell: ['body'], ask: ['question'], withdraw_ask: ['note'], withdraw_go: ['note'], request_go: ['what'], open_team: ['purpose'], open_ticket: ['body'], request_access: ['why'], reserve: ['note'],
 };
-const HEBREW_TITLE: Partial<Record<ToolDef['name'], string[]>> = {
+const PERSON_TITLE: Partial<Record<ToolDef['name'], string[]>> = {
   show: ['title'], open_team: ['name'], open_ticket: ['title'], ask: ['headline'], request_go: ['headline'],
   tell: ['eta_what'], status: ['awaiting_note', 'eta_what'], close_team: ['awaiting_note'],
 };
-/** compose_home: every text a block shows him (headline, note, caption, since items) is Hebrew too. */
+/** compose_home: every text a block shows him (headline, note, caption, since items) is in his language too. */
 const BLOCK_TEXT = ['text', 'note', 'caption'];
 
-/** The rewrite request when a field that a person reads is English, else null. */
-export function hebrewProblem(def: ToolDef, args: Record<string, unknown>): string | null {
-  for (const k of HEBREW_TITLE[def.name] ?? []) {
+/** The fixed Hebrew answers hq parses (mailbox.ts MANAGER_DECISION, the caught-fault answers): written as is in any
+ *  company, so they are taken out before the language check. */
+const FIXED_MARKERS = /החלטתי במקומך\s*[:,\-–]?\s*(?:לטפל|לא עכשיו)?/g;
+
+/** The rewrite request when a field that a person reads is not in the owner's language, else null. */
+export function languageProblem(def: ToolDef, args: Record<string, unknown>, language: OwnerLanguage): string | null {
+  for (const k of PERSON_TITLE[def.name] ?? []) {
     const v = args[k];
-    if (typeof v === 'string' && isEnglishTitle(v)) return hebrewReason(`${def.name}.${k} (כותרת)`, [v]);
+    if (typeof v === 'string' && isWrongLanguageTitle(v, language)) return languageReason(`${def.name}.${k} (title)`, [v], language);
   }
-  for (const k of HEBREW_TEXT[def.name] ?? []) {
+  for (const k of PERSON_TEXT[def.name] ?? []) {
     const v = args[k];
-    const bad = typeof v === 'string' ? englishLines(v) : [];
-    if (bad.length) return hebrewReason(`${def.name}.${k}`, bad);
+    const bad = typeof v === 'string' ? wrongLanguageLines(v.replace(FIXED_MARKERS, ' '), language) : [];
+    if (bad.length) return languageReason(`${def.name}.${k}`, bad, language);
   }
   if (def.name === 'compose_home' && Array.isArray(args.blocks)) {
     for (const [i, b] of (args.blocks as Record<string, unknown>[]).entries()) {
       const items = Array.isArray(b?.items) ? (b.items as unknown[]).map((x) => (x && typeof x === 'object' ? (x as { text?: unknown }).text : x)) : [];
       const texts = [...BLOCK_TEXT.map((k) => b?.[k]), ...items].filter((v): v is string => typeof v === 'string');
-      for (const v of texts) if (isEnglishTitle(v)) return hebrewReason(`compose_home.blocks[${i}]`, [v]);
+      for (const v of texts) if (isWrongLanguageTitle(v, language)) return languageReason(`compose_home.blocks[${i}]`, [v], language);
     }
   }
   return null;

@@ -325,7 +325,7 @@ test('closeGo: approved_in_chat needs his real message after the card opened; wi
     clock.advance(1000);
     hq.mailbox.tell({ msg_id: 'o-yoav', from: 'owner', to: 'yoav', body: 'יאללה נתקן' });
     assert.equal(hq.mailbox.closeGo('eli-1:12', 'approved_in_chat', 'yoav', 'o-yoav').item.state, 'resolved', 'the manager closes with his message to the manager');
-    assert.match(hq.mailbox.get(`inbox-${g3.id}-closed-by-yoav`)!.body, /אושרה בשיחה/);
+    assert.match(hq.mailbox.get(`inbox-${g3.id}-closed-by-yoav`)!.body, /approved in the conversation/);
 
     // A request_access card is closed only by his own decision.
     const acc = hq.inbox.add({ kind: 'go', from_identity: 'eli', title: 'GO: kubectl', blocking: true, ref: 'acc-7' });
@@ -426,7 +426,7 @@ test('task 986: a fault of the system goes to the manager, never to him; his vie
     assert.equal(hq.inbox.mine().length, 0, 'out of his view');
     assert.equal(hq.inbox.get(go.id)!.state, 'open', 'kept as it was');
     assert.equal(hq.mailbox.getAsk('ask-old')!.state, 'escalated', 'the manager can answer it now');
-    assert.match(hq.mailbox.get(`inbox-${go.id}-returned`)!.body, /48 שעות[\s\S]*פריסה של hq/);
+    assert.match(hq.mailbox.get(`inbox-${go.id}-returned`)!.body, /48 hours[\s\S]*פריסה של hq/);
     assert.equal(hq.inbox.returnStale((i) => hq.mailbox.returnToManager(i)).length, 0, 'once');
   } finally { await env.cleanup(); }
 });
@@ -471,11 +471,11 @@ test('task 986: messages to the manager that fail are one item while it lasts, c
     mb.fail({ ...two, error: 'לא עונה' });
     const open = () => hq.inbox.mine().filter((i) => i.kind === 'delivery_failure' && i.from_identity === m);
     assert.equal(open().length, 1, 'one item while it lasts');
-    assert.match(hq.mailbox.get('to-m-1-failed')!.body, /מחכה לך/);
+    assert.match(hq.mailbox.get('to-m-1-failed')!.body, /"Needs you"/);
     // A worker's message to another worker: the manager hears of it, and the sender is told so.
     const w = hq.mailbox.tell({ msg_id: 'to-r-1', from: 'dana', to: 'rotem', body: 'היי' });
     mb.fail({ ...w, error: 'לא עונה' });
-    assert.match(hq.mailbox.get('to-r-1-failed')!.body, /הודעה עליה עברה ל-/);
+    assert.match(hq.mailbox.get('to-r-1-failed')!.body, /A notice about it went to /);
     // The manager takes messages again: the item closes.
     const three = hq.mailbox.tell({ msg_id: 'to-m-3', from: 'dana', to: m, body: 'שאלה שלישית' });
     mb.setState(three.id, 'delivered');

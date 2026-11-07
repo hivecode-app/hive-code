@@ -167,45 +167,45 @@ test('system prompt (L0+L1): dossier, how to reply, Authority, charter; task wor
   const companyDir = FIXTURE;
   const base = { symbol: '', team: null, team_kind: 'permanent', project: null, reports_to: null, lifecycle: 'resident', source: 'org', active: 1, data: '{}', updated_at: 0 };
   const yoav = buildSystemPrompt(companyDir, { ...base, id: 'gal', name: 'גל', title: 'מנהל החברה' }, 'gal');
-  assert.match(yoav, /אתה גל, מנהל החברה/);
+  assert.match(yoav, /You are גל, מנהל החברה/);
   assert.match(yoav, /# גל · מנהל החברה/);                      // the dossier itself
-  assert.match(yoav, /## הרשימה המלאה של מה שאסור/);            // Authority, verbatim (directives.md)
+  assert.match(yoav, /## The complete list of what is forbidden/);            // Authority, verbatim (directives.md)
   assert.match(yoav, /`tell`/);
-  assert.match(yoav, /ה-identity של שירה הוא `owner`/);
+  assert.match(yoav, /שירה's identity is `owner`/);
   // chat.md §2.3א: with the owner the text is the reply; no tell back, no self-narration or delivery internals.
-  assert.match(yoav, /\*\*הטקסט שאתה כותב הוא התשובה\.\*\*/);
-  assert.match(yoav, /\*\*לא עונים לה ב-`tell`\.\*\*/);   // the owner of the example company is a woman
-  assert.match(yoav, /לא מסכמים לעצמך מה עשית/);
-  assert.match(yoav, /ההודעה נכנסה לתור המסירה/);
+  assert.match(yoav, /\*\*The text you write is the answer\.\*\*/);
+  assert.match(yoav, /\*\*Do not answer her with `tell`\.\*\*/);   // the owner of the example company is a woman
+  assert.match(yoav, /Do not summarize to yourself what you did/);
+  assert.match(yoav, /the message entered the delivery queue/);
   assert.doesNotMatch(yoav, /טקסט רגיל בתשובה שלך לא מגיע לאף אחד/, 'the old rule that made every reply a tell');
   const worker = buildSystemPrompt(companyDir, { ...base, id: 'engine-t7', name: 'דנה', title: 'מפתחת', team_kind: 'task',
     project: 'engine', reports_to: 'ron', lifecycle: 'ephemeral', source: 'runtime' }, 'gal');
-  assert.match(worker, /# אתה דנה, מפתחת, בצוות משימה \(`engine-t7`\)/);
-  // #51: Hebrew to everyone, titles included, even when the message came in English.
-  assert.match(worker, /ה-`description` של כל כלי/);
-  assert.match(worker, /\*\*עברית בכל הודעה\*\*: לשירה, לגל ולכל עובד, גם כשכתבו לך באנגלית/);
-  assert.match(worker, /`open_team`\) וטיקטים \(`open_ticket`\) בעברית/);
+  assert.match(worker, /# You are דנה, מפתחת, on a task team \(`engine-t7`\)/);
+  // #51: the owner's language to everyone, titles included (no owner_language in this org: English, the engine default).
+  assert.match(worker, /The `description` of every tool call \(`Bash` and the rest\) is in English/);
+  assert.match(worker, /\*\*Write every message to the owner in English\.\*\* שירה reads English/);
+  assert.match(worker, /task and ticket titles/);
   assert.match(worker, /gh pr merge --squash/);
   // The worker runs in another project's checkout: the company skills by absolute path.
   assert.ok(worker.includes(`\`${join(companyDir, 'skills', 'reviewer', 'SKILL.md')}\``), 'absolute reviewer skill path');
   assert.ok(worker.includes(`\`${join(companyDir, 'skills', 'ship', 'SKILL.md')}\``), 'absolute ship skill path');
   assert.match(worker, /`engine-ci`/);
   assert.match(worker, /# אמנת המנוע/);                          // project charter
-  assert.match(worker, /מדווח ל-`ron`/);
+  assert.match(worker, /You report to `ron`/);
   // A helper eli opens has no project: the errand itself, no worktree/PR, outward acts need the owner (#24).
   const task = { ...base, team_kind: 'task', lifecycle: 'ephemeral', source: 'runtime' };
   const eli = { ...base, id: 'eli', name: 'אלי', title: 'ראש הצוות האישי', team: 'personal', lifecycle: 'lead' };
   const helper = buildSystemPrompt(companyDir, { ...task, id: 'company-t9', name: 'איתי', title: 'עוזר אישי', reports_to: 'eli' }, 'gal', eli);
-  assert.match(helper, /# אתה איתי, עוזר אישי: עוזר חד-פעמי/);
-  assert.match(helper, /`eli` פתח אותך/);
-  assert.match(helper, /כלפי אנשים בחוץ/);
+  assert.match(helper, /# You are איתי, עוזר אישי: a one-off helper/);
+  assert.match(helper, /`eli` opened you/);
+  assert.match(helper, /toward people outside/);
   assert.doesNotMatch(helper.split('\n---\n')[0]!, /git worktree|gh pr merge/); // company.md below still mentions them
   // Any other task without a project (noga's contract PRs, an owner task with no project) keeps the code-task rules.
   const noga = { ...base, id: 'noga', name: 'נגה', title: 'ראש מחלקת השיפור', team: 'improvement', lifecycle: 'lead' };
   for (const opener of [noga, undefined]) {
     const t = buildSystemPrompt(companyDir, { ...task, id: 'company-t10', name: 't10', title: 'x', reports_to: opener?.id ?? 'gal' }, 'gal', opener);
-    assert.match(t, /צוות משימה/);
-    assert.doesNotMatch(t, /עוזר חד-פעמי/);
+    assert.match(t, /on a task team/);
+    assert.doesNotMatch(t, /a one-off helper/);
   }
 });
 

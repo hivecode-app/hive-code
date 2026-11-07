@@ -35,11 +35,11 @@ test('company-run, focused tests and other commands pass', () => {
 
 test('the reminder says there is no reservation and what the server looks like; unreadable numbers are not guessed', () => {
   const r = heavyReminder('docker build .', { memAvailMb: 6144, memTotalMb: 16384, load1: 2.5, cpus: 8 })!;
-  assert.match(r.text, /אין עליה הזמנה/);
-  assert.match(r.text, /זיכרון פנוי 6\.0GB מתוך 16\.0GB, עומס 2\.5 על 8 ליבות/);
+  assert.match(r.text, /it has no reservation/);
+  assert.match(r.text, /6\.0GB of 16\.0GB memory free, load 2\.5 on 8 cores/);
   assert.match(r.text, /`class: "docker"`/);
   assert.equal(heavyReminder('ls'), null);
-  assert.match(describeState({ memAvailMb: null, memTotalMb: null, load1: null, cpus: 4 }), /הזיכרון לא נקרא, העומס לא נקרא/);
+  assert.match(describeState({ memAvailMb: null, memTotalMb: null, load1: null, cpus: 4 }), /memory not read, load not read/);
   const s = serverState((p) => (p.endsWith('meminfo') ? 'MemTotal: 2097152 kB\nMemAvailable: 1048576 kB\n' : '0.50 0.4 0.3 1/2 3'));
   assert.deepEqual([s.memTotalMb, s.memAvailMb, s.load1], [2048, 1024, 0.5]);
 });
@@ -64,7 +64,7 @@ test('CLI: a heavy Bash gets the reminder as context (no deny) and a spool event
   assert.equal(hit.code, 0);
   const out = JSON.parse(hit.stdout) as { hookSpecificOutput: { permissionDecision?: string; additionalContext: string } };
   assert.equal(out.hookSpecificOutput.permissionDecision, undefined, 'a reminder, not a block');
-  assert.match(out.hookSpecificOutput.additionalContext, /אין עליה הזמנה/);
+  assert.match(out.hookSpecificOutput.additionalContext, /it has no reservation/);
   const quiet = await call('company-run --lease lease-1 -- flutter test');
   assert.equal(quiet.stdout, '');
   const spool = join(state, 'shifts', 'ron-2', 'spool');

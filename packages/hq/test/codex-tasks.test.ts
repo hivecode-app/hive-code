@@ -107,7 +107,7 @@ test('the quota ran out before the start: out of the queue, the opener hears it,
     assert.ok(JSON.parse(hq.scheduler.task(t.id)!.labels).includes('needs-decision'));
     const told = hq.store.db.prepare(`SELECT body, to_identity FROM messages WHERE id LIKE ?`).get(`task-${t.id}-codex-quota-%`) as { body: string; to_identity: string };
     assert.equal(told.to_identity, 'yoav');
-    assert.match(told.body, /לא עברה ל-Claude/);
+    assert.match(told.body, /did not move to Claude/);
   } finally { await e.cleanup(); }
 });
 

@@ -1,25 +1,25 @@
-# הזיכרון של החברה
+# The company's memory
 
-זיכרון אחד, משותף לכל החברה. אין מחיצות. מה שנטען לכל עובד נקבע לפי רלוונטיות, וכל השאר זמין ב-`recall` לכל עובד. לכל תחום יש **בעלים** שאחראי שהידע בו נכון ועדכני. הבעלות לא חוסמת קריאה.
+One memory, shared by the whole company. There are no partitions. What is loaded into each worker is decided by relevance, and everything else is available to every worker through `recall`. Every domain has an **owner** who is responsible for the knowledge in it being correct and up to date. Ownership does not block reading.
 
-**מקור האמת הוא הנתונים שלנו, לא ה-transcript.** ה-transcript הוא ארכיון לקריאה בלבד.
+**The source of truth is our data, not the transcript.** The transcript is a read-only archive.
 
-## השכבות
+## The layers
 
-| שכבה | מה יש בה | איפה נשמרת |
+| Layer | What is in it | Where it is kept |
 |---|---|---|
-| **L0: זהות** | שם, תואר, אישיות, תפקיד, סמכות | `company/identities/<id>.md`, `company/org.yaml` |
-| **L1: חוק החברה** | סעיף הסמכות, ההוראות, אמנת ברירת המחדל ואמנת הפרויקט | `company/directives.md`, `company/company.md`, `company/projects/<p>.md` |
-| **L2: משמרת** | handoff אחרון: מה עשיתי, מה הוחלט, מה הצעד הבא | store |
-| **L3: חברה** | עובדות קבועות: מכונות, מוסכמות, ספר העיצוב | [company/](company/INDEX.md) |
-| **L3: פרויקט** | לקחים טכניים, החלטות, מלכודות, פקודות | [projects/](projects/INDEX.md) |
-| **L4: ארכיון** | כל ה-transcripts, ה-handoffs וההודעות | `~/.claude/projects` (קריאה בלבד), store |
+| **L0: identity** | Name, title, personality, role, authority | `company/identities/<id>.md`, `company/org.yaml` |
+| **L1: company law** | The Authority block, the directives, the default charter and the project charter | `company/directives.md`, `company/company.md`, `company/projects/<p>.md` |
+| **L2: shift** | The last handoff: what I did, what was decided, what the next step is | store |
+| **L3: company** | Permanent facts: machines, conventions, the design book | [company/](company/INDEX.md) |
+| **L3: project** | Technical lessons, decisions, traps, commands | [projects/](projects/INDEX.md) |
+| **L4: archive** | All the transcripts, handoffs and messages | `~/.claude/projects` (read-only), store |
 
-## כללים
+## Rules
 
-- **לכל תיקייה יש `INDEX.md`**: שורה לכל קובץ, עם תקציר של שורה אחת. `company check` נכשל אם קישור מצביע על קובץ שלא קיים. קובץ שלא רשום באינדקס מקבל אזהרה.
-- **עובדות בלבד.** לכל עובדה תאריך ("נכון ל-…"). עובדה שהתיישנה מסומנת, לא נמחקת בשקט.
-- **אין סודות.** אין סיסמאות, טוקנים, מפתחות, מספרי זהות או חשבון בנק. כותבים איפה הם נמצאים, לא את הערך.
-- **כתיבה רק דרך `remember`** או PR.
-- **הוראה** של בעל החברה היא לא זיכרון. היא נכנסת ל-`company/directives.md`.
-- **סתירה** בין שתי עובדות הופכת לשאלה לבעל החברה, לא להכרעה שקטה.
+- **Every directory has an `INDEX.md`**: a line per file, with a one-line summary. `company check` fails if a link points to a file that does not exist. A file not listed in the index gets a warning.
+- **Facts only.** Every fact has a date ("as of …"). A fact that went stale is marked, not deleted silently.
+- **No secrets.** No passwords, tokens, keys, ID numbers or bank accounts. Write where they are, not the value.
+- **Write only through `remember`** or a PR.
+- **A directive** of the owner is not memory. It goes into `company/directives.md`.
+- **A conflict** between two facts becomes a question to the owner, not a silent decision.

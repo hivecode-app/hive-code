@@ -88,19 +88,19 @@ export function serverState(read: (p: string) => string = (p) => readFileSync(p,
 
 export function describeState(s: ServerState): string {
   const gb = (mb: number) => (mb / 1024).toFixed(1);
-  const mem = s.memAvailMb !== null && s.memTotalMb !== null ? `זיכרון פנוי ${gb(s.memAvailMb)}GB מתוך ${gb(s.memTotalMb)}GB` : 'הזיכרון לא נקרא';
-  const load = s.load1 !== null ? `עומס ${s.load1.toFixed(1)} על ${s.cpus} ליבות` : 'העומס לא נקרא';
+  const mem = s.memAvailMb !== null && s.memTotalMb !== null ? `${gb(s.memAvailMb)}GB of ${gb(s.memTotalMb)}GB memory free` : 'memory not read';
+  const load = s.load1 !== null ? `load ${s.load1.toFixed(1)} on ${s.cpus} cores` : 'load not read';
   return `${mem}, ${load}`;
 }
 
-/** The Hebrew reminder, or null when the command is not a known heavy one. */
+/** The reminder, or null when the command is not a known heavy one. */
 export function heavyReminder(command: string, state: ServerState = serverState()): { hit: HeavyHit; text: string } | null {
   const hit = scan(command);
   if (!hit) return null;
   return {
     hit,
-    text: `תזכורת: \`${hit.what}\` הוא פקודה כבדה, ואין עליה הזמנה (\`company-run\`). השרת משותף לכל המשמרות. מצב השרת עכשיו: ${describeState(state)}. `
-      + `הפקודה לא נחסמת. לפני הריצה: \`reserve\` עם \`class: "${hit.class}"\`, ואז \`company-run --lease <lease> -- <הפקודה>\`. `
-      + 'אם זו לא הרצה כבדה (למשל בדיקה ממוקדת שלא זוהתה, או docker ממשהו קטן), ממשיכים כרגיל.',
+    text: `Reminder: \`${hit.what}\` is a heavy command, and it has no reservation (\`company-run\`). The server is shared by all shifts. Server state now: ${describeState(state)}. `
+      + `The command is not blocked. Before running it: \`reserve\` with \`class: "${hit.class}"\`, then \`company-run --lease <lease> -- <command>\`. `
+      + 'If this is not a heavy run (for example a focused test that was not recognized, or docker for something small), carry on as usual.',
   };
 }

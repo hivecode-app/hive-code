@@ -1,20 +1,20 @@
-# ערכת הפתיחה
+# The starter kit
 
-מה שההתקנה מעתיקה ל-`COMPANY_HOME` (ברירת מחדל `~/company`) בחברה חדשה, כ-repo git מקומי. התוכנית: [docs/generic/PLAN.md](../docs/generic/PLAN.md), סעיפים 3 ו-4.
+What the installer copies to `COMPANY_HOME` (default `~/company`) for a new company, as a local git repo. The plan: [docs/generic/PLAN.md](../docs/generic/PLAN.md), sections 3 and 4.
 
-| מה | למה |
+| What | Why |
 |---|---|
-| `company/company.md` | החוזה: עקרונות, אמנת ברירת המחדל, מה דורש שאלה |
-| `company/directives.md` | סעיף הסמכות של המנוע (חמשת הסוגים שה-hook חוסם), ומקום להוראות |
-| `company/org.yaml` | שלד: מנהל אחד עם שם זמני, `setup: pending`, בלי צוותים ופרויקטים |
-| `company/identities/manager.md` | התיק של המנהל |
-| `company/skills/` | `setup` (שיחת ההקמה), `reviewer`, `verify`, `ship` |
-| `company/modes/night.md` | מצב לילה |
-| `memory/` | `README.md`, ספר עיצוב בסיסי, מוסכמות, ותבנית `machines.md` |
-| `examples/` | אמנת פרויקט, תיקי זהות, probe, ומה מוסיפים ל-`org.yaml` |
+| `company/company.md` | The contract: principles, the default charter, what needs a question |
+| `company/directives.md` | The engine's Authority block (the five kinds the hook blocks), and a place for directives |
+| `company/org.yaml` | Skeleton: one manager with a temporary name, `setup: pending`, no teams and no projects |
+| `company/identities/manager.md` | The manager's dossier |
+| `company/skills/` | `setup` (the setup conversation), `reviewer`, `verify`, `ship` |
+| `company/modes/night.md` | Night mode |
+| `memory/` | `README.md`, a basic design book, conventions, and a `machines.md` template |
+| `examples/` | A project charter, identity dossiers, a probe, and what to add to `org.yaml` |
 
-**מה בודק אותה:** `npm run check:starter` (בתוך `npm run check:contract` של ה-CI). כל עוד `setup: pending`, הבדיקה מקבלת שם בעלים ואזור זמן ריקים. בסוף שיחת ההקמה המנהל מוחק את השורה, ומאותו רגע הם חובה.
+**What checks it:** `npm run check:starter` (inside CI's `npm run check:contract`). As long as `setup: pending` is there, the check accepts an empty owner name and timezone. At the end of the setup conversation the manager deletes that line, and from then on they are required.
 
-**סעיף הסמכות** בערכה מסתיים ב-`<!-- /AUTHORITY -->`. בחברה שהוקמה ממנה, `company check` משווה אותו לעותק שכאן. אם ה-hook משתנה, משנים את הסעיף כאן באותו PR.
+**The Authority block** in the kit ends with `<!-- /AUTHORITY -->`. In a company set up from it, `company check` compares it to the copy here. If the hook changes, change the block here in the same PR.
 
-הערכה בעברית, כמו המנוע. השמות בדוגמאות מומצאים, והמנהל מציע שמות חדשים לפי מה שבעל החברה בוחר.
+The kit is in English. Workers write to the owner in the owner's language (`owner_language` in `org.yaml`). The names in the examples are made up, and the manager proposes new names based on what the owner chooses.

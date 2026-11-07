@@ -244,7 +244,7 @@ test('nodes: a worker there that finds it needs the main server (status needs-lo
     assert.equal(hq.scheduler.task(t.id)!.machine, 'n2');
     const there = hq.scheduler.task(t.id)!.worktree!;
     const brief = hq.mailbox.list(`proj-t${t.id}`).find((m) => m.to_identity === `proj-t${t.id}`)!;
-    assert.match(brief.body, /רץ בשרת השני \(`n2`\)/, 'the brief says where it runs and how to move');
+    assert.match(brief.body, /Running on the second server \(`n2`\)/, 'the brief says where it runs and how to move');
     await until(() => hq.mailbox.get(brief.id)!.state !== 'queued', 3000, 'taken there');
 
     const before = launcher.launches.length;
@@ -260,8 +260,8 @@ test('nodes: a worker there that finds it needs the main server (status needs-lo
     assert.ok(labels.includes('needs-local'), 'stays here');
     assert.ok(labels.includes(`moved-from:n2:${there}`), 'the brief here says where the work from there is');
     const again = hq.mailbox.list(`proj-t${t.id}`).filter((m) => m.to_identity === `proj-t${t.id}` && m.id !== brief.id && m.id !== 'while-moving').at(-1)!;
-    assert.match(again.body, /התחילה ב-`n2` וחזרה לכאן/);
-    assert.doesNotMatch(again.body, /רץ בשרת השני/);
+    assert.match(again.body, /started on `n2` and came back here/);
+    assert.doesNotMatch(again.body, /Running on the second server/);
     assert.ok(hq.store.eventsAfter(0, 5000).some((e) => e.type === 'task.move_local'));
     assert.equal(await hq.scheduler.moveLocal(t.id, 'שוב'), false, 'here already');
   } finally { await env.cleanup(); r.cleanup(); }
@@ -323,7 +323,7 @@ test('#224: a task placed on a node that is switched off, or whose worktree ther
 
     // Started there, so its next brief says where its work from there is now.
     const brief = hq.mailbox.list(`proj-t${off.id}`).filter((m) => m.to_identity === `proj-t${off.id}`).at(-1)!;
-    assert.match(brief.body, /המשימה התחילה ב-`n2` וחזרה לכאן/);
+    assert.match(brief.body, /The task started on `n2` and came back here/);
 
     // Switched off, and the close there fails: it still comes back, and its brief says the work stayed there.
     const ws2 = hq.scheduler.workspacesFor('n2') as RemoteWorkspaces;
@@ -337,7 +337,7 @@ test('#224: a task placed on a node that is switched off, or whose worktree ther
     await hq.scheduler.fill();
     await until(() => hq.scheduler.task(stuck.id)!.state === 'running', 8000, 'running here');
     const b3 = hq.mailbox.list(`proj-t${stuck.id}`).filter((m) => m.to_identity === `proj-t${stuck.id}`).at(-1)!;
-    assert.match(b3.body, /וייתכן שהעבודה משם לא נמשכה/);
+    assert.match(b3.body, /and the work from there may not have been fetched/);
     assert.ok(b3.body.includes(there), 'where it stayed');
     assert.ok(hq.store.eventsAfter(0, 5000).some((e) => e.type === 'task.worktree_close_failed' && (e.data as { id: number }).id === stuck.id));
     ws2.close = realClose;

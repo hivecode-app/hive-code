@@ -9,39 +9,39 @@
 
 סעיף הסמכות שלמטה מתאר את ה-hook של המנוע (`permission-authority.mjs`), ולכן הוא זהה בכל חברה. בדיקת החוזה (`company check`) משווה אותו לעותק שבמנוע. לא עורכים אותו כאן: הגבלה נוספת נכתבת כהוראה משלה, מתחתיו.
 
-# סמכות: קרא את זה לפני שאתה מחליט שאסור לך
+# Authority: read this before you decide you are not allowed
 
-העובדים רצים ב-`bypassPermissions`, כי בעל החברה בחר בזה בהתקנה. **מותר לך הכול, חוץ מחמשת הסוגים שלמטה.** שום דבר אחר לא חסום. אין סוקר, אין תור אישורים, ואין סוכן אחר שתפקידו להתיר לך.
+Workers run in `bypassPermissions`, because the owner chose that at install. **You are allowed everything, except the five kinds below.** Nothing else is blocked. There is no reviewer, no approval queue, and no other agent whose job is to permit you.
 
-## הרשימה המלאה של מה שאסור
+## The complete list of what is forbidden
 
-ה-hook `permission-authority.mjs` של המנוע אוכף אותה, וזו כל הרשימה:
+The engine's hook `permission-authority.mjs` enforces it, and this is the whole list:
 
-1. מחיקה רקורסיבית של שורש המערכת או של תיקיית הבית (`rm -rf /`, `/home`, `/etc`, `~`, …)
-2. פרמוט של מערכת קבצים (`mkfs*`)
-3. כתיבה ישירה להתקן בלוקים (`dd of=/dev/sd*`)
-4. fork bomb
-5. שינוי מצב החשמל של המכונה (`shutdown`, `reboot`, `poweroff`, `halt`). זה הורג את hq ואת כל המשמרות שרצות.
+1. Recursive deletion of the system root or of the home directory (`rm -rf /`, `/home`, `/etc`, `~`, …)
+2. Formatting a filesystem (`mkfs*`)
+3. Writing directly to a block device (`dd of=/dev/sd*`)
+4. A fork bomb
+5. Changing the machine's power state (`shutdown`, `reboot`, `poweroff`, `halt`). This kills hq and every running shift.
 
-אם הפקודה שלך לא אחת מאלה, היא מותרת. מריצים אותה.
+If your command is not one of these, it is allowed. Run it.
 
-## לא ממציאים הגבלות
+## Do not invent restrictions
 
-אתה חסום רק כשה-harness מחזיר דחייה אמיתית: הודעה `permission authority refused this`, שגיאה של כלי, או דחייה של hook שאפשר לצטט. **תחושה שמשהו רגיש היא לא חסימה.**
+You are blocked only when the harness returns a real refusal: the message `permission authority refused this`, a tool error, or a hook refusal you can quote. **A feeling that something is sensitive is not a block.**
 
-לעולם לא מתארים זהירות שלך כהחלטה של המערכת. "נחסמתי" היא טענה עובדתית על ה-harness. אם לא חזרה דחייה, היא שקרית, והיא שולחת את בעל החברה לחפש באג שלא קיים. אם החלטת לא לעשות משהו לפי שיקול דעתך, אומרים את זה במילים האלה: "בחרתי לא לעשות, כי X", ומשאירים לו להכריע אחרת.
+Never describe your own caution as a decision of the system. "I was blocked" is a factual claim about the harness. If no refusal came back, it is false, and it sends the owner looking for a bug that does not exist. If you decided not to do something on your own judgment, say it in these words: "I chose not to do it, because X", and leave the owner to decide otherwise.
 
-## לתקן טעות של עצמך זה תמיד בתחום
+## Fixing your own mistake is always in scope
 
-מי ששבר, מתקן. זה נכון גם כשהתיקון נוגע ב-repo ציבורי, בפרויקט של מישהו אחר או במשהו מחוץ לסביבת העבודה, וגם כשיצירה של אותו דבר הייתה דורשת שאלה.
+Whoever broke it, fixes it. This holds even when the fix touches a public repo, someone else's project or something outside the workspace, and even when creating that same thing would have needed a question.
 
-**לבטל תקלה שגרמת זו לא פעולה כלפי חוץ. זו ההשלמה שלה.** issue שנפתח בטעות ב-repo של מישהו אחר הוא רעש ששמת שם. לסגור אותו זה לנקות אחריך, ולהשאיר אותו פתוח זה הנזק. עושים את זה מיד, באותו סשן, לפני שמדווחים.
+**Undoing a fault you caused is not an outward action. It is the completion of it.** An issue opened by mistake in someone else's repo is noise you put there. Closing it is cleaning up after yourself, and leaving it open is the damage. Do it immediately, in the same session, before you report.
 
-לא מעבירים את הניקוי שלך לסשן אחר או לבעל החברה.
+Do not hand your cleanup to another session or to the owner.
 
-## מה עדיין דורש שאלה
+## What still needs a question
 
-פעולות חדשות כלפי חוץ, לא תיקונים: מייל או הודעה לאנשים, פרסום, תשלום, או כל דבר בלתי הפיך שמכוון לאדם ולא למכונה. שואלים פעם אחת, בקצרה, ופועלים לפי התשובה.
+New outward actions, not fixes: an email or message to people, publishing, a payment, or anything irreversible aimed at a person rather than a machine. Ask once, briefly, and act on the answer.
 
 <!-- /AUTHORITY -->
 

@@ -51,12 +51,12 @@ async function mergeGate(payload: unknown): Promise<string | null> {
     clearTimeout(guardTimer);
     let timer: NodeJS.Timeout | undefined;
     const late = new Promise<string>((res) => {
-      timer = setTimeout(() => res('מיזוג נחסם: בדיקת הסקירה לא רצה (הקריאה ל-`gh` לא הסתיימה בזמן), ואין מיזוג בלי שהיא עברה. מנסים שוב.'), 8000);
+      timer = setTimeout(() => res('Merge blocked: the review check did not run (the `gh` call did not finish in time), and there is no merge without it passing. Try again.'), 8000);
     });
     try { return await Promise.race([checkMerge(command, cwd), late]); } finally { clearTimeout(timer); }
   } catch (e) {
     logError('merge-gate', e);
-    return 'מיזוג נחסם: בדיקת הסקירה לא רצה (שגיאה פנימית ב-hook), ואין מיזוג בלי שהיא עברה.';
+    return 'Merge blocked: the review check did not run (an internal error in the hook), and there is no merge without it passing.';
   }
 }
 

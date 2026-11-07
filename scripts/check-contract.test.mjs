@@ -53,9 +53,9 @@ const cases = [
   ['colour word as symbol', 'is a colour', (d) => edit(d, 'company/org.yaml', 'symbol: tune', 'symbol: red')],
   ['colour key', 'colour fields', (d) => edit(d, 'company/org.yaml', '    symbol: tune\n', '    symbol: tune\n    bg_color: x\n')],
   ['hex colour value', 'colour value', (d) => edit(d, 'company/org.yaml', 'helpers: ephemeral   #', 'helpers: "#ff0000"   #')],
-  ['Authority weakened', 'differs from the engine', (d) => edit(d, 'company/directives.md', 'מותר לך הכול, חוץ מחמשת הסוגים', 'מותר לך הכול, חוץ מהסוגים')],
-  ['the owner\'s own Authority, not verbatim', 'pinned verbatim', (d) => edit(d, 'company/directives.md', '# סמכות: קרא את זה לפני שאתה מחליט שאסור לך\n', '# Authority — read this before you decide you are not allowed\n\nnot the text\n\n<!-- /RAN:AUTHORITY -->\n\n# סמכות: קרא את זה לפני שאתה מחליט שאסור לך\n')],
-  ['Authority heading removed', 'heading is missing', (d) => edit(d, 'company/directives.md', '# סמכות: קרא את זה לפני שאתה מחליט שאסור לך\n', '# סמכות\n')],
+  ['Authority weakened', 'differs from the engine', (d) => edit(d, 'company/directives.md', 'You are allowed everything, except the five kinds below.', 'You are allowed everything, except the kinds below.')],
+  ['the owner\'s own Authority, not verbatim', 'pinned verbatim', (d) => edit(d, 'company/directives.md', '# Authority: read this before you decide you are not allowed\n', '# Authority — read this before you decide you are not allowed\n\nnot the text\n\n<!-- /RAN:AUTHORITY -->\n\n# Authority: read this before you decide you are not allowed\n')],
+  ['Authority heading removed', 'heading is missing', (d) => edit(d, 'company/directives.md', '# Authority: read this before you decide you are not allowed\n', '# Authority\n')],
   ['missing identity file', 'has no file', (d) => rmSync(join(d, 'company/identities/ofir.md'))],
   ['duplicate identity id', 'duplicate identity id', (d) => edit(d, 'company/org.yaml', '  - id: noam\n', '  - id: maya\n')],
   ['duplicate automation id', 'duplicate automation id', (d) => edit(d, 'company/org.yaml', '- id: said-twice', '- id: memory-consolidation')],
@@ -229,9 +229,9 @@ test('the starter kit with the examples set up passes', async () => {
 const starterCases = [
   ['setup done without a time zone', '"timezone" must be an IANA', (d) => edit(d, 'company/org.yaml', 'setup: pending\n', '')],
   ['setup done without the owner name', '"owner_name" must be a non-empty name', (d) => edit(d, 'company/org.yaml', 'setup: pending\n', '')],
-  ['manager without a name', 'identity "manager" has no name', (d) => edit(d, 'company/org.yaml', 'name: מנהל החברה', 'name:')],
+  ['manager without a name', 'identity "manager" has no name', (d) => edit(d, 'company/org.yaml', 'name: Company manager', 'name:')],
   ['setup flag with another value', '"setup" can only be "pending"', (d) => edit(d, 'company/org.yaml', 'setup: pending\nowner:', 'setup: done\nowner:')],
-  ['generic Authority edited', 'differs from the engine', (d) => edit(d, 'company/directives.md', 'מותר לך הכול, חוץ מחמשת הסוגים', 'מותר לך הכול, חוץ מהסוגים')],
+  ['generic Authority edited', 'differs from the engine', (d) => edit(d, 'company/directives.md', 'You are allowed everything, except the five kinds below.', 'You are allowed everything, except the kinds below.')],
   ['generic Authority without its end marker', 'must run from', (d) => edit(d, 'company/directives.md', '<!-- /AUTHORITY -->', '')],
 ];
 
@@ -257,7 +257,7 @@ test('the starter kit and the fixtures carry nothing of the owner of this repo',
 test('--home <path> checks that path, also as npm passes it', () => {
   const dir = copyStarter();
   try {
-    edit(dir, 'company/org.yaml', 'name: מנהל החברה', 'name:');
+    edit(dir, 'company/org.yaml', 'name: Company manager', 'name:');
     const env = { ...process.env, HOME: join(dir, 'nohome'), COMPANY_HOME: join(repo, 'starter') };
     for (const args of [['--home', dir], ['--home', '--home', dir]]) {
       const r = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env });

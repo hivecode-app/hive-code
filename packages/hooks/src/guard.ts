@@ -27,26 +27,26 @@ export interface GuardEnv {
 const DEPLOYER = 'adi';
 
 export const GUARD_REASON = (what: string, root: string): string =>
-  `${what} נחסם: זה ה-checkout הראשי של agent-company (\`${root}\`), ש-hq רץ ממנו ושממנו פורסים. `
-  + 'עדכון לקובץ זיכרון (מה פתוח, לקחים, יומן): `remember` עם `file` (נתיב תחת `memory/`) ו-`mode` (`append` או `replace`), '
-  + 'ו-hq מכניס אותו ב-PR מאוחד. שינוי אחר: PR מ-worktree משלך (`git worktree add -b <ענף> .worktrees/<שם>` מתוך ה-repo), '
-  + 'ועורכים רק בתוך `.worktrees/<שם>`.';
+  `${what} blocked: this is the main checkout of agent-company (\`${root}\`), which hq runs from and deploys from. `
+  + 'To update a memory file (what is open, lessons, log): `remember` with `file` (a path under `memory/`) and `mode` (`append` or `replace`), '
+  + 'and hq puts it in a combined PR. Any other change: a PR from a worktree of your own (`git worktree add -b <branch> .worktrees/<name>` from inside the repo), '
+  + 'and edit only inside `.worktrees/<name>`.';
 
 export const COMPANY_GUARD_REASON = (what: string, root: string): string =>
-  `${what} נחסם: זה ה-checkout הראשי של החברה (\`${root}\`, \`COMPANY_HOME\`), שממנו hq קורא את החוזה והזיכרון. `
-  + 'עדכון לקובץ זיכרון (מה פתוח, לקחים, יומן): `remember` עם `file` (נתיב תחת `memory/`) ו-`mode` (`append` או `replace`), '
-  + 'ו-hq מכניס אותו בעצמו. שינוי אחר בחוזה: PR מ-worktree משלך ב-repo של החברה (`git worktree add -b <ענף> .worktrees/<שם>` מתוכו), '
-  + 'ועורכים רק בתוך `.worktrees/<שם>`.';
+  `${what} blocked: this is the company's main checkout (\`${root}\`, \`COMPANY_HOME\`), which hq reads the contract and memory from. `
+  + 'To update a memory file (what is open, lessons, log): `remember` with `file` (a path under `memory/`) and `mode` (`append` or `replace`), '
+  + 'and hq puts it in itself. Any other change to the contract: a PR from a worktree of your own in the company repo (`git worktree add -b <branch> .worktrees/<name>` from inside it), '
+  + 'and edit only inside `.worktrees/<name>`.';
 
 /** git subcommands that move HEAD or rewrite the working tree. In the main checkout only a deploy may do that (22/10:
  *  a `git pull` there put undeployed code into every new shift). Reading (`log`, `show`, `fetch`, `worktree add`) passes. */
 export const GIT_HEAD_MOVES = new Set(['pull', 'checkout', 'switch', 'reset', 'merge', 'rebase', 'restore']);
 
 export const GIT_MOVE_REASON = (what: string, root: string, company: boolean): string =>
-  `${what} נחסם: \`${root}\` הוא ה-checkout הראשי ${company ? 'של החברה, שממנו hq קורא את החוזה והזיכרון' : 'של agent-company, שממנו hq ו-shift-host רצים'}, `
-  + 'והוא זז רק בפריסה (`scripts/deploy.sh`). קוד שמוזג ועוד לא נפרס לא נכנס אליו. '
-  + 'לקרוא קובץ כמו שהוא ב-main: `git fetch origin` ואז `git -C <checkout> show origin/main:<נתיב>`. '
-  + 'לעבוד על הקוד: worktree משלך (`git worktree add -b <ענף> .worktrees/<שם> origin/main` מתוך ה-repo), ושם מותר כל `git`.';
+  `${what} blocked: \`${root}\` is the main checkout ${company ? "of the company, which hq reads the contract and memory from" : 'of agent-company, which hq and shift-host run from'}, `
+  + 'and it moves only in a deploy (`scripts/deploy.sh`). Code that was merged and not yet deployed does not go into it. '
+  + 'To read a file as it is on main: `git fetch origin`, then `git -C <checkout> show origin/main:<path>`. '
+  + 'To work on the code: a worktree of your own (`git worktree add -b <branch> .worktrees/<name> origin/main` from inside the repo), where any `git` is allowed.';
 
 /** The protected root, or null when there is none (a dev worktree set as COMPANY_REPO protects nothing). */
 export function protectedRoot(env: GuardEnv): string | null {
@@ -99,7 +99,7 @@ function checkRoot(input: GuardInput, env: GuardEnv, root: string, reason: (what
     const p = ti.file_path ?? ti.notebook_path;
     if (typeof p !== 'string' || !p) return null;
     const target = abs(p);
-    return inMainCheckout(target, root) ? reason(`\`${tool}\` ל-\`${target}\``, root) : null;
+    return inMainCheckout(target, root) ? reason(`\`${tool}\` on \`${target}\``, root) : null;
   }
   if (tool === 'Bash' && typeof ti.command === 'string') {
     const hit = bashWrite(ti.command, cwd, root, home, deployer);
@@ -135,7 +135,7 @@ export function bashWrite(command: string, cwd0: string, root: string, home: str
       if (next === undefined) continue;
       i++; // an operator's operand is never a command word
       if (redirect || !WRITE_REDIRECTS.has(t.op!) || next.startsWith('/dev/') || (t.op === '>&' && /^(\d+|-)$/.test(next))) continue;
-      if (hit(next)) redirect = `כתיבה ל-\`${abs(next)}\``;
+      if (hit(next)) redirect = `Writing to \`${abs(next)}\``;
     }
     // `$(…)` and backticks run too (lex keeps what bash would run: not in single quotes, not escaped, not `$((…))`).
     for (const t of seg) for (const inner of t.subs ?? []) { const r = bashWrite(inner, cwd, root, home); if (r) return r; }
@@ -147,17 +147,17 @@ export function bashWrite(command: string, cwd0: string, root: string, home: str
     if (!cmd) return null;
     if (cmd === 'cd' || cmd === 'pushd') { cwd = args[0] && args[0] !== '-' ? abs(args[0]) : home; return null; }
     if (cmd === 'tee') {
-      for (const a of args) if (!a.startsWith('-') && hit(a)) return `\`tee\` ל-\`${abs(a)}\``;
+      for (const a of args) if (!a.startsWith('-') && hit(a)) return `\`tee\` to \`${abs(a)}\``;
     }
     if (cmd === 'sed' && args.some((a) => /^-[a-zA-Z]*i/.test(a) || a.startsWith('--in-place'))) {
       const scripted = args.some((a) => a === '-e' || a === '-f' || a.startsWith('--expression') || a.startsWith('--file'));
       const files = args.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^-[a-zA-Z]*[ef]$/.test(args[i - 1]!)));
-      for (const f of scripted ? files : files.slice(1)) if (hit(f)) return `\`sed -i\` על \`${abs(f)}\``;
+      for (const f of scripted ? files : files.slice(1)) if (hit(f)) return `\`sed -i\` on \`${abs(f)}\``;
     }
     if (cmd === 'cp' || cmd === 'mv' || cmd === 'install') {
       const t = args.findIndex((a) => /^-[a-zA-Z]*t$/.test(a) || a.startsWith('--target-directory'));
       const dest = t >= 0 ? (args[t]!.includes('=') ? args[t]!.split('=')[1] : args[t + 1]) : args.filter((a) => !a.startsWith('-')).at(-1);
-      if (dest && hit(dest)) return `\`${cmd}\` ל-\`${abs(dest)}\``;
+      if (dest && hit(dest)) return `\`${cmd}\` to \`${abs(dest)}\``;
     }
     if (cmd === 'git') {
       let dir = cwd; let i = 0;
@@ -167,7 +167,7 @@ export function bashWrite(command: string, cwd0: string, root: string, home: str
         else i += 1;
       }
       const sub = args[i];
-      if (sub && (sub === 'commit' || GIT_HEAD_MOVES.has(sub)) && inMainCheckout(dir, root)) return `\`git ${sub}\` ב-\`${dir}\``;
+      if (sub && (sub === 'commit' || GIT_HEAD_MOVES.has(sub)) && inMainCheckout(dir, root)) return `\`git ${sub}\` in \`${dir}\``;
     }
     return null;
   };
