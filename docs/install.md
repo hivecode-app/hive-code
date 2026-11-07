@@ -86,9 +86,11 @@ A second timer cleans up only incomplete backups left by processes that died. It
 
 ## Uninstall
 
-1. Stop and disable the user services and timers. `systemctl --user list-unit-files 'agent-company*' 'company-shift@*'` lists them; for each one run `systemctl --user disable --now <name>`.
-2. Remove their unit files from `~/.config/systemd/user/` (the same names), then run `systemctl --user daemon-reload`.
-3. Remove `~/.local/share/agent-company`, `~/.local/state/agent-company`, `~/.config/agent-company` and the links `~/.local/bin/company` and `~/.local/bin/company-run`.
-4. If you used Tailscale Funnel, turn it off with `tailscale funnel reset`.
+1. Stop `hq` first, so it does not start new shifts: `systemctl --user disable --now agent-company-hq.service`.
+2. Stop the workers' sessions: for each shift that `systemctl --user list-units --all 'company-shift@*'` lists, run `systemctl --user disable --now <name>`.
+3. Stop and disable the rest: `systemctl --user list-unit-files 'agent-company*'` lists the services and timers, and for each one run `systemctl --user disable --now <name>`.
+4. Remove the unit files from `~/.config/systemd/user/`: the `agent-company*` files and `company-shift@.service`. Then run `systemctl --user daemon-reload`.
+5. Remove `~/.local/share/agent-company`, `~/.local/state/agent-company`, `~/.config/agent-company` and the links `~/.local/bin/company` and `~/.local/bin/company-run`.
+6. If you used Tailscale Funnel, turn it off with `tailscale funnel reset`.
 
 Your company in `~/company` is a regular git repository: keep it or delete it.

@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hive Code: a team of Claude Code agents you manage from your phone</title>
+  <meta name="description" content="Hive Code runs on your own Linux server and turns Claude Code into a small team: a manager, workers with memory, a pull request and a review for every task, and one app to follow it all.">
+  <meta property="og:title" content="Hive Code">
+  <meta property="og:description" content="A team of Claude Code agents you manage from your phone. Self-hosted, open source.">
+  <meta property="og:image" content="https://hivecode-app.github.io/hive-code/screenshots/desktop.png">
+  <meta name="theme-color" content="#F5F5F3" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121314" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="brand/mark-light.svg" media="(prefers-color-scheme: light)">
+  <link rel="icon" href="brand/mark-dark.svg" media="(prefers-color-scheme: dark)">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="wrap bar-in">
+      <a class="brand" href="./" aria-label="Hive Code home">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="brand/logo-dark.svg">
+          <img src="brand/logo-light.svg" alt="Hive Code" width="115" height="28">
+        </picture>
+      </a>
+      <nav class="links">
+        <a href="https://github.com/hivecode-app/hive-code/blob/main/docs/install.md">Docs</a>
+        <a href="https://github.com/hivecode-app/hive-code/blob/main/CHANGELOG.md">Changelog</a>
+        <a class="gh" href="https://github.com/hivecode-app/hive-code">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero wrap">
+      <h1>A team of Claude Code agents you manage from your phone.</h1>
+      <p class="lede">Hive Code runs on your own Linux server. A manager takes your requests, workers with names and memory do the work, and every task ends as a reviewed pull request. You step in only when the work needs you.</p>
+      <div class="install">
+        <div class="cmd" role="group" aria-label="Install command">
+          <code id="cmd">curl -fsSL https://raw.githubusercontent.com/hivecode-app/hive-code/main/scripts/install.sh | bash</code>
+          <button type="button" class="copy" data-copy="cmd" aria-live="polite">Copy</button>
+        </div>
+        <p class="hint">Ubuntu or Debian with systemd, 16&nbsp;GB of memory, a Claude Pro or Max plan and a GitHub account. <a href="https://github.com/hivecode-app/hive-code/blob/main/docs/install.md">Install guide</a></p>
+      </div>
+      <figure class="shot">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="screenshots/desktop-dark.png">
+          <img src="screenshots/desktop.png" width="1280" height="800" alt="The Hive Code app on a desktop browser: the chat list, a developer's conversation with test output and a pull request, and a question waiting for an answer">
+        </picture>
+      </figure>
+    </section>
+
+    <section class="band">
+      <div class="wrap split">
+        <div>
+          <h2>Every task ends as a reviewed pull request</h2>
+          <p>Write to the manager the way you would write to a lead developer. Behind the scenes, each request follows the same path:</p>
+          <ol class="steps">
+            <li><strong>A branch of its own.</strong> The worker gets a git worktree, so tasks never step on each other.</li>
+            <li><strong>Tests before the pull request.</strong> It runs the commands your project's charter lists, and fixes what fails.</li>
+            <li><strong>An independent review.</strong> A second session with no edit tools and a clean context reviews the pull request.</li>
+            <li><strong>Merge on green.</strong> It merges only with an approving review and a passing CI check.</li>
+            <li><strong>Production waits for you.</strong> Deploying asks for your GO, with the change, the risk and the way back.</li>
+          </ol>
+        </div>
+        <figure class="phone">
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="screenshots/phone-chat-dark.png">
+            <img src="screenshots/phone-chat.png" width="390" height="844" alt="A conversation with a worker on a phone: test output, a pull request card and a question with two answers" loading="lazy">
+          </picture>
+        </figure>
+      </div>
+    </section>
+
+    <section class="wrap cols">
+      <div>
+        <h2>It stops for you only when it must</h2>
+        <p>A question the worker cannot answer alone arrives as a card with buttons. An approval to ship shows what changes and how to roll back. A login request asks once. Everything else is a message you can read when you like.</p>
+      </div>
+      <div>
+        <h2>Workers remember</h2>
+        <p>A worker outlives its sessions. When a session ends, the worker writes a handoff and the next shift picks it up. Decisions you make once are saved and apply to every worker, including new ones.</p>
+      </div>
+      <div>
+        <h2>Your company is a repository</h2>
+        <p>Roles, rules, project charters and shared memory are Markdown and YAML in <code>~/company</code>. Read them, edit them, or ask the manager to change them through a pull request.</p>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="wrap">
+        <h2>Your server, your subscription</h2>
+        <div class="cols tight">
+          <p>Every worker is the real Claude Code CLI, signed in to your Claude plan. There is no API key, no backend of ours and no telemetry.</p>
+          <p>Workers have full access to the server, on purpose, so they can finish a task without asking about every command. The installer asks you to accept this first.</p>
+          <p>The server listens on localhost only. Your phone reaches it through Tailscale Funnel, a Cloudflare Tunnel or your own domain, and each device signs in with a pairing code or a passkey.</p>
+        </div>
+        <p class="more"><a href="https://github.com/hivecode-app/hive-code#security-and-permissions">Security and permissions</a></p>
+      </div>
+    </section>
+
+    <section class="wrap end">
+      <h2>Try it on a spare server</h2>
+      <p>One command installs it, and running it again only fills in what is missing. Android has an app; on iPhone, use the browser.</p>
+      <div class="cmd" role="group" aria-label="Install command">
+        <code id="cmd2">curl -fsSL https://raw.githubusercontent.com/hivecode-app/hive-code/main/scripts/install.sh | bash</code>
+        <button type="button" class="copy" data-copy="cmd2" aria-live="polite">Copy</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap foot-in">
+      <p>Hive Code is open source under the MIT License. It is an independent project, not affiliated with Anthropic.</p>
+      <nav class="links">
+        <a href="https://github.com/hivecode-app/hive-code">GitHub</a>
+        <a href="https://github.com/hivecode-app/hive-code/blob/main/docs/faq.md">FAQ</a>
+        <a href="https://github.com/hivecode-app/hive-code/blob/main/SECURITY.md">Security</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script>
+    for (const b of document.querySelectorAll('[data-copy]')) {
+      b.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(document.getElementById(b.dataset.copy).textContent);
+          b.textContent = 'Copied';
+        } catch {
+          const range = document.createRange();
+          range.selectNodeContents(document.getElementById(b.dataset.copy));
+          getSelection().removeAllRanges();
+          getSelection().addRange(range);
+          b.textContent = 'Selected, copy it';
+        }
+        setTimeout(() => { b.textContent = 'Copy'; }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>

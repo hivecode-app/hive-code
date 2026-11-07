@@ -7,3 +7,4 @@ dist/
 *.tsbuildinfo
 .claude/worktrees/
 .worktrees/
+site/_site/

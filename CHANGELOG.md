@@ -12,7 +12,7 @@ All notable changes to Hive Code are listed here. The format follows [Keep a Cha
 - Real projects in filters, in the sidebar and on the projects screen.
 - First-run setup in the app: access confirmation, Claude and GitHub connections, project selection and work settings.
 - Notification settings, and notifications grouped by intent: questions and approvals alert, updates stay quiet.
-- Android push notifications through Firebase Cloud Messaging, without a permanent "connected" notification.
+- Groundwork for Android push notifications through Firebase Cloud Messaging, without a permanent "connected" notification. Not available yet for your own installation.
 - Files and media: uploads in parts that resume, previews, and attachments the workers can read.
 - Long dictation that is not lost, sent in parts with progress and retry.
 - Private reports a worker can show you, with versions and an isolated link.
