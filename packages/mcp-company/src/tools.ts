@@ -118,7 +118,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       + 'If something still waits on ' + him + ' (a deploy after approval, or something ' + he + ' must check ' + himself + '), add awaiting and awaiting_note; check or verify reach ' + him + ' as a message in the chat with "Works" and "Doesn\'t work". '
       + 'The task closes when the turn ends, and only if you answered every message ' + O + ' sent you. Otherwise hq tells you "' + O + ' is waiting for an answer on…" and it stays open. '
       + 'A time estimate ("ready in 40 minutes") goes in the eta_min or eta_at, eta_kind and eta_what fields; after done or eta_done it closes with the real time.', {
-      state: s('State, e.g. working | blocked | idle | done. On the second server: needs-local when something only the main server has is missing, and the task moves there'),
+      state: s('State, e.g. working | blocked | idle | done. On the second server: needs-local when the task needs an emulator, the browser or the main server itself, and it moves there'),
       note: s('Short note'),
       summary: s('With done: one line in ' + his + ' words on what changed for ' + him + ', no PR or task numbers.' + WORDS + 'e.g. "Photos in the chat upload from the phone too"'),
       ...awaitingArgs,
@@ -140,7 +140,8 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       repo: s('The checkout from the charter (name), if the project has more than one. Default: the first'),
       assignee: s('The standing worker of the project whose domain it is, e.g. ido. Without: a temporary worker'),
       members: strs('Identities of the team members'),
-      local: { type: 'boolean', description: 'true when the task needs something only the main server has: ssh keys, `.env`, kubectl, secrets of the main server, a browser or a simulator. Without: runs on whichever server has room, the second one included' },
+      needs: { type: 'array', items: { type: 'string', enum: ['emulator', 'browser', 'main-server'] }, description: 'Only what the second server lacks: emulator (an Android emulator: it has no KVM), browser (the shared browser), main-server (the main server itself: an hq deploy, its state dir, a service that runs there). '
+        + 'Code, tests, flutter, docker, building and pushing an image, kubectl, a deploy to dev, the projects\' keys and SOPS are on the second server too, so they are not a need (hq sends such a task first to a server set up with the keys). Without: runs on whichever server has room' },
       engine: { type: 'string', enum: ['claude', 'codex'], description: 'Which engine the worker runs on. Default claude. codex only in a project whose charter turns it on (`codex: { tasks: on-request }`), with no assignee, '
         + 'and for code work with a clear check (tests, typecheck). Not for production, a browser or a conversation. When the Codex quota is used up, hq rejects with the reason and does not fall back to Claude' },
       model: s('With engine codex only: the Codex model, e.g. gpt-6-astra. Default: the charter\'s'),

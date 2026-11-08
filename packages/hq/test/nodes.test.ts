@@ -10,9 +10,21 @@ import { join } from 'node:path';
 import { charter, git, makeEnv, repo, until } from './helpers.ts';
 import { HostClient } from '../src/host-client.ts';
 import { syncCompany } from '../src/workspace-cli.ts';
-import { NodeUnreachable, RemoteLauncher, RemoteNode, RemoteWorkspaces, nodeToggle, type NodeDef, type SshRun } from '../src/nodes.ts';
+import { NodeUnreachable, RemoteLauncher, RemoteNode, RemoteWorkspaces, nodeCanHost, nodeToggle, type NodeDef, type SshRun } from '../src/nodes.ts';
 import type { LaunchSpec } from '../src/shifts.ts';
 import { BaseFetchFailed, Workspaces } from '../src/workspace.ts';
+
+test('nodeCanHost: a need goes only to a node that has it; needs-local never leaves the main server', () => {
+  const ci-host = { has: [] as NodeDef['has'] };
+  const kvm = { has: ['emulator'] as NodeDef['has'] };
+  assert.equal(nodeCanHost(ci-host, ['opened-by:yoav', 'repo:x']), true, 'labels that are not needs do not matter');
+  assert.equal(nodeCanHost(ci-host, ['needs-emulator']), false);
+  assert.equal(nodeCanHost(kvm, ['needs-emulator']), true);
+  assert.equal(nodeCanHost(kvm, ['needs-simulator']), true, 'the old name');
+  assert.equal(nodeCanHost(kvm, ['needs-emulator', 'needs-browser']), false, 'every need');
+  assert.equal(nodeCanHost({ has: ['emulator', 'browser'] }, ['needs-local']), false);
+  assert.equal(nodeCanHost({}, ['needs-browser']), false, 'no has: the baseline only');
+});
 
 const NODE: NodeDef = { name: 'n2', ssh: 'root@n2.test', projects: ['proj'], maxSlots: 2, maxLoad: 0.85, identityFile: null };
 
@@ -409,6 +421,60 @@ test('task-288: local under load, the head of the queue cannot go to the node: a
     assert.equal(hq.scheduler.task(free.id)!.machine, 'n2');
     assert.equal(hq.scheduler.task(head.id)!.state, 'queued');
     assert.equal(hq.scheduler.task(other.id)!.state, 'queued');
+  } finally { await env.cleanup(); r.cleanup(); }
+});
+
+test('task 1596: the main server full, a p0 and a task that needs what the node has go there; one that needs what it lacks waits here', async () => {
+  const r = repo();
+  const calls: string[][] = [];
+  const env = await makeEnv({ projects: { proj: charter(r.checkout) }, cfg: { nodes: [{ ...NODE, maxSlots: 3, has: ['emulator'], keys: true }] }, deps: { ssh: fakeSsh(calls) }, noStart: true });
+  try {
+    const { hq } = env;
+    git(env.dir, 'init', '--quiet', '--initial-branch=main');
+    git(env.dir, 'add', 'company');
+    git(env.dir, 'commit', '--quiet', '-m', 'company');
+    hq.nodes.list[0]!.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await hq.start({ listen: false, timers: false });
+    hq.scheduler.loadInfo = () => ({ load1: 16, cpus: 8 });
+    const browser = hq.scheduler.addTask({ title: 'צריכה דפדפן', project: 'proj', priority: 0, labels: ['needs-browser'] });
+    const p0 = hq.scheduler.addTask({ title: 'p0 רגילה', project: 'proj', priority: 0 });
+    const emu = hq.scheduler.addTask({ title: 'צריכה אמולטור', project: 'proj', labels: ['needs-emulator'] });
+    const main = hq.scheduler.addTask({ title: 'פריסת hq', project: 'proj', labels: ['needs-local'] });
+    await hq.scheduler.fill();
+    await until(() => hq.scheduler.task(p0.id)!.state === 'running' && hq.scheduler.task(emu.id)!.state === 'running', 8000, 'both run on the node');
+    assert.equal(hq.scheduler.task(p0.id)!.machine, 'n2', 'a p0 does not wait for the main server');
+    assert.equal(hq.scheduler.task(emu.id)!.machine, 'n2', 'the node has an emulator');
+    assert.equal(hq.scheduler.task(browser.id)!.state, 'queued', 'the node has no browser: it waits for the main server');
+    assert.equal(hq.scheduler.task(main.id)!.state, 'queued');
+  } finally { await env.cleanup(); r.cleanup(); }
+});
+
+test('task 1596: a node set up with the keys goes first, though another has more room; a worker on one without them hears request_access', async () => {
+  const r = repo();
+  const calls: string[][] = [];
+  const bare: NodeDef = { ...NODE, name: 'n3', ssh: 'root@n3.test', maxSlots: 4 };
+  const ssh: SshRun = (args, input) => fakeSsh(calls)(args.map((a) => (a === bare.ssh ? NODE.ssh : a)), input);
+  const env = await makeEnv({ projects: { proj: charter(r.checkout) }, cfg: { nodes: [bare, { ...NODE, maxSlots: 1, keys: true }] }, deps: { ssh }, noStart: true });
+  try {
+    const { hq } = env;
+    git(env.dir, 'init', '--quiet', '--initial-branch=main');
+    git(env.dir, 'add', 'company');
+    git(env.dir, 'commit', '--quiet', '-m', 'company');
+    for (const n of hq.nodes.list) n.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await hq.start({ listen: false, timers: false });
+    hq.scheduler.loadInfo = () => ({ load1: 16, cpus: 8 });
+    const first = hq.scheduler.addTask({ title: 'ראשונה', project: 'proj' });
+    await until(() => hq.scheduler.task(first.id)!.state === 'running', 8000, 'first running');
+    assert.equal(hq.scheduler.task(first.id)!.machine, 'n2', 'the node with the keys, though n3 has 4 free and n2 1');
+    const second = hq.scheduler.addTask({ title: 'שנייה', project: 'proj' });
+    await until(() => hq.scheduler.task(second.id)!.state === 'running', 8000, 'second running');
+    assert.equal(hq.scheduler.task(second.id)!.machine, 'n3', 'n2 is full: the other node, not the main server');
+    const msgs = hq.store.db.prepare('SELECT to_identity AS t, body FROM messages WHERE to_identity IN (?, ?)').all(hq.scheduler.task(first.id)!.identity, hq.scheduler.task(second.id)!.identity) as { t: string; body: string }[];
+    const of = (id: number) => msgs.filter((m) => m.t === hq.scheduler.task(id)!.identity).map((m) => m.body).join('\n');
+    assert.match(of(first.id), /ssh to the clusters/);
+    assert.doesNotMatch(of(first.id), /It has no ssh keys/);
+    assert.match(of(second.id), /It has no ssh keys, `\.env`, kubectl/);
+    assert.match(of(second.id), /request_access/);
   } finally { await env.cleanup(); r.cleanup(); }
 });
 

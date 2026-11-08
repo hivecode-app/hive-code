@@ -15,7 +15,7 @@ import { loadInfo, memInfoMb, type MemInfo } from './proc.ts';
 import { dirname, join } from 'node:path';
 import { BaseFetchFailed, noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
 import { codexOf } from './codex-quota.ts';
-import { LOCAL, LOCAL_LABELS, NEEDS_LOCAL, NodeUnreachable, PORTABLE_AWAY_MS, nodeToggle, RemoteWorkspaces, type Nodes, type RemoteNode } from './nodes.ts';
+import { LOCAL, NEEDS_LOCAL, NodeUnreachable, nodeCanHost, PORTABLE_AWAY_MS, nodeToggle, RemoteWorkspaces, type Nodes, type RemoteNode } from './nodes.ts';
 
 export interface TaskRow {
   id: number; ref: string | null; project: string | null; title: string; body: string; source: string; state: string;
@@ -344,15 +344,16 @@ export class Scheduler {
 
   /**
    * Where a task that has no machine yet would go (nodes.ts): a node, when the task can run there (a task worker's
-   * task of a project the node lists, with no label that keeps it here) and the node has a free slot; else here.
+   * task of a project the node lists, whose needs the node has: nodeCanHost) and the node has a free slot; else here.
    * A task with a machine stays on it: its worktree and session are there.
    */
   placeFor(t: TaskRow, nodeFree: Map<string, number>): string {
     if (t.machine) return t.machine;
     if (!this.nodes || !this.mayLeave(t)) return LOCAL;
-    const best = this.nodes.list.filter((n) => n.def.projects.includes(t.project!) && this.store.toggle(nodeToggle(n.def.name))
+    const best = this.nodes.list.filter((n) => this.fits(t, n) && this.store.toggle(nodeToggle(n.def.name))
       && (nodeFree.get(n.def.name) ?? 0) > 0)
-      .sort((a, b) => (nodeFree.get(b.def.name) ?? 0) - (nodeFree.get(a.def.name) ?? 0))[0];
+      // A node with the keys first (a task may need them, and a worker there without them moves back), then the most room.
+      .sort((a, b) => Number(!!b.def.keys) - Number(!!a.def.keys) || (nodeFree.get(b.def.name) ?? 0) - (nodeFree.get(a.def.name) ?? 0))[0];
     return best?.def.name ?? LOCAL;
   }
 
@@ -364,11 +365,15 @@ export class Scheduler {
    */
   private mayLeave(t: TaskRow): boolean {
     if (t.worktree || t.started_at != null || !t.project) return false;
-    if ((JSON.parse(t.labels || '[]') as string[]).some((l) => LOCAL_LABELS.includes(l))) return false;
     // Codex's ChatGPT login is here (codex-quota.ts): a Codex task runs here.
     if (codexOf(t.labels)) return false;
     if (!t.identity) return true;
     return getIdentity(this.store, t.identity)?.team_kind === 'task' || this.standing(t.identity);
+  }
+
+  /** The node lists the task's project and has what its labels need (nodes.ts nodeCanHost). */
+  private fits(t: TaskRow, n: RemoteNode): boolean {
+    return n.def.projects.includes(t.project!) && nodeCanHost(n.def, JSON.parse(t.labels || '[]') as string[]);
   }
 
   /** A node the task could run on, whether or not it has room now (waitReason). */
@@ -859,7 +864,7 @@ export class Scheduler {
     if (t.worktree) {
       const { c } = this.checkoutOf(t);
       if (!(await ws.ensure(t.worktree, c?.path, ch ?? undefined))) throw new WorktreeGone(`task ${t.id}: worktree ${t.worktree} is gone and its branch too`);
-      return { path: t.worktree, note: worktreeNote(t.worktree, ch) + nodeNote(t.machine, this.mailbox.names.owner.name) + this.charterNote(t) };
+      return { path: t.worktree, note: worktreeNote(t.worktree, ch) + nodeNote(t.machine, this.mailbox.names.owner.name, !!(t.machine && this.nodes?.get(t.machine)?.def.keys)) + this.charterNote(t) };
     }
     // Started before hq made worktrees: its session and work live where it ran (hq's default cwd and
     // a worktree the worker made itself). Moving it would orphan both.
@@ -871,7 +876,7 @@ export class Scheduler {
     const w = await ws.create(ch, c, `company-t${t.id}`);
     this.store.db.prepare('UPDATE tasks SET worktree = ?, updated_at = ? WHERE id = ?').run(w.path, this.store.now(), t.id);
     this.store.emit('task.worktree', null, { id: t.id, path: w.path, branch: w.branch, base: w.base });
-    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) + nodeNote(t.machine, this.mailbox.names.owner.name) + staleNote(w.stale) + this.charterNote(t) + movedNote(t) };
+    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) + nodeNote(t.machine, this.mailbox.names.owner.name, !!(t.machine && this.nodes?.get(t.machine)?.def.keys)) + staleNote(w.stale) + this.charterNote(t) + movedNote(t) };
   }
 
   /**
@@ -1113,7 +1118,7 @@ export class Scheduler {
   private couldGoTo(t: TaskRow, name: string): boolean {
     if (t.machine) return t.machine === name;
     const n = this.nodes?.get(name);
-    return !!n && this.mayLeave(t) && n.def.projects.includes(t.project!);
+    return !!n && this.mayLeave(t) && this.fits(t, n);
   }
 
   /** Nodes being read right now (refreshNodes): their read is shared, and its end fills again. */
@@ -1461,8 +1466,17 @@ function worktreeNote(path: string, ch: ReturnType<typeof readCharter>, branch?:
 }
 
 /** A task on a node: what is not there, and how it moves to the main server when it needs that (moveLocal). */
-function nodeNote(machine?: string | null, owner = 'the owner'): string {
+function nodeNote(machine?: string | null, owner = 'the owner', keys = false): string {
   if (!machine || machine === LOCAL) return '';
+  if (!keys) return noKeysNote(machine, owner);
+  return `\n**Running on the second server (\`${machine}\`).** It has what a task needs end to end: the checkouts and the toolchains (Go, Flutter with clang, docker), ssh to the clusters (\`kubectl\` runs there, like on the main server), the registry login (\`ghcr.io\`), the SOPS key and the projects' keys. Build, test, push an image, deploy to dev and read the clusters from here. `
+    + '`request_access` is there too, for what is gated anyway: a change in production reaches ' + owner + ' as a card (carry on with what does not depend on it and come back with `request`), and `hq:query` reads hq.db. '
+    + 'What stays on the main server only: an emulator (no KVM here), the browser, and the main server itself (an hq deploy, its state dir, a service that runs there). When the task needs one of them: first `commit` what you have (WIP too), then `status` with `state: "needs-local"` and a `note` that says what is missing. The shift here ends, and the task continues on the main server from your branch. '
+    + 'Anything else that is missing here (a tool, a key, a file) is a gap in this server: say it in the note too, so it gets fixed and the next task does not move.';
+}
+
+/** A node that `node-install --keys` did not set up: the checkouts and the toolchains only, the rest through request_access. */
+function noKeysNote(machine: string, owner: string): string {
   return `\n**Running on the second server (\`${machine}\`).** It has the checkouts and the toolchains. It has no ssh keys, \`.env\`, kubectl or the main server's secrets: what they give, ask hq for with \`request_access\`, and it runs it on your behalf and returns the output to you. `
     + 'Examples: `resource: "kube:<namespace>", argv: ["rollout","status","deploy/api"]` · `resource: "ssh:<host>"` with a command from the list · `resource: "hq:query", argv: ["select …"]`. The lists are closed: what is not on the list comes back with `unfit` and a suggestion, and a change in production reaches ' + owner + ' as a card every time (carry on with what does not depend on it and come back with `request`). '
     + 'What stays on the main server only: a browser, a simulator, flutter, a local file, and a secret kept in a file (`.env`). When the task needs one of them, or `request_access` says there is no alternative: first `commit` what you have (WIP too), then `status` with `state: "needs-local"` and a `note` that says what is missing. The shift here ends, and the task continues on the main server from your branch.';

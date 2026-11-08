@@ -340,7 +340,7 @@
         "properties": {
           "state": {
             "type": "string",
-            "description": "State, e.g. working | blocked | idle | done. On the second server: needs-local when something only the main server has is missing, and the task moves there"
+            "description": "State, e.g. working | blocked | idle | done. On the second server: needs-local when the task needs an emulator, the browser or the main server itself, and it moves there"
           },
           "note": {
             "type": "string",
@@ -459,9 +459,17 @@
             },
             "description": "Identities of the team members"
           },
-          "local": {
-            "type": "boolean",
-            "description": "true when the task needs something only the main server has: ssh keys, `.env`, kubectl, secrets of the main server, a browser or a simulator. Without: runs on whichever server has room, the second one included"
+          "needs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "emulator",
+                "browser",
+                "main-server"
+              ]
+            },
+            "description": "Only what the second server lacks: emulator (an Android emulator: it has no KVM), browser (the shared browser), main-server (the main server itself: an hq deploy, its state dir, a service that runs there). Code, tests, flutter, docker, building and pushing an image, kubectl, a deploy to dev, the projects' keys and SOPS are on the second server too, so they are not a need (hq sends such a task first to a server set up with the keys). Without: runs on whichever server has room"
           },
           "engine": {
             "type": "string",

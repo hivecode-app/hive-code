@@ -4,6 +4,7 @@
 #   scripts/node-install.sh <node> --update   the engine there to this checkout's commit (scripts/deploy.sh hq runs it)
 #   scripts/node-install.sh <node> --token <file>   the node's Claude token (claude setup-token), to its own file there
 #   scripts/node-install.sh <node> --projects  only the toolchains and the projects' checkouts (after adding a project)
+#   scripts/node-install.sh <node> --keys      what a task needs beyond code: ssh to the clusters, the registry login, the projects' keys (below)
 # <node> is a name in hq.config.json `nodes`. The node mirrors this machine's paths: $HOME is this machine's $HOME there too (a
 # directory, not a user: the shifts run as the node's existing user, root when there is no other), so worktrees,
 # sockets and shift dirs are the same paths on both sides. Nothing there is touched beyond those paths, /usr/local
@@ -73,6 +74,52 @@ update_engine() {
 }
 
 if [[ "$mode" == "--update" ]]; then update_engine; exit 0; fi
+
+# ── --keys: a task on the node runs end to end (build, push an image, deploy to dev, read the clusters) like here
+#    (task 1596, 08/11/2026: 70% of the tasks were kept on the main server, most for a key the node did not have).
+#    The node gets ssh keys of its own, made there and authorized on the hosts (revoke: the line `node-<name>-*` in
+#    the host's authorized_keys); everything else is a copy of the file here, at the same path. Run again after
+#    a file here changes. Production stays as it is (dir-0006): a node is as trusted as the main server. ──
+if [[ "$mode" == "--keys" ]]; then
+  # What to give comes from the company config (hq.config.json `nodeKeys`), not from here: the hosts the projects'
+  # scripts reach as root with ~/.ssh/<key> (the key name is theirs: deploy.sh, node-logs.sh, remote-build.sh), and the
+  # files they read from $HOME (git grep '~/.lumo' and the like in their scripts).
+  keys_json="$(node -e '
+    const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).nodeKeys;
+    if (!c) { console.error(`no nodeKeys in ${process.argv[1]}`); process.exit(1); }
+    for (const [k, hs] of Object.entries(c.hosts || {})) console.log(`host ${k} ${hs.join(" ")}`);
+    for (const f of c.files || []) console.log(`file ${f}`);' "$CONFIG")"
+  failed=0
+  while read -r kind key hosts; do
+    [[ "$kind" == host ]] || continue
+    pub="$(on "set -e; install -d -m700 $H/.ssh; [ -f $H/.ssh/$key ] || ssh-keygen -q -t ed25519 -N '' -C node-$name-$key -f $H/.ssh/$key; cat $H/.ssh/$key.pub" </dev/null)"
+    ok=()
+    for h in $hosts; do
+      # A newline first when the file does not end with one: else the key is glued to the last key there, and both stop working.
+      ssh -n -o BatchMode=yes -i "$HOME/.ssh/$key" "root@$h" "install -d -m700 ~/.ssh; f=~/.ssh/authorized_keys; touch \$f; chmod 600 \$f
+          grep -qxF '$pub' \$f || { [ ! -s \$f ] || [ -z \"\$(tail -c1 \$f)\" ] || echo >> \$f; echo '$pub' >> \$f; }" \
+        || { say "לא הצלחתי להוסיף את $key ב-$h"; failed=1; continue; }
+      { ssh-keygen -F "$h" -f "$HOME/.ssh/known_hosts" || true; } | grep -v '^#' \
+        | on "touch $H/.ssh/known_hosts; while read -r l; do grep -qxF \"\$l\" $H/.ssh/known_hosts || echo \"\$l\" >> $H/.ssh/known_hosts; done"
+      on "grep -qx 'Host $h' $H/.ssh/config 2>/dev/null || printf '\\nHost %s\\n  User root\\n  IdentityFile ~/.ssh/%s\\n  IdentitiesOnly yes\\n' $h $key >> $H/.ssh/config; chmod 600 $H/.ssh/config" </dev/null
+      ok+=("$h")
+    done
+    say "$key: ${ok[*]:-אף שרת}"
+  done <<<"$keys_json"
+  have=(); missing=()
+  while read -r kind f _; do [[ "$kind" == file ]] || continue; if [[ -e "$HOME/$f" ]]; then have+=("$f"); else missing+=("$f"); fi; done <<<"$keys_json"
+  ((${#missing[@]} == 0)) || { say "אין כאן, ולכן לא הועתקו: ${missing[*]}"; failed=1; }
+  if ((${#have[@]})); then tar -C "$HOME" -czf - "${have[@]}" | on "cd $H && tar -xzf -"; say "קבצים: ${have[*]}"; fi
+  # The registry: only the ghcr.io entry of docker's config here (the rest is this machine's).
+  if node -e 'const a=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).auths?.["ghcr.io"]; if(!a) process.exit(1); process.stdout.write(JSON.stringify(a));' "$HOME/.docker/config.json" 2>/dev/null \
+    | on "set -e; install -d -m700 $H/.docker; f=$H/.docker/config.json; [ -s \$f ] || echo '{}' > \$f
+          node -e 'const fs=require(\"fs\"),f=process.argv[1],c=JSON.parse(fs.readFileSync(f,\"utf8\"));c.auths={...c.auths,\"ghcr.io\":JSON.parse(fs.readFileSync(0,\"utf8\"))};fs.writeFileSync(f,JSON.stringify(c,null,2),{mode:0o600})' \$f"; then
+    say "ghcr.io"
+  else say "ההתחברות ל-ghcr.io לא הועתקה"; failed=1; fi
+  ((failed == 0)) || { echo "node-install --keys: חלק לא הושלם (למעלה). אחרי התיקון מריצים שוב, ואז \`keys: true\` ל-$name ב-hq.config.json" >&2; exit 1; }
+  say "הכול הועבר. אם עוד אין, \`keys: true\` ל-$name ב-hq.config.json"
+  exit 0
+fi
 [[ "$mode" == "install" || "$mode" == "--projects" ]] || { echo "unknown mode $mode" >&2; exit 2; }
 
 # ── tools: git, build tools (better-sqlite3), node (this machine's version, when there is none), gh, and what the
@@ -256,6 +303,11 @@ if [[ "$own" == 1 ]]; then
 # ── the shift unit as a unit of its user (nodes.ts SC), like the shifts here; linger keeps it up with no login ──
 on "[ \"\$(loginctl show-user \$(id -un) -p Linger --value 2>/dev/null)\" = yes ] || sudo -n loginctl enable-linger \$(id -un)" \
   || { echo "node-install: linger is off there and sudo wants a password: loginctl enable-linger there first" >&2; exit 1; }
+# The shifts' PATH is its user's login PATH (~/.local/bin, ~/go/bin, /usr/local/go/bin, ~/flutter/bin), after $BIN: a tool
+# its user has is a tool the shifts have. Until 08/11/2026 it was $BIN:/usr/local/bin:/usr/bin:/bin, and kubectl, sops, go
+# and flutter on ci-host were there and not found, so tasks moved to the main server for tools it had (task 1596).
+login_path="$(on 'bash -lc '"'"'printf %s "$PATH"'"'"'' </dev/null | tr ':' '\n' | awk -v bin="$BIN" 'NF && $0 != bin && !seen[$0]++' | paste -sd: -)"
+SPATH="$BIN:${login_path:-/usr/local/bin:/usr/bin:/bin}"
 on "install -d $H/.config/systemd/user && cat > $H/.config/systemd/user/company-shift@.service && XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user daemon-reload" <<UNIT
 # Written by agent-company scripts/node-install.sh: one task shift of hq on the main server (nodes.ts). Do not edit here.
 [Unit]
@@ -267,7 +319,7 @@ StartLimitBurst=5
 Type=simple
 Environment=HOME=$H
 Environment=DISABLE_AUTOUPDATER=1
-Environment=PATH=$BIN:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=$SPATH
 WorkingDirectory=$H
 UMask=0077
 ExecStart=/usr/bin/env node $ENGINE/packages/shift-host/src/cli.ts --args-file $NSTATE/shifts/%i/host-args.json

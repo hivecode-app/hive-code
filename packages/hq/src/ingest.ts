@@ -33,6 +33,7 @@ import { LeaseError } from './leases.ts';
 import type { ShowArgs, ShowResult } from './artifacts.ts';
 import { UploadError } from './uploads.ts';
 import { CODEX_LABEL, CODEX_MODEL_LABEL } from './codex-quota.ts';
+import { needsToLabels } from './nodes.ts';
 
 const OPS: ReadonlySet<OpName> = new Set(['show', 'tell', 'ask', 'remember', 'handoff', 'status', 'open_team', 'close_team', 'request_go', 'open_ticket', 'compose_home', 'withdraw_ask', 'withdraw_go']);
 
@@ -319,11 +320,16 @@ export class Ingest {
           throw new IngestError(400, 'open_team: priority must be an integer 0..3', 'ה-`priority` חייב להיות מספר שלם בין 0 ל-3');
         }
         const priority = a.priority != null ? (a.priority as number) : titlePriority(need('name'));
+        const needs = needsToLabels(a.needs, a.local === true);
+        if (!needs) {
+          throw new IngestError(400, 'open_team: needs must be emulator, browser or main-server',
+            'ב-`needs` מותר רק `emulator`, `browser` או `main-server`. קוד, בדיקות, docker, kubectl ופריסה ל-dev יש בשני השרתים, ולכן אין צורך לסמן אותם');
+        }
         const task = this.hq.scheduler.addTask({
           title: need('name'), body: need('purpose'), project, ref, priority, labels: [`opened-by:${e.identity}`, ...(s(a.repo) ? [`repo:${s(a.repo)}`] : []),
-            // Needs what exists only here: stays here (nodes.ts NEEDS_LOCAL). Default: wherever there is room.
-            // `remote` (before 22/10) is ignored: every task may go to a node now.
-            ...(a.local === true ? ['needs-local'] : []),
+            // What a node lacks (nodes.ts NEED_LABELS): only a node that has it, or here. Default: wherever there is room.
+            // `remote` (before 22/10) is ignored, and `local: true` (before 08/11) is read as main-server.
+            ...needs,
             ...(engine === 'codex' ? [CODEX_LABEL, ...(codexModel ? [`${CODEX_MODEL_LABEL}${codexModel}`] : [])] : [])],
           identity: worker?.id, for_owner: a.for_owner === true,
           // A proposal waits for him: it starts only when he presses "התחלה" in the tasks tab (POST /api/tasks/:id/start).

@@ -43,21 +43,60 @@ export interface NodeDef {
   portable?: boolean;
   /** Memory kept free there for its own user, instead of capacity.reserveMb (the laptop: ran works on it). */
   reserveMb?: number;
+  /**
+   * What it has beyond the baseline every node has (the checkouts, the toolchains, the clusters, the registry, the
+   * projects' keys): a task labeled with a need (NEED_LABELS) goes only to a node that has it. ci-host has neither: no
+   * KVM for an emulator, no browser of his.
+   */
+  has?: Capability[];
+  /**
+   * `scripts/node-install.sh <node> --keys` ran there: ssh to the clusters, the registry login and the projects' keys
+   * (hq.config.json `nodeKeys`), at the same paths as here. Without it a node has the checkouts and the toolchains only:
+   * its workers hear so (nodeNote), and the scheduler prefers a node with keys (placeFor).
+   */
+  keys?: boolean;
 }
+
+/** What a node may have beyond the baseline. The main server has all of them. */
+export type Capability = 'emulator' | 'browser';
 
 export const LOCAL = 'local';
 export const nodeToggle = (name: string) => `node:${name}`;
 
 /**
  * A task goes to whichever machine has room, a node included (ran, 22/10/2026: «ששתי השרתים יתנו מהכוח חישוב
- * שלהם»). Only a task that needs what exists only here (ssh keys, `.env`, kubectl, the browser, a simulator) stays:
- * `open_team` with `local: true`, or a worker there that finds it is missing something (`status` state `needs-local`,
- * Scheduler.moveLocal). Until 22/10 it was the other way round, `remote-ok` opting in; that label means nothing now.
+ * שלהם»; 08/11/2026: «מלא עבודה מלא עומס מצטבר במקום אחד במקום לחלק את זה נורמלי»). A node with `keys` has the
+ * checkouts, the toolchains, ssh to the clusters, the registry login and the projects' keys (scripts/node-install.sh), so
+ * what keeps a task off a node is only what a node lacks (`has`): an emulator, the browser, or the main server itself (an hq
+ * deploy, its state dir). `open_team` `needs`, or a worker there that finds something missing (`status` state
+ * `needs-local`, Scheduler.moveLocal). Until 22/10 it was the other way round, `remote-ok` opting in; that label means nothing now.
  */
 export const NEEDS_LOCAL = 'needs-local';
 
-/** Labels that keep a task here (fallbackLocal and moveLocal add `needs-local`). */
-export const LOCAL_LABELS = [NEEDS_LOCAL, 'needs-browser', 'needs-simulator'];
+/** A need → its label. `main-server` is NEEDS_LOCAL: no node has the main server. */
+export const NEED_LABELS = { emulator: 'needs-emulator', browser: 'needs-browser', 'main-server': NEEDS_LOCAL } as const;
+export type Need = keyof typeof NEED_LABELS;
+
+/** Label → the capability a node needs for it; null = the main server only. `needs-simulator` is the old name of needs-emulator. */
+const LABEL_NEEDS: Record<string, Capability | null> = { [NEEDS_LOCAL]: null, 'needs-browser': 'browser', 'needs-emulator': 'emulator', 'needs-simulator': 'emulator' };
+
+/** open_team `needs` (and the old `local: true`, read as main-server) → its labels; null = a value that is not a need. */
+export function needsToLabels(needs: unknown, local = false): string[] | null {
+  const list = needs == null ? [] : Array.isArray(needs) ? needs : [needs];
+  if (list.some((x) => typeof x !== 'string' || !(x in NEED_GUARD))) return null;
+  const labels = [...new Set([...(list as Need[]), ...(local ? ['main-server' as const] : [])].map((x) => NEED_LABELS[x]))];
+  return labels;
+}
+const NEED_GUARD: Record<string, true> = Object.fromEntries(Object.keys(NEED_LABELS).map((k) => [k, true]));
+
+/** Whether a task with these labels may run on this node (the main server runs all of them). */
+export function nodeCanHost(def: Pick<NodeDef, 'has'>, labels: string[]): boolean {
+  return labels.every((l) => {
+    if (!(l in LABEL_NEEDS)) return true;
+    const cap = LABEL_NEEDS[l];
+    return cap != null && (def.has ?? []).includes(cap);
+  });
+}
 
 export interface NodeStatus {
   up: boolean; at: number; error: string | null;

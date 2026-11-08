@@ -143,6 +143,22 @@ test('open_team priority: explicit field, p0/p1 from the title, explicit beats t
   } finally { await env.cleanup(); }
 });
 
+test('open_team needs: only what a node lacks becomes a label; the old local: true is main-server', async () => {
+  const env = await ingestEnv();
+  try {
+    const { hq, sock } = env;
+    const open = async (extra: Record<string, unknown>, id: string) => {
+      const r = await post(sock, '/v1/ops', entry('open_team', { name: 'x', purpose: 'y', project: 'agent-company', ...extra }, id, 'yoav'));
+      return { r, labels: r.status === 200 ? (JSON.parse(hq.scheduler.task(r.json.result.task as number)!.labels) as string[]).filter((l) => l.startsWith('needs-')) : undefined };
+    };
+    assert.deepEqual((await open({}, 'yoav-n:1')).labels, [], 'no needs: wherever there is room');
+    assert.deepEqual((await open({ needs: ['emulator'] }, 'yoav-n:2')).labels, ['needs-emulator']);
+    assert.deepEqual((await open({ needs: ['browser', 'main-server'] }, 'yoav-n:3')).labels, ['needs-browser', 'needs-local']);
+    assert.deepEqual((await open({ local: true }, 'yoav-n:4')).labels, ['needs-local'], 'an old caller');
+    assert.equal((await open({ needs: ['kubectl'] }, 'yoav-n:5')).r.status, 400, 'kubectl is on both servers: not a need');
+  } finally { await env.cleanup(); }
+});
+
 test('open_team proposal waits for his start; about is the line he reads instead of the brief', async () => {
   const env = await ingestEnv();
   try {
