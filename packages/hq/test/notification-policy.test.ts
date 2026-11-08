@@ -220,3 +220,18 @@ test('a previously pushed GO waits quietly on Telegram until focus ends', async 
     hq.store.setToggle('focus',false);await hq.pusher.sweepUnacked();assert.equal(env.telegrams.length,1);
   } finally {await env.cleanup();}
 });
+
+test('ownerCompletions finds a report through an index, not a walk of the messages to the owner', async () => {
+  const env = await makeEnv();
+  try {
+    const db = env.hq.store.db;
+    const seen: string[] = [];
+    const prepare = db.prepare.bind(db);
+    db.prepare = ((sql: string) => { if (/\bFROM messages\b/.test(sql)) seen.push(sql); return prepare(sql); }) as typeof db.prepare;
+    try { ownerCompletions(env.hq.store, env.hq.mailbox); } finally { db.prepare = prepare as typeof db.prepare; }
+    assert.equal(seen.length, 2);
+    const usesIndex = seen.map((sql) => (prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...(sql.match(/\?/g) ?? []).map(() => null)) as { detail: string }[]).map((r) => r.detail).join(' / '));
+    assert.match(usesIndex[0]!, /USING INDEX messages_ref/);
+    assert.match(usesIndex[1]!, /USING (COVERING )?INDEX messages_pair/);
+  } finally { await env.cleanup(); }
+});

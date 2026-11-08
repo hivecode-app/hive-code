@@ -16,7 +16,10 @@ sl="$(cg app-shifts.slice)"
 echo "app-shifts.slice: memory.high=$(val "$sl" memory.high) memory.max=$(val "$sl" memory.max) cpu.weight=$(val "$sl" cpu.weight)"
 for u in $(systemctl --user list-units 'company-shift@*' --state=active --no-legend --plain | awk '{print $1}'); do
   c="$(cg "$u")"; p="$(systemctl --user show "$u" -p MainPID --value)"
-  echo "  $u: slice=$(basename "$(dirname "$c")") memory.high=$(val "$c" memory.high) nice=$(ps -o ni= -p "$p" 2>/dev/null | tr -d ' ') oom=$(cat "/proc/$p/oom_score_adj" 2>/dev/null)"
+  # A shift started before task 1547 sits in the old slice, which never enabled the memory controller for its children:
+  # the kernel has no memory.high for it, and MemoryHigh takes effect only when the shift next starts, in app-shifts.slice.
+  high="$(val "$c" memory.high)"; [[ "$high" == '?' ]] && high='none(old-slice,no-memory-controller)'
+  echo "  $u: slice=$(basename "$(dirname "$c")") memory.high=$high nice=$(ps -o ni= -p "$p" 2>/dev/null | tr -d ' ') oom=$(cat "/proc/$p/oom_score_adj" 2>/dev/null)"
 done
 echo "now: $(awk '/^MemAvailable/ {a=$2} /^SwapFree/ {s=$2} END {printf "available %.1fGB, swap free %dMB", a/1048576, s/1024}' /proc/meminfo) · memory PSI $(head -1 /proc/pressure/memory)"
 

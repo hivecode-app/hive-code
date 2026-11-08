@@ -663,6 +663,9 @@ const MIGRATIONS: string[] = [
   // events. Built once, at the first start after deploy (a full read of the log).
   `CREATE INDEX IF NOT EXISTS events_type ON events(type, seq);
    CREATE INDEX IF NOT EXISTS events_identity_type ON events(identity, type, seq);`,
+
+  // v45, task 1589: owner-completions looks up a task's report by `ref` every 30s, and nothing indexed it.
+  `CREATE INDEX IF NOT EXISTS messages_ref ON messages(ref);`,
 ];
 
 /** The switches a new store starts with. `manager`: the manager's name in their descriptions (org.yaml, CompanyNames). */
