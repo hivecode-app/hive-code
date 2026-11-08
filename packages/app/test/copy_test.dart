@@ -76,10 +76,12 @@ void main() {
       expect(visitor.violations, isEmpty, reason: file.path);
     }
   });
-  test('every approved now row in the copy table is present in both ARBs', () {
+  // The copy table is an internal product document (docs/product/), not part of the public repository.
+  final copyTable = File('../../docs/product/copy-table.md');
+  test('every approved now row in the copy table is present in both ARBs', skip: copyTable.existsSync() ? false : 'no docs/product/copy-table.md here', () {
     final en = jsonDecode(File('lib/l10n/app_en.arb').readAsStringSync()) as Map<String, dynamic>;
     final he = jsonDecode(File('lib/l10n/app_he.arb').readAsStringSync()) as Map<String, dynamic>;
-    final lines = File('../../docs/product/copy-table.md').readAsLinesSync();
+    final lines = copyTable.readAsLinesSync();
     String plain(String s) => s.replaceAll('**', '').replaceAll('\u2060', '');
     for (final line in lines.where((l) => l.startsWith('| '))) {
       final cells = line.split('|').sublist(1, line.split('|').length - 1).map((s) => s.trim()).toList();
