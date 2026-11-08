@@ -1747,16 +1747,25 @@ class HqBackend extends Backend {
     _images[id] = bytes;
   }
 
+  @visibleForTesting
+  Duration originalIdleTimeout = const Duration(seconds: 30);
+
   @override
   Future<Uint8List?> attachmentData(String id) async {
     final hit = _images[id];
     if (hit != null) return hit;
     try {
-      final r = await _http.get(Uri.parse('$baseUrl/api/uploads/${Uri.encodeComponent(id)}'), headers: {'authorization': 'Bearer $token'}).timeout(const Duration(seconds: 30));
-      if (r.statusCode == 401) _refused();
-      if (r.statusCode != 200) return null;
-      _rememberAttachment(id, r.bodyBytes);
-      return r.bodyBytes;
+      final request = http.Request('GET', Uri.parse('$baseUrl/api/uploads/${Uri.encodeComponent(id)}'))..headers['authorization'] = 'Bearer $token';
+      final r = await _http.send(request).timeout(const Duration(seconds: 30));
+      if (r.statusCode != 200) {
+        await r.stream.listen(null).cancel();
+        if (r.statusCode == 401) _refused();
+        return null;
+      }
+      // 30s without a byte is a dead connection; a 200MB original on a phone network can take minutes.
+      final bytes = await http.ByteStream(r.stream.timeout(originalIdleTimeout)).toBytes();
+      _rememberAttachment(id, bytes);
+      return bytes;
     } catch (_) {
       return null;
     }

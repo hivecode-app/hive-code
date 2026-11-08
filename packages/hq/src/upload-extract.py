@@ -34,7 +34,7 @@ def store(path, data):
 
 if zipfile.is_zipfile(source):
     with zipfile.ZipFile(source) as z:
-        meta['detected_mime'] = 'application/zip'
+        meta['detected_mime'] = mime if mime == 'application/vnd.android.package-archive' and 'AndroidManifest.xml' in z.namelist() else 'application/zip'
         odf = z.read('mimetype').decode('ascii',errors='replace').strip() if 'mimetype' in z.namelist() and z.getinfo('mimetype').file_size < 256 else ''
         odf_types = {'application/vnd.oasis.opendocument.' + t for t in ('text','spreadsheet','presentation')}
         entries = z.infolist()

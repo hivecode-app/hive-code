@@ -245,11 +245,14 @@ function publicMeta(meta: UploadMeta): UploadMeta {
   return details;
 }
 
+const APK_MIME = 'application/vnd.android.package-archive';
+
 export function sniffFile(b: Buffer, name = ''): { mime: string; ext: string } {
   const image = sniffImage(b); if (image) return image;
   const ext = extname(name).slice(1).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12) || 'bin';
   if (b.subarray(0, 5).toString() === '%PDF-') return { mime: 'application/pdf', ext: 'pdf' };
   if (b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b) {
+    if (ext === 'apk') return { mime: APK_MIME, ext };
     const office: Record<string, string> = { docx: 'wordprocessingml.document', xlsx: 'spreadsheetml.sheet', pptx: 'presentationml.presentation' };
     return { mime: office[ext] ? `application/vnd.openxmlformats-officedocument.${office[ext]}` : ext === 'odt' ? 'application/vnd.oasis.opendocument.text' : 'application/zip', ext: office[ext] || ext === 'odt' ? ext : 'zip' };
   }

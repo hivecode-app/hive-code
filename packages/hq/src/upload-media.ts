@@ -65,7 +65,7 @@ export async function prepareMedia(u: Upload, dictate?: DictateConfig): Promise<
         const transcript = join(dir, 'transcript.txt'); writeFileSync(transcript, text, { mode: 0o400 });
         meta.readable = [...(meta.readable ?? []), transcript];
       } else errors.push('transcription is not configured');
-    } else if (/zip|tar|gzip|officedocument|opendocument|text\/csv/.test(u.mime)) {
+    } else if (/zip|tar|gzip|officedocument|opendocument|package-archive|text\/csv/.test(u.mime)) {
       Object.assign(meta, JSON.parse(await run('python3', ['-I', fileURLToPath(new URL('./upload-extract.py', import.meta.url)), u.path, dir, u.mime])));
       const mime = meta.detected_mime ?? u.mime;
       if (/wordprocessing|presentation|opendocument/.test(mime)) {

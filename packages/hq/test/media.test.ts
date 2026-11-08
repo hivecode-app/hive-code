@@ -234,6 +234,23 @@ test('office MIME comes from archive contents rather than the supplied filename'
   }finally{await env.cleanup();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('an APK over 100MB sent as a file keeps its MIME and downloads whole',async()=>{
+  const env=await apiEnv(),dir=mkdtempSync(join(tmpdir(),'media-apk-'));
+  try {
+    fixtures(dir);const file=join(dir,'app.apk'),mime='application/vnd.android.package-archive';
+    execFileSync('python3',['-I','-c',"import sys,zipfile\nwith zipfile.ZipFile(sys.argv[1],'w') as z:\n  z.writestr('AndroidManifest.xml','x')\n  z.writestr('classes.dex',bytes(101*1024*1024))",file]);
+    const [id]=await env.hq.uploads.importFiles('eli',[file]);
+    assert.equal(env.hq.uploads.get(id!)!.mime,mime);
+    const response=await env.call(`/api/uploads/${id}`);
+    assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),mime);
+    assert.match(response.headers.get('content-disposition')!,/filename\*=UTF-8''app\.apk/);
+    const body=Buffer.from(await response.arrayBuffer());
+    assert.ok(body.length>100*1024*1024);assert.equal(createHash('sha256').update(body).digest('hex'),await digest(file));
+    const renamed=env.hq.uploads.save(readFileSync(join(dir,'files.zip')),'renamed.apk');await env.hq.uploads.prepare(renamed.id);
+    assert.equal(env.hq.uploads.get(renamed.id)!.mime,'application/zip');
+  }finally{await env.cleanup();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('drain waits for asynchronous assembly and worker-file imports',async()=>{
   const env=await makeEnv(),dir=mkdtempSync(join(tmpdir(),'media-drain-'));
   try {

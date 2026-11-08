@@ -1,5 +1,6 @@
 // Attached and pasted images: the preview in the composer (removable), what a send carries, and how
 // HqBackend uploads them before the message (POST /api/uploads, then tell with their ids).
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -120,6 +121,25 @@ void main() {
     final again = UserMsg(id: 'm-3', ts: DateTime(2026, 10, 20), text: 'הנה', attachments: [image().uploaded('u-1'), image()]);
     expect((await hq.send('yoav', again)).ok, isTrue);
     expect(paths.skip(1), ['/api/uploads', '/api/messages/tell']);
+  });
+
+  test('HqBackend: a slow original keeps downloading past the idle limit, a stalled one gives up', () async {
+    final body = StreamController<List<int>>();
+    final hq = HqBackend(baseUrl: 'http://hq', token: 't', client: MockClient.streaming((req, _) async => http.StreamedResponse(body.stream, 200)))
+      ..originalIdleTimeout = const Duration(milliseconds: 400);
+    final slow = hq.attachmentData('u-big');
+    for (var i = 0; i < 4; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      body.add([i]);
+    }
+    unawaited(body.close());
+    expect(await slow, [0, 1, 2, 3], reason: 'longer than the limit in total, but never idle for it');
+
+    final dead = StreamController<List<int>>();
+    final stalled = HqBackend(baseUrl: 'http://hq', token: 't', client: MockClient.streaming((req, _) async => http.StreamedResponse(dead.stream, 200)))
+      ..originalIdleTimeout = const Duration(milliseconds: 50);
+    expect(await stalled.attachmentData('u-big'), isNull);
+    unawaited(dead.close());
   });
 
   testWidgets('a worker\'s message shows its images in a grid; a tap opens them full screen, a swipe moves on', (tester) async {
