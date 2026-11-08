@@ -6,7 +6,7 @@
 import { artifactInfo, type ArtifactInfo } from './artifacts.ts';
 import { ownerSystemCopy } from './system-copy.ts';
 import { randomUUID } from 'node:crypto';
-import { g, loadNames, OWNER, type CompanyNames, type AskDTO, type InboxItemDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency, type WaitingOn } from '@company/shared';
+import { g, loadNames, OWNER, englishLines, hebrewLines, type OwnerLanguage, type CompanyNames, type AskDTO, type InboxItemDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency, type WaitingOn } from '@company/shared';
 import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
 import type { Inbox } from './inbox.ts';
@@ -627,6 +627,7 @@ export class Mailbox {
    * nothing. Only the final text (after the last tool): a turn that wrote "בודק" and went on with tools keeps nothing. A
    * turn that reached him itself (a tool, or a message stored to him in the turn, e.g. the API from Bash) keeps nothing:
    * that message is what he gets. The id is the final block's engine messageId, the same however the log is replayed.
+   * A note not in his language, an empty one or a bare waiting line is not kept at all ({@link noteSkip}).
    */
   private saveNote(row: Pick<ShiftRow, 'id' | 'identity'>, turnSeq: number, window: { seq: number; type: string; data: Record<string, any> }[],
     reached: boolean, sinceTs: number): void {
@@ -642,8 +643,20 @@ export class Mailbox {
       .filter((b) => (b.text ?? '').trim());
     if (!blocks.length) return;
     const key = blocks.at(-1)!.messageId ?? String(turnSeq);
+    const body = blocks.map((b) => b.text!.trim()).join('\n\n');
+    // loadNames is cached by mtime and keeps the last good org.yaml: a broken file never flips his language mid-run.
+    const names = this.names;
+    const skip = noteSkip(body, names.language, names.owner.name);
+    if (skip) {
+      // Not kept, but not silent either: the event log keeps what was dropped and why (once, also when hq replays the turn).
+      const textRef = blocks.at(-1)?.messageId ?? null;
+      const logged = textRef && this.store.db.prepare(`SELECT 1 FROM events WHERE identity = ? AND type = 'note.dropped'
+        AND json_extract(data, '$.text_ref') = ? LIMIT 1`).get(row.identity, textRef);
+      if (!logged) this.store.emit('note.dropped', row.identity, { shift: row.id, reason: skip, text_ref: textRef, body: body.slice(0, 200) });
+      return;
+    }
     const m = this.tell({ msg_id: `${row.identity}-note-${key}`, from: row.identity, to: OWNER, kind: 'note',
-      body: blocks.map((b) => b.text!.trim()).join('\n\n'), text_ref: blocks.at(-1)?.messageId });
+      body, text_ref: blocks.at(-1)?.messageId });
     if (m.state !== 'handled') this.setState(m.id, 'handled');
   }
 
@@ -1247,4 +1260,33 @@ export function goVerdict(text: string): 'yes' | 'no' | 'other' {
   if (words.some((w) => YES_WORDS.has(w)) && words.every((w) => YES_WORDS.has(w) || YES_FILLER.has(w))) return 'yes';
   if (words.length <= 3 && !/הבנתי|ברור|יודע|מבין|בטוח|מכיר|ממש|כל כך|idea|problem|ahead/.test(t) && /^(no|nope|cancel|reject|stop|לא|דחה|דוחה|נדחה|דחיתי|בטל|בטלתי|ביטול|עצור|עצרו|תעצור)$/.test(words[0]!)) return 'no';
   return 'other';
+}
+
+/** Invisible characters a turn can end with (a note whose whole body was U+200C, 07/11). */
+const INVISIBLE = /[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
+/** A bare waiting line: "Waiting for CI.", "Still waiting for the review.", "מחכה ל-CI", "ממשיך לחכות לסקירה". */
+const WAITING = /^(?:still\s+|i'?m\s+|i\s+am\s+|now\s+)?waiting\b|^(?:עדיין\s+|עכשיו\s+|(?:ממשיך|ממשיכה|ממשיכים)\s+ל)?(?:מחכה|מחכים|ממתין|ממתינה|ממתינים|חכות)(?=[\s.,:]|$)/i;
+/** …unless it waits on him: that is a line he has to act on. */
+const WAITS_ON_HIM = /\?|\byou(?:r)?\b|(?:^|\s)(?:לך|ממך)(?=[\s.,:]|$)|שלך/i;
+/** A second clause or sentence ("מחכה ל-CI. בינתיים תיקנתי…", "Waiting for CI, then I merge") is content, not a bare wait. */
+const MORE = /[.,:;!—–]\s*\S/;
+
+/**
+ * Why the final text of a turn he did not start is not kept as a note (null: keep it). Notes go into his conversation
+ * for good, so the owner's language holds there as it does for `tell` (dir-0002): hq drops it rather than sending it
+ * back for a rewrite, since a rewrite costs the worker a whole turn for a line that answers nothing, and the end-of-turn
+ * block that did that was removed on 07/11 for the duplicates it made (#456). Empty text and a bare waiting line say
+ * nothing he needs either.
+ */
+export function noteSkip(body: string, language: OwnerLanguage, ownerName = ''): 'empty' | 'waiting' | 'language' | null {
+  const visible = body.replace(INVISIBLE, '').trim();
+  if (!visible) return 'empty';
+  const line = visible.replace(/[.…\s]+$/, '');
+  if (!line.includes('\n') && line.length <= 120 && WAITING.test(line) && !MORE.test(line) && !WAITS_ON_HIM.test(line)
+    && !(ownerName && line.includes(ownerName))) return 'waiting';
+  // Not in his language: no line of it is, and some line is in another. One line of his language with English error
+  // lines under it keeps the note; a short "Done." counts too (the `tell` guard needs 25 letters, too many here).
+  const own = language === 'he' ? hebrewLines(visible, 2) : englishLines(visible, 4);
+  const wrong = language === 'he' ? englishLines(visible, 4) : hebrewLines(visible, 1);
+  return !own.length && wrong.length ? 'language' : null;
 }

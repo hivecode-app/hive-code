@@ -2,7 +2,12 @@
 // (one bubble, not a `tell` on top of it), and a `tell` to him in that turn never replaces it (08/11).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeEnv, until, type TestEnv } from './helpers.ts';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { makeEnv as makeEnvAny, ORG_YAML, until, type TestEnv } from './helpers.ts';
+
+// A Hebrew-speaking owner, like רן: the worker texts below are Hebrew, and a note keeps only his language.
+const makeEnv = () => makeEnvAny({ org: `${ORG_YAML}owner_language: he\n` });
 
 async function ownerTurn(env: TestEnv, id: string, body: string) {
   const { hq, launcher } = env;
@@ -306,6 +311,76 @@ test('no note for a turn that only wrote "בודק" before its tools, or that re
     host.event({ kind: 'result', subtype: 'success', isError: false, text: 'שלחתי לרן שהפרומו יצא.' });
     await new Promise((r) => setTimeout(r, 150));
     assert.deepEqual(hq.mailbox.list('eli').filter((m) => m.kind === 'note').map((m) => m.body), []);
+  } finally { await env.cleanup(); }
+});
+
+test('p0 08/11: a turn he did not start that ends in English, an empty line or a bare waiting line leaves no note with him', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, launcher } = env;
+    const ending = async (id: string, text: string) => {
+      hq.mailbox.tell({ msg_id: id, from: 'rotem', to: 'eli', body: 'תבדוק' });
+      await until(() => hq.mailbox.get(id)!.state === 'delivered');
+      const host = launcher.hosts.get('eli-1')!;
+      host.deliveryState(id, 'started');
+      await until(() => hq.mailbox.get(id)!.state === 'seen');
+      host.event({ kind: 'tool_use', toolUseId: `t-${id}`, name: 'Bash', input: { command: 'gh pr checks' } });
+      host.event({ kind: 'tool_result', toolUseId: `t-${id}`, isError: false, preview: '' });
+      host.event({ kind: 'text', text, messageId: `msg-${id}` });
+      host.event({ kind: 'result', subtype: 'success', isError: false, text });
+      await until(() => hq.shifts.get('eli-1')!.in_turn === 0, 3000, 'turn over');
+    };
+    await ending('r-en', "I'll wait for the run to finish."); // lumo-t1509, 07/11
+    await ending('r-en2', 'Dana knows. I\'m waiting for the second verifier before I write the fixes.\n\n- **What happened:** the probe timed out twice.');
+    await ending('r-zwnj', '\u200c'); // a note whose whole body was this, 07/11
+    await ending('r-wait-en', 'Waiting for CI.');
+    await ending('r-wait-he', 'מחכה ל-CI ולסקירה.');
+    await ending('r-wait-he2', 'ממשיך לחכות לסקירה ול-CI.');
+    await ending('r-done', 'Done.');
+    const kept = [
+      'מחכה לך: לאשר את הפריסה?',
+      'ממתין לאישור של רן על הפריסה',
+      'מחכה ל-CI. בינתיים מצאתי שהבאג נובע ממטמון ישן ותיקנתי אותו ב-#503.',
+      'הבדיקות ירוקות, ממזגת אחרי הסקירה. הודעות השגיאה היו:\nError: connect ECONNREFUSED while the runner was offline\nError: the second retry also timed out after thirty seconds',
+    ];
+    for (const [i, text] of kept.entries()) await ending(`r-ok${i}`, text);
+    const notes = () => hq.mailbox.list('eli').filter((m) => m.kind === 'note').map((m) => m.body);
+    await until(() => notes().length === kept.length, 3000, 'the notes in his language');
+    assert.deepEqual(notes().sort(), [...kept].sort(), 'a line that waits on him, a wait with content, Hebrew with English errors in it: kept');
+    const dropped = () => hq.store.eventsAfter(0, 5000).filter((e) => e.type === 'note.dropped').map((e) => (e.data as { reason: string }).reason);
+    assert.deepEqual(dropped(), ['language', 'language', 'empty', 'waiting', 'waiting', 'waiting', 'language'], 'dropped, and not silently');
+    // hq replays a dropped turn (a restart): the drop is logged once.
+    await ending('r-done2', 'Done.');
+    await until(() => dropped().length === 8, 3000, 'r-done2 dropped');
+    const last = hq.store.eventsAfter(0, 5000).filter((e) => e.type === 'engine.result').at(-1)!;
+    (hq.mailbox as unknown as { onTurnEnd(row: { id: string; identity: string }, ev: { isError: boolean; text?: string }): void })
+      .onTurnEnd({ id: 'eli-1', identity: 'eli' }, { isError: false, text: 'Done.', ...(last.data as object) });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(dropped().length, 8, 'r-done2 once, not twice');
+
+    // A broken org.yaml mid-run keeps his language (the last one that parsed): a Hebrew note is still kept.
+    writeFileSync(join(env.cfg.companyDir, 'org.yaml'), 'owner: [\n');
+    await ending('r-broken', 'הבדיקות ירוקות, ממזגת אחרי הסקירה.');
+    await until(() => notes().includes('הבדיקות ירוקות, ממזגת אחרי הסקירה.'), 3000, 'Hebrew note kept with a broken org.yaml');
+  } finally { await env.cleanup(); }
+});
+
+test('an English-speaking owner: a note in Hebrew is not kept, one in English is', async () => {
+  const env = await makeEnvAny();
+  try {
+    const { hq, launcher } = env;
+    for (const [id, text] of [['r-he', 'כשענבל תאשר, אעדכן אותך על התוצאה.'], ['r-en', 'Once Inbal approves, I will update you on the result.']]) {
+      hq.mailbox.tell({ msg_id: id!, from: 'rotem', to: 'eli', body: 'check' });
+      await until(() => hq.mailbox.get(id!)!.state === 'delivered');
+      const host = launcher.hosts.get('eli-1')!;
+      host.deliveryState(id!, 'started');
+      await until(() => hq.mailbox.get(id!)!.state === 'seen');
+      host.event({ kind: 'text', text: text!, messageId: `msg-${id}` });
+      host.event({ kind: 'result', subtype: 'success', isError: false, text: text! });
+      await until(() => hq.shifts.get('eli-1')!.in_turn === 0, 3000, 'turn over');
+    }
+    await until(() => hq.mailbox.list('eli').some((m) => m.kind === 'note'), 3000, 'note stored');
+    assert.deepEqual(hq.mailbox.list('eli').filter((m) => m.kind === 'note').map((m) => m.body), ['Once Inbal approves, I will update you on the result.']);
   } finally { await env.cleanup(); }
 });
 
