@@ -19,6 +19,13 @@ test('known heavy commands are found, with the class to reserve', () => {
   assert.equal(what('bash -c "flutter test"'), 'flutter test');
   assert.equal(what('flock /tmp/flutter-test.lock flutter test'), 'flutter test', 'a flock is not a reservation');
   assert.equal(what('timeout 20m ./gradlew build'), 'gradlew');
+  // task 1547: what ran unreserved at 07:12 on 08/11
+  assert.equal(what('cd bridge && go vet ./...'), 'go vet ./...');
+  assert.equal(scan('go test -race ./internal/...')?.class, 'build', 'not test-full: that one waits for every flutter test');
+  assert.equal(what('go -C bridge vet ./...'), 'go vet ./...');
+  assert.equal(scan('go build ./...')?.class, 'build');
+  assert.equal(what('cargo test --release'), 'cargo test');
+  assert.equal(what('cargo +nightly build'), 'cargo build');
 });
 
 test('company-run, focused tests and other commands pass', () => {
@@ -31,6 +38,11 @@ test('company-run, focused tests and other commands pass', () => {
   assert.equal(what('docker compose down'), null);
   assert.equal(what('echo "flutter test" > notes.txt'), null);
   assert.equal(what('git commit -m "docker build fix"'), null);
+  assert.equal(what('go test ./internal/bridge -run TestSend'), null, 'one package is a focused run');
+  assert.equal(what('go vet .'), null);
+  assert.equal(what('go mod tidy'), null);
+  assert.equal(what('company-run --lease lease-4 -- go vet ./...'), null);
+  assert.equal(what('cargo fmt'), null);
 });
 
 test('the reminder says there is no reservation and what the server looks like; unreadable numbers are not guessed', () => {

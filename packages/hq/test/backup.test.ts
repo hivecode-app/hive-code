@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -109,4 +109,62 @@ test('backup-prune: two runs at once (hq hourly and a manual one) both finish, a
     assert.deepEqual(files, ['hq-2026-10-24T030000Z.db.zst', 'hq-2026-10-24T040000Z.db.zst', 'hq-2026-10-24T050000Z.db.zst']);
     for (const f of files) assert.equal((await restoreBackup(join(dir, f), join(dir, `${f}.out`))).messages, 1);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('task 1547: the hourly backup in its own process (isolate) restores whole, without the free pages, and without systemd too', async () => {
+  const env = await makeEnv();
+  try {
+    const dir = join(env.cfg.stateDir, 'backups');
+    env.hq.mailbox.tell({ msg_id: 'b-iso', to: 'owner', from: 'eli', body: 'בתהליך נפרד' });
+    // 8MB of rows that are then deleted: the file keeps their pages, the copy should not.
+    const db = env.hq.store.db;
+    db.exec(`CREATE TABLE filler (x BLOB)`);
+    const ins = db.prepare('INSERT INTO filler VALUES (?)');
+    for (let i = 0; i < 2000; i++) ins.run(Buffer.alloc(4096, i % 251));
+    db.exec(`DELETE FROM filler`);
+    db.pragma('wal_checkpoint(TRUNCATE)');
+    const fileSize = statSync(db.name).size;
+
+    const check = async (file: string, body: string) => {
+      const out = join(env.dir, `restored-${Math.random().toString(36).slice(2)}.db`);
+      await restoreBackup(file, out);
+      assert.ok(statSync(out).size < fileSize - 6 * 1024 * 1024, `the copy (${statSync(out).size}) leaves out the free pages of the file (${fileSize})`);
+      const copy = new Store(out);
+      assert.equal((copy.db.prepare(`SELECT body FROM messages WHERE id = 'b-iso'`).get() as { body: string }).body, body);
+      copy.close();
+    };
+    const file = await backupOnce(env.hq.store, dir, { hourly: 24, daily: 7 }, { isolate: true });
+    assert.deepEqual(readdirSync(dir), [file.split('/').pop()], 'no temp file left, no raw copy');
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    await check(file, 'בתהליך נפרד');
+
+    // A machine where the scope is refused (here: a systemd-run that fails): the same child, bare.
+    const bin = mkdtempSync(join(tmpdir(), 'no-systemd-'));
+    writeFileSync(join(bin, 'systemd-run'), '#!/bin/sh\necho "Failed to connect to bus" >&2\nexit 1\n', { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      env.clock.advance(HOUR);
+      const bare = await backupOnce(env.hq.store, dir, { hourly: 24, daily: 7 }, { isolate: true });
+      await check(bare, 'בתהליך נפרד');
+    } finally { process.env.PATH = path; rmSync(bin, { recursive: true, force: true }); }
+  } finally { await env.cleanup(); }
+});
+
+test('task 1547 (review): a child that ran in the scope and failed is that failure, with no bare second run', async () => {
+  const env = await makeEnv();
+  try {
+    const dir = join(env.cfg.stateDir, 'backups');
+    // A systemd-run that runs the child (as the real one does), and a child that fails as backup-child.ts does: exit 3.
+    const bin = mkdtempSync(join(tmpdir(), 'scope-'));
+    const log = join(bin, 'runs');
+    writeFileSync(join(bin, 'systemd-run'), `#!/bin/sh\necho scoped >> ${log}\necho "VACUUM INTO: disk I/O error" >&2\nexit 3\n`, { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      await assert.rejects(backupOnce(env.hq.store, dir, { hourly: 24, daily: 7 }, { isolate: true }), /disk I\/O error/);
+      assert.equal(readFileSync(log, 'utf8'), 'scoped\n', 'one run, in the scope; not again in hq');
+      assert.deepEqual(readdirSync(dir), [], 'nothing left behind');
+    } finally { process.env.PATH = path; rmSync(bin, { recursive: true, force: true }); }
+  } finally { await env.cleanup(); }
 });

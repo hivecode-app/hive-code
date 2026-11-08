@@ -11,7 +11,7 @@ import { waitingLine, type Mailbox } from './mailbox.ts';
 import { ShiftBusyError, type ShiftManager } from './shifts.ts';
 import { ensureRuntimeIdentity, getIdentity, isStandingWorker, projectLead, taskWorkerName } from './org.ts';
 import { HELPER_TEAM, taskSteps } from './system-prompt.ts';
-import { loadInfo, memInfoMb } from './proc.ts';
+import { loadInfo, memInfoMb, type MemInfo } from './proc.ts';
 import { dirname, join } from 'node:path';
 import { BaseFetchFailed, noWorkers, readCharter, Workspaces, type CloseResult } from './workspace.ts';
 import { codexOf } from './codex-quota.ts';
@@ -43,12 +43,35 @@ const RAMP_MS = 2 * 60_000;
  * company-run leases hold on this machine (their ceilings: a command that has not grown yet counts in full). RSS_work
  * is the 90th percentile of a working shift's anon, measured (resources.ts samples).
  */
-export function capacity(cfg: HqConfig, mem: { totalMb: number; availableMb: number }, running: number, heldMb = 0) {
-  const { reserveMb, rssWorkMb, maxSlots } = cfg.capacity;
-  const byAvailable = Math.max(0, Math.floor((mem.availableMb - reserveMb - heldMb) / rssWorkMb));
+export function capacity(cfg: HqConfig, mem: MemInfo, running: number, heldMb = 0) {
+  const { rssWorkMb, maxSlots } = cfg.capacity;
+  const { reserveMb, stalled } = memPressure(cfg.capacity, mem);
+  const byAvailable = stalled ? 0 : Math.max(0, Math.floor((mem.availableMb - reserveMb - heldMb) / rssWorkMb));
   const free = Math.max(0, Math.min(maxSlots - running, byAvailable));
   const total = Math.min(maxSlots, running + free);
   return { total, running, free };
+}
+
+/**
+ * Task 1547: what the memory says beyond MemAvailable, for a new shift here and a lease here (leases.ts). On 08/11 at 07:12
+ * hq froze for 65 seconds with 0.4GB free, swap 4070 of 4095MB, 15 shifts and three unreserved builds (`go vet` and two
+ * links of a Go test, 0.5–0.75GB each); at 01:50 the same, at load 107.
+ *  - `stalled`: memory PSI `some avg10` at or over psiMaxPct (10). PSI is the kernel's own measure of time lost waiting for
+ *    memory, so it sees thrashing that MemAvailable does not (page cache counted as free while it is being re-read). On a
+ *    calm hq-host it is under 1; 10 means a tenth of every second some task is stuck on memory, which is where the API slows.
+ *  - swap free under swapLowMb (512) while memory already stalls a little (PSI at least swapPsiPct, 1): swap is what absorbed
+ *    a build's spike, and with it full the next spike lands on RAM and then on hq. The reserve grows by swapLowExtraMb (2048),
+ *    the size of the burst that froze it (three builds together). Full swap alone is not pressure: cold pages sit there for
+ *    days (hq-host: 4GB full with 7–9GB available and PSI 0), and the extra reserve would be on for good, starving builds.
+ *    A machine that does not report PSI gets the extra reserve on swap alone.
+ * A machine that reports neither (a node's poll, an old kernel) gets the plain reserve.
+ */
+export function memPressure(cap: Pick<HqConfig['capacity'], 'reserveMb' | 'psiMaxPct' | 'swapLowMb' | 'swapLowExtraMb' | 'swapPsiPct'>, mem: MemInfo):
+  { reserveMb: number; stalled: boolean; swapLow: boolean } {
+  const swapLow = mem.swapTotalMb != null && mem.swapFreeMb != null && mem.swapTotalMb > 0 && mem.swapFreeMb < cap.swapLowMb
+    && (mem.psiSome10 == null || mem.psiSome10 >= cap.swapPsiPct);
+  const stalled = mem.psiSome10 != null && mem.psiSome10 >= cap.psiMaxPct;
+  return { reserveMb: cap.reserveMb + (swapLow ? cap.swapLowExtraMb : 0), stalled, swapLow };
 }
 
 // B.16 queue order: priority first (a p0 that has not started goes before a p2 that came back interrupted), then within one
@@ -142,7 +165,7 @@ export const BUSY_REASON = 'השרת עמוס';
 export class Scheduler {
   /** Memory the company-run leases hold on this machine (hq sets it from the leases). */
   heldMb: () => number = () => 0;
-  memInfo: () => { totalMb: number; availableMb: number } = memInfoMb;
+  memInfo: () => MemInfo = memInfoMb;
   /** #224: load here (/proc/loadavg). Tests swap it. */
   loadInfo: () => { load1: number; cpus: number } = loadInfo;
   /** Reads a node's memory and load again (hq sets it, to keep its up/down notices); default: the plain poll. */
@@ -286,9 +309,13 @@ export class Scheduler {
     const { load1, cpus } = this.loadInfo();
     const load = cpus > 0 ? Math.round((load1 / cpus) * 100) / 100 : null;
     const overLoad = load != null && load > this.cfg.capacity.maxLoad;
-    const shortMem = c.free === 0 && tasks + active < this.cfg.capacity.maxSlots && mem.availableMb - held - this.cfg.capacity.reserveMb < this.cfg.capacity.rssWorkMb;
+    const mp = memPressure(this.cfg.capacity, mem);
+    const shortMem = c.free === 0 && tasks + active < this.cfg.capacity.maxSlots && (mp.stalled || mem.availableMb - held - mp.reserveMb < this.cfg.capacity.rssWorkMb);
     const pressure: 'load' | 'memory' | null = overLoad ? 'load' : shortMem ? 'memory' : null;
-    return { ...c, free: overLoad ? 0 : c.free, pressure, load, availableMb: Math.round(mem.availableMb), tasks, leads: { active, idle, resting } };
+    // Why memory is short, for the queue's words (pressure-watch): stalling, swap gone, or just not enough free.
+    const memWhy: 'stalled' | 'swap' | null = pressure !== 'memory' ? null : mp.stalled ? 'stalled' : mp.swapLow ? 'swap' : null;
+    return { ...c, free: overLoad ? 0 : c.free, pressure, load, availableMb: Math.round(mem.availableMb), tasks, leads: { active, idle, resting },
+      ...(memWhy ? { memWhy, psi: mem.psiSome10 ?? null, swapFreeMb: mem.swapFreeMb != null ? Math.round(mem.swapFreeMb) : null } : {}) };
   }
 
   /**

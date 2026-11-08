@@ -14,6 +14,11 @@ import { readCharter } from './workspace.ts';
 import { classesFor, scopeProps, type HeavyClass } from './heavy.ts';
 import { LOCAL } from './nodes.ts';
 import { totalmem } from 'node:os';
+import { memPressure } from './scheduler.ts';
+import type { MemInfo } from './proc.ts';
+
+/** A lease this young has not grown to its size yet (shortNow). */
+const RAMP_MS = 2 * 60_000;
 
 /**
  * company-run is on the PATH of every shift (the shift units), here and on the nodes. Its full path, in case a shell
@@ -121,7 +126,8 @@ export class Leases {
       const rep = this.reply(r);
       const by = this.blockedBy(r, this.granted(r.machine));
       // Who holds the room, in a phrase the screen can put in a sentence: "build של לומו (משימה 351)".
-      const who = by && by !== 'budget' ? `${by.class} של ${by.project ? this.hq.projectName(by.project) : by.identity}${by.task ? ` (משימה ${by.task})` : ''}` : null;
+      const who = typeof by === 'object' && by ? `${by.class} של ${by.project ? this.hq.projectName(by.project) : by.identity}${by.task ? ` (משימה ${by.task})` : ''}`
+        : by === 'memory' ? this.memoryWhy() : null;
       return { ...base, age_min: Math.max(0, Math.floor((this.now() - r.created_at) / 60_000)), eta_min: rep.eta_min ?? null, waiting_for: who };
     });
   }
@@ -176,6 +182,16 @@ export class Leases {
     return this.granted(machine).reduce((n, r) => n + r.mem_mb, 0);
   }
 
+  /**
+   * Task 1547: the lease first in line here that waits for the machine's memory (blockedBy `memory`), as the memory it waits
+   * for (its share of the ceiling). The scheduler counts it as held: else every MB that frees goes to the next shift (1300 over
+   * the reserve) and never adds up to the build's share, and at night, with the queue full, the build waits for hours.
+   */
+  waitingMb(machine: string): number {
+    const first = this.queue(machine)[0];
+    return first && this.blockedBy(first, this.granted(machine)) === 'memory' ? first.mem_mb * this.hq.cfg.heavy.liveSharePct / 100 : 0;
+  }
+
   private granted(machine: string): LeaseRow[] {
     return this.db.prepare(`SELECT * FROM leases WHERE state = 'granted' AND machine = ? ORDER BY granted_at, id`).all(machine) as LeaseRow[];
   }
@@ -192,17 +208,46 @@ export class Leases {
     return r.a && r.a > 0 ? r.a : timeoutMs / 3;
   }
 
-  /** Why `r` cannot start now: the lease it waits for, or null when it fits. */
-  private blockedBy(r: LeaseRow, held: LeaseRow[]): LeaseRow | null | 'budget' {
+  /** Why `r` cannot start now: the lease it waits for, the budget, the memory of the machine now (`memory`), or null when it fits. */
+  private blockedBy(r: LeaseRow, held: LeaseRow[]): LeaseRow | null | 'budget' | 'memory' {
     if (r.exclusive) {
       const same = held.find((h) => h.exclusive === r.exclusive);
       if (same) return same;
     }
     const budget = this.budgetMb(r.machine);
     if (budget === null) return 'budget';
-    if (held.reduce((n, h) => n + h.mem_mb, 0) + r.mem_mb <= budget) return null;
-    // The one that frees the memory soonest.
-    return [...held].sort((a, b) => this.endsAt(a) - this.endsAt(b))[0] ?? 'budget';
+    if (held.reduce((n, h) => n + h.mem_mb, 0) + r.mem_mb > budget) {
+      // The one that frees the memory soonest.
+      return [...held].sort((a, b) => this.endsAt(a) - this.endsAt(b))[0] ?? 'budget';
+    }
+    return r.machine === LOCAL && this.shortNow(r, held) ? 'memory' : null;
+  }
+
+  /**
+   * Task 1547: the budget counts ceilings, not what the machine has now. On 08/11 at 07:12 a lease would have been granted with
+   * 0.4GB free and swap full. Here a lease also needs the machine calm (memPressure: no memory stall) and, over the reserve
+   * (larger when swap is gone), liveSharePct of its ceiling free now: a ceiling is a hard MemoryMax with margin, and a build
+   * uses about half of it. A lease granted in the last two minutes has not grown yet: its share counts as taken.
+   */
+  /** Why the machine's memory holds a lease, as a phrase: the stall, swap gone, or not enough free. */
+  private memoryWhy(): string {
+    let mem: MemInfo;
+    try { mem = this.hq.scheduler.memInfo(); } catch { return 'לחץ זיכרון בשרת'; }
+    const mp = memPressure(this.hq.cfg.capacity, mem);
+    const gb = (mb: number) => (mb / 1024).toFixed(1);
+    return mp.stalled ? `הזיכרון בשרת נתקע (ב-${mem.psiSome10}% מהזמן תהליכים מחכים לזיכרון)`
+      : mp.swapLow ? `ה-swap בשרת כמעט מלא, ונשארו ${gb(mem.availableMb)}GB פנויים`
+        : `נשארו בשרת ${gb(mem.availableMb)}GB פנויים, פחות ממה שצריך`;
+  }
+
+  private shortNow(r: LeaseRow, held: LeaseRow[]): boolean {
+    let mem: MemInfo;
+    try { mem = this.hq.scheduler.memInfo(); } catch { return false; } // not Linux: the budget alone, as before
+    const { reserveMb, stalled } = memPressure(this.hq.cfg.capacity, mem);
+    if (stalled) return true;
+    const share = this.hq.cfg.heavy.liveSharePct / 100;
+    const young = held.filter((h) => this.now() - (h.granted_at ?? 0) < RAMP_MS).reduce((n, h) => n + h.mem_mb * share, 0);
+    return mem.availableMb - reserveMb - young < r.mem_mb * share;
   }
 
   private endsAt(h: LeaseRow): number {
@@ -221,7 +266,7 @@ export class Leases {
       if (blocked !== null) {
         // One that waits for memory holds back all behind it. One that waits only for its exclusive key (one flutter test at a time)
         // takes nothing from the others, unless it is a p0: a p0 is not overtaken.
-        const waitsOnKey = q.priority > 0 && blocked !== 'budget' && q.exclusive !== null && blocked.exclusive === q.exclusive;
+        const waitsOnKey = q.priority > 0 && typeof blocked === 'object' && q.exclusive !== null && blocked.exclusive === q.exclusive;
         if (waitsOnKey) continue;
         break;
       }
@@ -354,14 +399,17 @@ export class Leases {
     const blocker = this.blockedBy(r, held);
     const ahead = queue.slice(0, position - 1);
     const p0Ahead = r.priority > 0 && ahead.some((q) => q.priority === 0);
-    const holder = blocker && blocker !== 'budget' ? blocker : null;
+    const holder = typeof blocker === 'object' && blocker ? blocker : null;
     // The wait: until the one that holds frees its place, and a typical run of each who is before.
     const first = holder ? Math.max(0, this.endsAt(holder) - this.now()) : 0;
+    // Waiting only for the machine's memory, behind nobody: nothing says when it frees, so no estimate rather than "1 minute".
+    const noEta = blocker === 'memory' && !ahead.length;
     const etaMin = mins(first + ahead.reduce((n, q) => n + this.typicalMs(q.class, q.timeout_ms), 0));
-    const why = p0Ahead ? 'משימה דחופה (p0) מחכה לפניך ולא עוקפים אותה' : holder ? `מחזיק: ${this.holderText(holder)}` : 'התור שלפניך מחכה';
+    const why = p0Ahead ? 'משימה דחופה (p0) מחכה לפניך ולא עוקפים אותה' : holder ? `מחזיק: ${this.holderText(holder)}`
+      : blocker === 'memory' ? `${this.memoryWhy()}, ו-${r.class} נוסף היה מקפיא אותו` : 'התור שלפניך מחכה';
     return {
-      status: 'queued', lease, machine: r.machine, position, eta_min: etaMin, ...(holder ? { holder: this.holderText(holder) } : {}),
-      message: `אין מקום ל-${r.class} ב-${r.machine} עכשיו. ${why}. מקום בתור: ${position}. הערכה: כ-${etaMin} דקות. ממשיכים במה שלא תלוי בזה וחוזרים עם \`reserve\` ו-\`lease: "${lease}"\` (שומר לך את המקום בתור; אם לא חוזרים תוך ${ABANDONED_MS / 60_000} דקות הוא מתפנה).`,
+      status: 'queued', lease, machine: r.machine, position, ...(noEta ? {} : { eta_min: etaMin }), ...(holder ? { holder: this.holderText(holder) } : {}),
+      message: `אין מקום ל-${r.class} ב-${r.machine} עכשיו. ${why}. מקום בתור: ${position}. ${noEta ? 'אין הערכה: זה תלוי במתי הזיכרון יתפנה' : `הערכה: כ-${etaMin} דקות`}. ממשיכים במה שלא תלוי בזה וחוזרים עם \`reserve\` ו-\`lease: "${lease}"\` (שומר לך את המקום בתור; אם לא חוזרים תוך ${ABANDONED_MS / 60_000} דקות הוא מתפנה).`,
     };
   }
 

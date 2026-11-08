@@ -61,7 +61,11 @@ export class PressureWatch {
       if (!since) { store.setMeta(META(t.id), String(now)); continue; }
       if (now - since < PRESSURE_AFTER_MS) continue;
       const procs = await this.topProcs(3);
-      const why = slots.pressure === 'load' ? `העומס על השרת גבוה (${slots.load ?? '?'} למעבד)` : `נשאר זיכרון פנוי של ${(slots.availableMb / 1024).toFixed(1)}GB, פחות ממה שצריך להתחיל משימה`;
+      const gb = (mb: number) => (mb / 1024).toFixed(1);
+      const why = slots.pressure === 'load' ? `העומס על השרת גבוה (${slots.load ?? '?'} למעבד)`
+        : slots.memWhy === 'stalled' ? `השרת נתקע על זיכרון: ב-${slots.psi}% מהזמן תהליכים מחכים לזיכרון (נשארו ${gb(slots.availableMb)}GB פנויים)`
+          : slots.memWhy === 'swap' ? `ה-swap כמעט מלא (נשארו ${slots.swapFreeMb ?? '?'}MB), ולכן צריך יותר זיכרון פנוי כדי להתחיל משימה. נשארו ${gb(slots.availableMb)}GB`
+            : `נשאר זיכרון פנוי של ${gb(slots.availableMb)}GB, פחות ממה שצריך להתחיל משימה`;
       const holders = this.hq.resources.holdersLine();
       const top = procs.length ? procs.map((p) => `- ${(p.rssMb / 1024).toFixed(1)}GB · pid ${p.pid} · ${p.cmd}`).join('\n') : 'לא הצלחתי לקרוא את רשימת התהליכים';
       inbox.add({ kind: 'incident', urgency: 'urgent', from_identity: this.owner(), dedupe_key: `pressure-${t.id}-${since}`,

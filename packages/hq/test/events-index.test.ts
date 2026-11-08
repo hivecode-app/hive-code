@@ -58,3 +58,28 @@ test('pruneEvents: what is older than the month goes, by seq, and the rest stays
     assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM events WHERE type = 'task.state'`).get() as { n: number }).n, 0, 'all of them old: all go');
   } finally { await env.cleanup(); }
 });
+
+test('task 1547: probe results older than two days leave the log in steps, by the type index, and the rest stays', async () => {
+  const env = await makeEnv();
+  try {
+    const { hq, clock } = env;
+    const day = 86_400_000;
+    for (let i = 0; i < 25; i++) hq.store.emit('probe.result', 'rotem', { probe: `p${i}`, ok: true });
+    hq.store.emit('task.state', null, { id: 1, state: 'running' });
+    clock.advance(3 * day);
+    for (let i = 0; i < 3; i++) hq.store.emit('probe.result', 'rotem', { probe: `new${i}`, ok: true });
+    const count = () => (hq.store.db.prepare(`SELECT COUNT(*) n FROM events WHERE type = 'probe.result'`).get() as { n: number }).n;
+    // 10 a step, at most 20 a call: two steps now, the rest on the next call.
+    assert.equal(await hq.store.pruneProbeEvents(2 * day, 10, 20), 20);
+    assert.equal(count(), 8);
+    assert.equal(await hq.store.pruneProbeEvents(2 * day, 10, 20), 5);
+    assert.deepEqual(hq.store.db.prepare(`SELECT json_extract(data, '$.probe') p FROM events WHERE type = 'probe.result' ORDER BY seq`).all(),
+      [{ p: 'new0' }, { p: 'new1' }, { p: 'new2' }], 'the last two days stay');
+    assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM events WHERE type = 'task.state'`).get() as { n: number }).n, 1, 'other types are not touched');
+    assert.equal(await hq.store.pruneProbeEvents(2 * day, 10, 20), 0);
+    for (const sql of [`SELECT seq, ts FROM events WHERE type = 'probe.result' ORDER BY seq LIMIT ?`, `DELETE FROM events WHERE type = 'probe.result' AND seq <= ?`]) {
+      const plan = (hq.store.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(null) as { detail: string }[]).map((r) => r.detail);
+      assert.ok(!plan.some((d) => /^SCAN events\b/.test(d)), `${sql} → ${plan.join(' / ')}`);
+    }
+  } finally { await env.cleanup(); }
+});

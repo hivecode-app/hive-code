@@ -269,7 +269,7 @@ export class Hq {
     this.estimates = new Estimates(this.store);
     this.access = new Access(this, deps.accessRunner);
     this.leases = new Leases(this);
-    this.scheduler.heldMb = () => this.leases.heldMb(LOCAL);
+    this.scheduler.heldMb = () => this.leases.heldMb(LOCAL) + this.leases.waitingMb(LOCAL);
     this.shifts.on('ended', (row) => this.leases.releaseShift(row.id));
     this.night.estimates = this.estimates;
     this.scheduler.onTaskDone = (id) => { this.estimates.cancelForTask(id); this.awaiting.followUpDone(id); this.store.db.prepare('UPDATE tasks SET owner_done_at = COALESCE(owner_done_at, ?) WHERE id = ? AND for_owner = 1').run(this.store.now(), id); };
@@ -475,8 +475,10 @@ export class Hq {
       // resources stage 1: disk, memory, cgroups and docker of each machine, by project (reads a node only while its poll says it is up).
       this.every(SAMPLE_EVERY_MS, 'resources', () => this.resources.sample());
       this.every(T.backupMs, 'backup', async () => {
+        // Task 1547: the probe results leave the log whatever the backup does (off, or failing): they are what grew hq.db.
+        await this.store.pruneProbeEvents();
         if (!this.store.toggle('backup')) return;
-        await backupOnce(this.store, join(this.cfg.stateDir, 'backups'), this.cfg.backups);
+        await backupOnce(this.store, join(this.cfg.stateDir, 'backups'), this.cfg.backups, { isolate: true });
         this.probes.prune();
         this.store.pruneEvents();
       });

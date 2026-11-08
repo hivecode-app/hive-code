@@ -5,6 +5,8 @@
 import { chmodSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { constants, createZstdCompress, createZstdDecompress } from 'node:zlib';
 import Database from 'better-sqlite3';
@@ -19,15 +21,31 @@ const OTHER = /^hq-.*\.db(\.zst)?$/;
 const OTHER_KEEP = 3;
 const ZSTD_LEVEL = 3; // measured on the 620MB hq.db: 94MB in ~2s; higher levels cost much more time for a few MB
 
-export async function backupOnce(store: Store, dir: string, policy: BackupPolicy): Promise<string> {
+/**
+ * Task 1547: why hq "held 3.2GB" on 08/11 at 07:12 while its own heap was ~0.5GB. A file's page cache is charged to the cgroup
+ * that reads it, and every hour this backup read all of hq.db (2.9GB), wrote a raw copy and read it again to compress: all of
+ * it charged to hq's unit (memory.peak 4–9.6GB a run, swap peak under 250MB, so not the heap). With the machine short, hq then
+ * waited on the reclaim of its own cache. `isolate`: the copy runs in a child process, in its own systemd scope with a
+ * memory ceiling (backup-child.ts), so its cache is the scope's and is given back as it goes; and it is `VACUUM INTO`, which
+ * leaves out the free pages (what the event prune frees), so the copy is the size of the data, not of the file.
+ * No systemd here (CI, another machine): the same child without the scope. No file (a db in memory): in process, as before.
+ */
+export async function backupOnce(store: Store, dir: string, policy: BackupPolicy, opts: { isolate?: boolean } = {}): Promise<string> {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
   const stamp = new Date(store.now()).toISOString().replace(/[:]/g, '').replace(/\..+/, 'Z');
   const raw = join(dir, `.hq-${stamp}.db.tmp`);
+  const out = join(dir, `hq-${stamp}.db.zst`);
   try {
-    await store.db.backup(raw);
-    chmodSync(raw, 0o600); // same privacy as hq.db
-    const file = await compress(raw, join(dir, `hq-${stamp}.db.zst`));
+    let file: string;
+    if (opts.isolate && store.db.name && store.db.name !== ':memory:' && existsSync(store.db.name)) {
+      await isolatedSnapshot(store.db.name, raw, out);
+      file = out;
+    } else {
+      await store.db.backup(raw);
+      chmodSync(raw, 0o600); // same privacy as hq.db
+      file = await compress(raw, out);
+    }
     await pruneBackups(dir, policy);
     store.setMeta('last_backup_at', String(store.now()));
     store.emit('backup.done', null, { file });
@@ -37,8 +55,44 @@ export async function backupOnce(store: Store, dir: string, policy: BackupPolicy
   }
 }
 
+const CHILD = join(dirname(fileURLToPath(import.meta.url)), 'backup-child.ts');
+/** The child's ceiling: enough for SQLite's own cache and zstd, small next to the 2.9GB it reads. Past it the kernel takes back the
+ *  child's clean cache first, which costs it little; the child goes slower, hq does not. */
+export const CHILD_MEMORY_HIGH = '768M';
+const CHILD_TIMEOUT_MS = 30 * 60_000;
+
+/** backup-child.ts exits with this when it ran and failed: systemd-run passes the child's code through, its own failures are 1. */
+export const CHILD_FAILED = 3;
+
+/**
+ * The snapshot and its compression in backup-child.ts, in a systemd scope of its own. Bare (in hq's cgroup, no ceiling) only when
+ * systemd-run did not run the child at all (not installed, no user manager, the scope refused): a child that ran and failed is
+ * that failure, reported as is, with no second run on top of what it left.
+ */
+async function isolatedSnapshot(db: string, raw: string, out: string): Promise<void> {
+  const child = [process.execPath, CHILD, db, raw, out];
+  const scoped = ['systemd-run', '--user', '--scope', '--quiet', '--collect', '-p', `MemoryHigh=${CHILD_MEMORY_HIGH}`, '-p', 'CPUWeight=20', '--', ...child];
+  try {
+    await run(scoped);
+  } catch (e) {
+    const err = e as Error & { code?: number | string };
+    if (err.code === CHILD_FAILED || err.code === undefined || existsSync(raw) || existsSync(out)) throw e;
+    await run(child);
+  }
+  if (!existsSync(out)) throw new Error(`backup child left no ${basename(out)}`);
+}
+
+function run([cmd, ...args]: string[]): Promise<void> {
+  return new Promise((resolve, reject) => execFile(cmd!, args, { timeout: CHILD_TIMEOUT_MS, maxBuffer: 1 << 20 }, (e, _out, err) => {
+    if (!e) return resolve();
+    // `code`: the exit code, or 'ENOENT' when the command is not there; undefined = killed (the timeout): not a launch failure.
+    const code = (e as { code?: number | string }).code;
+    reject(Object.assign(new Error(`${basename(cmd!)}: ${String(err || e.message).trim().slice(0, 300)}`), { code: e.killed ? undefined : code }));
+  }));
+}
+
 /** `src` → `out` (zstd), through a temp name so a half-written file never looks like a backup. Removes `src`. */
-async function compress(src: string, out: string): Promise<string> {
+export async function compress(src: string, out: string): Promise<string> {
   const tmp = join(dirname(out), `.${basename(out)}.${randomBytes(4).toString('hex')}.tmp`); // its own: two runs never share one
   try {
     await pipeline(createReadStream(src), createZstdCompress({ params: { [constants.ZSTD_c_compressionLevel]: ZSTD_LEVEL } }),

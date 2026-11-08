@@ -1,0 +1,13 @@
+# All the shifts together (company-shift@*.service, Slice= in its template), next to hq in app.slice (task 1547).
+# On 08/11 at 07:12 the shifts and what they ran took the machine until hq froze for 65 seconds (0.4GB free, swap full).
+# Together they are throttled past 65% of RAM and stopped at 80% (the OOM killer then takes from here, not from hq):
+# on hq-host 15.6G and 19.2G of 24G, against a measured peak of 9.4G for all of them at once (17 shifts). What stays
+# out of the slice is hq, the reserved builds (company-run scopes, each with its ceiling) and the system.
+# CPU: the default weight (100) against hq's 1000, so hq gets its turn when the machine is at load 107.
+# Installed by `scripts/deploy.sh hq` as a symlink, like hq's unit.
+[Unit]
+Description=agent-company shifts
+
+[Slice]
+MemoryHigh=65%
+MemoryMax=80%

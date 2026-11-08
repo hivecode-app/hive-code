@@ -11,7 +11,7 @@ const taskShifts = (hq: { store: { db: { prepare(sql: string): { get(): unknown 
   (hq.store.db.prepare(`SELECT COUNT(*) n FROM shifts WHERE state IN ('starting','live') AND task_id IS NOT NULL`).get() as { n: number }).n;
 
 test('capacity formula: floor((MemAvailable − reserve − leases held) / RSS_work), capped by maxSlots − running', () => {
-  const cfg = loadConfig({ stateDir: '/nonexistent', capacity: { reserveMb: 4096, rssIdleMb: 400, rssWorkMb: 1300, residents: ['yoav'], maxSlots: 8, maxLoad: 1.5 } });
+  const cfg = loadConfig({ stateDir: '/nonexistent', capacity: { reserveMb: 4096, rssIdleMb: 400, rssWorkMb: 1300, residents: ['yoav'], maxSlots: 8, maxLoad: 1.5, psiMaxPct: 10, swapLowMb: 512, swapLowExtraMb: 2048, swapPsiPct: 1 } });
   assert.deepEqual(capacity(cfg, { totalMb: 23_552, availableMb: 14_000 }, 0), { total: 7, running: 0, free: 7 });
   assert.deepEqual(capacity(cfg, { totalMb: 23_552, availableMb: 14_000 }, 6), { total: 8, running: 6, free: 2 }, 'maxSlots − running');
   assert.equal(capacity(cfg, { totalMb: 23_552, availableMb: 5_000 }, 0).free, 0);

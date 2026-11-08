@@ -265,6 +265,9 @@ deploy_hq() {
   for u in agent-company-hq.service agent-company-drift.service agent-company-drift.timer agent-company-disk-clean.service agent-company-disk-clean.timer; do
     [[ "$(readlink "$UNITS/$u" || true)" == "$repo/deploy/$u" ]] || { ln -sfn "$repo/deploy/$u" "$UNITS/$u"; say "יחידה $u מקושרת ל-repo"; }
   done
+  # The shifts' slice (task 1547): its ceiling keeps hq alive when the shifts take the machine. Its own name, so a link.
+  [[ "$(readlink "$UNITS/app-shifts.slice" || true)" == "$repo/packages/shift-host/systemd/app-shifts.slice" ]] \
+    || { ln -sfn "$repo/packages/shift-host/systemd/app-shifts.slice" "$UNITS/app-shifts.slice"; say "יחידה app-shifts.slice מקושרת ל-repo"; }
   # company-ci moved to ci-host (deploy/ci-host/): the old runner unit here goes, link and all.
   if [[ -L "$UNITS/actions-runner-company.service" ]]; then
     systemctl --user disable -q --now actions-runner-company 2>/dev/null || true
@@ -272,6 +275,10 @@ deploy_hq() {
     say "היחידה actions-runner-company הוסרה (company-ci רץ ב-ci-host)"
   fi
   systemctl --user daemon-reload
+  # daemon-reload gives the shifts already running their MemoryHigh; Nice and OOMScoreAdjust are set per process when a
+  # shift starts, so the ones running before task 1505 still had 0 and 200 on 08/11 (yoav-7, lumo-t1503-1). Now they too.
+  source "$repo/scripts/lib/shift-limits.sh"
+  say "$(shift_limits_live)"
   systemctl --user enable -q agent-company-hq
   systemctl --user enable -q --now agent-company-drift.timer
   systemctl --user enable -q --now agent-company-disk-clean.timer

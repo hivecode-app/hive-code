@@ -21,6 +21,15 @@ UMask=0077
 # Always, including SIGKILL: a frozen hq is killed by its own freeze-watch thread (packages/hq/src/freeze-watch.ts) and comes back here.
 Restart=always
 RestartSec=2
+# Task 1547: hq first when the machine runs out. Measured on hq-host (systemd 255, user manager), not assumed:
+#  - CPU: CPUWeight 1000 against the shifts' slice (app-shifts.slice, 100): at load 107 hq gets ten times their share. The
+#    shifts' Nice=5 never did this: Nice counts inside one cgroup, and hq is in another.
+#  - OOM: 100 is the lowest a user unit can ask (its manager's own value; a negative one is cut to 100 quietly). Shifts are 500.
+#  - Memory: not MemoryLow here. Protection holds only as far as every parent has it, and user@1001.service has none (that
+#    needs root), so it would read as protection and do nothing. hq is kept by the ceiling on the shifts' slice instead.
+#  - IO: no IOWeight. The io controller is not given to user units here, and the disk has no scheduler (`none`) for ioprio.
+CPUWeight=1000
+OOMScoreAdjust=100
 TimeoutStopSec=20
 KillMode=mixed
 

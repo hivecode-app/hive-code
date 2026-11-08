@@ -100,12 +100,20 @@ export interface HqConfig {
     residents: string[];         // resident pool (not counted in work slots): org.yaml `resident: true`, else the manager
     maxSlots: number;
     maxLoad: number;             // #224: no new shift here while load1 per CPU is over this (load from outside the shifts too)
+    // Task 1547: MemAvailable alone let 15 shifts and three unreserved builds in until hq froze (08/11 07:12: 0.4GB free,
+    // swap 4070 of 4095MB). See memPressure() in scheduler.ts for the reasons behind the numbers.
+    psiMaxPct: number;           // memory PSI `some avg10` at or over this: the machine is stalling on memory, nothing new starts
+    swapLowMb: number;           // free swap under this (on a machine with swap): the reserve grows by swapLowExtraMb
+    swapLowExtraMb: number;
+    swapPsiPct: number;          // …only while memory PSI `some avg10` is at least this too (swap full of cold pages alone is not pressure)
   };
   /** B.11: hq.db backups kept (backup.ts): the newest `hourly`, and the newest of each of the last `daily` days. */
   backups: { hourly: number; daily: number };
   /** resources-design.md §1, `reserve`: the classes of heavy work (heavy.ts parseHeavy: class, mem, cpu, disk, timeout, exclusive, env), and
    *  the memory the leases of one machine may hold together: `machines.<name>.memMb` (`local` = this one), else `budgetPct` of its total. */
-  heavy: { classes: unknown[]; budgetPct: number; machines: Record<string, { memMb?: number }> };
+  heavy: { classes: unknown[]; budgetPct: number; machines: Record<string, { memMb?: number }>;
+    /** Task 1547: a lease here also needs this share of its ceiling free now, over the reserve (leases.ts blockedBy). */
+    liveSharePct: number };
   /** WebAuthn and device pairing (auth.ts). */
   auth: {
     rpId: string;                // passkeys are bound to this host (and its subdomains)
@@ -244,11 +252,12 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
       compactContextTokens: 250_000, compactQuietMs: 2 * 60_000 },
     engine: { model: 'claude-opus-5-5', effort: null, effortByTeam: { personal: 'medium' } },
     batching: { enabled: true, gatherMs: 10 * 60_000 },
-    capacity: { reserveMb: 4096, rssIdleMb: 400, rssWorkMb: 1300, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8, maxLoad: 1.5 },
+    capacity: { reserveMb: 4096, rssIdleMb: 400, rssWorkMb: 1300, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8, maxLoad: 1.5,
+      psiMaxPct: 10, swapLowMb: 512, swapLowExtraMb: 2048, swapPsiPct: 1 },
     // Task 1531: 24 hourly + 7 daily of a 2.6GB hq.db (360MB each in zstd) were 29 files, 9.8GB of hq-host's disk. Five hours
     // back is enough to undo a bad hour; past that, one a day for a week.
     backups: { hourly: 5, daily: 7 },
-    heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: {} },
+    heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: {}, liveSharePct: 50 },
     auth: {
       rpId: 'localhost',
       rpName: 'החברה',

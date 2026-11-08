@@ -256,7 +256,7 @@ test('unidentified-watch: כבויה (או בלי אוטומציה) לא שומ�
 });
 
 test('מסך המשאבים: הזמנות פעילות ותור, ומשימה שמחכה אומרת למי ובכמה זמן', async () => {
-  const env = await makeEnv({ org: ORG, noStart: false, cfg: { heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: { local: { memMb: 10_000 } } } } });
+  const env = await makeEnv({ org: ORG, noStart: false, cfg: { heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: { local: { memMb: 10_000 } }, liveSharePct: 50 } } });
   const { hq, clock } = env;
   hq.resources.machines = () => [{ name: 'local', run: async (s) => (s.includes('docker-ps') ? DOCKER_OUT : FAST_OUT) }];
   await hq.resources.sample();

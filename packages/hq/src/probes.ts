@@ -1254,7 +1254,10 @@ export class ProbeRunner {
       ON CONFLICT(probe_id) DO UPDATE SET consecutive_failures = @fails, last_run_at = @now,
         last_ok_at = COALESCE(@ok_at, last_ok_at), last_status = @status, last_latency_ms = @lat, last_error = @err`)
       .run({ k: p.key, project: p.project, fails, now: retry ? (prev?.last_run_at ?? now) : now, ok_at: o.ok ? now : null, status: o.status, lat: o.latencyMs, err: o.error });
-    this.store.emit('probe.result', this.cfg.monitoringLeadId, { probe: p.key, ...o });
+    // The verdict, not the readings (alerts, pods, versions…): their rounds below take them from `o`, and nobody reads them
+    // back from the log. A lumo_ws result was 216KB a minute: probe.result was 1.8GB of the 2.9GB hq.db (task 1547).
+    const { alerts: _a, ws: _w, outdated: _o, dupes: _d, wa: _f, versions: _v, ...verdict } = o;
+    this.store.emit('probe.result', this.cfg.monitoringLeadId, { probe: p.key, ...verdict, error: verdict.error?.slice(0, 2000) ?? null });
     if (p.kind === 'kubelet') { if (o.versions) this.kubeletSkew(p, o.versions, now); return undefined; }
     if (p.kind === 'alertmanager') { if (o.alerts) this.alertmanagerRound(p, o.alerts, now); return undefined; }
     if (p.kind === 'lumo_ws') { if (o.ws) this.lumoWsRound(p, o.ws, now); return undefined; }

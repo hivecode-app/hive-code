@@ -46,6 +46,24 @@ function classify(words: string[]): HeavyHit | null {
     return null;
   }
   if (name === 'gradlew' || name === 'gradlew.bat') return { class: 'build', what: 'gradlew' };
+  // Task 1547: `go vet ./...` and the links of a Go test (0.5–0.75GB each, three at once) were what froze hq on 08/11 at 07:12.
+  // The whole module (`./...`) is heavy; one package is a focused run, as `flutter test <file>`.
+  // `build` for all three: `test-full` waits for every `flutter test` in the company (its exclusive key).
+  if (name === 'go') {
+    let sub = 0;
+    while (sub < args.length && args[sub]!.startsWith('-')) sub += args[sub] === '-C' ? 2 : 1; // `go -C dir vet`
+    const verb = args[sub] ?? '';
+    if (['vet', 'test', 'build'].includes(verb) && args.slice(sub + 1).some((a) => a === './...' || a.endsWith('/...'))) {
+      return { class: 'build', what: `go ${verb} ./...` };
+    }
+    return null;
+  }
+  // cargo compiles the whole crate whatever the filter.
+  if (name === 'cargo') {
+    const verb = args.find((a) => !a.startsWith('-') && !a.startsWith('+'));
+    if (verb && ['build', 'b', 'test', 't', 'check', 'c', 'clippy'].includes(verb)) return { class: 'build', what: `cargo ${verb}` };
+    return null;
+  }
   if (name === 'docker' || name === 'docker-compose') {
     const rest = args.filter((a) => !a.startsWith('-'));
     if (name === 'docker' && rest[0] === 'build') return { class: 'docker', what: 'docker build' };

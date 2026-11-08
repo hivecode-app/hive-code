@@ -17,7 +17,7 @@ ${heavy}
 async function setup(heavy = '', memMb = 10_000) {
   const env = await makeEnv({
     noStart: true, projects: { 'agent-company': CHARTER(heavy) },
-    cfg: { heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: { local: { memMb } } } },
+    cfg: { heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: { local: { memMb } }, liveSharePct: 50 } },
   });
   await env.hq.start({ listen: false, timers: false });
   const db = env.hq.store.db;

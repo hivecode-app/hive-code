@@ -765,6 +765,29 @@ export class Store {
     this.db.prepare('DELETE FROM events WHERE seq < ?').run(keep ? keep.seq : Number.MAX_SAFE_INTEGER);
   }
 
+  /**
+   * Task 1547: a probe's result is in probe_results for its history; in the log it is only for whoever listens live. Older
+   * than `maxAgeMs` it goes, oldest first, `batch` rows a step with a turn of the event loop between steps and at most
+   * `maxRows` a call: the first run after the change has a month of them (1.5M rows, 1.8GB), and one DELETE of all of
+   * them would hold the loop past freeze-watch's 45 seconds. Each step reads the oldest by the (type, seq) index, never `ts`.
+   * Returns how many went.
+   */
+  async pruneProbeEvents(maxAgeMs = 2 * 86_400_000, batch = 5000, maxRows = 300_000): Promise<number> {
+    const cutoff = this.now() - maxAgeMs;
+    const oldest = this.db.prepare(`SELECT seq, ts FROM events WHERE type = 'probe.result' ORDER BY seq LIMIT ?`);
+    const del = this.db.prepare(`DELETE FROM events WHERE type = 'probe.result' AND seq <= ?`);
+    let n = 0;
+    while (n < maxRows) {
+      const rows = oldest.all(batch) as { seq: number; ts: number }[];
+      const old = rows.filter((r) => r.ts < cutoff);
+      if (!old.length) break;
+      n += del.run(old[old.length - 1]!.seq).changes;
+      if (old.length < rows.length || rows.length < batch) break;
+      await new Promise((r) => setImmediate(r));
+    }
+    return n;
+  }
+
   // ── toggles ───────────────────────────────────────────────────────────────
   toggle(key: string): boolean {
     const r = this.db.prepare('SELECT enabled FROM toggles WHERE key = ?').get(key) as { enabled: number } | undefined;

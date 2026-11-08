@@ -28,6 +28,14 @@ RestartPreventExitStatus=75 76 2
 # when it is free; and the OOM killer takes a shift (500) before hq (200, the user manager's).
 Nice=5
 OOMScoreAdjust=500
+# Task 1547: Nice is per process, and hq and the shifts are in different cgroups, so between them the CPU goes by cgroup
+# weight (hq's CPUWeight), not by Nice. Memory: every shift in one slice with a ceiling (app-shifts.slice), and each shift
+# throttled past 4G. A working shift is 0.5GB at p99 (6 hours of samples on hq-host, 08/11); the one that reached 5.2GB ran
+# `go vet` and two Go test links unreserved, the build that froze hq at 07:12. Throttled, not killed: it slows itself down,
+# not the machine. A build under `company-run` runs in its own scope, outside the shift, with its lease's ceiling.
+# Applied by `daemon-reload` to the shifts already running too (MemoryHigh; Slice and Nice only to new ones).
+Slice=app-shifts.slice
+MemoryHigh=4G
 # mixed: SIGTERM to the host only (it closes claude's stdin gracefully), SIGKILL to the rest on timeout
 KillMode=mixed
 TimeoutStopSec=20

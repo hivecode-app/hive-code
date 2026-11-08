@@ -13,10 +13,29 @@ export function procStart(pid: number): string | null {
   }
 }
 
-export function memInfoMb(): { totalMb: number; availableMb: number } {
+/** The machine's memory, beyond MemAvailable (task 1547): swap, and memory PSI. A part that can't be read is left out, never 0. */
+export interface MemInfo { totalMb: number; availableMb: number; swapTotalMb?: number; swapFreeMb?: number; psiSome10?: number }
+
+export function memInfoMb(): MemInfo {
   const txt = readFileSync('/proc/meminfo', 'utf8');
   const get = (k: string) => Number(new RegExp(`^${k}:\\s+(\\d+)`, 'm').exec(txt)?.[1] ?? 0) / 1024;
-  return { totalMb: get('MemTotal'), availableMb: get('MemAvailable') };
+  const swapTotal = /^SwapTotal:\s+(\d+)/m.exec(txt), swapFree = /^SwapFree:\s+(\d+)/m.exec(txt);
+  const psi = memPsiSome10();
+  return {
+    totalMb: get('MemTotal'), availableMb: get('MemAvailable'),
+    ...(swapTotal && swapFree ? { swapTotalMb: Number(swapTotal[1]) / 1024, swapFreeMb: Number(swapFree[1]) / 1024 } : {}),
+    ...(psi != null ? { psiSome10: psi } : {}),
+  };
+}
+
+/** `some avg10` of /proc/pressure/memory: the share of the last 10 seconds some task waited for memory. null = no PSI here. */
+export function memPsiSome10(read: (p: string) => string = (p) => readFileSync(p, 'utf8')): number | null {
+  try {
+    const m = /^some avg10=([\d.]+)/m.exec(read('/proc/pressure/memory'));
+    return m ? Number(m[1]) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Load average over the last minute and the CPUs it is shared by (#224: load from outside the shifts counts too). */

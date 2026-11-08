@@ -46,7 +46,7 @@ const CATALOG = {
 async function setup(access = '', listen = false) {
   const runner = new FakeRunner();
   const env = await makeEnv({ noStart: true, deps: { accessRunner: runner }, projects: { 'agent-company': CHARTER(access) },
-    cfg: { heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: { local: { memMb: 10_000 } } } } });
+    cfg: { heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: { local: { memMb: 10_000 } }, liveSharePct: 50 } } });
   await env.hq.start({ listen, timers: false });
   writeCatalog(env.cfg.stateDir, CATALOG);
   const t = env.hq.scheduler.addTask({ title: 'משימה', project: 'agent-company' });
