@@ -3,7 +3,7 @@
   "displayName": "שיחה עם החברה",
   "description": "השיחה עם עובד בחברה, כמו באפליקציה, עם הקובץ והשורות המסומנות בכל הודעה.",
   "version": "0.1.0",
-  "publisher": "hive-owner",
+  "publisher": "hivecode",
   "private": true,
   "license": "UNLICENSED",
   "repository": { "type": "git", "url": "https://github.com/hivecode-app/hive-code" },
@@ -29,7 +29,7 @@
     "configuration": {
       "title": "החברה",
       "properties": {
-        "company.url": { "type": "string", "default": "https://api.hq.example.com", "description": "הכתובת של hq" },
+        "company.url": { "type": "string", "default": "http://127.0.0.1:7420", "description": "הכתובת של hq (מחוץ לשרת: כתובת ה-API הציבורית שלו)" },
         "company.identity": { "type": "string", "default": "avital", "description": "העובד שהשיחה איתו" }
       }
     }

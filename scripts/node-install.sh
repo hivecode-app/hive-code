@@ -4,11 +4,11 @@
 #   scripts/node-install.sh <node> --update   the engine there to this checkout's commit (scripts/deploy.sh hq runs it)
 #   scripts/node-install.sh <node> --token <file>   the node's Claude token (claude setup-token), to its own file there
 #   scripts/node-install.sh <node> --projects  only the toolchains and the projects' checkouts (after adding a project)
-# <node> is a name in hq.config.json `nodes`. The node mirrors this machine's paths: $HOME is /home/owner there too (a
+# <node> is a name in hq.config.json `nodes`. The node mirrors this machine's paths: $HOME is this machine's $HOME there too (a
 # directory, not a user: the shifts run as the node's existing user, root when there is no other), so worktrees,
 # sockets and shift dirs are the same paths on both sides. Nothing there is touched beyond those paths, /usr/local
 # (node, gh), and /etc/systemd/system/company-shift@.service. Never this machine's ~/.claude (dir-0016).
-# A node with `ownLogin` (a machine with a user of its own: the laptop, ci-host) is set up as that user, and only under
+# A node with `ownLogin` (a machine with a user of its own: a laptop, a second server) is set up as that user, and only under
 # ~/.local/share/agent-company, ~/.local/state/agent-company, ~/.config/systemd/user and the checkouts: its packages,
 # ~/.claude (its login, CLAUDE.md), git identity and gh login stay as they are, and what is missing is only reported.
 # Its ~/flutter only follows this machine's version, as a fast-forward of its own channel (below).
@@ -30,7 +30,7 @@ read -r ssh_target ssh_key projects mirror own < <(node -e '
 [[ "$mirror" == "-" ]] && mirror=""
 ssh_args=(-o BatchMode=yes -o ConnectTimeout=15)
 [[ "$ssh_key" != "-" ]] && ssh_args+=(-i "${ssh_key/#\~/$HOME}")
-H=/home/owner
+H="$HOME"
 NSTATE="$H/.local/state/agent-company"
 ENGINE="$H/projects/agent-company"
 BIN="$H/.local/share/agent-company/bin" # nodes.ts NODE_BIN: first on the PATH there
@@ -176,7 +176,7 @@ clone() { # <owner/name> <path> [branch or commit]; stdin closed: inside `while 
 }
 # A repo as it is here: its origin, and its branch (or commit, when detached).
 slug() { git -C "$1" remote get-url origin 2>/dev/null | sed -nE 's#^(git@github\.com:|https://github\.com/)##p' | sed -E 's#\.git$##'; }
-# Repos inside a checkout that git there does not track (lumo's server/ and reference/*): the same, at the same path
+# Repos inside a checkout that git there does not track (a project's server/ and reference/*): the same, at the same path
 # and commit (scripts/repo-sync.sh; nodes.ts nestedRepos finds the same ones).
 pins=()
 nested() { # <checkout> <worktree dir>
@@ -189,7 +189,10 @@ nested() { # <checkout> <worktree dir>
 chome="$(node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); console.log((c.companyHome||"~/company").replace(/^~/, process.env.HOME))' "$CONFIG")"
 # The engine moves with each deploy and the company with each task op there (workspace-cli syncCompany): ours only.
 ours "$ENGINE"; ours "$chome"
-clone hivecode-app/hive-code "$ENGINE"
+# The engine from where this checkout comes from (its origin).
+engine_repo="$(slug "$repo")"
+[[ -n "$engine_repo" ]] || { echo "node-install: the origin of $repo is not a GitHub repo" >&2; exit 1; }
+clone "$engine_repo" "$ENGINE"
 crepo="$(slug "$chome")"
 clone "$crepo" "$chome"
 for p in ${projects//,/ }; do
@@ -254,7 +257,7 @@ if [[ "$own" == 1 ]]; then
 on "[ \"\$(loginctl show-user \$(id -un) -p Linger --value 2>/dev/null)\" = yes ] || sudo -n loginctl enable-linger \$(id -un)" \
   || { echo "node-install: linger is off there and sudo wants a password: loginctl enable-linger there first" >&2; exit 1; }
 on "install -d $H/.config/systemd/user && cat > $H/.config/systemd/user/company-shift@.service && XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user daemon-reload" <<UNIT
-# Written by agent-company scripts/node-install.sh: one task shift of hq on hq-host (nodes.ts). Do not edit here.
+# Written by agent-company scripts/node-install.sh: one task shift of hq on the main server (nodes.ts). Do not edit here.
 [Unit]
 Description=agent-company shift %i (node $name)
 StartLimitIntervalSec=300
@@ -285,7 +288,7 @@ fi
 
 # ── the shift unit: one instance per shift, like here, as a system unit of the node's user ──
 on "cat > /etc/systemd/system/company-shift@.service && systemctl daemon-reload" <<EOF
-# Written by agent-company scripts/node-install.sh: one task shift of hq on hq-host (nodes.ts). Do not edit here.
+# Written by agent-company scripts/node-install.sh: one task shift of hq on the main server (nodes.ts). Do not edit here.
 [Unit]
 Description=agent-company shift %i (node $name)
 StartLimitIntervalSec=300

@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, openSync,
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { ENV, OWNER } from '@company/shared';
+import { ENV, g, OWNER } from '@company/shared';
 import type { Hq } from './hq.ts';
 import { getIdentity } from './org.ts';
 import { readCharter } from './workspace.ts';
@@ -237,7 +237,8 @@ export class Access {
       if (d === 'yes') return this.start(r, plan ?? this.replan(r), Math.max(0, (until - Date.now()) / 1000), r.approved_by ? undefined : 'owner');
       if (d === 'no' || d === 'closed') {
         // Only his own no is "he declined": a card someone else closed ran nothing, and the worker should not read it as his answer.
-        const note = d === 'no' ? 'רן דחה' : 'הכרטיס נסגר בלי אישור של רן, והפקודה לא רצה. אם עדיין צריך אותה, בקשה חדשה פותחת כרטיס חדש';
+        const owner = this.hq.mailbox.names.owner;
+        const note = d === 'no' ? `${owner.name} ${g(owner, 'דחה', 'דחתה')}` : `הכרטיס נסגר בלי אישור של ${owner.name}, והפקודה לא רצה. אם עדיין צריך אותה, בקשה חדשה פותחת כרטיס חדש`;
         const res = this.db.prepare(`UPDATE access_requests SET state = 'denied', decided_at = ?, note = ? WHERE id = ? AND state = 'pending'`)
           .run(this.now(), note, r.id);
         if (res.changes) this.hq.store.emit('access.denied', r.identity, { request: r.id, by: d === 'no' ? 'owner' : 'closed' });
@@ -246,7 +247,7 @@ export class Access {
       }
       if (Date.now() >= until) {
         return { status: 'pending', request: `acc-${r.id}`,
-          message: `מחכה לאישור של רן על: ${r.shown}. המשך במה שלא תלוי בזה, וחזור עם \`request: "acc-${r.id}"\`. הוא ידע שחיכית.` };
+          message: `מחכה לאישור של ${this.hq.mailbox.names.owner.name} על: ${r.shown}. המשך במה שלא תלוי בזה, וחזור עם \`request: "acc-${r.id}"\`. ${g(this.hq.mailbox.names.owner, 'הוא ידע', 'היא תדע')} שחיכית.` };
       }
       await sleep(Math.min(1000, until - Date.now()));
       r = this.row(r.id)!;
@@ -364,7 +365,7 @@ export class Access {
     if (r.state === 'running') return { status: 'running', request: rid, message: 'עדיין רץ' };
     const raw = text ?? this.readLog(r.id);
     // Whole, secrets too: every worker can do everything anyway, so nothing is hidden from it («אין לי שום סיבה שעובד לא יוכל
-    // לראות לסיסמאות», רן, 24/10). The output is not stored anywhere else: the job log stays where it was written, in a 0700 directory.
+    // לראות לסיסמאות», the owner, 24/10). The output is not stored anywhere else: the job log stays where it was written, in a 0700 directory.
     const lines = raw.split('\n');
     let out = lines.slice(-TAIL_LINES).join('\n');
     const truncated = lines.length > TAIL_LINES || out.length > TAIL_CHARS;

@@ -2,8 +2,8 @@
 Description=Every night: agent-company drift check (noga/drift-check)
 
 [Timer]
-# Before the owner's morning, wherever the server's clock is (company/org.yaml timezone).
-OnCalendar=*-*-* 03:40:00 Asia/Bangkok
+# At night in the server's own time zone (timedatectl): set it to the owner's, so this runs before his morning.
+OnCalendar=*-*-* 03:40:00
 Persistent=true
 RandomizedDelaySec=5min
 

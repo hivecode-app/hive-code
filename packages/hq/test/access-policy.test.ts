@@ -225,10 +225,13 @@ test('build: another owner, a tag outside the registry, a short sha or a path up
   assert.ok(!planBuild({ ...buildRes, owners: ['hive-owner', 'partner/shared'] }, ['partner/other', SHA40, 'Dockerfile', t]).ok);
 });
 
-test('build: the catalog entry loads with the default registry, and a registry outside ghcr is dropped to it', () => {
-  const { catalog } = parseCatalog({ resources: { 'build:hq-host': { type: 'build', env: 'registry' }, 'build:evil': { type: 'build', registry: 'evil.io/x/' } } });
+test('build: with no owners the registry\'s account is ours, and an entry with no registry or one outside ghcr is not loaded', () => {
+  const { catalog, problems } = parseCatalog({ resources: { 'build:hq-host': { type: 'build', registry: 'ghcr.io/hive-owner/', env: 'registry' },
+    'build:none': { type: 'build', env: 'registry' }, 'build:evil': { type: 'build', registry: 'evil.io/x/' } } });
   assert.equal((catalog['build:hq-host'] as BuildResource).registry, 'ghcr.io/hive-owner/');
-  assert.equal((catalog['build:evil'] as BuildResource).registry, 'ghcr.io/hive-owner/');
+  assert.ok(!catalog['build:none'] && !catalog['build:evil']);
+  assert.equal(problems.length, 2);
+  assert.ok(planBuild(catalog['build:hq-host'] as BuildResource, ['hive-owner/lumo', SHA40, 'Dockerfile', 'ghcr.io/hive-owner/x:1']).ok);
 });
 
 // ── #302: words with spaces and quotes reach the far side as they were, and a read query in a pod is a read ──

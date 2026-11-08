@@ -12,3 +12,6 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Each owner's own Firebase project (docs/generic/INSTALL.md); never in the repo.
+google-services.json

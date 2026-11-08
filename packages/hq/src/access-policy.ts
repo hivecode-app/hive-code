@@ -250,7 +250,7 @@ export function matchPattern(pattern: string[], argv: string[]): boolean {
     const a = argv[i];
     if (a === undefined) return false;
     if (p === '*') { if (!wild(a)) return false; continue; }
-    // A word with a star in it ("ghcr.io/hive-owner/*") matches any safe text in the star's place. A pattern that names
+    // A word with a star in it ("ghcr.io/owner/*") matches any safe text in the star's place. A pattern that names
     // its flag up to the `=` ("--tail=*") lets the word be that flag; "-n*" would let "-nf" in, so it does not.
     if (p.includes('*')) {
       const re = new RegExp(`^${p.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[A-Za-z0-9._:/=@,+%-]*')}$`);
@@ -456,7 +456,8 @@ export function describeResource(name: string, res: Resource): string {
 
 // ── build and push ─────────────────────────────────────────────────────────
 
-export const DEFAULT_REGISTRY = 'ghcr.io/hive-owner/';
+/** The account a ghcr.io registry belongs to (`ghcr.io/<owner>/…`): a build entry with no `owners` builds only its repos. */
+const registryOwner = (registry: string) => /^ghcr\.io\/([^/]+)/.exec(registry)?.[1];
 const REPO = /^([A-Za-z0-9][A-Za-z0-9-]{0,38})\/([A-Za-z0-9._-]{1,100})$/;
 const SHA = /^[0-9a-f]{40}$/;
 const REL_PATH = /^[A-Za-z0-9._][A-Za-z0-9._/-]*$/;
@@ -466,18 +467,19 @@ const relPathOk = (p: string) => REL_PATH.test(p) && !p.split('/').includes('..'
 
 /** `[repo, sha, dockerfile, tag, context?]` → the build script under a `docker` lease. The repo is ours, the sha is whole, the tag is under the registry. */
 export function planBuild(res: BuildResource, argv: string[]): Verdict {
-  const usage = '`["hive-owner/<repo>", "<sha של 40 תווים>", "<נתיב Dockerfile>", "ghcr.io/hive-owner/<שם>:<תג>", "<context, ברירת מחדל .>"]`';
+  const reg = res.registry.endsWith('/') ? res.registry : `${res.registry}/`;
+  const usage = `\`["${registryOwner(reg) ?? 'owner'}/<repo>", "<sha של 40 תווים>", "<נתיב Dockerfile>", "${reg}<שם>:<תג>", "<context, ברירת מחדל .>"]\``;
   if (argv.length < 4 || argv.length > 5) return unfit('build מקבל repo, sha, נתיב ל-Dockerfile ותג (ואופציונלית context)', usage);
   const [repo, sha, dockerfile, tag, context = '.'] = argv as [string, string, string, string, string?];
   const m = REPO.exec(repo);
   if (!m) return unfit(`\`${repo}\` לא בצורה owner/name`, usage);
-  const owners = res.owners ?? ['hive-owner'];
+  const owners = res.owners ?? [registryOwner(reg)].filter((x): x is string => !!x);
   // A repo of another owner is allowed in the catalog by name, once we have WRITE on it (access-build.sh checks that too).
   if (!owners.includes(m[1]!) && !owners.includes(repo)) return deny(`ה-repo \`${repo}\` לא שלנו: מותר רק של ${owners.join(', ')}`);
   if (!SHA.test(sha)) return unfit('ה-sha חייב להיות מלא (40 תווים, אותיות קטנות): ענף או תג לא מספיקים, כי הבנייה חייבת להיות קומיט אחד', usage);
   if (!relPathOk(dockerfile)) return unfit(`נתיב ה-Dockerfile \`${dockerfile}\` לא מותר: יחסי ל-repo, בלי \`..\``);
   if (context !== '.' && !relPathOk(context)) return unfit(`ה-context \`${context}\` לא מותר: תיקייה יחסית ל-repo, בלי \`..\``);
-  const registry = res.registry.endsWith('/') ? res.registry : `${res.registry}/`;
+  const registry = reg;
   const t = /^([a-z0-9][a-z0-9._/-]*):([A-Za-z0-9_][A-Za-z0-9._-]{0,127})$/.exec(tag);
   if (!t || !tag.startsWith(registry) || tag.length === registry.length || t[1]!.split('/').includes('..')) {
     return deny(`התג חייב להיות תחת \`${registry}\` ובצורה \`${registry}<שם>:<תג>\``);
@@ -541,7 +543,9 @@ export function parseCatalog(raw: unknown): { catalog: Catalog; problems: string
         ...(str(o.key) ? { key: str(o.key)! } : {}), allow, ...common };
     } else if (/^build:[a-z0-9-]+$/.test(name) && o.type === 'build') {
       const owners = Array.isArray(o.owners) ? o.owners.filter((x): x is string => typeof x === 'string' && /^[A-Za-z0-9._/-]+$/.test(x)) : undefined;
-      catalog[name] = { type: 'build', registry: str(o.registry) && /^ghcr\.io\/[a-z0-9][a-z0-9._/-]*\/?$/.test(str(o.registry)!) ? str(o.registry)! : DEFAULT_REGISTRY,
+      // The registry is the company's own (ghcr.io/<owner>/): an entry without one, or with one outside ghcr, isn't loaded.
+      if (!(str(o.registry) && /^ghcr\.io\/[a-z0-9][a-z0-9._/-]*\/?$/.test(str(o.registry)!))) { problems.push(`${name}: registry חסר או לא ב-ghcr.io`); continue; }
+      catalog[name] = { type: 'build', registry: str(o.registry)!,
         ...(owners?.length ? { owners } : {}), ...(str(o.script) ? { script: str(o.script)! } : {}), ...common };
     } else if (name === 'hq:query' && o.type === 'hq-query') {
       catalog[name] = { type: 'hq-query', ...common };

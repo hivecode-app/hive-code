@@ -161,7 +161,7 @@ void main() {
         from: from,
         time: '13:41',
         kicker: 'GO לפרודקשן · לומו 1.1.20',
-        headline: 'לפרוס את עדכון הלומו: הטקסט בטלפון מתוקן',
+        headline: 'לפרוס את העדכון של לומו: הטקסט בטלפון מתוקן',
         body: 'תיקון הטקסט בטלפון.\nחזרה אחורה: כדקה.\nPR: 3698\nסיכון: low',
         options: const [AskOption(id: 'go', label: 'GO', primary: true)],
         askId: 'inbox:7',
@@ -256,13 +256,13 @@ void main() {
   testWidgets('one card at a time, its title and who asks; "GO" sends it and brings the next', (tester) async {
     final store = await stack(tester, [go(), ask(blocking: false)]);
     expect(find.text('1 מתוך 2'), findsOneWidget);
-    expect(card('לפרוס את עדכון הלומו'), findsOneWidget);
+    expect(card('לפרוס את העדכון של לומו'), findsOneWidget);
     expect(card('37 המנויים'), findsOneWidget, reason: 'the next card is under it');
     await tester.tap(find.text('GO'));
     await tester.pumpAndSettle();
     expect(store.decision('inbox:7', 'g-dana'), isNotNull);
     expect(find.text('2 מתוך 2'), findsOneWidget);
-    expect(card('לפרוס את עדכון הלומו'), findsNothing);
+    expect(card('לפרוס את העדכון של לומו'), findsNothing);
     await tester.pump(const Duration(seconds: 6));
   });
 

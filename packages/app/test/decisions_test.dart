@@ -159,7 +159,7 @@ void main() {
     _danaWithHistory(store);
     final chat = store.data!.chats['dana']!;
     // A question too, and a long talk after both: the cards are far up, not built yet.
-    chat.items.add(AskCard(id: 'dq', ts: _at(13, 45), askId: 'ask-dq', from: 'dana', question: 'לשלוח למשה גם את רשימת השינויים?', options: const [AskOption(id: 'y', label: 'כן'), AskOption(id: 'n', label: 'לא')]));
+    chat.items.add(AskCard(id: 'dq', ts: _at(13, 45), askId: 'ask-dq', from: 'dana', question: 'לשלוח לרוני גם את רשימת השינויים?', options: const [AskOption(id: 'y', label: 'כן'), AskOption(id: 'n', label: 'לא')]));
     for (var i = 0; i < 40; i++) {
       chat.items.add(TextMsg(id: 'pad$i', ts: _at(14, 0), text: 'שורה $i'));
     }
@@ -252,7 +252,7 @@ void main() {
   testWidgets('a question\'s whole text shows in the card, and "לשאלה" opens its details', (tester) async {
     final store = await pumpApp(tester, home: const SizedBox());
     final chat = Conversation(identityId: 'dana', items: [
-      AskCard(id: 'dq', ts: _at(13, 45), askId: 'ask-dq', from: 'dana', headline: 'לשלוח למשה את רשימת השינויים?',
+      AskCard(id: 'dq', ts: _at(13, 45), askId: 'ask-dq', from: 'dana', headline: 'לשלוח לרוני את רשימת השינויים?',
           question: 'הרשימה ארוכה: **14 שינויים** מאז הגרסה הקודמת, כולל התיקון לתמונות.', options: const [AskOption(id: 'y', label: 'כן'), AskOption(id: 'n', label: 'לא')]),
       for (var i = 0; i < 40; i++) TextMsg(id: 'pad$i', ts: _at(14, 0), text: 'שורה $i'),
     ]);

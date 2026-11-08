@@ -6,14 +6,14 @@
 #                                         check on it. Creates nothing on GitHub and touches no checkout.
 #   scripts/split-company.sh              the same, then creates the repo, pushes, and clones it to COMPANY_HOME.
 #
-# Options: --repo owner/name (default hive-owner/my-company) · --home DIR (default ~/company) ·
+# Options: --repo owner/name (default <owner of the engine's origin>/company) · --home DIR (default ~/company) ·
 #          --engine DIR (the engine checkout to split from, default this one; it is cloned from its origin, so the
 #          split starts from origin/main and not from local state).
 # Does not deploy and does not change hq.config.json in the state dir: that is `scripts/deploy.sh hq` (runbook).
 set -Eeuo pipefail
 
 DRY=0
-REPO=hive-owner/my-company
+REPO=""
 CHOME="$HOME/company"
 ENGINE="$(cd "$(dirname "$0")/.." && pwd -P)"
 while (($#)); do
@@ -39,6 +39,7 @@ git filter-repo --version >/dev/null 2>&1 || die "אין git-filter-repo. התק
 url="$(git -C "$ENGINE" remote get-url origin)" || die "ל-$ENGINE אין origin"
 slug="$(sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##' <<<"$url")"
 [[ "$slug" =~ ^[^/]+/[^/]+$ ]] || die "origin של $ENGINE ($url) הוא לא repo ב-GitHub"
+[[ -n "$REPO" ]] || REPO="${slug%%/*}/company"
 [[ "$slug" != "$REPO" ]] || die "--repo הוא ה-repo של המנוע עצמו"
 if [[ -e "$CHOME" ]] && [[ -n "$(ls -A "$CHOME" 2>/dev/null)" ]]; then die "$CHOME כבר קיים ולא ריק"; fi
 if gh repo view "$REPO" >/dev/null 2>&1; then

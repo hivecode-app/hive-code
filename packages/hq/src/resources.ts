@@ -159,7 +159,7 @@ export interface AttrCtx {
   /** project ids of org.yaml */
   projects: ReadonlySet<string>;
   /** resources.map: an exact name (a cgroup's last segment, a container, a compose project) → project id. A key `<machine>:<name>`
-   *  holds on that machine only and wins over the bare name (user@1000.service is Ran's desktop on the laptop, not elsewhere);
+   *  holds on that machine only and wins over the bare name (user@1000.service is the owner's desktop on the laptop, not elsewhere);
    *  a key `cmd:<text>` (or `<machine>:cmd:<text>`) takes a scope whose command lines contain the text (a session has no stable name).
    *  Order: names (the machine's, then bare), then commands (the machine's, then bare), then the defaults. */
   map: Readonly<Record<string, string>>;
@@ -167,18 +167,13 @@ export interface AttrCtx {
   dockerRead: boolean;
 }
 
-/** Pseudo-project for what is not a project of org.yaml but is known: Ran's own Claude sessions. */
+/** Pseudo-project for what is not a project of org.yaml but is known: the owner's own Claude sessions. */
 export const OWNER_SESSIONS = 'owner-sessions';
-const BUILTIN_NAMES: Record<string, string> = { [OWNER_SESSIONS]: 'הסשנים של רן' };
-/** What the company runs on a machine, by the unit's own name: the default of `resources.map` (which wins over it). Exact names, then patterns. */
-const DEFAULT_MAP: Record<string, string> = {
-  'user@1001.service': 'agent-company', // hq, shift-host and node, and what Ran's login holds
-  'chrome-personal.service': 'agent-company', 'playwright-mcp.service': 'agent-company', 'kasmvnc.service': 'agent-company', // the browser
-  'gha-deploy.service': 'lumo',
-};
+/** What the company runs on a machine by the unit's own name (hq's user, the browser, a deploy runner) is per machine:
+ *  `resources.map` in hq.config.json. The default knows only the owner's remote sessions. */
 const DEFAULT_PATTERNS: [RegExp, string][] = [[/^claude-remote@.+\.service$/, OWNER_SESSIONS]];
 /** Project of a unit by default, from its last path segment. */
-const defaultOf = (last: string): string | null => DEFAULT_MAP[last] ?? DEFAULT_PATTERNS.find(([re]) => re.test(last))?.[1] ?? null;
+const defaultOf = (last: string): string | null => DEFAULT_PATTERNS.find(([re]) => re.test(last))?.[1] ?? null;
 /** The company's own project: a shift with no task and no project (a permanent worker, the manager) is the company's. */
 const COMPANY = 'agent-company';
 
@@ -264,7 +259,7 @@ function localRun(script: string, timeoutMs: number): Promise<string> {
   return new Promise((res, rej) => execFile('bash', ['-c', script], { timeout: timeoutMs, maxBuffer: 8 << 20 }, (e, out) => (e && !out ? rej(e) : res(String(out)))));
 }
 
-/** ssh to a witness host (no master), the same way probes.ts reaches ci-host. */
+/** ssh to a witness host (no master), the same way probes.ts reaches it. */
 function sshRun(ssh: string, identityFile: string | null): Run {
   return (script, timeoutMs) => new Promise((res, rej) => {
     const args = [...(identityFile ? ['-i', identityFile] : []), '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', ssh, `bash -c ${q(script)}`];
@@ -312,7 +307,7 @@ export class Resources {
         { name: 'local', run: localRun },
         ...hq.nodes.list.map((n): Machine => (n.status?.up ? { name: n.def.name, run: (s, t) => n.exec(`bash -c ${q(s)}`, undefined, t) }
           : { name: n.def.name, run: null, why: n.status?.error ?? 'כבוי או שלא נבדק' })),
-        ...(w ? [{ name: 'ci-host', run: sshRun(w.ssh, w.identityFile) }] : []),
+        ...(w ? [{ name: w.name ?? 'witness', run: sshRun(w.ssh, w.identityFile) }] : []),
       ];
     });
   }
@@ -390,7 +385,7 @@ export class Resources {
       const by = new Map<string, MachineView['holders'][number]>();
       for (const u of rows) {
         const key = u.project ?? '';
-        const h = by.get(key) ?? { project: u.project, name: u.project ? (BUILTIN_NAMES[u.project] ?? this.hq.projectName(u.project)) : 'לא מזוהה', mem_mb: 0, cpu_pct: null, count: 0, kinds: [] };
+        const h = by.get(key) ?? { project: u.project, name: u.project ? (u.project === OWNER_SESSIONS ? `הסשנים של ${this.hq.mailbox.names.owner.name}` : this.hq.projectName(u.project)) : 'לא מזוהה', mem_mb: 0, cpu_pct: null, count: 0, kinds: [] };
         h.mem_mb = Math.round((h.mem_mb + u.mem_mb) * 10) / 10;
         if (u.cpu_pct != null) h.cpu_pct = Math.round(((h.cpu_pct ?? 0) + u.cpu_pct) * 10) / 10;
         h.count++;

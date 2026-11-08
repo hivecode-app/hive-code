@@ -64,10 +64,10 @@ const PUNCT = /^[\s,.:;!-]+|[\s,.:;!-]+$/g;
 
 /**
  * "לילה" alone, or with an addition: "לילה, רק לומו", "לילה בלי פריסות", "לילה עד 7".
- * `רק <p>[ ו<p>]` becomes the scope filter on the queue; `עד HH[:MM]` the end hour (in `tz`); the rest is a note to every task.
+ * `רק <p>[ ו<p>]` becomes the scope filter on the queue (a project id, or how he says it: `aliases`, hq.config.json `projectAliases`); `עד HH[:MM]` the end hour (in `tz`); the rest is a note to every task.
  * Not a trigger: anything that does not start with the word לילה ("לילה טוב" is a goodnight, not an order).
  */
-export function parseNightTrigger(body: string, projects: string[], now: number, tz: string): NightTrigger | null {
+export function parseNightTrigger(body: string, projects: string[], now: number, tz: string, aliases: Readonly<Record<string, string>> = {}): NightTrigger | null {
   const m = /^לילה(?=$|[\s,.:;!-])[\s,.:;!-]*(.*)$/s.exec(body.trim());
   if (!m) return null;
   let rest = m[1]!.trim();
@@ -75,7 +75,7 @@ export function parseNightTrigger(body: string, projects: string[], now: number,
 
   // "רק לומו, טיקי בלי פריסות": take the project names right after רק, stop at the first word that is not one.
   let scope: string[] | null = null;
-  const alias = (n: string) => projects.find((p) => p === n || p.toLowerCase() === n.toLowerCase() || HEBREW_NAMES[n] === p);
+  const alias = (n: string) => projects.find((p) => p === n || p.toLowerCase() === n.toLowerCase() || aliases[n] === p);
   const toks = rest.split(/\s+/);
   const at = toks.findIndex((t) => t.replace(PUNCT, '') === 'רק');
   if (at >= 0) {
@@ -101,9 +101,6 @@ export function parseNightTrigger(body: string, projects: string[], now: number,
   rest = rest.replace(/\s+/g, ' ').replace(PUNCT, '');
   return { scope, note: rest || null, until };
 }
-
-/** How he says the project names in Hebrew. */
-const HEBREW_NAMES: Record<string, string> = { 'לומו': 'lumo', 'טיקי': 'tiki-bot-go', 'טיקי-בוט': 'tiki-bot-go', 'קול': 'voice-bot', 'החברה': 'agent-company' };
 
 export interface NightRow {
   id: number; started_at: number; ended_at: number | null; until_at: number | null; scope: string | null; note: string | null;
@@ -180,7 +177,7 @@ export class Night {
   private onMessage(m: MessageRow): void {
     if (m.from_identity !== OWNER || m.kind !== 'tell') return;
     const now = this.store.now();
-    const trig = parseNightTrigger(m.body, loadCharters(this.cfg.companyDir).map((c) => c.project), now, this.timeZone());
+    const trig = parseNightTrigger(m.body, loadCharters(this.cfg.companyDir).map((c) => c.project), now, this.timeZone(), this.cfg.projectAliases);
     const cur = this.current();
     if (trig) {
       if (!cur) this.store.bg(this.start({ ...trig, by: m.to_identity }), 'night.start');

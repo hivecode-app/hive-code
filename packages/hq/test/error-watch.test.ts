@@ -29,7 +29,7 @@ const items = (e: TestEnv) => e.hq.inbox.open().filter((i) => i.kind === 'ask' &
 const sigs = (e: TestEnv) => e.hq.store.db.prepare('SELECT * FROM error_signatures').all() as { sig: string; state: string; count: number; cycle_count: number; task_id: number | null; muted_until: number | null }[];
 
 test('signature: the same error with other ids, numbers and paths is one; another component is another', () => {
-  const a = { type: 'turn.error', component: 'agent-company-t244', message: 'API Error 500 at /home/owner/x.ts:12 for msg adi-1:mvigd529-2geca04177' };
+  const a = { type: 'turn.error', component: 'agent-company-t244', message: 'API Error 500 at /home/ran/x.ts:12 for msg adi-1:mvigd529-2geca04177' };
   const b = { type: 'turn.error', component: 'agent-company-t251', message: 'API Error 503 at /tmp/y.ts:7 for msg yoav-3:mvi00000-0000000000' };
   assert.equal(signature(a), signature(b));
   assert.notEqual(signature(a), signature({ ...a, component: 'dana' }));

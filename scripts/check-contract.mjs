@@ -184,7 +184,8 @@ function checkSymbol(owner, sym, where) {
 
 // The Authority block: from its heading to the closing marker, matched as whole lines.
 const AUTHORITY_HEADING = '# Authority — read this before you decide you are not allowed';
-const AUTHORITY_END = '<!-- /RAN:AUTHORITY -->';
+// The closing marker carries the owner's name in capitals (`<!-- /<NAME>:AUTHORITY -->`), as in his own CLAUDE.md.
+const AUTHORITY_END = /^<!-- \/[A-Z][A-Z0-9_-]*:AUTHORITY -->$/;
 // sha256 of the verbatim block in ~/.claude/CLAUDE.md as copied on 20/10/2026.
 // When he changes the source, copy the new text into directives.md and update this pin in the same PR.
 const AUTHORITY_SHA256 = '56ec6097c8334b54d9450898aeeaa08570d6f5bd0237eb79028a4c675efc2220';
@@ -201,7 +202,7 @@ export function extractAuthority(text, heading = AUTHORITY_HEADING, endMarker = 
   const lines = text.split(/\r?\n/);
   const start = lines.indexOf(heading);
   if (start < 0) return null;
-  const end = lines.indexOf(endMarker, start);
+  const end = lines.findIndex((l, i) => i > start && (typeof endMarker === 'string' ? l === endMarker : endMarker.test(l)));
   if (end < 0) return null;
   return lines.slice(start, end).join('\n').trimEnd();
 }
@@ -556,14 +557,14 @@ export function main() {
     } else if (!dLines.includes(AUTHORITY_HEADING)) err(`company/directives.md: the Authority heading is missing ("${AUTHORITY_HEADING}" or "${GENERIC_AUTHORITY_HEADING}")`);
     else {
     const block = extractAuthority(d);
-    if (block === null) err(`company/directives.md: the Authority block must run from "${AUTHORITY_HEADING}" to a line "${AUTHORITY_END}"`);
+    if (block === null) err(`company/directives.md: the Authority block must run from "${AUTHORITY_HEADING}" to a line "<!-- /<NAME>:AUTHORITY -->"`);
     else {
       if (sha256(block) !== AUTHORITY_SHA256) err('company/directives.md: the Authority block differs from the pinned verbatim copy. Copy it again from ~/.claude/CLAUDE.md and update AUTHORITY_SHA256 in the same PR');
       const source = join(homedir(), '.claude', 'CLAUDE.md');
       if (existsSync(source)) {
         const src = extractAuthority(readFileSync(source, 'utf8'));
         const srcText = readFileSync(source, 'utf8');
-        if (src === null && srcText.split(/\r?\n/).includes(AUTHORITY_HEADING)) err(`~/.claude/CLAUDE.md has the Authority heading but no "${AUTHORITY_END}" line; cannot compare`);
+        if (src === null && srcText.split(/\r?\n/).includes(AUTHORITY_HEADING)) err(`~/.claude/CLAUDE.md has the Authority heading but no "<!-- /<NAME>:AUTHORITY -->" line; cannot compare`);
         if (src !== null && src !== block) err('company/directives.md: the Authority block differs from ~/.claude/CLAUDE.md on this machine. Copy it again, word for word');
       }
     }

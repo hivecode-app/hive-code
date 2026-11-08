@@ -17,7 +17,7 @@ test('#480: the five classes are refused', () => {
     ':(){ :|:& };:',
     'shutdown -h now', 'sudo reboot', 'poweroff', 'halt', 'systemctl poweroff', 'sudo systemctl reboot', 'ls && /sbin/shutdown now',
     // The review of #504: a full home path, wrappers, flags after the target, a shell's -c, a raw redirect.
-    'rm -rf /home/u', 'rm -rf /home/owner/', 'rm -rf /home/owner/*', 'sudo -u root rm -rf /', 'timeout 5 reboot', 'time rm -rf ~',
+    'rm -rf /home/u', 'rm -rf /home/ran/', 'rm -rf /home/ran/*', 'sudo -u root rm -rf /', 'timeout 5 reboot', 'time rm -rf ~',
     'nice rm -rf /', 'xargs rm -rf ~', "bash -c 'rm -rf ~'", 'rm ~ -rf', '\\rm -rf ~', 'cat x > /dev/sda', 'dd of=/dev/mapper/root',
     'echo "$(rm -rf ~)"', 'X=1 env Y=2 rm -rf /', 'init 0', '{ reboot; }',
   ]) assert.match(bash(c) ?? '', /^Permission authority refused this: /, c);

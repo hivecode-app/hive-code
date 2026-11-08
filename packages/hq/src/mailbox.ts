@@ -6,6 +6,7 @@
 import { artifactInfo, type ArtifactInfo } from './artifacts.ts';
 import { ownerSystemCopy } from './system-copy.ts';
 import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import { g, loadNames, OWNER, englishLines, hebrewLines, type OwnerLanguage, type CompanyNames, type AskDTO, type InboxItemDTO, type AskRequest, type DeliveryState, type MessageKind, type MessageState, type Priority, type TellRequest, type Urgency, type WaitingOn } from '@company/shared';
 import type { Store } from './store.ts';
 import type { HqConfig } from './config.ts';
@@ -183,6 +184,10 @@ export class Mailbox {
 
   /** The owner's and the manager's names in texts, from org.yaml (re-read when it changes). */
   get names(): CompanyNames { return loadNames(this.cfg.companyDir, this.cfg.managerId); }
+  /** The servers' own names, which the owner reads as "השרת": this machine, its nodes that are servers (not a portable one), the probe witness. */
+  private machineNames(): string[] {
+    return [hostname(), ...(this.cfg.nodes ?? []).filter((n) => !n.portable).map((n) => n.name), ...(this.cfg.probeWitness?.name ? [this.cfg.probeWitness.name] : [])];
+  }
 
   label(id: string): string {
     if (id === OWNER) return this.names.owner.name;
@@ -294,7 +299,7 @@ export class Mailbox {
     const fyi = req.fyi === true && from !== OWNER && from !== 'hq' && req.to !== OWNER && req.to !== 'hq'
       && (req.kind ?? 'tell') === 'tell' && priority !== 'now' && !(req.ref && this.get(req.ref)?.from_identity === req.to);
     this.store.db.prepare(`INSERT INTO messages (id, from_identity, to_identity, kind, body, urgency, priority, ref, text_ref, attachments, created_at, fyi, alert_hint)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, from, req.to, req.kind ?? 'tell', req.to === OWNER && req.kind === 'system' ? ownerSystemCopy(req.body ?? '', (id) => this.label(id)) : req.body ?? '', req.urgency ?? 'normal',
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, from, req.to, req.kind ?? 'tell', req.to === OWNER && req.kind === 'system' ? ownerSystemCopy(req.body ?? '', (id) => this.label(id), this.machineNames()) : req.body ?? '', req.urgency ?? 'normal',
       priority, req.ref ?? null, req.text_ref ?? null, files.length ? JSON.stringify(files) : null, now, fyi ? 1 : 0, req.to === OWNER && priority !== 'now' ? (req.alert_hint ?? (req.fyi ? 'fyi' : null)) : null);
     const m = this.get(id)!;
     this.store.emit('message.new', req.to, m);
@@ -622,7 +627,7 @@ export class Mailbox {
 
   /**
    * A turn he did not start (a teammate's message, hq, a task) still streams its text into his conversation, and he reads
-   * it as it is written (lumo-t552 25/10: the Easy promo, written after inbal's message). Its final text is kept as a
+   * it as it is written (lumo-t552 25/10: a promo, written after a colleague's message). Its final text is kept as a
    * `note`: in the conversation for good, after the event window has moved on, but no alert, not unread, and it answers
    * nothing. Only the final text (after the last tool): a turn that wrote "בודק" and went on with tools keeps nothing. A
    * turn that reached him itself (a tool, or a message stored to him in the turn, e.g. the API from Bash) keeps nothing:

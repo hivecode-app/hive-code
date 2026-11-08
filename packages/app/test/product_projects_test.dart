@@ -16,6 +16,8 @@ void main() {
     _id('eli', 'אלי', 'personal', 'permanent', 'lead', 'resting'),
     _id('adi', 'עדי', 'agent-company', 'project', 'lead', 'resting', project: 'agent-company'),
     _id('dana', 'דנה', 'lumo', 'project', 'lead', 'working', project: 'lumo'),
+    _id('maya', 'מאיה', 'shop-team', 'project', 'lead', 'working', project: 'shop'),
+    _id('shop-t3', 'עומר', 'shop-t3', 'task', 'ephemeral', 'working', project: 'shop'),
     for (var i = 1; i <= 16; i++) _id('agent-company-t$i', 'עובד $i', 'agent-company-t$i', 'task', 'ephemeral', i == 1 ? 'working' : 'done', project: 'agent-company'),
     _id('lumo-t40', 'קרן', 'lumo-t40', 'task', 'ephemeral', 'working', project: 'lumo'),
     // An errand with no project, opened by a task worker of lumo: it works for lumo.
@@ -27,8 +29,9 @@ void main() {
   ];
   final projects = [
     {'id': 'agent-company', 'name': 'החברה', 'status': 'active', 'team': 'agent-company'},
-    {'id': 'lumo', 'name': 'האפליקציה לומו', 'status': 'active', 'team': 'lumo'},
+    {'id': 'lumo', 'name': 'האפליקציה לומו', 'status': 'active', 'team': 'lumo', 'symbol': 'local_shipping'},
     {'id': 'voice-bot', 'name': 'הבוט הקולי', 'status': 'active', 'team': 'voice-bot'},
+    {'id': 'shop', 'name': 'החנות', 'status': 'dormant', 'team': 'shop-team', 'symbol': 'forum'},
     {'id': 'rates-bot', 'name': 'בוט המחירים', 'status': 'dormant', 'team': null},
   ];
   final d = mapSnapshot(board: board, inbox: const [], asks: const [], toggles: const [], tasks: const [], projects: projects, now: DateTime(2026, 11, 7, 12));
@@ -52,6 +55,15 @@ void main() {
     expect(d.projectTone('agent-company'), isNot(d.projectTone('lumo')));
     expect(d.projectTone('lumo'), isNot(d.projectTone('voice-bot')));
     expect(d.toneOf('yoav'), isNull, reason: 'a standing team without a tone stays slate');
+  });
+
+  test('a project\'s workers wear its team\'s org.yaml symbol; the company\'s own teams keep theirs', () {
+    expect(d.teamOf('dana')!.symbol, 'local_shipping');
+    expect(d.teamOf('lumo-t40')!.symbol, 'local_shipping', reason: 'a task worker shows its host\'s symbol');
+    expect(d.teamOf('lumo-t41')!.symbol, 'local_shipping');
+    expect(d.teamOf('maya')!.symbol, 'forum', reason: 'a team no table in the app knows: the symbol is hq\'s');
+    expect(d.teamOf('shop-t3')!.symbol, 'forum');
+    expect(d.teamOf('yoav')!.symbol, 'explore');
   });
 
   test('projectName reads his name for an id', () {

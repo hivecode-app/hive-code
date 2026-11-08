@@ -2,7 +2,7 @@
 # Hands-on QA of the real app on the laptop's emulator (AVD `laya`, read-only): installs a profile
 # build of the working tree and plays a steps file, saving screenshots back to
 # ~/.local/state/agent-company/qa/emu/<name>/. Only one heavy job at a time on the laptop: refuses
-# while a Lumo CI job or another emulator runs. Every adb call targets this run's emulator only
+# while an Android CI job or another emulator runs. Every adb call targets this run's emulator only
 # (its own port), never a phone that happens to be plugged in.
 #
 # Steps (one per line; blank lines and # comments are skipped):

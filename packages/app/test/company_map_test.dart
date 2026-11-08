@@ -19,15 +19,16 @@ const _day = '2026-10-20';
 const _desktop = Size(1440, 900);
 const _phoneSide = Size(844, 390);
 
-MapDay _small() => MapDay.fromJson({
+MapDay _small({String owner = 'רן', List<Map<String, dynamic>> extraTeams = const []}) => MapDay.fromJson({
       'day': _day,
       'upTo': kDayMs,
       'teams': [
         {'id': 'management', 'name': 'הנהלה', 'symbol': 'account_tree', 'tone': 'slate', 'lead': 'yoav', 'project': null},
-        {'id': 'lumo', 'name': 'לומו', 'symbol': 'forum', 'tone': 'teal', 'lead': 'dana', 'project': 'lumo'},
+        {'id': 'lumo', 'name': 'לומו', 'symbol': 'local_shipping', 'tone': 'teal', 'lead': 'dana', 'project': 'lumo'},
+        ...extraTeams,
       ],
       'people': [
-        {'id': 'owner', 'name': 'רן', 'mono': 'עק', 'team': 'management', 'role': 'owner'},
+        {'id': 'owner', 'name': owner, 'mono': owner, 'team': 'management', 'role': 'owner'},
         {'id': 'hq', 'name': 'hq', 'mono': '', 'team': 'management', 'role': 'system'},
         {'id': 'yoav', 'name': 'יואב', 'mono': 'יו', 'team': 'management', 'role': 'lead'},
         {'id': 'dana', 'name': 'דנה', 'mono': 'דנ', 'team': 'lumo', 'role': 'lead'},
@@ -92,6 +93,23 @@ void main() {
     expect(l.alpha('lumo-t1', 2 * _h), 1);
     expect(l.alpha('lumo-t1', 8 * _h), 0);
     expect(l.alpha('dana', 8 * _h), 1);
+  });
+
+  test('project teams take the places around the owner in org.yaml order, whatever their ids; a standing team takes none', () {
+    final l = MapLayout(_small(extraTeams: [
+      {'id': 'legal', 'name': 'משפטי', 'symbol': 'gavel', 'tone': 'slate', 'lead': null, 'project': null},
+      {'id': 'shop', 'name': 'החנות', 'symbol': 'storefront', 'tone': 'olive', 'lead': null, 'project': 'shop'},
+    ]));
+    expect(l.anchor['lumo'], const Offset(985, 270));
+    expect(l.anchor['shop'], const Offset(1010, 520), reason: 'the second project, though a standing team came before it');
+    expect(l.anchor['legal'], isNot(anyOf(const Offset(985, 270), const Offset(1010, 520))));
+  });
+
+  testWidgets('the owner\'s name under them is the one hq sends', (tester) async {
+    await pumpApp(tester, size: _desktop, home: _screen(_small(owner: 'מיכל'), at: 8 * _h));
+    await tester.pump();
+    expect(find.text('מיכל'), findsWidgets);
+    expect(find.text('רן'), findsNothing);
   });
 
   test('a wide short screen spreads the teams along it, and the circles stay the size they are', () {

@@ -1,19 +1,18 @@
 // One app for every server (pairing.ts): the pairing page and assetlinks.json, served by hq itself.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { makeEnv } from './helpers.ts';
-import { APK_ORIGIN } from '../src/config.ts';
 import { APP_PACKAGE, assetLinks, certFingerprint, pairLink } from '../src/pairing.ts';
 
-const REPO = join(import.meta.dirname, '..', '..', '..');
-const APK = APK_ORIGIN;
+// bytes 0..31 as the cert's sha256.
+const APK = 'android:apk-key-hash:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+const PRINT = [...Array(32).keys()].map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(':');
 
-test('pairing: assetlinks.json from the APK origin is the file hq-host serves today', () => {
-  const live = JSON.parse(readFileSync(join(REPO, 'deploy', 'caddy', 'assetlinks.json'), 'utf8'));
-  assert.deepEqual(assetLinks(['https://app.example.com', APK]), live);
-  assert.equal(live[0].target.package_name, APP_PACKAGE);
+test('pairing: assetlinks.json from the APK origin', () => {
+  assert.deepEqual(assetLinks(['https://app.example.com', APK]), [{
+    relation: ['delegate_permission/common.handle_all_urls', 'delegate_permission/common.get_login_creds'],
+    target: { namespace: 'android_app', package_name: APP_PACKAGE, sha256_cert_fingerprints: [PRINT] },
+  }]);
   assert.equal(certFingerprint('https://x'), null);
   assert.deepEqual(assetLinks(['https://app.example.com']), []);
 });

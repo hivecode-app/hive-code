@@ -38,7 +38,7 @@ const CATALOG = {
     'ssh:ci-host': { type: 'ssh', host: 'ci-host.example', user: 'root', env: 'ci', allow: [{ argv: ['docker', 'images'] }] },
     'hq:query': { type: 'hq-query', env: 'internal' },
     'ssh:prod-box': { type: 'ssh', host: 'prod.example', user: 'root', env: 'prod', allow: [{ argv: ['docker', 'ps'] }, { argv: ['docker', 'exec', '*', 'node', '-v'], class: 'read' }, { argv: ['docker', 'restart', '*'], class: 'write' }, { argv: ['docker', 'exec', '*', '**'], class: 'exec' }] },
-    'build:hq-host': { type: 'build', registry: 'ghcr.io/hive-owner/', env: 'registry', script: '/engine/scripts/access-build.sh' },
+    'build:hq-host': { type: 'build', registry: 'ghcr.io/hive-owner/', owners: ['hive-owner'], env: 'registry', script: '/engine/scripts/access-build.sh' },
     'kube:other': { type: 'kube', namespace: 'other', env: 'dev', projects: ['someone-else'] },
   },
 };

@@ -73,7 +73,13 @@ test('fail_after consecutive failures → one urgent message to רותם with ev
       const ok = p.id === 'api-health' ? (outcomes.shift() ?? true) : true;
       return { ok, status: ok ? 200 : 503, latencyMs: 12, error: ok ? null : 'status 503, expected 200' };
     };
-    const toRotem = () => hq.store.db.prepare(`SELECT * FROM messages WHERE to_identity = 'rotem' ORDER BY created_at`).all() as
+    // A kind this hq doesn't have (k8s) is told once, with why; the rest of the test is about api-health.
+    const unsupported = hq.store.db.prepare(`SELECT body FROM messages WHERE to_identity = 'rotem' AND id LIKE 'probe-lumo/k8s-rollout-unsupported-%'`).all() as { body: string }[];
+    assert.equal(unsupported.length, 1);
+    assert.match(unsupported[0]!.body, /lumo\/k8s-rollout באמנה של lumo לא רץ: אין ב-hq הזה סוג probe .*\(k8s, every\)/);
+    hq.probes.reload();
+    assert.equal((hq.store.db.prepare(`SELECT COUNT(*) n FROM messages WHERE id LIKE '%-unsupported-%'`).get() as { n: number }).n, 1, 'once, not on every reload');
+    const toRotem = () => hq.store.db.prepare(`SELECT * FROM messages WHERE to_identity = 'rotem' AND id NOT LIKE '%-unsupported-%' ORDER BY created_at`).all() as
       { kind: string; urgency: string; priority: string; body: string }[];
     for (let i = 0; i < 2; i++) { await hq.probes.tick(); clock.advance(61_000); }
     assert.equal(toRotem().length, 0, 'no anomaly before fail_after');
@@ -157,6 +163,7 @@ test('witness: all five slow here, fine from ci-host → an event on hq-host, no
     const asked: string[] = [];
     hq.probes.witness = async (p) => { asked.push(p.key); return { ok: true, status: 200, latencyMs: 300, error: null }; };
     hq.probes.host = () => ({ load1: 52, cpus: 8, freeMb: 0 });
+    hq.probes.machine = 'hq-host';
     for (let i = 0; i < 3; i++) { await hq.probes.tick(); clock.advance(61_000); }
     assert.equal(asked.length, 5, 'asked only once they reached fail_after');
     const msgs = hq.store.db.prepare(`SELECT kind, priority, body FROM messages WHERE to_identity = 'rotem'`).all() as { kind: string; priority: string; body: string }[];
@@ -413,6 +420,8 @@ const ROUND = 5 * 60_000;
 async function netEnv(n: number, lossy: (host: string, round: number) => boolean, httpOk = () => true) {
   const env = await makeEnv({ projects: { 'tiki-bot-go': NODES(n) } });
   const { hq } = env;
+  hq.probes.witnessName = 'ci-host';
+  hq.probes.machine = 'hq-host';
   let round = 0;
   hq.probes.run = (p) => p.kind === 'http'
     ? Promise.resolve(httpOk() ? { ok: true, status: 200, latencyMs: 40, error: null } : { ok: false, status: 503, latencyMs: 40, error: 'status 503, expected 200' })
@@ -966,6 +975,7 @@ test('http probe: a timeout, a refused connection, a name that does not exist (N
 async function failFor(fail: (t: number) => false | 'answer' | 'timeout' | 'noAnswer' | 'unknown', ms: number, witnessOk = false) {
   const env = await makeEnv({ projects: { lumo: FAIL_FOR } });
   const { hq, clock } = env;
+  hq.probes.machine = 'hq-host';
   const t0 = hq.store.now();
   const runs: number[] = [];
   const asked: number[] = [];
@@ -1079,4 +1089,22 @@ test('fail_for: a flapping service (scheduled runs fail, the retry after each pa
     assert.equal(r.anomalies.length, 1, 'three scheduled failures in a row, as before fail_for');
     assert.match(r.anomalies[0]!.body, /3 כישלונות ברצף \(fail_after=3\)/);
   } finally { await r.env.cleanup(); }
+});
+
+test('a local probe module that fails to load: the unknown kind\'s reason carries its error', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { loadProbeKinds } = await import('../src/probe-kit.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'hq-probe-kinds-'));
+  try {
+    writeFileSync(join(dir, 'broken.mjs'), 'throw new Error("no kit here")\n');
+    const pk = await loadProbeKinds(dir);
+    assert.deepEqual(pk, { kinds: [], errors: [{ file: 'broken.mjs', error: 'no kit here' }] });
+    const [p] = parseCharterProbes('shop', '---\nmonitoring:\n  - {id: q, queue_depth: orders}\n---\n# shop\n');
+    assert.equal(p!.kind, 'unsupported');
+    assert.match(p!.reason!, /מודול מקומי לא נטען \(broken\.mjs: no kit here\)/);
+  } finally {
+    await loadProbeKinds(join(dir, 'none'));
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

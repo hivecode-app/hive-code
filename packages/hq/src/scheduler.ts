@@ -58,11 +58,11 @@ export function capacity(cfg: HqConfig, mem: MemInfo, running: number, heldMb = 
  * links of a Go test, 0.5–0.75GB each); at 01:50 the same, at load 107.
  *  - `stalled`: memory PSI `some avg10` at or over psiMaxPct (10). PSI is the kernel's own measure of time lost waiting for
  *    memory, so it sees thrashing that MemAvailable does not (page cache counted as free while it is being re-read). On a
- *    calm hq-host it is under 1; 10 means a tenth of every second some task is stuck on memory, which is where the API slows.
+ *    calm main server it is under 1; 10 means a tenth of every second some task is stuck on memory, which is where the API slows.
  *  - swap free under swapLowMb (512) while memory already stalls a little (PSI at least swapPsiPct, 1): swap is what absorbed
  *    a build's spike, and with it full the next spike lands on RAM and then on hq. The reserve grows by swapLowExtraMb (2048),
  *    the size of the burst that froze it (three builds together). Full swap alone is not pressure: cold pages sit there for
- *    days (hq-host: 4GB full with 7–9GB available and PSI 0), and the extra reserve would be on for good, starving builds.
+ *    days (one main server: 4GB full with 7–9GB available and PSI 0), and the extra reserve would be on for good, starving builds.
  *    A machine that does not report PSI gets the extra reserve on swap alone.
  * A machine that reports neither (a node's poll, an old kernel) gets the plain reserve.
  */
@@ -859,7 +859,7 @@ export class Scheduler {
     if (t.worktree) {
       const { c } = this.checkoutOf(t);
       if (!(await ws.ensure(t.worktree, c?.path, ch ?? undefined))) throw new WorktreeGone(`task ${t.id}: worktree ${t.worktree} is gone and its branch too`);
-      return { path: t.worktree, note: worktreeNote(t.worktree, ch) + nodeNote(t.machine) + this.charterNote(t) };
+      return { path: t.worktree, note: worktreeNote(t.worktree, ch) + nodeNote(t.machine, this.mailbox.names.owner.name) + this.charterNote(t) };
     }
     // Started before hq made worktrees: its session and work live where it ran (hq's default cwd and
     // a worktree the worker made itself). Moving it would orphan both.
@@ -871,7 +871,7 @@ export class Scheduler {
     const w = await ws.create(ch, c, `company-t${t.id}`);
     this.store.db.prepare('UPDATE tasks SET worktree = ?, updated_at = ? WHERE id = ?').run(w.path, this.store.now(), t.id);
     this.store.emit('task.worktree', null, { id: t.id, path: w.path, branch: w.branch, base: w.base });
-    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) + nodeNote(t.machine) + staleNote(w.stale) + this.charterNote(t) + movedNote(t) };
+    return { path: w.path, note: worktreeNote(w.path, ch, w.branch, w.base) + nodeNote(t.machine, this.mailbox.names.owner.name) + staleNote(w.stale) + this.charterNote(t) + movedNote(t) };
   }
 
   /**
@@ -1318,8 +1318,8 @@ export class Scheduler {
   }
 
   /**
-   * close_team's `team` → its task: `t22` / `task-22` / `#22` / `22`, the task worker's identity (`lumo-t22`) or a
-   * shift of it (`lumo-t22-2`), the task's ref, or the worker's display name; a standing worker's identity or name
+   * close_team's `team` → its task: `t22` / `task-22` / `#22` / `22`, the task worker's identity (`app-t22`) or a
+   * shift of it (`app-t22-2`), the task's ref, or the worker's display name; a standing worker's identity or name
    * finds its current task. An open task wins over a done one;
    * two open tasks behind one name are ambiguous (the caller says which).
    */
@@ -1461,14 +1461,14 @@ function worktreeNote(path: string, ch: ReturnType<typeof readCharter>, branch?:
 }
 
 /** A task on a node: what is not there, and how it moves to the main server when it needs that (moveLocal). */
-function nodeNote(machine?: string | null): string {
+function nodeNote(machine?: string | null, owner = 'the owner'): string {
   if (!machine || machine === LOCAL) return '';
-  return `\n**Running on the second server (\`${machine}\`).** It has the checkouts and the toolchains. It has no ssh keys, \`.env\`, kubectl or hq-host secrets: what they give, ask hq for with \`request_access\`, and it runs it on your behalf and returns the output to you. `
-    + 'Examples: `resource: "kube:lumo-dev", argv: ["rollout","status","deploy/api"]` · `resource: "ssh:ci-host"` with a command from the list · `resource: "hq:query", argv: ["select …"]`. The lists are closed: what is not on the list comes back with `unfit` and a suggestion, and a change in production reaches Ran as a card every time (carry on with what does not depend on it and come back with `request`). '
+  return `\n**Running on the second server (\`${machine}\`).** It has the checkouts and the toolchains. It has no ssh keys, \`.env\`, kubectl or the main server's secrets: what they give, ask hq for with \`request_access\`, and it runs it on your behalf and returns the output to you. `
+    + 'Examples: `resource: "kube:<namespace>", argv: ["rollout","status","deploy/api"]` · `resource: "ssh:<host>"` with a command from the list · `resource: "hq:query", argv: ["select …"]`. The lists are closed: what is not on the list comes back with `unfit` and a suggestion, and a change in production reaches ' + owner + ' as a card every time (carry on with what does not depend on it and come back with `request`). '
     + 'What stays on the main server only: a browser, a simulator, flutter, a local file, and a secret kept in a file (`.env`). When the task needs one of them, or `request_access` says there is no alternative: first `commit` what you have (WIP too), then `status` with `state: "needs-local"` and a `note` that says what is missing. The shift here ends, and the task continues on the main server from your branch.';
 }
 
-/** Repos the worktree reads beside it (lumo's server/) that stayed behind on the node (RemoteWorkspaces.create). */
+/** Repos the worktree reads beside it (a sibling repo's server/) that stayed behind on the node (RemoteWorkspaces.create). */
 function staleNote(stale?: string[]): string {
   if (!stale?.length) return '';
   return `\n**Repos that stayed behind on this server** (not at the same commit as on the main server): ${stale.map((l) => `\`${l}\``).join(' · ')}. `

@@ -1,5 +1,5 @@
 // hq's own event loop, frozen (#313): on 25/10 at 21:50 no event was written for 4 seconds, a host's reply lost to its
-// own timeout, and two nws probes failed at 10 seconds. Nothing measured it. Now `monitorEventLoopDelay` does, and a
+// own timeout, and two probes failed at 10 seconds. Nothing measured it. Now `monitorEventLoopDelay` does, and a
 // freeze of STALL_MS or more is one `hq.event_loop_stall` event: how long, and what was running around it (the loops of
 // `every()` and the API routes that began before it ended and had not finished before it began).
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';

@@ -1,41 +1,35 @@
 // probe-runner (B.17), observe-only in phase 1: code, no tokens. Probes are declared in each project
 // charter (company/projects/<p>.md) as a fenced ```yaml block with a top-level `probes:` list
-// (frontmatter `monitoring:` from the B.17 example is accepted too). Phase 1 runs `http` probes;
-// other kinds are listed as unsupported, never silently dropped.
-// `disk` (monitoring-spec §3.2 step 4) is the first ssh-shaped probe: read-only `df`, measured from hq-host only.
-// `whatsapp_log` reads the WhatsApp gateway's log (read-only `kubectl logs --since` over ssh) and judges what it says (whatsappLogBreaches):
-// no incoming message and no status update from Meta for `quiet` in the day (#347), `old` over a share of `forwarded` in the webhook summary, a minute of send failures (26/10),
-// and the automation fields of the summary (easy #346): `unknownNumber`/`lookupFailed`/`notQueued`/`unreadable` over their threshold.
-// Its `Outbound: no status` and `Message failed` lines (easy #355) are judged on their own, without fail_after (whatsapp-failed.ts).
-// `latency` measures network jitter to a host: `ping -c 20 -i 0.2 -q` from hq-host (a node with jitter is a slow node, 22/10).
+// (frontmatter `monitoring:` from the B.17 example is accepted too). Kinds this hq doesn't know, or entries it can't read,
+// are listed as unsupported with the reason and told to the monitoring lead once, never silently dropped.
+// `disk` (monitoring-spec §3.2 step 4) is the first ssh-shaped probe: read-only `df`, measured from hq's machine only.
+// `latency` measures network jitter to a host: `ping -c 20 -i 0.2 -q` from hq's machine (a node with jitter is a slow node, 22/10).
 // `kubelet` reads a cluster over ssh (`kubectl get --raw /version`, `kubectl get nodes`) and compares each node's kubeletVersion to the
-// apiserver's: a node on another version is one anomaly to רותם, held until it matches again (task 697: six 1.34 kubelets on a 1.33 master, 9 days).
+// apiserver's: a node on another version is one anomaly to the monitoring lead, held until it matches again (task 697: six 1.34 kubelets on a 1.33 master, 9 days).
 // No answer (timeout, ssh failed, garbage output) is "unknown": not a failure, never counted toward fail_after.
 // For latency, 100% loss is an answer (a failure); hosts that drop ICMP stay out of the charter.
-// `fail_after` consecutive failures → one `now` message to רותם with the evidence; recovery → one note.
-// `fail_for` (http only, lumo root 6, 27/10): after a failure that got an answer, look again every FAIL_FOR_RETRY_MS, and a failure
+// `fail_after` consecutive failures → one `now` message to the monitoring lead with the evidence; recovery → one note.
+// `fail_for` (http only, 27/10): after a failure that got an answer, look again every FAIL_FOR_RETRY_MS, and a failure
 // still there fail_for after the first one is crossed without waiting for fail_after (then the same witness). The retries are extra
 // runs on top of `every`: they don't count toward fail_after and don't move its schedule. A timeout starts and crosses it like a
 // status (the witness filters out a fault on our side). A timed-out run holds its tick for timeoutMs, so a stuck server is crossed
 // at about fail_for + 2×timeout + the witness: fail_for should be well above timeout; a DNS that didn't answer (EAI_AGAIN) or unknown doesn't start or move that
 // clock, and fail_after still covers it as before.
 // Latency (memory/company/monitoring/probe-alerts-spec.md, 26/10): over avg/mdev with the loss under its threshold is jitter,
-// recorded and counted in a daily digest by node; it wakes רותם only when it lasts JITTER_SUSTAIN_ROUNDS samples in a row and it has
-// an impact (jitterImpact, yoav 28/10): a service probe of its project failing, or the node not Ready, in that window. Without one it
+// recorded and counted in a daily digest by node; it wakes the monitoring lead only when it lasts JITTER_SUSTAIN_ROUNDS samples in a row and it has
+// an impact (jitterImpact, 28/10): a service probe of its project failing, or the node not Ready, in that window. Without one it
 // is noted quietly (probe.jitter_quiet) and counted in the digest, which drafts a Contabo ticket only for a node that had an impact. More than SHARED_MIN_NODES nodes losing pings in one round
 // is one event; it reaches the owner only when it lasts past SHARED_PERSIST_MS and http fails too or there is no witness.
-// `prod: false` (http only; easy's entry link, 03/11): its anomaly arrives at `later`, low urgency, and its failure is no impact for jitter,
+// `prod: false` (http only, 03/11): its anomaly arrives at `later`, low urgency, and its failure is no impact for jitter,
 // a shared event or a root signal.
 // `alertmanager` reads the cluster's own critical alerts over ssh (alertmanager.ts): one message per fingerprint, held until it is gone.
 // `cluster` reads the layer under the services of a whole k3s cluster over one ssh (root-signals.ts): its findings and messages are its own.
-// `lumo_ws` reads the summary of the Lumo websocket in easy's workers over one ssh (lumo-ws.ts): its state and messages are its own.
-// Its discovery (a full scan every discover_every) runs on its own, as `cluster`: a slow scan doesn't hold the other probes.
-// `client_outdated` reads every worker's log for whatsmeow's `Client outdated (405)`, 409 and LoggedOut over one ssh (client-outdated.ts): urgent messages by its thresholds.
-// `ride_dupes` reads duplicate ride notifications in easy's Mongo, one read-only aggregate from hq-host (ride-dupes.ts): one message a round.
+// Other kinds come from outside the engine (ProbeKind, registered by probe-kit.ts from the company's local directory): a probe of
+// one of them is parsed, run, recorded and told through the hooks of its kind.
 import { OWNER, pre } from '@company/shared';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { loadavg, cpus, homedir } from 'node:os';
+import { loadavg, cpus, homedir, hostname } from 'node:os';
 import { execFile } from 'node:child_process';
 import { memInfoMb } from './proc.ts';
 import { tzOffsetMs } from './timezone.ts';
@@ -48,28 +42,23 @@ import type { Mailbox } from './mailbox.ts';
 import type { Inbox } from './inbox.ts';
 import { RootWatch, isSshTarget, type ClusterSpec } from './root-signals.ts';
 import { amRound, isNamespace, readAlertmanager, NS_TIMEOUT_S, RESOLVE_AFTER_MS, type AlertmanagerSpec, type AmReading, type AmState, type LabelSelector } from './alertmanager.ts';
-import { FAILED_AWK, FAILED_AWK_END, emptyFailedState, failedRound, parseFailed, type FailedReading, type FailedSpec, type FailedState } from './whatsapp-failed.ts';
-import { LOGGED_OUT_FLEET, emptyOutdatedState, outdatedCommand, outdatedRound, outdatedSince, parseOutdatedOutput, parseOutdatedTarget, type ClientOutdatedSpec, type OutdatedReading, type OutdatedState } from './client-outdated.ts';
-import { MAX_WINDOW_MS, dupesRound, dupesSince, emptyDupesState, readDupes, type DupesReading, type DupesState, type RideDupesSpec } from './ride-dupes.ts';
-import { discoverCommand, discoverDue, discoverRound, emptyWsDiscovery, emptyWsState, isLabelKey, isLabelValue, kubeTs, parseDiscoverOutput, parseWsOutput, parseWsTarget, stripAnsi, wsCommand, wsRound, wsWatch, type LumoWsSpec, type WsDiscovery, type WsReading, type WsState } from './lumo-ws.ts';
-
-export { stripAnsi };
+import { createHash } from 'node:crypto';
 
 export interface ProbeSpec {
   key: string;              // <project>/<id>
   project: string;
   id: string;
-  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'whatsapp_log' | 'cluster' | 'alertmanager' | 'lumo_ws' | 'client_outdated' | 'ride_dupes' | 'unsupported';
+  /** A kind of the engine, one registered (ProbeKind), or 'unsupported' (then `reason` says why). */
+  kind: 'http' | 'disk' | 'latency' | 'kubelet' | 'cluster' | 'alertmanager' | 'unsupported' | (string & {});
+  reason?: string;
+  /** Unsupported because no field of it is a kind this hq has (a company's kind whose module isn't loaded): told to the lead. */
+  unknownKind?: true;
   url?: string;
   disk?: { target: string; host: string | null; path: string; identityFile: string | null; maxPercent: number };  // host null = local
   latency?: { host: string; maxAvgMs: number; maxMdevMs: number; maxLossPercent: number };
   kubelet?: { target: string; identityFile: string | null };  // ssh target of a machine with kubectl for the cluster (its master)
-  whatsappLog?: WhatsappLogSpec;
   alertmanager?: AlertmanagerSpec;  // the cluster's Alertmanager in each namespace listed, read over ssh to its master
   cluster?: ClusterSpec;     // root signals (root-signals.ts): the k3s master to read the cluster from, over ssh
-  lumoWs?: LumoWsSpec;     // the Lumo websocket of easy's workers (lumo-ws.ts), read over ssh to the master
-  clientOutdated?: ClientOutdatedSpec;  // whatsmeow's 405, 409 and LoggedOut in easy's workers (client-outdated.ts), read over ssh to the master
-  rideDupes?: RideDupesSpec;  // duplicate ride notifications in easy's worker_ride_tracker (ride-dupes.ts), read from Mongo
   prod?: false;              // `prod: false` in the charter (http only): not production. Its anomaly arrives at `later`, low urgency, and its failure is no impact of jitter or a shared event
   method: string;
   expect: number[];
@@ -83,8 +72,76 @@ export interface ProbeSpec {
 
 /** How often a `fail_for` probe is looked at again while a failure is open. */
 export const FAIL_FOR_RETRY_MS = 10_000;
-/** client_outdated doesn't start when a round of lumo_ws with '*' on its master is due within this: its ~80s read ends before that round. */
-export const WS_ROUND_CLEAR_MS = 120_000;
+
+/** The row of probe_state: a kind's hooks read it (when it last ran) and set anomaly_open themselves. */
+export interface ProbeStateRow { probe_id: string; consecutive_failures: number; anomaly_open: number; last_run_at: number | null; last_ok_at: number | null }
+
+/** What a kind's hooks get from the runner. */
+export interface ProbeContext {
+  store: Store;
+  mailbox: Mailbox;
+  /** The monitoring lead: who the probes' messages go to. */
+  lead: string;
+  /** Every probe of the charters, as last reloaded. */
+  readonly probes: ProbeSpec[];
+  /** Keys being read now (a kind may add its own, as `<key>#scan`). */
+  inflight: Set<string>;
+  state(key: string): ProbeStateRow | undefined;
+  /** The runner's run (a test may replace it): the kind's own `run` for its probes. */
+  run(p: ProbeSpec): Promise<ProbeOutcome>;
+  /** Record an outcome read outside the tick, as the tick records its own (then `round`). */
+  record(p: ProbeSpec, o: ProbeOutcome, now: number): void;
+  /** An identity active in org.yaml. */
+  known(id: string): boolean;
+}
+
+/** A probe kind that isn't the engine's (a company's own product, say): its charter field and its hooks. Registered with
+ *  registerProbeKinds; probe-kit.ts loads them from the company's local directory. */
+export interface ProbeKind {
+  /** The charter field that declares it (`<kind>: <target>`), and the probe's `kind`. */
+  kind: string;
+  /** The fields this kind adds to the ProbeSpec, and its defaults for `every` and `timeout`. null: the entry is malformed (unsupported). */
+  parse(r: Record<string, unknown>, h: { identityFile: string | null }): { fields: Record<string, unknown>; everyMs?: number; timeoutMs?: number } | null;
+  /** Read once: only the outcome, never a change. No answer is `unknown`. */
+  run(p: ProbeSpec, ctx: ProbeContext): Promise<ProbeOutcome>;
+  /** Not run by the tick: its `tick` starts its own reads (a long one doesn't hold the other probes) and records them (ctx.record). */
+  alone?: boolean;
+  /** The probe as the tick runs it (what it learned since the charter, say). */
+  prepare?(p: ProbeSpec, ctx: ProbeContext): ProbeSpec;
+  /** Every tick, before the tick's own runs, with this kind's probes. Not awaited. */
+  tick?(probes: ProbeSpec[], ctx: ProbeContext, now: number): void;
+  /** After every recorded outcome, an unknown one too. */
+  round?(p: ProbeSpec, o: ProbeOutcome, ctx: ProbeContext, now: number): void;
+  /** Its messages are its own (round): fail_after and the recovery note don't apply. */
+  ownMessages?: boolean;
+  /** Its failure is a service failing: an impact for jitter in its project. */
+  service?: boolean;
+  /** Outcome fields that are readings: not written to the probe.result event. */
+  readings?: string[];
+  /** What the anomaly's head says about the probe, and the recovery note (fail_after kinds). */
+  anomaly?(p: ProbeSpec): string;
+  recovered?(p: ProbeSpec, o: ProbeOutcome): string;
+  /** Its fields in the probes summary (the API). */
+  summary?(p: ProbeSpec, ctx: ProbeContext): Record<string, unknown>;
+}
+
+const kinds = new Map<string, ProbeKind>();
+/** The kinds the engine has itself, by their charter field. */
+const BUILTIN_FIELDS = ['http', 'disk', 'latency', 'kubelet', 'cluster', 'alertmanager'];
+
+/** Registers kinds (a kind of the same name replaces the one before). One of the engine's own names is refused. */
+export function registerProbeKinds(ks: ProbeKind[]): void {
+  for (const k of ks) {
+    if (!/^[a-z][a-z0-9_]*$/.test(k.kind) || BUILTIN_FIELDS.includes(k.kind) || k.kind === 'unsupported') throw new Error(`probe kind ${JSON.stringify(k.kind)}: not a name a kind can have`);
+    kinds.set(k.kind, k);
+  }
+}
+
+export const probeKind = (kind: string): ProbeKind | undefined => kinds.get(kind);
+
+/** The local modules that failed to load (probe-kit.ts): an unknown kind's reason says so, with the error. */
+let loadErrors: { file: string; error: string }[] = [];
+export function setProbeKindErrors(errors: { file: string; error: string }[]): void { loadErrors = errors; }
 
 export function parseDuration(v: unknown, dflt: number): number {
   if (typeof v === 'number') return v * 1000;
@@ -109,15 +166,8 @@ export function isPingHost(s: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(s);
 }
 
-/** `root@host:<ns>/<kind>/<name>`: the workload whose log a `whatsapp_log` probe reads. null when it isn't one. */
-export function parseLogTarget(s: string): { host: string; ns: string; resource: string } | null {
-  const m = /^([A-Za-z0-9_.@-]+):([a-z0-9][a-z0-9-]*)\/((?:deploy|deployment|statefulset|sts)\/[a-z0-9][a-z0-9.-]*)$/.exec(s.trim());
-  if (!m || m[1]!.startsWith('-')) return null;  // `-…` would reach ssh as an option
-  return { host: m[1]!, ns: m[2]!, resource: m[3]! };
-}
-
 /** A time in the charter: an ISO date or date-time (YAML may hand a Date). A date alone is midnight in Israel. NaN when it isn't one. */
-const charterTime = (v: unknown): number => {
+export const charterTime = (v: unknown): number => {
   if (v instanceof Date) return v.getTime();
   if (typeof v !== 'string') return NaN;
   const t = v.trim();
@@ -126,7 +176,7 @@ const charterTime = (v: unknown): number => {
 };
 
 /** A missing threshold takes the default; one that is there but isn't a number is NaN, and the probe becomes unsupported (as disk does). */
-const posNum = (v: unknown, dflt: number): number => { if (v == null) return dflt; const n = typeof v === 'number' ? v : NaN; return Number.isFinite(n) && n >= 0 ? n : NaN; };
+export const posNum = (v: unknown, dflt: number): number => { if (v == null) return dflt; const n = typeof v === 'number' ? v : NaN; return Number.isFinite(n) && n >= 0 ? n : NaN; };
 
 /** `{key: value}` of label names and values, at least one. null when it isn't one. */
 function labelSelector(v: unknown): LabelSelector | null {
@@ -137,9 +187,9 @@ function labelSelector(v: unknown): LabelSelector | null {
 }
 
 /** A list of non-empty strings. null when it isn't one. */
-const stringList = (v: unknown): string[] | null => Array.isArray(v) && v.every((x) => typeof x === 'string' && x.trim()) ? v.map((x) => (x as string).trim()) : null;
+export const stringList = (v: unknown): string[] | null => Array.isArray(v) && v.every((x) => typeof x === 'string' && x.trim()) ? v.map((x) => (x as string).trim()) : null;
 
-const isIdentityId = (s: string): boolean => /^[a-z][a-z0-9-]*$/.test(s);
+export const isIdentityId = (s: string): boolean => /^[a-z][a-z0-9-]*$/.test(s);
 
 /** Extract probe declarations from a project charter. */
 export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
@@ -174,14 +224,6 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
     const lt = typeof r.latency === 'string' && isPingHost(r.latency.trim())
       ? { host: r.latency.trim(), maxAvgMs: posNum(r.max_avg_ms, 10), maxMdevMs: posNum(r.max_mdev_ms, 20), maxLossPercent: posNum(r.max_loss_percent, 5) }
       : undefined;
-    const lgt = typeof r.whatsapp_log === 'string' ? parseLogTarget(r.whatsapp_log) : null;
-    const lg = lgt ? { target: String(r.whatsapp_log), ...lgt, identityFile: typeof r.identity === 'string' ? r.identity.replace(/^~(?=\/|$)/, homedir()) : null,
-      quietMs: parseDuration(r.quiet ?? '10m', NaN), maxOldRatio: posNum(r.max_old_ratio, 0.1), maxSendErrorsPerMin: posNum(r.max_send_errors_per_min, 20),
-      maxUnknownNumber: posNum(r.max_unknown_number, 0), maxLookupFailed: posNum(r.max_lookup_failed, 0),
-      maxNotQueued: posNum(r.max_not_queued, 0), maxUnreadable: posNum(r.max_unreadable, 0),
-      failed: { jump: posNum(r.failed_jump, 3), min: posNum(r.failed_min, 20), baselineFrom: r.failed_baseline_from == null ? null : charterTime(r.failed_baseline_from) } } : undefined;
-    const whatsappLog = lg && [lg.quietMs, lg.maxOldRatio, lg.maxSendErrorsPerMin, lg.maxUnknownNumber, lg.maxLookupFailed, lg.maxNotQueued, lg.maxUnreadable,
-      lg.failed.jump, lg.failed.min, lg.failed.baselineFrom ?? 0].every(Number.isFinite) && lg.quietMs > 0 && lg.failed.min >= 1 ? lg : undefined;
     const latency = lt && [lt.maxAvgMs, lt.maxMdevMs, lt.maxLossPercent].every(Number.isFinite) ? lt : undefined;
     // `root@host`: never something ssh could read as an option.
     const kubelet = typeof r.kubelet === 'string' && /^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(r.kubelet.trim())
@@ -200,38 +242,6 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
       ? { name: String((n as { name?: unknown }).name ?? ''), prod: (n as { prod?: unknown }).prod !== false } : { name: String(n), prod: true }) : [];
     const nss = nsEntries.map((n) => n.name);
     const resolveAfterMs = r.resolve_after == null ? RESOLVE_AFTER_MS : parseDuration(r.resolve_after, NaN);
-    // lumo_ws: the phones are the switch's list (`settings.lumoWsPhones`), `'*'` for all; anything else makes it unsupported.
-    const wst = typeof r.lumo_ws === 'string' ? parseWsTarget(r.lumo_ws) : null;
-    const phoneLabel = r.phone_label == null ? 'userId' : String(r.phone_label);
-    const phones = r.phones === '*' ? '*' as const : Array.isArray(r.phones) && r.phones.every((x) => typeof x === 'string' || typeof x === 'number')
-      ? [...new Set(r.phones.map(String))] : r.phones == null ? [] : null;
-    const wsIgnore = r.ignore == null ? [] : Array.isArray(r.ignore) && r.ignore.every((x) => typeof x === 'string' || typeof x === 'number') ? [...new Set(r.ignore.map(String))] : null;
-    const ws = wst && phones && wsIgnore && [...(phones === '*' ? [] : phones), ...wsIgnore].every(isLabelValue) && isLabelKey(phoneLabel) ? { target: String(r.lumo_ws), ...wst, phoneLabel, phones, ignore: wsIgnore, identityFile,
-      downAfter: posNum(r.down_after, 2), quietMs: parseDuration(r.quiet ?? '10m', NaN), silentMs: parseDuration(r.silent ?? '15m', NaN),
-      discoverEveryMs: parseDuration(r.discover_every ?? '6h', NaN), discoverTimeoutMs: parseDuration(r.discover_timeout ?? '5m', NaN) } : undefined;
-    // discover_timeout at least 30s: the master stops the scan 10s before hq gives up on it.
-    const lumoWs = ws && Number.isInteger(ws.downAfter) && ws.downAfter >= 1 && [ws.quietMs, ws.silentMs, ws.discoverEveryMs].every((x) => x > 0) && ws.discoverTimeoutMs >= 30_000 ? ws : undefined;
-    const cot = typeof r.client_outdated === 'string' ? parseOutdatedTarget(r.client_outdated) : null;
-    // client_outdated beside another kind in one entry: unsupported, not swallowed by the other.
-    const coClash = r.client_outdated != null && ['http', 'disk', 'latency', 'kubelet', 'whatsapp_log', 'cluster', 'alertmanager', 'lumo_ws'].some((k) => r[k] != null);
-    // `pilot`: the numbers in the pod names of the pilot workers; `logged_out_fleet`: LoggedOut of the rest from this many. Malformed: unsupported.
-    const coPilot = r.pilot == null ? [] : Array.isArray(r.pilot) && r.pilot.every((x: unknown) => /^[0-9]{6,15}$/.test(String(x))) ? r.pilot.map(String) : null;
-    const coFleet = r.logged_out_fleet == null ? LOGGED_OUT_FLEET : Number(r.logged_out_fleet);
-    const coBad = r.client_outdated != null && (coPilot == null || !Number.isInteger(coFleet) || coFleet < 1);
-    const clientOutdated: ClientOutdatedSpec | undefined = cot && !coClash && !coBad ? { target: String(r.client_outdated), ...cot, identityFile,
-      ...(typeof r.name === 'string' && r.name.trim() ? { name: r.name.trim() } : {}), ...(typeof r.fix === 'string' && r.fix.trim() ? { fix: r.fix.trim() } : {}),
-      pilot: coPilot!, loggedOutFleet: coFleet } : undefined;
-    // ride_dupes: the file with the Mongo URI; beside another kind in one entry, or malformed, unsupported.
-    const rdClash = r.ride_dupes != null && ['http', 'disk', 'latency', 'kubelet', 'whatsapp_log', 'cluster', 'alertmanager', 'lumo_ws', 'client_outdated'].some((k) => r[k] != null);
-    const rdWindow = parseDuration(r.window ?? '20m', NaN);
-    const rdCc = r.cc == null ? [] : stringList(typeof r.cc === 'string' ? [r.cc] : r.cc);
-    const rdName = (v: unknown, d: string) => v == null ? d : typeof v === 'string' && /^[A-Za-z0-9_-]+$/.test(v) ? v : null;
-    const rdDb = rdName(r.db, 'new-tiki-bot'), rdColl = rdName(r.collection, 'worker_ride_tracker');
-    // The file: absolute or under ~ (not hq's cwd). window at most MAX_WINDOW_MS and every at least a minute: a load on production otherwise.
-    const rdEvery = parseDuration(r.every ?? '5m', NaN);
-    const rideDupes: RideDupesSpec | undefined = typeof r.ride_dupes === 'string' && /^(\/|~\/)/.test(r.ride_dupes.trim()) && !rdClash && rdWindow > 0 && rdWindow <= MAX_WINDOW_MS
-      && rdEvery >= 60_000 && rdCc && rdCc.every(isIdentityId) && rdDb && rdColl
-      ? { uriFile: r.ride_dupes.trim().replace(/^~(?=\/|$)/, homedir()), db: rdDb, collection: rdColl, windowMs: rdWindow, cc: [...new Set(rdCc)] } : undefined;
     // Which alerts are this probe's (alertmanager.ts): `match` a selector, `exclude` one or a list, `critical`/`warning` alertnames,
     // `notify` an identity and `cc` a list of them. Any of these there but malformed makes the probe unsupported.
     const amMatch = r.match == null ? undefined : labelSelector(r.match);
@@ -248,18 +258,34 @@ export function parseCharterProbes(project: string, md: string): ProbeSpec[] {
           ...(amMatch ? { match: amMatch } : {}), ...(amExclude.length ? { exclude: amExclude as LabelSelector[] } : {}),
           ...(amCritical!.length ? { critical: amCritical! } : {}), ...(amWarning!.length ? { warning: amWarning! } : {}),
           ...(amNotify ? { notify: amNotify } : {}), ...(amCc!.length ? { cc: [...new Set(amCc!)].filter((c) => c !== amNotify) } : {}) } : undefined;
+    // A registered kind is the entry's only kind: beside another one it is unsupported, not swallowed by it.
+    const fields = Object.keys(r).filter((k) => r[k] != null);
+    const ownKind = fields.filter((k) => kinds.has(k));
+    const clash = ownKind.length > 0 && fields.filter((k) => kinds.has(k) || BUILTIN_FIELDS.includes(k)).length > 1;
+    const own = ownKind.length === 1 && !clash ? kinds.get(ownKind[0]!)!.parse(r, { identityFile }) : null;
+    const builtin = typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : null;
+    const kind = badFailFor || badProd || clash ? 'unsupported' : ownKind.length ? (own ? ownKind[0]! : 'unsupported') : builtin ?? 'unsupported';
+    const named = fields.filter((k) => kinds.has(k) || BUILTIN_FIELDS.includes(k));
+    const reason = kind !== 'unsupported' ? undefined
+      : badFailFor ? 'fail_for הוא ל-http בלבד, ומשך חיובי'
+      : badProd ? 'prod הוא true או false, ו-false ל-http בלבד'
+      : clash ? `כמה סוגים ברשומה אחת: ${named.join(', ')}`
+      : named.length ? `הרשומה של ${named[0]} לא תקינה (יעד, סף או שדה)`
+      : `אין ב-hq הזה סוג probe לאף שדה ברשומה (${fields.filter((k) => k !== 'id').join(', ') || 'ריקה'}): ${loadErrors.length
+        ? `מודול מקומי לא נטען (${loadErrors.map((e) => `${e.file}: ${e.error}`).join('; ')})`
+        : 'סוג של מודול מקומי שלא נטען?'}`;
     out.push({
-      key: `${project}/${id}`, project, id,
-      kind: badFailFor || badProd || coClash || rdClash ? 'unsupported' : rideDupes ? 'ride_dupes' : typeof r.http === 'string' ? 'http' : disk ? 'disk' : latency ? 'latency' : kubelet ? 'kubelet' : whatsappLog ? 'whatsapp_log' : cluster ? 'cluster' : alertmanager ? 'alertmanager' : lumoWs ? 'lumo_ws' : clientOutdated ? 'client_outdated' : 'unsupported',
+      key: `${project}/${id}`, project, id, kind, ...(reason ? { reason } : {}), ...(kind === 'unsupported' && !named.length ? { unknownKind: true as const } : {}),
       url: typeof r.http === 'string' ? r.http : undefined,
-      disk, latency, kubelet, whatsappLog, cluster, alertmanager, lumoWs, clientOutdated, rideDupes,
+      disk, latency, kubelet, cluster, alertmanager,
+      ...(own && kind !== 'unsupported' ? own.fields : {}),
       // Observe-only: a probe may only read. Anything but GET/HEAD in a charter is ignored.
       method: typeof r.method === 'string' && r.method.toUpperCase() === 'HEAD' ? 'HEAD' : 'GET',
       expect: (Array.isArray(exp) ? exp : [exp]).map(Number),
       maxLatencyMs: r.max_latency_ms != null ? Number(r.max_latency_ms) : (r.max_latency != null ? parseDuration(r.max_latency, 0) : null),
-      everyMs: parseDuration(r.every, clientOutdated ? 900_000 : cluster || lumoWs || rideDupes ? 300_000 : 60_000),
+      everyMs: parseDuration(r.every, own?.everyMs ?? (cluster ? 300_000 : 60_000)),
       // 20 pings at 0.2s with -W 2 end within ~6s; the default leaves room so a dead host ends in ping's summary, not a kill.
-      timeoutMs: parseDuration(r.timeout, clientOutdated ? 240_000 : rideDupes ? 20_000 : cluster ? 180_000 : latency ? 20_000 : alertmanager ? Math.max(60_000, (alertmanager.namespaces.length * NS_TIMEOUT_S + 20) * 1000) : lumoWs ? (lumoWs.phones === '*' ? 150_000 : 60_000) : kubelet || whatsappLog ? 30_000 : 10_000),
+      timeoutMs: parseDuration(r.timeout, own?.timeoutMs ?? (cluster ? 180_000 : latency ? 20_000 : alertmanager ? Math.max(60_000, (alertmanager.namespaces.length * NS_TIMEOUT_S + 20) * 1000) : kubelet ? 30_000 : 10_000)),
       failAfter: Number(r.fail_after ?? 3),
       failForMs: badFailFor ? null : failForMs,
       ...(r.prod === false && !badProd ? { prod: false as const } : {}),
@@ -278,8 +304,8 @@ export function loadProbes(companyDir: string): ProbeSpec[] {
 
 /** `unknown`: no answer came back. Not a failure (ok is meaningless then); the runner doesn't count it.
  *  `noAnswer` (http): a DNS that didn't answer (EAI_AGAIN). A failure for fail_after as always, but it doesn't move fail_for's clock.
- *  A timeout is not noAnswer: it starts and crosses fail_for like a status. */
-export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; alerts?: AmReading; ws?: WsReading; outdated?: OutdatedReading; dupes?: DupesReading; wa?: FailedReading; percent?: number; ping?: PingStats; versions?: KubeletVersions }
+ *  A timeout is not noAnswer: it starts and crosses fail_for like a status. A registered kind adds its own reading fields (ProbeKind.readings). */
+export interface ProbeOutcome { ok: boolean; status: number | null; latencyMs: number | null; error: string | null; unknown?: boolean; noAnswer?: boolean; alerts?: AmReading; percent?: number; ping?: PingStats; versions?: KubeletVersions }
 
 /** The apiserver's version and each node's kubelet version, as `kubectl` reported them ('' = the node has none yet, still registering). */
 export interface KubeletVersions { master: string; nodes: Record<string, string> }
@@ -313,7 +339,7 @@ export type PingRun = (host: string, timeoutMs: number) => Promise<string>;
 const localPing: PingRun = (host, timeoutMs) => new Promise((res, rej) =>
   execFile('ping', ['-c', '20', '-i', '0.2', '-W', '2', '-q', '--', host], { timeout: timeoutMs }, (e, out) => e && !out ? rej(e) : res(out)));
 
-/** Read-only ping from hq-host. Only a ping that didn't run or didn't print a summary is unknown. */
+/** Read-only ping from hq's machine. Only a ping that didn't run or didn't print a summary is unknown. */
 export async function runLatencyProbe(p: ProbeSpec, ping: PingRun = localPing): Promise<ProbeOutcome> {
   const l = p.latency!;
   let out: string;
@@ -345,200 +371,6 @@ export async function runDiskProbe(p: ProbeSpec, run: SshRun = runSsh, local: Lo
   const percent = Number(m[1]);
   return { ok: percent <= d.maxPercent, percent, status: percent, latencyMs: lat(),
     error: percent > d.maxPercent ? `${percent}% בשימוש ב-${d.path} על ${d.host ?? 'local'}, הסף ${d.maxPercent}%` : null };
-}
-
-/** A `whatsapp_log` probe: where the log is, and its thresholds. */
-export interface WhatsappLogSpec { target: string; host: string; ns: string; resource: string; identityFile: string | null; quietMs: number; maxOldRatio: number; maxSendErrorsPerMin: number;
-  maxUnknownNumber: number; maxLookupFailed: number; maxNotQueued: number; maxUnreadable: number;
-  /** `Message failed` per code against its baseline (whatsapp-failed.ts): `failed_jump`, `failed_min`, `failed_baseline_from`. */
-  failed: FailedSpec }
-
-/** The window for "no incoming message" is judged only inside these Israel hours: at night a quiet bot is normal. */
-export const QUIET_FROM_HOUR = 6;
-export const QUIET_TO_HOUR = 23;
-/** Inside the hours a quiet window is judged (Israel time). */
-export const quietHours = (t: number): boolean => { const h = israel(t).hour; return h >= QUIET_FROM_HOUR && h < QUIET_TO_HOUR; };
-const INCOMING = /Incoming WhatsApp message/;
-/** Meta's delivery statuses for what we sent: they keep coming on a quiet morning with no user writing in (#347). The gateway doesn't
- *  log them when its forwarding allowlist is on (tiki-bot-go whatsapp-webhook-go/server/server.go): then a quiet morning alerts again. */
-const STATUS = 'Message status update';
-/** The 5-minute summary: the title then its fields. Not the per-driver route's own lines with that title ("…: bad signature", "… not understood"). */
-const SUMMARY = /Lumo automation webhook\s+\w+=\d/;
-const SEND_FAILED = /Client\.Timeout|131016/;
-/** The server sends back only these lines (the log is ~2,000 lines a minute), plus the line count. Status updates come by the hundred
- *  a minute, so only a count per minute (`@@status <latest ts in it> <n>`), not the lines. */
-export const REMOTE_AWK = `/${STATUS}/{m=substr($1,1,16); n[m]++; t[m]=$1; next} ${FAILED_AWK}/Incoming WhatsApp message|Lumo automation webhook|Client\\.Timeout|131016/{print} `
-  + `END{for (m in n) print "@@status " t[m] " " n[m]; ${FAILED_AWK_END}print "@@lines " NR}`;
-/** When the workload's running containers started (`@@started`, one line each): the log covers a window only from there. */
-const STARTED_TPL = '{{range .items}}{{range .status.containerStatuses}}@@started {{if .state.running}}{{.state.running.startedAt}}{{end}}{{"\\n"}}{{end}}{{end}}';
-const SELECTOR_TPL = '{{range $k, $v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}';
-
-/** `started`: the latest start of a running container (null when none is known). `statuses`: Meta's status updates per minute,
- *  `ts` the latest one in that minute. */
-export interface WhatsappLog { started: number | null; lines: number; entries: { ts: number; text: string }[]; statuses: { ts: number; count: number }[];
-  failed?: FailedReading['failed']; noStatus?: FailedReading['noStatus'] }
-
-/** What the remote command printed, ANSI colors removed. null when it isn't that (no line count). kubectl's own errors go to stderr and fail the run. */
-export function parseWhatsappLog(out: string): WhatsappLog | null {
-  const clean = stripAnsi(out);
-  const end = /^@@lines (\d+)$/m.exec(clean);
-  if (!end) return null;
-  const lines = Number(end[1]);
-  const starts = [...clean.matchAll(/^@@started (\S+)$/gm)].map((m) => kubeTs(m[1]!)).filter((t): t is number => t != null);
-  const started = starts.length ? Math.max(...starts) : null;
-  const statuses = [...clean.matchAll(/^@@status (\S+) (\d+)$/gm)].map((m) => ({ ts: kubeTs(m[1]!), count: Number(m[2]) }))
-    .filter((x): x is { ts: number; count: number } => x.ts != null);
-  const entries: WhatsappLog['entries'] = [];
-  for (const l of clean.split('\n')) {
-    if (l.startsWith('@@')) continue;
-    const sp = l.indexOf(' ');
-    const ts = sp > 0 ? kubeTs(l.slice(0, sp)) : null;
-    if (ts != null) entries.push({ ts, text: l.slice(sp + 1) });
-  }
-  return { started, lines, entries, statuses, ...parseFailed(clean, kubeTs) };
-}
-
-/** A numeric `key=value` field of a summary line. NaN when the line doesn't have it (every comparison with NaN is false). */
-const summaryField = (text: string) => (k: string): number => Number(new RegExp(`(?:^|\\s)${k}=(\\d+)`).exec(text)?.[1] ?? NaN);
-
-const hhmm = (ts: number) => new Date(ts).toISOString().slice(11, 16);
-
-/** The conditions on the gateway's log at `now`. Empty when nothing is over. `everyMs`: failures are counted per minute since the last run. */
-export function whatsappLogBreaches(log: WhatsappLog, l: WhatsappLogSpec, now: number, everyMs: number): string[] {
-  const out: string[] = [];
-  const upTo = log.entries.filter((e) => e.ts <= now);
-  // 1. No incoming message and no status update from Meta in `quiet` (#347: on a quiet morning no one writes in, and the statuses of
-  //    what we send keep coming; a stuck gateway or a webhook Meta stopped sending gets neither). By day only, and only when the log
-  //    covers the window: the container started before it. A log that is empty or sparse (a stuck gateway still printing its summary)
-  //    is covered all the same.
-  const start = now - l.quietMs;
-  const day = quietHours;
-  const covered = log.started != null && log.started <= start;
-  if (day(start) && day(now) && covered && !upTo.some((e) => e.ts > start && INCOMING.test(e.text))
-    && !log.statuses.some((x) => x.ts > start && x.ts <= now)) {
-    out.push(`אף שורת "Incoming WhatsApp message" ואף "${STATUS}" מ-Meta ב-${Math.round(l.quietMs / 60_000)} הדקות האחרונות (${hhmm(start)}–${hhmm(now)} UTC)`);
-  }
-  // 2. The latest webhook summary: messages dropped as old against the ones forwarded. A summary comes every 5 minutes and stays
-  //    the latest until the next one, so with `every: 1m` one bad summary is several bad runs: it alone can reach fail_after.
-  const sums = upTo.filter((e) => SUMMARY.test(e.text));
-  const sum = sums.at(-1);
-  if (sum) {
-    const n = summaryField(sum.text);
-    const old = n('old'), fwd = n('forwarded');
-    if (Number.isFinite(old) && Number.isFinite(fwd) && old > 0 && old > l.maxOldRatio * fwd) {
-      out.push(`בסיכום "Lumo automation webhook" של ${hhmm(sum.ts)} UTC: old=${old} מול forwarded=${fwd}, מעל ${Math.round(l.maxOldRatio * 100)}%`);
-    }
-  }
-  // 2b. The automation fields (easy #346). A field the summary doesn't print is absent, not 0: a gateway before #346 never breaches.
-  //     Judged on every summary since the last run and on the latest one, which (like 2) stays the latest for 5 minutes.
-  //     Evidence: the summary line itself and its timestamp.
-  const recent = sums.filter((e) => e.ts > now - Math.max(everyMs, 60_000) || e === sum);
-  const line = (e: { ts: number; text: string }) => `${new Date(e.ts).toISOString()}: ${e.text.trim()}`;
-  const automation: Array<[string, (n: (k: string) => number) => boolean]> = [
-    [`unknownNumber מעל ${l.maxUnknownNumber}`, (n) => n('unknownNumber') > l.maxUnknownNumber],
-    [`lookupFailed מעל ${l.maxLookupFailed}`, (n) => n('lookupFailed') > l.maxLookupFailed],
-    // Every message in a webhook ends in exactly one count; only notQueued (Kafka failed) is one that should have gone through and
-    // didn't. forwarded=0 alone is a quiet night. unreadable: a POST we couldn't decode.
-    [`notQueued מעל ${l.maxNotQueued}`, (n) => n('notQueued') > l.maxNotQueued],
-    [`unreadable מעל ${l.maxUnreadable}`, (n) => n('unreadable') > l.maxUnreadable],
-  ];
-  for (const [what, bad] of automation) {
-    const hit = recent.filter((e) => bad(summaryField(e.text))).pop();
-    if (hit) out.push(`${what} בסיכום "Lumo automation webhook" (${line(hit)})`);
-  }
-  // 3. Send failures (Client.Timeout, 131016) per minute, in the minutes since the last run (the current one included).
-  const from = Math.floor((now - Math.max(everyMs, 60_000)) / 60_000) * 60_000;
-  const perMin = new Map<number, number>();
-  for (const e of upTo) if (e.ts >= from && SEND_FAILED.test(e.text)) { const m = Math.floor(e.ts / 60_000) * 60_000; perMin.set(m, (perMin.get(m) ?? 0) + 1); }
-  const worst = [...perMin].filter(([, c]) => c > l.maxSendErrorsPerMin).sort((a, b) => b[1] - a[1])[0];
-  if (worst) out.push(`${worst[1]} שורות של Client.Timeout או 131016 בדקה ${hhmm(worst[0])} UTC (הסף ${l.maxSendErrorsPerMin})`);
-  return out;
-}
-
-/** Read-only `kubectl get` (selector, container start) and `kubectl logs --since` on the cluster's master, filtered there.
- *  A kubectl failure fails the pipeline (pipefail) and ssh with it: unknown. Only an answer that parses can fail. */
-export async function runWhatsappLogProbe(p: ProbeSpec, run: SshRun = runSsh, clock: () => number = Date.now): Promise<ProbeOutcome> {
-  const l = p.whatsappLog!;
-  const t0 = performance.now();
-  const lat = () => Math.round(performance.now() - t0);
-  // A summary line comes every 5 minutes, failures are counted since the last run: the window holds both, and a minute of margin.
-  const since = Math.ceil((Math.max(l.quietMs, 6 * 60_000, p.everyMs + 2 * 60_000) + 60_000) / 1000);
-  const k = `k3s kubectl -n ${q(l.ns)}`;
-  const script = ['set -o pipefail', `sel=$(${k} get ${q(l.resource)} -o go-template=${q(SELECTOR_TPL)})`,
-    `${k} get pods -l "\${sel%,}" -o go-template=${q(STARTED_TPL)}`,
-    `${k} logs ${q(l.resource)} --since=${since}s --timestamps | awk ${q(REMOTE_AWK)}`].join(' && ');
-  const cmd = `bash -c ${q(script)}`;
-  let out: string;
-  try {
-    out = await run(['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10',
-      ...(l.identityFile ? ['-i', l.identityFile] : []), l.host, cmd], undefined, p.timeoutMs);
-  } catch (e) { return { ok: false, unknown: true, status: null, latencyMs: lat(), error: (e as Error).message }; }
-  const log = parseWhatsappLog(out);
-  if (!log) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: `פלט kubectl logs לא מובן: ${stripAnsi(out).trim().slice(0, 120) || '(ריק)'}` };
-  const now = clock();
-  const bad = whatsappLogBreaches(log, l, now, p.everyMs);
-  // The window the reading covers: from --since, or from the container's start when it is later.
-  const wa: FailedReading = { from: Math.max(now - since * 1000, log.started ?? -Infinity), to: now, failed: log.failed ?? [], noStatus: log.noStatus ?? [] };
-  return { ok: !bad.length, wa, status: null, latencyMs: lat(), error: bad.length ? `${l.resource}: ${bad.join('; ')}` : null };
-}
-
-/** Read-only: the summaries of the Lumo websocket in the workers with the switch on, over one ssh (lumo-ws.ts).
- *  An empty list reads nothing. ok is judged by the round (the runner), not here. */
-export async function runLumoWsProbe(p: ProbeSpec, run: SshRun = runSsh): Promise<ProbeOutcome> {
-  const s = p.lumoWs!;
-  const t0 = performance.now();
-  const lat = () => Math.round(performance.now() - t0);
-  if (Array.isArray(s.phones) && !s.phones.length) return { ok: true, ws: { pods: {}, summaries: [], errors: [] }, status: null, latencyMs: 0, error: null };
-  let out: string;
-  try {
-    out = await run(['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10',
-      ...(s.identityFile ? ['-i', s.identityFile] : []), s.host, wsCommand(s, p.everyMs)], undefined, p.timeoutMs);
-  } catch (e) { return { ok: false, unknown: true, status: null, latencyMs: lat(), error: (e as Error).message }; }
-  const r = parseWsOutput(out);
-  if ('error' in r) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: r.error };
-  return { ok: true, ws: r, status: null, latencyMs: lat(), error: r.errors.length ? `kubectl: ${r.errors.slice(0, 3).join('; ')}` : null };
-}
-
-/** Read-only: the 405, 409 and LoggedOut lines in every worker's log, over one ssh (client-outdated.ts). ok is judged by the round (the runner), not here. */
-export async function runClientOutdatedProbe(p: ProbeSpec, run: SshRun = runSsh): Promise<ProbeOutcome> {
-  const s = p.clientOutdated!;
-  const t0 = performance.now();
-  const lat = () => Math.round(performance.now() - t0);
-  let out: string;
-  try {
-    out = await run(['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10',
-      ...(s.identityFile ? ['-i', s.identityFile] : []), s.host, outdatedCommand(s, p.everyMs, p.timeoutMs)], undefined, p.timeoutMs);
-  } catch (e) { return { ok: false, unknown: true, status: null, latencyMs: lat(), error: (e as Error).message }; }
-  const r = parseOutdatedOutput(out);
-  if ('error' in r) return { ok: false, unknown: true, status: null, latencyMs: lat(), error: r.error };
-  const by = (k: string) => new Set(r.hits.filter((h) => h.kind === k).map((h) => h.pod)).size;
-  // ok by the lines that are urgent on their own; a LoggedOut is judged by the round (pilot, threshold), not here.
-  const found = [['Client outdated (405)', by('405')], ['409', by('409')]].filter(([, n]) => n).map(([w, n]) => `${w} ב-${n} וורקרים`);
-  return { ok: !found.length, outdated: r, status: null, latencyMs: lat(),
-    error: found.length ? found.join(', ') : r.errors.length ? `kubectl: ${r.errors.slice(0, 3).join('; ')}` : null };
-}
-
-/** Read-only: one aggregate on easy's Mongo (ride-dupes.ts). ok when no driver got the same ride twice in the window. */
-export async function runRideDupesProbe(p: ProbeSpec, read = readDupes): Promise<ProbeOutcome> {
-  const t0 = performance.now();
-  const lat = () => Math.round(performance.now() - t0);
-  const s = p.rideDupes!;
-  const now = s.now ?? Date.now();
-  let r: DupesReading;
-  try { r = await read(s, s.since ?? now - s.windowMs - p.everyMs, now, p.timeoutMs); }
-  catch (e) { return { ok: false, unknown: true, status: null, latencyMs: lat(), error: (e as Error).message }; }
-  const dupes = r.groups.filter((g) => g.times.some((t, i) => i > 0 && t - g.times[i - 1]! <= p.rideDupes!.windowMs));
-  return { ok: !dupes.length, dupes: r, status: null, latencyMs: lat(),
-    error: dupes.length ? `${dupes.length} נסיעות שנשלחו יותר מפעם אחת ל-${new Set(dupes.map((g) => g.driver)).size} נהגים` : null };
-}
-
-/** Read-only: the scan of discovery (lumo-ws.ts), one ssh, discover_timeout. Throws nothing: no answer is `{ error }`. */
-export async function runLumoWsDiscover(p: ProbeSpec, run: SshRun = runSsh): Promise<{ phones: string[]; lines: number } | { error: string }> {
-  const s = p.lumoWs!;
-  try {
-    return parseDiscoverOutput(await run(['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10',
-      ...(s.identityFile ? ['-i', s.identityFile] : []), s.host, discoverCommand(s)], undefined, s.discoverTimeoutMs));
-  } catch (e) { return { error: (e as Error).message }; }
 }
 
 const KUBELET_SEP = '@@nodes';
@@ -606,7 +438,7 @@ export async function runHttpProbe(p: ProbeSpec): Promise<ProbeOutcome> {
     const err = e as Error & { cause?: { code?: string } };
     // ENOTFOUND is the DNS's answer (no such name: a real fault); EAI_AGAIN is a DNS that didn't answer.
     // A timeout (of the request or the connection) is a failure like a status: a server stuck altogether is caught by fail_for,
-    // and the witness from ci-host is what tells a fault on our side apart (27/10).
+    // and the witness is what tells a fault on our side apart (27/10).
     const noAnswer = err.cause?.code === 'EAI_AGAIN';
     return { ok: false, status: null, latencyMs: Math.round(performance.now() - t0), error: err.cause?.code ? `${err.message} (${err.cause.code})` : err.message,
       ...(noAnswer ? { noAnswer: true } : {}) };
@@ -618,8 +450,8 @@ export type WitnessOutcome = ProbeOutcome | { unavailable: string };
 
 export type Witness = (p: ProbeSpec) => Promise<WitnessOutcome>;
 
-/** The same check, run by curl on the witness machine (ci-host). Same expectations as the probe: status and latency budget. */
-export function sshWitness(w: { ssh: string; identityFile: string | null }, run: SshRun = runSsh): Witness {
+/** The same check, run by curl on the witness machine. Same expectations as the probe: status and latency budget. */
+export function sshWitness(w: { ssh: string; identityFile: string | null; name?: string }, run: SshRun = runSsh): Witness {
   return async (p) => {
     const secs = Math.ceil(p.timeoutMs / 1000);
     const cmd = `curl -s -o /dev/null -X ${p.method} --max-time ${secs} -w '%{http_code} %{time_total}' -- ${q(p.url!)}; true`;
@@ -645,11 +477,11 @@ export function hostLoad(): { load1: number; cpus: number; freeMb: number } {
   return { load1: Math.round(loadavg()[0]! * 100) / 100, cpus: cpus().length, freeMb };
 }
 
-/** What ci-host saw pinging each host (null = no readable summary for it); `unavailable` = ci-host could not be asked. */
+/** What the witness saw pinging each host (null = no readable summary for it); `unavailable` = it could not be asked. */
 export type PingWitness = (hosts: string[], timeoutMs: number) => Promise<Map<string, PingStats | null> | { unavailable: string }>;
 
-/** The same ping as the probe, run on the witness machine (ci-host) for all the hosts at once, in parallel, over one ssh. */
-export function sshPingWitness(w: { ssh: string; identityFile: string | null }, run: SshRun = runSsh): PingWitness {
+/** The same ping as the probe, run on the witness machine for all the hosts at once, in parallel, over one ssh. */
+export function sshPingWitness(w: { ssh: string; identityFile: string | null; name?: string }, run: SshRun = runSsh): PingWitness {
   return async (hosts, timeoutMs) => {
     const safe = hosts.filter(isPingHost);
     if (!safe.length) return { unavailable: 'אין כתובות לבדוק' };
@@ -664,7 +496,7 @@ export function sshPingWitness(w: { ssh: string; identityFile: string | null }, 
       const host = (nl < 0 ? block : block.slice(0, nl)).trim();
       if (safe.includes(host)) seen.set(host, parsePing(nl < 0 ? '' : block.slice(nl + 1)));
     }
-    if (![...seen.values()].some(Boolean)) return { unavailable: `תשובה לא מובנת מ-ping ב-ci-host: ${out.trim().slice(0, 80) || '(ריק)'}` };
+    if (![...seen.values()].some(Boolean)) return { unavailable: `תשובה לא מובנת מ-ping ב-${w.name ?? w.ssh.replace(/^.*@/, '')}: ${out.trim().slice(0, 80) || '(ריק)'}` };
     return seen;
   };
 }
@@ -693,15 +525,16 @@ export const jitterOnly = (p: ProbeSpec, o: ProbeOutcome): boolean =>
 export const lossFailed = (p: ProbeSpec, o: ProbeOutcome): boolean => p.kind === 'latency' && !o.ok && !o.unknown && !jitterOnly(p, o);
 
 /** Kinds whose failure is a service failing: jitter while one of them fails in its project has an impact. Not latency (the
- *  network itself), disk or kubelet (a version skew or a full disk is not something jitter does). lumo_ws records no failure
- *  (its findings are its own messages), so it isn't here. */
-const SERVICE_KINDS = new Set<ProbeSpec['kind']>(['http', 'whatsapp_log', 'alertmanager']);
+ *  network itself), disk or kubelet (a version skew or a full disk is not something jitter does). A registered kind is one when
+ *  it says so (ProbeKind.service). */
+const SERVICE_KINDS = new Set<ProbeSpec['kind']>(['http', 'alertmanager']);
+const isService = (kind: string): boolean => SERVICE_KINDS.has(kind) || !!kinds.get(kind)?.service;
 
 /** What jitter on `p` could have done in (from, to]: a failure of a service probe in its project (not one with `prod: false`), or its node not Ready in a
  *  `cluster:` probe's rounds (root-signals.ts, `ready:<node>`; the node by the vmi name in the probe's id). Oldest first. */
 export function jitterImpact(db: Store['db'], probes: ProbeSpec[], p: ProbeSpec, from: number, to: number): { ts: number; what: string }[] {
   const out: { ts: number; what: string }[] = [];
-  const services = probes.filter((x) => x.project === p.project && SERVICE_KINDS.has(x.kind) && x.prod !== false).map((x) => x.key);
+  const services = probes.filter((x) => x.project === p.project && isService(x.kind) && x.prod !== false).map((x) => x.key);
   if (services.length) {
     const rows = db.prepare(`SELECT probe_id, ts FROM probe_results WHERE ok = 0 AND ts > ? AND ts <= ? AND probe_id IN (${services.map(() => '?').join(', ')})`)
       .all(from, to, ...services) as { probe_id: string; ts: number }[];
@@ -715,7 +548,7 @@ export function jitterImpact(db: Store['db'], probes: ProbeSpec[], p: ProbeSpec,
   return out.sort((a, b) => a.ts - b.ts);
 }
 
-/** `tiki-bot-go/api נכשל 3 פעמים, הנוד vmi1 לא Ready פעם אחת`: impacts by what, in the order they first happened. */
+/** `shop/api נכשל 3 פעמים, הנוד vmi1 לא Ready פעם אחת`: impacts by what, in the order they first happened. */
 const impactText = (xs: { what: string }[]): string => {
   const n = new Map<string, number>();
   for (const x of xs) n.set(x.what, (n.get(x.what) ?? 0) + 1);
@@ -753,7 +586,7 @@ export function backfillLatencyRows(db: Store['db'], probes: ProbeSpec[]): numbe
 }
 
 /** `25/10` and the hour, in Israel time. */
-function israel(ts: number): { date: string; day: string; hour: number } {
+export function israel(ts: number): { date: string; day: string; hour: number } {
   const f = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' })
     .formatToParts(ts).map((x) => [x.type, x.value]));
   return { date: `${f.year}-${f.month}-${f.day}`, day: `${f.day}/${f.month}`, hour: Number(f.hour) };
@@ -820,8 +653,6 @@ const OUTAGE_META = 'probes.shared_outage';
 /** The last shared event that ended: its members' loss inside it doesn't count toward sustained jitter after it. */
 const OUTAGE_LAST_META = 'probes.shared_outage_last';
 
-interface ProbeStateRow { probe_id: string; consecutive_failures: number; anomaly_open: number; last_run_at: number | null; last_ok_at: number | null }
-
 /** An open failure of a fail_for probe: since = its first failure that got an answer, moved on by every stretch without an answer
  *  (from the answered failure before it to the one after it: the clock is frozen there); answered = the last answered failure;
  *  gap = a failure without an answer came after it; last = the last run (retry or scheduled);
@@ -832,15 +663,18 @@ interface FailFor { since: number; answered: number; gap: boolean; last: number;
 export class ProbeRunner {
   probes: ProbeSpec[] = [];
   run: (p: ProbeSpec) => Promise<ProbeOutcome> = (p) => p.kind === 'disk' ? runDiskProbe(p) : p.kind === 'latency' ? runLatencyProbe(p)
-    : p.kind === 'kubelet' ? runKubeletProbe(p) : p.kind === 'alertmanager' ? runAlertmanagerProbe(p) : p.kind === 'whatsapp_log' ? runWhatsappLogProbe(p) : p.kind === 'lumo_ws' ? runLumoWsProbe(p)
-    : p.kind === 'client_outdated' ? runClientOutdatedProbe(p) : p.kind === 'ride_dupes' ? runRideDupesProbe(p) : runHttpProbe(p);
-  /** The scan of discovery of a lumo_ws probe (runs on its own, never holds the tick). */
-  discover: (p: ProbeSpec) => Promise<{ phones: string[]; lines: number } | { error: string }> = (p) => runLumoWsDiscover(p);
-  /** Second vantage point, asked before an anomaly wakes רותם. null = none configured. */
+    : p.kind === 'kubelet' ? runKubeletProbe(p) : p.kind === 'alertmanager' ? runAlertmanagerProbe(p)
+    : kinds.has(p.kind) ? kinds.get(p.kind)!.run(p, this.ctx) : runHttpProbe(p);
+  /** Second vantage point, asked before an anomaly wakes the monitoring lead. null = none configured. */
   witness: Witness | null;
-  /** The same second vantage point for latency: ping from ci-host. null = none configured (then a shared event has no witness). */
+  /** The same second vantage point for latency: ping from the witness machine. null = none configured (then a shared event has no witness). */
   pingWitness: PingWitness | null;
+  /** How the messages name the witness machine and this one. */
+  witnessName: string;
+  machine: string = hostname();
   host: () => { load1: number; cpus: number; freeMb: number } = hostLoad;
+  /** What the registered kinds' hooks get. */
+  readonly ctx: ProbeContext;
   /** Root signals of the `cluster:` probes: their own findings and messages, not probe_results. */
   readonly roots: RootWatch;
   private measurerEpisode = false;
@@ -859,6 +693,16 @@ export class ProbeRunner {
     this.inbox = inbox;
     this.witness = cfg.probeWitness ? sshWitness(cfg.probeWitness) : null;
     this.pingWitness = cfg.probeWitness ? sshPingWitness(cfg.probeWitness) : null;
+    this.witnessName = cfg.probeWitness?.name ?? cfg.probeWitness?.ssh.replace(/^.*@/, '') ?? 'נקודה שנייה';
+    const runner = this;  // eslint-disable-line @typescript-eslint/no-this-alias
+    this.ctx = {
+      store, mailbox, lead: cfg.monitoringLeadId, inflight: this.inflight,
+      get probes() { return runner.probes; },
+      state: (key) => this.state(key),
+      run: (p) => this.run(p),
+      record: (p, o, now) => { this.record(p, o, false, now); },
+      known: (id) => getIdentity(this.store, id)?.active === 1,
+    };
     this.roots = new RootWatch(store, mailbox, inbox, cfg.monitoringLeadId);
     this.roots.failingHttp = () => this.failingHttp().map((p) => p.key);
   }
@@ -871,12 +715,19 @@ export class ProbeRunner {
     for (const k of this.failFor.keys()) if (!this.probes.some((p) => p.key === k && p.failForMs != null)) this.failFor.delete(k);
     const backfilled = backfillLatencyRows(this.store.db, this.probes);
     if (backfilled) this.store.emit('probes.backfilled', this.cfg.monitoringLeadId, { rows: backfilled });
-    const unsupported = this.probes.filter((p) => p.kind === 'unsupported').map((p) => p.key);
-    this.store.emit('probes.loaded', this.cfg.monitoringLeadId, { count: this.probes.length, unsupported });
+    const bad = this.probes.filter((p) => p.kind === 'unsupported');
+    this.store.emit('probes.loaded', this.cfg.monitoringLeadId, { count: this.probes.length, unsupported: bad.map((p) => p.key) });
+    // Not silent: a probe of a kind this hq doesn't have (its module not loaded) is told once to the monitoring lead (the msg_id keeps
+    // it to one per reason). A malformed entry of a known kind is in the event and the summary, with its reason.
+    for (const p of bad.filter((x) => x.unknownKind)) {
+      const h = createHash('sha1').update(p.reason ?? '').digest('hex').slice(0, 8);
+      this.mailbox.tell({ msg_id: `probe-${p.key}-unsupported-${h}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system', priority: 'next',
+        body: `${p.key} באמנה של ${p.project} לא רץ: ${p.reason}. לטעון את הסוג (probeKindsDir, probe-kit.ts), או לתקן את הרשומה באמנה.` });
+    }
     return this.probes;
   }
 
-  private state(key: string): ProbeStateRow | undefined {
+  state(key: string): ProbeStateRow | undefined {
     return this.store.db.prepare('SELECT * FROM probe_state WHERE probe_id = ?').get(key) as ProbeStateRow | undefined;
   }
 
@@ -888,24 +739,9 @@ export class ProbeRunner {
     const isDue = (p: ProbeSpec, slack = 0) => { const s = this.state(p.key); return !s?.last_run_at || now - s.last_run_at >= p.everyMs - slack; };
     // Root signals: a round per cluster, on its own (a 3-minute ssh doesn't hold the other probes back).
     for (const p of this.probes.filter((x) => x.kind === 'cluster' && !this.inflight.has(x.key) && isDue(x))) void this.clusterRound(p, now);
-    // lumo_ws discovery: a minute-long scan, on its own as well; the round goes on with the list it had.
-    // Neither starts while a read of client_outdated on the same master is on (and the other way around, below): one full read at a time there.
-    // A read is on: in this hq, or started (`started` in meta, cleared at its end) by an hq that restarted, and still within its timeout on the master.
-    const readOn = (x: ProbeSpec) => this.inflight.has(x.key) || ((s) => s != null && now - s < x.timeoutMs)(this.outdatedState(x).started);
-    const reading = (host: string) => this.probes.some((x) => x.kind === 'client_outdated' && x.clientOutdated!.host === host && readOn(x));
-    for (const p of this.probes.filter((x) => x.kind === 'lumo_ws' && !this.inflight.has(`${x.key}#discover`) && !reading(x.lumoWs!.host) && discoverDue(x.lumoWs!, this.wsDiscovery(x), now))) void this.discoverRound(p, now);
-    // client_outdated: a ~80s read of every worker, on its own too; not while a scan of lumo_ws reads the same master (it waits a tick).
-    // A scan is on the same way: in this hq, or tried (before its ssh) after the last one that answered, within discover_timeout.
-    const scanOn = (x: ProbeSpec) => this.inflight.has(`${x.key}#discover`) || ((d) => d.tried != null && d.tried > (d.at ?? -Infinity) && now - d.tried < x.lumoWs!.discoverTimeoutMs)(this.wsDiscovery(x));
-    const scanning = (host: string) => this.probes.some((x) => x.kind === 'lumo_ws' && x.lumoWs!.host === host && scanOn(x));
-    // With '*' a round of lumo_ws is a full read too (~85s for 423 workers, 01/11): client_outdated doesn't start while one is on, or
-    // due within WS_ROUND_CLEAR_MS, so it runs in the gap after a round. Its window reaches back to its last read, so waiting loses nothing.
-    const wsFull = (host: string) => this.probes.some((x) => x.kind === 'lumo_ws' && x.lumoWs!.phones === '*' && x.lumoWs!.host === host &&
-      (this.inflight.has(x.key) || ((s) => !s?.last_run_at || s.last_run_at + x.everyMs - now < WS_ROUND_CLEAR_MS)(this.state(x.key))));
-    for (const p of this.probes.filter((x) => x.kind === 'client_outdated' && !readOn(x) && isDue(x) && !scanning(x.clientOutdated!.host) && !wsFull(x.clientOutdated!.host))) void this.outdatedRun(p, now);
-    // ride_dupes: on its own as well, so a Mongo that stopped answering holds no other probe.
-    for (const p of this.probes.filter((x) => x.kind === 'ride_dupes' && !this.inflight.has(x.key) && isDue(x))) void this.dupesRun(p, now);
-    const runnable = this.probes.filter((p) => p.kind !== 'unsupported' && p.kind !== 'cluster' && p.kind !== 'client_outdated' && p.kind !== 'ride_dupes' && !this.inflight.has(p.key));
+    // The registered kinds' own work (reads that run alone, scans): started here, never awaited.
+    for (const k of kinds.values()) if (k.tick) k.tick(this.probes.filter((x) => x.kind === k.kind), this.ctx, now);
+    const runnable = this.probes.filter((p) => p.kind !== 'unsupported' && p.kind !== 'cluster' && !kinds.get(p.kind)?.alone && !this.inflight.has(p.key));
     // A round of latency is one tick: one that is due takes along those almost due, and they all record this tick's time.
     const latencyDue = runnable.some((p) => p.kind === 'latency' && isDue(p));
     const due = runnable.filter((p) => isDue(p) || (latencyDue && p.kind === 'latency' && isDue(p, ROUND_SLACK_MS)));
@@ -921,7 +757,8 @@ export class ProbeRunner {
     await Promise.all([...due.map((p) => ({ p, retry: false })), ...retries.map((p) => ({ p, retry: true }))].map(async ({ p, retry }) => {
       this.inflight.add(p.key);
       try {
-        const o = await this.run(p.kind === 'lumo_ws' ? this.wsSpec(p) : p);
+        const k = kinds.get(p.kind);
+        const o = await this.run(k?.prepare ? k.prepare(p, this.ctx) : p);
         if (p.kind === 'latency') round.push({ p, o });
         const r = this.record(p, o, true, now, retry);
         if (r === 'crossed') crossed.push(p);
@@ -950,82 +787,6 @@ export class ProbeRunner {
     } catch (e) {
       this.store.emit('roots.error', this.cfg.monitoringLeadId, { probe: p.key, error: (e as Error).message });
     } finally { this.inflight.delete(p.key); }
-  }
-
-  /** One read of a client_outdated probe, outside the tick. Its time is when it started: the next window reaches back to there. */
-  async outdatedRun(p: ProbeSpec, now = this.store.now()): Promise<void> {
-    this.inflight.add(p.key);
-    const meta = `probes.client_outdated.${p.key}`;
-    const mark = (started: number | undefined) => this.store.setMeta(meta, JSON.stringify({ ...this.outdatedState(p), started }));
-    try {
-      const spec = this.outdatedSpec(p, now);
-      mark(now);
-      const o = await this.run(spec);
-      // Taken out of the charter (or changed) during the read: nothing is recorded or told for it, as discovery.
-      const cur = this.probes.find((x) => x.key === p.key && x.kind === 'client_outdated');
-      if (cur) this.record(cur, o, false, now);
-    }
-    catch (e) { this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: (e as Error).message }); }
-    finally { mark(undefined); this.inflight.delete(p.key); }
-  }
-
-  private dupesState(p: ProbeSpec): DupesState {
-    try { return { ...emptyDupesState(), ...(JSON.parse(this.store.getMeta(`probes.ride_dupes.${p.key}`) || '{}') as Partial<DupesState>) }; } catch { return emptyDupesState(); }
-  }
-
-  /** One read of a ride_dupes probe, outside the tick. Its window reaches back from the last read that answered (dupesSince). */
-  async dupesRun(p: ProbeSpec, now = this.store.now()): Promise<void> {
-    this.inflight.add(p.key);
-    try {
-      const o = await this.run({ ...p, rideDupes: { ...p.rideDupes!, since: dupesSince(p.rideDupes!, this.dupesState(p), p.everyMs, now), now } });
-      const cur = this.probes.find((x) => x.key === p.key && x.kind === 'ride_dupes');
-      if (cur) this.record(cur, o, false, now);
-    }
-    catch (e) { this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: (e as Error).message }); }
-    finally { this.inflight.delete(p.key); }
-  }
-
-  private wsDiscovery(p: ProbeSpec): WsDiscovery {
-    try { return { ...emptyWsDiscovery(), ...(JSON.parse(this.store.getMeta(`probes.lumo_ws_discovery.${p.key}`) || '{}') as Partial<WsDiscovery>) }; } catch { return emptyWsDiscovery(); }
-  }
-
-  /** A lumo_ws probe as its round runs: the charter's phones and the discovered ones, without the ignored. */
-  wsSpec(p: ProbeSpec): ProbeSpec { return { ...p, lumoWs: wsWatch(p.lumoWs!, this.wsDiscovery(p).phones) }; }
-
-  private outdatedState(p: ProbeSpec): OutdatedState {
-    try { return { ...emptyOutdatedState(), ...(JSON.parse(this.store.getMeta(`probes.client_outdated.${p.key}`) || '{}') as Partial<OutdatedState>) }; } catch { return emptyOutdatedState(); }
-  }
-
-  /** A client_outdated probe as its round runs: its window reaches back to the last read that answered. */
-  outdatedSpec(p: ProbeSpec, now: number): ProbeSpec {
-    return { ...p, clientOutdated: { ...p.clientOutdated!, sinceMs: outdatedSince(this.outdatedState(p), p.everyMs, p.timeoutMs, now) } };
-  }
-
-  /** One scan of discovery (lumo-ws.ts). Its time, how long it took and how many lines it read are in meta and in the event. */
-  async discoverRound(p: ProbeSpec, now = this.store.now()): Promise<void> {
-    const k = `${p.key}#discover`;
-    this.inflight.add(k);
-    try {
-      // Tried before it runs: a restart during the scan waits as after a failure, not a second scan on the master at once.
-      this.store.setMeta(`probes.lumo_ws_discovery.${p.key}`, JSON.stringify({ ...this.wsDiscovery(p), tried: now }));
-      const t0 = performance.now();
-      const r = await this.discover(p);
-      const ms = Math.round(performance.now() - t0);
-      // A reload during the scan: the charter as it is now (an ignore added meanwhile is not "discovered"); a probe gone records nothing.
-      const cur = this.probes.find((x) => x.key === p.key && x.kind === 'lumo_ws');
-      if (!cur) return;
-      p = cur;
-      const { state, messages, added } = discoverRound(p.key, p.lumoWs!, this.wsDiscovery(p), r, now, ms);
-      this.store.setMeta(`probes.lumo_ws_discovery.${p.key}`, JSON.stringify(state));
-      const lead = this.cfg.monitoringLeadId;
-      for (const m of messages) {
-        this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system', priority: m.anomaly ? 'next' : 'later', body: m.body });
-        this.store.emit(m.event, lead, { probe: p.key, msg: m.id });
-      }
-      this.store.emit('probe.lumo_ws_discover', lead, { probe: p.key, ms, ...('error' in r ? { error: r.error } : { found: r.phones.length, lines: r.lines, added }) });
-    } catch (e) {
-      this.store.emit('probe.lumo_ws_discover', this.cfg.monitoringLeadId, { probe: p.key, error: (e as Error).message });
-    } finally { this.inflight.delete(k); }
   }
 
   /** The daily jitter digest to רותם, once a day from DIGEST_HOUR Israel time (part of prod-probes, its switch). */
@@ -1066,17 +827,18 @@ export class ProbeRunner {
     });
   }
 
-  /** ci-host's ping to the nodes that lost here: a line per node, and whether ci-host could be asked at all. */
-  private async ci-host(lost: { p: ProbeSpec; o: ProbeOutcome }[]): Promise<{ available: boolean; lines: string[] }> {
+  /** The witness's ping to the nodes that lost here: a line per node, and whether it could be asked at all. */
+  private async witnessPing(lost: { p: ProbeSpec; o: ProbeOutcome }[]): Promise<{ available: boolean; lines: string[] }> {
     const w = this.pingWitness ? await this.pingWitness(lost.map(({ p }) => p.latency!.host), Math.max(...lost.map(({ p }) => p.timeoutMs)))
       : { unavailable: 'לא הוגדרה נקודה שנייה' };
-    if ('unavailable' in w) return { available: false, lines: [`ping מ-ci-host: אין witness (${w.unavailable}).`] };
+    const name = this.witnessName;
+    if ('unavailable' in w) return { available: false, lines: [`ping מ-${name}: אין witness (${w.unavailable}).`] };
     const there = lost.map(({ p }) => ({ p, s: w.get(p.latency!.host) ?? null }));
     const alsoLost = there.filter(({ p, s }) => s && s.lossPercent > p.latency!.maxLossPercent).length;
     const read = there.filter(({ s }) => s).length;
     return { available: true, lines: [
-      `ping מ-ci-host: ${alsoLost} מתוך ${read} מאבדים גם משם. ${alsoLost === 0 ? 'מ-ci-host הנודים תקינים: כנראה הנתיב של hq-host, לא הנודים.' : alsoLost * 2 > read ? 'גם ci-host רואה אובדן: כנראה בנודים או ב-Contabo.' : 'תמונה חלקית.'}`,
-      ...there.map(({ p, s }) => `- ${p.key} מ-ci-host: ${s ? pingEvidence(s) : 'אין סיכום מובן'}`),
+      `ping מ-${name}: ${alsoLost} מתוך ${read} מאבדים גם משם. ${alsoLost === 0 ? `מ-${name} הנודים תקינים: כנראה הנתיב של ${this.machine}, לא הנודים.` : alsoLost * 2 > read ? `גם ${name} רואה אובדן: כנראה בנודים או ב-Contabo.` : 'תמונה חלקית.'}`,
+      ...there.map(({ p, s }) => `- ${p.key} מ-${name}: ${s ? pingEvidence(s) : 'אין סיכום מובן'}`),
     ] };
   }
 
@@ -1088,7 +850,7 @@ export class ProbeRunner {
     return [
       `${lost.length} מתוך ${checked} נודים איבדו pings באותו סבב (${checked - lost.length} תקינים):`,
       ...lost.map(({ p, o }) => `- ${p.key} (${p.latency!.host}): אובדן ${o.ping?.lossPercent ?? '?'}%, avg ${o.ping?.avg ?? '—'}ms`),
-      `hq-host, שממנו יוצאים ה-pings: load ${host.load1} על ${host.cpus} ליבות, ${host.freeMb >= 0 ? `${host.freeMb}MB RAM פנויים` : 'RAM לא ידוע'}.`,
+      `${this.machine}, שממנו יוצאים ה-pings: load ${host.load1} על ${host.cpus} ליבות, ${host.freeMb >= 0 ? `${host.freeMb}MB RAM פנויים` : 'RAM לא ידוע'}.`,
       !http.length ? 'probes של http: אין.' : bad.length ? `probes של http: ${bad.length} מתוך ${http.length} נכשלים (${bad.map((p) => p.key).join(', ')}).`
         : `probes של http: כל ה-${http.length} תקינים. זה רמז שהבעיה בנתיב הרשת ולא בשירותים.`,
     ];
@@ -1104,12 +866,12 @@ export class ProbeRunner {
     if (lost.length > SHARED_MIN_NODES) {
       if (!o) {
         this.outage = { since: now, lastRound: now, rounds: 1, members: new Set(lost.map(({ p }) => p.key)), owner: false, held: false };
-        const ci-host = await this.ci-host(lost);
+        const seen = await this.witnessPing(lost);
         this.mailbox.tell({ msg_id: `probe-shared-${now}`, from: 'hq', to: lead, kind: 'probe_anomaly', urgency: 'urgent', priority: 'now', body: [
-          'נפילה משותפת ברשת: אירוע אחד, לא התראה לכל נוד.', ...this.sharedFacts(lost, known.length), ...ci-host.lines,
+          'נפילה משותפת ברשת: אירוע אחד, לא התראה לכל נוד.', ...this.sharedFacts(lost, known.length), ...seen.lines,
           `אם זה נמשך גם בסבב הבא (יותר מ-${SHARED_PERSIST_MS / 60_000} דקות), תצא התראה דחופה ${pre('ל', this.mailbox.names.owner.name)}, אבל רק אם נכשל גם probe של http או שאין witness.`,
         ].join('\n') });
-        this.store.emit('probe.shared_outage', lead, { nodes: lost.map(({ p }) => p.key), checked: known.length, witness: ci-host.available });
+        this.store.emit('probe.shared_outage', lead, { nodes: lost.map(({ p }) => p.key), checked: known.length, witness: seen.available });
         return;
       }
       if (now > o.lastRound) { o.rounds++; o.lastRound = now; }
@@ -1123,24 +885,24 @@ export class ProbeRunner {
       if (o.owner || o.rounds < 2 || now - o.since < SHARED_PERSIST_MS) return;
       // Lasting. The owner hears of it only when something says it is real: http failing too, or no second point to say otherwise.
       const bad = this.failingHttp();
-      const ci-host = await this.ci-host(lost);
+      const seen = await this.witnessPing(lost);
       const minutes = Math.round((now - o.since) / 60_000);
-      if (bad.length || !ci-host.available) {
+      if (bad.length || !seen.available) {
         o.owner = true;
         this.outage = o;
         const ref = `probe-shared-${o.since}`;
-        const body = [`נפילה משותפת ברשת שנמשכת ${minutes} דקות.`, ...this.sharedFacts(lost, known.length), ...ci-host.lines,
+        const body = [`נפילה משותפת ברשת שנמשכת ${minutes} דקות.`, ...this.sharedFacts(lost, known.length), ...seen.lines,
           `${this.mailbox.label(lead)} כבר על זה. רק מעקב: לא נעשתה פעולה בשירות.`].join('\n');
         this.mailbox.tell({ msg_id: `${ref}-owner`, from: lead, to: OWNER, kind: 'probe_anomaly', urgency: 'urgent', priority: 'now', body });
         this.inbox?.add({ kind: 'incident', urgency: 'urgent', from_identity: lead, ref, dedupe_key: ref,
           title: `נפילה ברשת: ${lost.length} נודים מאבדים pings כבר ${minutes} דקות`, body });
-        this.store.emit('probe.shared_outage_owner', lead, { nodes: lost.map(({ p }) => p.key), http_failing: bad.map((p) => p.key), witness: ci-host.available });
+        this.store.emit('probe.shared_outage_owner', lead, { nodes: lost.map(({ p }) => p.key), http_failing: bad.map((p) => p.key), witness: seen.available });
       } else if (!o.held) {
         o.held = true;
         this.outage = o;
         this.mailbox.tell({ msg_id: `probe-shared-${o.since}-held`, from: 'hq', to: lead, kind: 'system', priority: 'next', body: [
-          `הנפילה המשותפת נמשכת ${minutes} דקות, אבל כל ה-http תקינים ו-ci-host זמין, ולכן לא יצאה התראה ${pre('ל', this.mailbox.names.owner.name)}: כנראה בעיית מדידה או נתיב.`,
-          ...ci-host.lines].join('\n') });
+          `הנפילה המשותפת נמשכת ${minutes} דקות, אבל כל ה-http תקינים ו-${this.witnessName} זמין, ולכן לא יצאה התראה ${pre('ל', this.mailbox.names.owner.name)}: כנראה בעיית מדידה או נתיב.`,
+          ...seen.lines].join('\n') });
       }
       return;
     }
@@ -1168,7 +930,7 @@ export class ProbeRunner {
   private async confirm(crossedAll: ProbeSpec[]): Promise<void> {
     let crossed = crossedAll;
     const majority = this.majorityFailing();
-    // Disk, latency and the log are measured from hq-host only: the witness checks http, nothing to verify from ci-host.
+    // Disk, latency and the other kinds are measured from here only: the witness checks http, nothing to verify from there.
     for (const p of crossed.filter((c) => c.kind !== 'http')) this.openAnomaly(p);
     crossed = crossed.filter((c) => c.kind === 'http');
     if (!crossed.length) return;
@@ -1182,9 +944,9 @@ export class ProbeRunner {
         if (majority && fails < p.failAfter * 2) continue;
         this.openAnomaly(p, `לא אומת מנקודה שנייה: ${w.unavailable}${majority ? ' (רוב ה-probes נכשלים יחד, ייתכן שהבעיה במודד)' : ''}`);
       } else if (w.ok) {
-        // Fine from there, failing here for a long time: a broken path from hq-host only. Not silent forever (unless most probes fail: that is the host, already recorded).
+        // Fine from there, failing here for a long time: a broken path from here only. Not silent forever (unless most probes fail: that is the host, already recorded).
         const fails = this.state(p.key)?.consecutive_failures ?? 0;
-        if (!majority && fails >= p.failAfter * 2) this.openAnomaly(p, `תקין מנקודה שנייה (status=${w.status} ${w.latencyMs}ms) אבל נכשל מ-hq-host ${fails} פעמים ברצף: ייתכן נתיב שבור רק משם`);
+        if (!majority && fails >= p.failAfter * 2) this.openAnomaly(p, `תקין מנקודה שנייה (status=${w.status} ${w.latencyMs}ms) אבל נכשל מ-${this.machine} ${fails} פעמים ברצף: ייתכן נתיב שבור רק משם`);
         else measurer.push({ p, w });
       } else this.openAnomaly(p, `אומת גם מנקודה שנייה: status=${w.status ?? '—'} latency=${w.latencyMs ?? '—'}ms ${w.error ?? ''}`.trim());
     }
@@ -1196,15 +958,15 @@ export class ProbeRunner {
   private measurerFault(items: { p: ProbeSpec; w: ProbeOutcome }[], majority: boolean): void {
     const host = this.host();
     this.store.emit('probe.measurer_fault', this.cfg.monitoringLeadId, {
-      machine: 'hq-host', probes: items.map(({ p, w }) => ({ probe: p.key, witness_status: w.status, witness_latency_ms: w.latencyMs })), majority, ...host });
+      machine: this.machine, probes: items.map(({ p, w }) => ({ probe: p.key, witness_status: w.status, witness_latency_ms: w.latencyMs })), majority, ...host });
     if (this.measurerEpisode) return;
     this.measurerEpisode = true;
     this.mailbox.tell({ msg_id: `probe-measurer-${this.store.now()}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system', priority: 'next',
       body: [
-        `אירוע על hq-host, לא תקלה בפרודקשן: ${items.map(({ p }) => p.key).join(', ')} נכשלו אצלנו אבל תקינים מנקודה שנייה (ci-host).`,
-        ...items.map(({ p, w }) => `- ${p.key}: ci-host status=${w.status} ${w.latencyMs}ms`),
+        `אירוע על ${this.machine}, לא תקלה בפרודקשן: ${items.map(({ p }) => p.key).join(', ')} נכשלו אצלנו אבל תקינים מנקודה שנייה (${this.witnessName}).`,
+        ...items.map(({ p, w }) => `- ${p.key}: ${this.witnessName} status=${w.status} ${w.latencyMs}ms`),
         `המכונה: load ${host.load1} על ${host.cpus} ליבות, ${host.freeMb >= 0 ? `${host.freeMb}MB RAM פנויים` : 'RAM לא ידוע'}.${majority ? ' יותר ממחצית ה-probes נכשלו יחד.' : ''}`,
-        'לא נפתחה חריגה ולא הערתי אותך כתקלה. אם זה חוזר, זה עומס על hq-host.',
+        `לא נפתחה חריגה ולא הערתי אותך כתקלה. אם זה חוזר, זה עומס על ${this.machine}.`,
       ].join('\n') });
   }
 
@@ -1222,9 +984,7 @@ export class ProbeRunner {
         ON CONFLICT(probe_id) DO UPDATE SET last_run_at = excluded.last_run_at, last_error = excluded.last_error`).run(p.key, p.project, retry ? (prev?.last_run_at ?? now) : now, o.error);
       this.store.emit('probe.unknown', this.cfg.monitoringLeadId, { probe: p.key, error: o.error });
       if (p.kind === 'alertmanager' && o.alerts) this.alertmanagerRound(p, o.alerts, now);  // its blindness is counted from unknowns
-      if (p.kind === 'lumo_ws') this.lumoWsRound(p, { error: o.error ?? 'אין תשובה' }, now);  // so is this one's
-      if (p.kind === 'client_outdated') this.clientOutdatedRound(p, { error: o.error ?? 'אין תשובה' }, now);  // and this one's
-      if (p.kind === 'ride_dupes') this.rideDupesRound(p, { error: o.error ?? 'אין תשובה' }, now);  // and this one's
+      kinds.get(p.kind)?.round?.(p, o, this.ctx, now);  // so is a registered kind's, when it has its own
       return undefined;
     }
     // Jitter without loss is noted (ok=0, jitter=1) and doesn't advance the loss streak; alone it wakes no one until it lasts (JITTER_SUSTAIN_ROUNDS).
@@ -1255,15 +1015,15 @@ export class ProbeRunner {
         last_ok_at = COALESCE(@ok_at, last_ok_at), last_status = @status, last_latency_ms = @lat, last_error = @err`)
       .run({ k: p.key, project: p.project, fails, now: retry ? (prev?.last_run_at ?? now) : now, ok_at: o.ok ? now : null, status: o.status, lat: o.latencyMs, err: o.error });
     // The verdict, not the readings (alerts, pods, versions…): their rounds below take them from `o`, and nobody reads them
-    // back from the log. A lumo_ws result was 216KB a minute: probe.result was 1.8GB of the 2.9GB hq.db (task 1547).
-    const { alerts: _a, ws: _w, outdated: _o, dupes: _d, wa: _f, versions: _v, ...verdict } = o;
+    // back from the log. One kind's result was 216KB a minute: probe.result was 1.8GB of the 2.9GB hq.db (task 1547).
+    const { alerts: _a, versions: _v, ...verdict } = o as ProbeOutcome & Record<string, unknown>;
+    const k = kinds.get(p.kind);
+    for (const f of k?.readings ?? []) delete verdict[f];
     this.store.emit('probe.result', this.cfg.monitoringLeadId, { probe: p.key, ...verdict, error: verdict.error?.slice(0, 2000) ?? null });
     if (p.kind === 'kubelet') { if (o.versions) this.kubeletSkew(p, o.versions, now); return undefined; }
     if (p.kind === 'alertmanager') { if (o.alerts) this.alertmanagerRound(p, o.alerts, now); return undefined; }
-    if (p.kind === 'lumo_ws') { if (o.ws) this.lumoWsRound(p, o.ws, now); return undefined; }
-    if (p.kind === 'client_outdated') { if (o.outdated) this.clientOutdatedRound(p, o.outdated, now); return undefined; }
-    if (p.kind === 'ride_dupes') { if (o.dupes) this.rideDupesRound(p, o.dupes, now); return undefined; }
-    if (p.kind === 'whatsapp_log' && o.wa) this.whatsappFailedRound(p, o.wa, now);
+    k?.round?.(p, o, this.ctx, now);
+    if (k?.ownMessages) return undefined;
 
     const open = prev?.anomaly_open === 1;
     if (p.kind === 'latency' && o.ok && this.store.getMeta(`probes.jitter_quiet.${p.key}`)) this.store.setMeta(`probes.jitter_quiet.${p.key}`, '');
@@ -1280,7 +1040,7 @@ export class ProbeRunner {
       this.mailbox.tell({ msg_id: `probe-${p.key}-recovered-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'system',
         priority: p.prod === false ? 'later' : 'next', body: p.kind === 'disk' ? `${p.key} חזר לתקין (${o.percent}% ב-${p.disk!.path} על ${p.disk!.host ?? 'local'}).`
           : p.kind === 'latency' && o.ping ? `${p.key} חזר לתקין (${p.latency!.host}: ${pingEvidence(o.ping)}).`
-          : p.kind === 'whatsapp_log' ? `${p.key} חזר לתקין (הלוג של ${p.whatsappLog!.resource} בלי חריגה).`
+          : k?.recovered ? k.recovered(p, o)
           : `${p.key} חזר לתקין (status=${o.status}, ${o.latencyMs}ms).` });
       this.store.emit('probe.recovered', this.cfg.monitoringLeadId, { probe: p.key });
     }
@@ -1354,80 +1114,6 @@ export class ProbeRunner {
     this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(Object.values(state.open).some((o) => !nonProd.has(o.ns) && !o.warning) ? 1 : 0, p.key);
   }
 
-  /** The workers' websocket against what was told (lumo-ws.ts). Not fail_after: each condition has its own duration.
-   *  The state is in meta, so a restart doesn't wake רותם again for what is still open, and keeps the runs of live=false. */
-  private lumoWsRound(p: ProbeSpec, reading: WsReading | { error: string }, now: number): void {
-    const key = `probes.lumo_ws.${p.key}`;
-    let prev: WsState = emptyWsState();
-    try { prev = { ...prev, ...(JSON.parse(this.store.getMeta(key) || '{}') as Partial<WsState>) }; } catch { /* unreadable: nothing open */ }
-    const spec = this.wsSpec(p).lumoWs!;
-    const disc = this.wsDiscovery(p);
-    const { state, messages, open, heard } = wsRound(p.key, spec, prev, reading, now, quietHours, disc.phones);
-    // With '*' the phones heard are kept where discovery keeps its own: a restart of hq still watches one that fell right before it.
-    if (spec.phones === '*' && heard.join() !== disc.phones.join()) this.store.setMeta(`probes.lumo_ws_discovery.${p.key}`, JSON.stringify({ ...disc, phones: heard }));
-    const lead = this.cfg.monitoringLeadId;
-    for (const m of messages) {
-      this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system',
-        ...(m.urgent ? { urgency: 'urgent' as const } : {}), priority: m.urgent ? 'now' : 'next', body: m.body });
-      this.store.emit(m.event, lead, { probe: p.key, msg: m.id });
-    }
-    this.store.setMeta(key, JSON.stringify(state));
-    this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(open ? 1 : 0, p.key);
-  }
-
-  /** whatsmeow's 405, 409 and LoggedOut in the workers (client-outdated.ts): urgent messages by its thresholds, not fail_after.
-   *  What was told is in meta, so a restart doesn't tell it again. */
-  private clientOutdatedRound(p: ProbeSpec, reading: OutdatedReading | { error: string }, now: number): void {
-    const key = `probes.client_outdated.${p.key}`;
-    const { state, messages, open } = outdatedRound(p.key, p.clientOutdated!, this.outdatedState(p), reading, now, p.timeoutMs);
-    const lead = this.cfg.monitoringLeadId;
-    for (const m of messages) {
-      this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system',
-        ...(m.urgent ? { urgency: 'urgent' as const } : {}), priority: m.urgent ? 'now' : 'next', body: m.body });
-      this.store.emit(m.event, lead, { probe: p.key, msg: m.id });
-    }
-    this.store.setMeta(key, JSON.stringify(state));
-    if (!('error' in reading)) this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(open ? 1 : 0, p.key);
-  }
-
-  /** Duplicate ride notifications (ride-dupes.ts): one message a round to the lead and the charter's cc, not fail_after.
-   *  What was told is in meta, so a restart doesn't tell it again. */
-  private rideDupesRound(p: ProbeSpec, reading: DupesReading | { error: string }, now: number): void {
-    const key = `probes.ride_dupes.${p.key}`;
-    const { state, messages, open } = dupesRound(p.key, p.rideDupes!, this.dupesState(p), reading, now, p.everyMs);
-    const lead = this.cfg.monitoringLeadId;
-    // cc as alertmanager's: a copy, `system`, to the active ones; one removed from org.yaml is said to the lead.
-    const known = (id: string) => getIdentity(this.store, id)?.active === 1;
-    const unknown = p.rideDupes!.cc.filter((id) => !known(id));
-    const cc = p.rideDupes!.cc.filter((id) => id !== lead && known(id));
-    const note = unknown.length ? `\n(באמנה של ${p.project} יש ב-cc ${unknown.length === 1 ? 'מזהה' : 'מזהים'} שלא פעילים ב-org.yaml: ${unknown.join(', ')}. לתקן את cc.)` : '';
-    for (const m of messages) {
-      this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system', priority: 'next', body: m.body + (m.cc ? note : '') });
-      if (m.cc) for (const c of cc) this.mailbox.tell({ msg_id: `${m.id}-cc-${c}`, from: 'hq', to: c, kind: 'system', priority: 'next',
-        body: `העתק לידיעה: ההודעה נשלחה ${pre('ל', this.mailbox.label(lead))} (${lead}), והניטור שם. אין צורך לשלוח ask.\n${m.body}` });
-      this.store.emit(m.event, lead, { probe: p.key, msg: m.id, ...(m.cc && cc.length ? { cc } : {}) });
-    }
-    this.store.setMeta(key, JSON.stringify(state));
-    if (!('error' in reading)) this.store.db.prepare('UPDATE probe_state SET anomaly_open = ? WHERE probe_id = ?').run(open ? 1 : 0, p.key);
-  }
-
-  /** `Outbound: no status` and `Message failed` of the gateway (whatsapp-failed.ts): their own messages, beside fail_after.
-   *  The counts per hour, the codes open and the ids told are in meta: the baseline survives a restart, and nothing is told twice. */
-  private whatsappFailedRound(p: ProbeSpec, reading: FailedReading, now: number): void {
-    const key = `probes.whatsapp_failed.${p.key}`;
-    let prev: FailedState = emptyFailedState();
-    try { prev = { ...prev, ...(JSON.parse(this.store.getMeta(key) || '{}') as Partial<FailedState>) }; } catch { /* unreadable: start over */ }
-    const l = p.whatsappLog!;
-    const { state, messages } = failedRound(p.key, `${l.ns}/${l.resource} ב-${l.host}`, l.failed, prev, reading, now);
-    const lead = this.cfg.monitoringLeadId;
-    for (const m of messages) {
-      this.mailbox.tell({ msg_id: m.id, from: 'hq', to: lead, kind: m.anomaly ? 'probe_anomaly' : 'system',
-        ...(m.anomaly ? { urgency: 'urgent' as const } : {}), priority: m.anomaly ? 'now' : 'next', body: m.body });
-      this.store.emit(m.event, lead, { probe: p.key, msg: m.id });
-    }
-    this.store.setMeta(key, JSON.stringify(state));
-  }
-
   /** Samples in a row, newest back, with no clean one (jitter or loss), up to JITTER_SUSTAIN_ROUNDS. Unknowns are not recorded here.
    *  Only samples from the last JITTER_SUSTAIN_ROUNDS intervals (a gap, like hq down, starts over), and for a node that was in the
    *  last shared event only samples after it ended: its loss there was the event's. */
@@ -1478,14 +1164,14 @@ export class ProbeRunner {
     const recent = this.store.db.prepare('SELECT ok, status, latency_ms, error, ts FROM probe_results WHERE probe_id = ? ORDER BY id DESC LIMIT ?')
       .all(p.key, sustained ? JITTER_SUSTAIN_ROUNDS : lasted != null ? Math.max(p.failAfter, Math.min(10, Math.ceil(lasted * 1000 / FAIL_FOR_RETRY_MS) + 1)) : p.failAfter) as { status: number | null; latency_ms: number | null; error: string | null; ts: number }[];
     const lastOk = st?.last_ok_at ? new Date(st.last_ok_at).toISOString() : 'אף פעם (מאז שהתחלנו לבדוק)';
-    // `prod: false`: the same evidence, at `later` and low urgency (easy's entry link, 03/11: not production).
+    // `prod: false`: the same evidence, at `later` and low urgency (03/11: not production).
     const prod = p.prod !== false;
     const head = prod ? 'חריגה בפרודקשן' : 'חריגה (לא פרודקשן, עדיפות נמוכה)';
     this.mailbox.tell({ msg_id: `probe-${p.key}-${now}`, from: 'hq', to: this.cfg.monitoringLeadId, kind: 'probe_anomaly',
       urgency: prod ? 'urgent' : 'low', priority: prod ? 'now' : 'later', body: [
         p.kind === 'disk' ? `${head}: ${p.key} (דיסק ${p.disk!.path} על ${p.disk!.host ?? 'local'}, הסף ${p.disk!.maxPercent}%)`
           : p.kind === 'latency' ? `${head}: ${p.key} (jitter ברשת אל ${p.latency!.host}: הספים avg ${p.latency!.maxAvgMs}ms, mdev ${p.latency!.maxMdevMs}ms, אובדן ${p.latency!.maxLossPercent}%)`
-          : p.kind === 'whatsapp_log' ? `${head}: ${p.key} (הלוג של ${p.whatsappLog!.ns}/${p.whatsappLog!.resource} ב-${p.whatsappLog!.host})`
+          : kinds.get(p.kind)?.anomaly ? `${head}: ${p.key} (${kinds.get(p.kind)!.anomaly!(p)})`
           : `${head}: ${p.key} (${p.method} ${p.url})`,
         sustained ? `jitter מתמשך עם השפעה: ${JITTER_SUSTAIN_ROUNDS} דגימות ברצף בלי דגימה תקינה (JITTER_SUSTAIN_ROUNDS), גם כשהאובדן לא הגיע ל-fail_after. תקין לאחרונה: ${lastOk}.`
           : lasted != null && fails < p.failAfter ? `נכשל ברצף ${lasted} שניות (fail_for=${p.failForMs! / 1000}s, בדיקה חוזרת כל ${FAIL_FOR_RETRY_MS / 1000} שניות), בלי לחכות ל-fail_after=${p.failAfter}. תקין לאחרונה: ${lastOk}.`
@@ -1502,10 +1188,9 @@ export class ProbeRunner {
 
   summary() {
     return this.probes.map((p) => ({ key: p.key, kind: p.kind, url: p.url ?? null, ...(p.disk ? { disk: p.disk.target } : {}), ...(p.latency ? { latency: p.latency.host } : {}),
-      ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.whatsappLog ? { whatsapp_log: p.whatsappLog.target } : {}), ...(p.cluster ? { cluster: p.cluster.ssh } : {}),
-      ...(p.clientOutdated ? { client_outdated: p.clientOutdated.target, told: Object.keys(this.outdatedState(p).told) } : {}),
-      ...(p.rideDupes ? { ride_dupes: `${p.rideDupes.db}.${p.rideDupes.collection}` } : {}),
-      ...(p.lumoWs ? { lumo_ws: p.lumoWs.target, phones: p.lumoWs.phones, ignore: p.lumoWs.ignore, discovered: this.wsDiscovery(p).phones } : {}),
+      ...(p.reason ? { reason: p.reason } : {}),
+      ...(p.kubelet ? { kubelet: p.kubelet.target } : {}), ...(p.cluster ? { cluster: p.cluster.ssh } : {}),
+      ...(kinds.get(p.kind)?.summary?.(p, this.ctx) ?? {}),
       ...(p.alertmanager ? { alertmanager: p.alertmanager.target, namespaces: p.alertmanager.namespaces, non_prod: p.alertmanager.nonProd ?? [], resolve_after_ms: p.alertmanager.resolveAfterMs ?? RESOLVE_AFTER_MS,
         ...(p.alertmanager.match ? { match: p.alertmanager.match } : {}), ...(p.alertmanager.exclude ? { exclude: p.alertmanager.exclude } : {}),
         ...(p.alertmanager.critical ? { critical: p.alertmanager.critical } : {}), ...(p.alertmanager.warning ? { warning: p.alertmanager.warning } : {}),

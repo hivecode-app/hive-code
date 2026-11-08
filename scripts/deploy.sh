@@ -47,6 +47,8 @@ FLUTTER="${FLUTTER:-$HOME/flutter/bin/flutter}"
 export GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.daemon=false -Dorg.gradle.project.kotlin.compiler.execution.strategy=in-process"
 APKSIGNER="${APKSIGNER:-/opt/android-sdk/build-tools/36.0.0/apksigner}"
 AAPT2="${AAPT2:-/opt/android-sdk/build-tools/36.0.0/aapt2}"
+# This machine's own paths (DICTATE_ENV), outside git: ~/.config/agent-company/deploy.env, when there is one.
+[[ ! -f "$HOME/.config/agent-company/deploy.env" ]] || . "$HOME/.config/agent-company/deploy.env"
 DICTATE_ENV="${DICTATE_ENV:-$HOME/projects/dictate-server/server/.env}"
 UNITS="$HOME/.config/systemd/user"
 # Hand-made backups of our Caddy blocks from before this script (20/10/2026). Same list in drift-check.sh.
@@ -283,9 +285,10 @@ deploy_hq() {
   systemctl --user enable -q --now agent-company-drift.timer
   systemctl --user enable -q --now agent-company-disk-clean.timer
   # This machine's own steps (not the engine's): <COMPANY_HOME>/company/local/deploy-hq.sh, when the company has one.
+  # ENGINE: the checkout being deployed, for what the company's own code runs against it (its probe kinds' tests).
   local hook="$CHOME/company/local/deploy-hq.sh" out
   if [[ -f "$hook" ]]; then
-    out="$(UNITS="$UNITS" bash "$hook")" || fail "$hook נכשל"
+    out="$(UNITS="$UNITS" ENGINE="$repo" bash "$hook")" || fail "$hook נכשל"
     say "השלבים המקומיים של החברה ($hook): $(tail -1 <<<"$out")"
   fi
 
@@ -316,6 +319,9 @@ deploy_app() {
   # one before (Android adds 1000 x ABI on top); the in-app update compares exactly that number.
   [[ "$(git rev-parse --is-shallow-repository)" == false ]] || fail "ה-checkout רדוד, ולכן מספר ה-build לא אמין"
   build="$(git rev-list --count HEAD)"
+  # The owner's own Android values (applicationId, google-services.json), outside the engine: packages/app/android/app/build.gradle.kts.
+  local android_cfg="${HIVECODE_ANDROID_CONFIG:-$CHOME/company/local/android}"
+  if [[ -d "$android_cfg" ]]; then export HIVECODE_ANDROID_CONFIG="$android_cfg"; else unset HIVECODE_ANDROID_CONFIG; fi
   (cd packages/app \
     && "$FLUTTER" build web --release --base-href / --no-web-resources-cdn >/dev/null \
     && "$FLUTTER" build apk --release --split-per-abi --build-number="$build" >/dev/null) || fail "flutter build"
@@ -324,7 +330,9 @@ deploy_app() {
   ((size > 5 * 1024 * 1024)) || fail "ה-APK קטן מדי ($size bytes)"
   hex="$("$APKSIGNER" verify --print-certs "$apk" | sed -n 's/.*certificate SHA-256 digest: \([0-9a-f]\{64\}\).*/\1/p' | head -1)"
   got="$(echo -n "$hex" | xxd -r -p | base64 -w0 | tr '+/' '-_' | tr -d '=')"
-  want="$(grep -o 'android:apk-key-hash:[A-Za-z0-9_-]\+' packages/hq/src/config.ts | head -1 | cut -d: -f3)"
+  # The release key is the company's: the APK origin its hq.config.json accepts for passkeys (auth.origins).
+  want="$(grep -o 'android:apk-key-hash:[A-Za-z0-9_-]\+' "$HQ_CONFIG_SRC" | head -1 | cut -d: -f3)"
+  [[ -n "$want" ]] || fail "אין ב-auth.origins של $HQ_CONFIG_SRC מפתח שחרור (android:apk-key-hash:<sha256 ב-base64url>)"
   [[ -n "$got" && "$got" == "$want" ]] || fail "ה-APK לא חתום במפתח השחרור ($got, ציפיתי ל-$want)"
   # The versionCode Android will see, read from the APK itself (not from what we asked Flutter for).
   code="$("$AAPT2" dump badging "$apk" | sed -n "s/^package: .* versionCode='\([0-9]*\)'.*/\1/p")"
@@ -334,16 +342,22 @@ deploy_app() {
   local live
   live="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).version_code||0)}catch{console.log(0)}' "$WWW/current/app-release.json")"
   ((code > live)) || fail "ה-versionCode החדש ($code) לא גבוה מזה שבאוויר ($live)"
+  # Another applicationId would install as a second app next to the one on the phone, not update it.
+  local pkg live_pkg
+  pkg="$("$AAPT2" dump badging "$apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+  if [[ -f "$WWW/current/agent-company.apk" ]]; then
+    live_pkg="$("$AAPT2" dump badging "$WWW/current/agent-company.apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+    [[ "$pkg" == "$live_pkg" ]] || fail "ה-APK החדש הוא $pkg וזה שבאוויר $live_pkg (ה-applicationId ב-$CHOME/company/local/android/android.properties)"
+  fi
 
   sudo -n install -d -o "$(id -un)" -m755 "$WWW/releases"
-  mkdir -p "$rel.tmp/.well-known"
+  mkdir -p "$rel.tmp"
   rsync -a packages/app/build/web/ "$rel.tmp/"
   cp "$apk" "$rel.tmp/agent-company.apk"
   # What hq offers the app as "the newest version" (packages/hq/src/app-release.ts).
   node -e 'const [code, name, sha, sha256, bytes] = process.argv.slice(1);
     console.log(JSON.stringify({ version_code: +code, version_name: name, sha, apk: "agent-company.apk", sha256, bytes: +bytes }))' \
     "$code" "$name" "$sha" "$(sha256sum "$apk" | cut -c1-64)" "$size" >"$rel.tmp/app-release.json"
-  cp deploy/caddy/assetlinks.json "$rel.tmp/.well-known/assetlinks.json"
   echo "$sha" >"$rel.tmp/.deployed-sha"
   chmod -R a+rX "$rel.tmp"
   mv "$rel.tmp" "$rel"
@@ -377,7 +391,8 @@ deploy_caddy() {
   for f in /etc/caddy/sites/*.caddy; do
     if [[ -e "$f" && "$(basename "$f")" != agent-company.caddy ]]; then cp "$f" "$stage/sites/"; fi
   done
-  cp deploy/caddy/agent-company.caddy "$stage/sites/agent-company.caddy"
+  # The engine's file with this company's domain in place of the placeholder (scripts/caddy-main.mjs --site).
+  node scripts/caddy-main.mjs --site >"$stage/sites/agent-company.caddy" || fail "אין דומיין לאתרי Caddy (HQ_DOMAIN או apiUrl ב-hq.config.json)"
   sudo -n caddy validate --adapter caddyfile --config "$stage/Caddyfile" >"$DSTATE/caddy-validate.log" 2>&1 \
     || fail "caddy validate נכשל (הלוג: $DSTATE/caddy-validate.log)"
   if cmp -s "$stage/Caddyfile" /etc/caddy/Caddyfile && cmp -s "$stage/sites/agent-company.caddy" /etc/caddy/sites/agent-company.caddy; then

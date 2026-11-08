@@ -340,7 +340,7 @@ rows:
     check: [setting_sources]
     fast: true
     disables: shifts (would load the owner's global instructions)
-    evidence: "canary 2.1.303: --setting-sources ALONE FAILS. For any cwd under $HOME the ancestor walk finds /home/owner/.claude/CLAUDE.md and loads it as type Project. Fixed by claudeMdExcludes (absolute path) in the generated --settings; PASS after"
+    evidence: "canary 2.1.303: --setting-sources ALONE FAILS. For any cwd under $HOME the ancestor walk finds /home/ran/.claude/CLAUDE.md and loads it as type Project. Fixed by claudeMdExcludes (absolute path) in the generated --settings; PASS after"
 
   - id: auto_memory_off
     internal: "autoMemoryEnabled:false via --settings"

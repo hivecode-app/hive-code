@@ -45,7 +45,8 @@ if (!APP || !API) {
   process.exit(1);
 }
 const admin = readFileSync(join(state, 'api-token'), 'utf8').trim();
-const apkKeyHash = /android:apk-key-hash:([A-Za-z0-9_-]+)/.exec(readFileSync(join(repo, 'packages/hq/src/config.ts'), 'utf8'))?.[1];
+// The release key: the APK origin the company's hq accepts for passkeys.
+const apkKeyHash = (liveCfg.auth?.origins ?? []).map((o) => /^android:apk-key-hash:([A-Za-z0-9_-]+)$/.exec(o)?.[1]).find(Boolean);
 const apksigner = process.env.APKSIGNER ?? '/opt/android-sdk/build-tools/36.0.0/apksigner';
 
 const results = [];
@@ -200,7 +201,7 @@ await when('apk', 'ה-APK והעדכון באפליקציה', async () => {
       bad(`apksigner דחה את ה-APK: ${(e).message.split('\n')[0]}`);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   } else if (bytes.length) {
-    bad('אין ב-packages/hq/src/config.ts מפתח שחרור (android:apk-key-hash), ולכן החתימה לא נבדקה');
+    bad(`אין ב-auth.origins של ${join(state, 'hq.config.json')} מפתח שחרור (android:apk-key-hash), ולכן החתימה לא נבדקה`);
   }
   if (bytes.length) console.log(`  sha256 של ה-APK: ${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}…`);
 

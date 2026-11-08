@@ -5,7 +5,7 @@
 # Usage: tool/qa/device.sh <name> [--debug|--profile]     e.g. tool/qa/device.sh bidi
 #        BASE=origin/main tool/qa/device.sh perf --profile   same test against <base>'s lib/, from a
 #        temporary copy (the working tree is never touched); results go to <name>@<base>/.
-# Refuses to start while a Lumo CI job or another emulator is running (one heavy job at a time).
+# Refuses to start while an Android CI job or another emulator is running (one heavy job at a time).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 name="$1"; mode="${2:---debug}"

@@ -3,7 +3,7 @@
 // a message is not here: the app asks for it (`messageBody`) when he touches the line. Times are milliseconds
 // from the start of the day in the company's time zone. Derived at read time from hq.db, nothing kept.
 import { isCancelled } from './scheduler.ts';
-import { OWNER } from '@company/shared';
+import { loadNames, OWNER } from '@company/shared';
 import { listIdentities, listMapTeams, type IdentityRow } from './org.ts';
 import type { Store } from './store.ts';
 import { tzOffsetMs } from './timezone.ts';
@@ -62,8 +62,9 @@ export function companyDay(store: Store, companyDir: string, tz: string, date: s
   for (const m of msgs) { active.add(m.f); active.add(m.t); }
   for (const s of shifts) active.add(s.identity);
 
+  const owner = loadNames(companyDir).owner.name;
   const people: { id: string; name: string; mono: string; team: string; role: string }[] = [
-    { id: OWNER, name: 'רן', mono: 'עק', team: 'management', role: 'owner' },
+    { id: OWNER, name: owner, mono: owner.slice(0, 2), team: 'management', role: 'owner' },
     { id: HQ, name: 'hq', mono: '', team: 'management', role: 'system' },
   ];
   for (const i of ids.values()) {

@@ -1,5 +1,5 @@
 // The real dictate-server. Skipped unless DICTATE_TEST_URL, DICTATE_TEST_TOKEN and DICTATE_TEST_WAV are set:
-//   DICTATE_TEST_URL=https://dictate.203-0-113-10.sslip.io DICTATE_TEST_TOKEN=... \
+//   DICTATE_TEST_URL=https://dictate.example.com DICTATE_TEST_TOKEN=... \
 //   DICTATE_TEST_WAV=$HOME/projects/dictate-server/test/s1.wav flutter test test/dictate_live_test.dart
 // Its own file: once a testWidgets runs, flutter_test answers every real HTTP request with 400.
 import 'dart:io';

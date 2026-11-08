@@ -95,12 +95,14 @@ test('a whole contract parses: org.yaml of the example company (fixtures/)', () 
   assert.ok(automations.some((a) => a.key === 'hadar/prod-probes'));
 });
 
-test('projects for the board: org.yaml order and names, the charter\'s status wins, no charter falls back to org.yaml', () => {
+test('projects for the board: org.yaml order, names and team symbols, the charter\'s status wins, no charter falls back to org.yaml', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hq-projects-'));
   try {
     assert.deepEqual(listProjects(dir), [], 'no org.yaml');
     mkdirSync(join(dir, 'projects'));
     writeFileSync(join(dir, 'org.yaml'), [
+      'teams:',
+      '  - {id: shop-team, symbol: storefront}',
       'projects:',
       '  - id: co', '    status: dormant', '    team: co',
       '  - id: shop', '    name: החנות', '    status: dormant', '    team: shop-team',
@@ -110,9 +112,9 @@ test('projects for the board: org.yaml order and names, the charter\'s status wi
     writeFileSync(join(dir, 'projects', 'co.md'), '---\nproject: co\nstatus: active\n---\n# co\n');
     writeFileSync(join(dir, 'projects', 'shop.md'), '---\nproject: shop\nstatus: dormant\n---\n# shop\n');
     assert.deepEqual(listProjects(dir), [
-      { id: 'co', name: null, status: 'active', team: 'co' },
-      { id: 'shop', name: 'החנות', status: 'dormant', team: 'shop-team' },
-      { id: 'lost', name: null, status: 'active', team: null },
+      { id: 'co', name: null, status: 'active', team: 'co', symbol: null },
+      { id: 'shop', name: 'החנות', status: 'dormant', team: 'shop-team', symbol: 'storefront' },
+      { id: 'lost', name: null, status: 'active', team: null, symbol: null },
     ]);
     writeFileSync(join(dir, 'org.yaml'), 'projects: [');
     assert.deepEqual(listProjects(dir), [], 'a broken org.yaml is an empty list, not a crash');

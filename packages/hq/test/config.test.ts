@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { APK_ORIGIN, companyLocation, loadConfig, type HqConfig } from '../src/config.ts';
+import { companyLocation, loadConfig, type HqConfig } from '../src/config.ts';
 import { makeEnv, ORG_YAML } from './helpers.ts';
 
 const FIXTURE = join(import.meta.dirname, '..', '..', '..', 'fixtures', 'company-home');
@@ -30,7 +30,7 @@ test('a company\'s hq.config.json + org.yaml (the example company in fixtures/) 
       defaultCwd: '/home/shira/projects/engine', residents: ['gal'],
       auth: {
         rpId: 'app.hq.example.com', rpName: 'החברה',
-        origins: ['https://app.hq.example.com', APK_ORIGIN],
+        origins: ['https://app.hq.example.com'],
         appUrl: 'https://app.hq.example.com/', pairCodeMs: 10 * 60_000, userName: 'shira', userDisplayName: 'שירה',
       },
       dictateUrl: 'http://127.0.0.1:8790',
@@ -55,16 +55,19 @@ test('no hq.config.json and no org.yaml: generic values, nothing of one particul
     assert.deepEqual(cfg.capacity.residents, ['manager']);
     assert.equal(cfg.telegramChat, '');
     assert.equal(cfg.defaultCwd, '/home/someone');
-    assert.deepEqual(cfg.auth.origins, [APK_ORIGIN], 'the APK is the engine\'s, accepted everywhere');
+    assert.deepEqual(cfg.auth.origins, [], 'no origin of one particular company or APK key');
     assert.equal(cfg.auth.appUrl, null);
     assert.equal(cfg.apiUrl, null);
     assert.equal(cfg.dictate.url, null);
     assert.deepEqual(cfg.accounts, [{ name: 'claude', label: 'Claude', expect: '', managed: false }]);
     assert.deepEqual(cfg.memoryImport, []);
     // shiftTemplate is a path inside the engine's own checkout, wherever that is installed.
-    const all = JSON.stringify({ ...cfg, shiftTemplate: undefined }).toLowerCase();
-    for (const s of ['ran', 'רן', 'hivecode', 'yoav', 'rotem', '100000001', 'owner-account', '8790']) {
-      assert.ok(!all.includes(s), `"${s}" in the generic config`);
+    const json = JSON.stringify({ ...cfg, shiftTemplate: undefined });
+    assert.doesNotMatch(json, /\bRan\b/, 'the owner\'s name in the generic config');
+    const all = json.toLowerCase();
+    for (const s of ['רן', 'hq.example.com', 'yoav', 'rotem', '100000001', 'owner-account', '8790']) {
+      // A whole word: "רן" is also inside other words.
+      assert.doesNotMatch(all, new RegExp(`(?<![\\p{L}\\p{N}])${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'u'), `"${s}" in the generic config`);
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -99,7 +102,7 @@ test('org.yaml gives manager, monitoring lead and residents; hq.config.json stil
     writeFileSync(join(dir, 'state', 'hq.config.json'), JSON.stringify({ managerId: 'dana', auth: { origins: ['https://x.example'] } }));
     const both = loadConfig({ stateDir: join(dir, 'state'), companyDir: join(dir, 'company') });
     assert.equal(both.managerId, 'dana');
-    assert.deepEqual(both.auth.origins, ['https://x.example', APK_ORIGIN]);
+    assert.deepEqual(both.auth.origins, ['https://x.example']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

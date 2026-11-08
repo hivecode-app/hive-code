@@ -1,10 +1,13 @@
-# Every public site of agent-company, and nothing else. `scripts/deploy.sh caddy` installs this file
-# as /etc/caddy/sites/agent-company.caddy; the main /etc/caddy/Caddyfile pulls it in with
+# Every public site of agent-company on a server that runs the system Caddy, and nothing else. The hosts are
+# written under a placeholder domain (TEMPLATE_DOMAIN in scripts/caddy-main.mjs): `node scripts/caddy-main.mjs --site`
+# prints this file with the company's own domain
+# (HQ_DOMAIN, else the host of `apiUrl` in the company's hq.config.json without its `api.`), and `scripts/deploy.sh caddy`
+# installs that as /etc/caddy/sites/agent-company.caddy; the main /etc/caddy/Caddyfile pulls it in with
 # `import sites/*.caddy`. Never edit the live copy: scripts/drift-check.sh reports any difference.
-# No secrets here: hq checks every token itself, and hq holds dictate-server's credential
+# No secrets here: hq checks every token itself, and hq holds the dictation service's credential
 # (DICTATE_TOKEN in ~/.config/agent-company/hq.env, packages/hq/src/dictate.ts).
 
-# The API for tools and the ci-host heartbeat. hq listens on 127.0.0.1:7420 only; everything except
+# The API for tools and an external heartbeat. hq listens on 127.0.0.1:7420 only; everything except
 # GET /health and /api/auth/* needs a token. WS /ws passes through.
 api.hq.example.com {
 	reverse_proxy 127.0.0.1:7420 {

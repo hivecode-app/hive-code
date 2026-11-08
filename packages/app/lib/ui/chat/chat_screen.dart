@@ -773,7 +773,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return Column(mainAxisSize: MainAxisSize.min, children: [
         ServiceLine(text: l.systemUpdates(e.system!.length), icon: 'info', onTap: () => setState(() => open ? _openGroups.remove(e.key) : _openGroups.add(e.key)), tapHint: l.more),
         if (open) for (final m in e.system!)
-          ServiceLine(text: m is EventLine ? cleanSystemText(m.text, l) : l.systemUpdates(1), icon: 'info'),
+          ServiceLine(text: m is EventLine ? cleanSystemText(m.text, l, machines: {for (final s in d.presence.values) if (s.machine != null) s.machine!}) : l.systemUpdates(1), icon: 'info'),
       ]);
     }
     if (e.group != null) {
@@ -1311,8 +1311,10 @@ class _Entry {
   final DateTime? day;
 }
 
-/// System transport details are not product copy. Task and message IDs stay in each tool's details.
-String cleanSystemText(String text, AppLocalizations l) {
-  final cleaned = text.replaceAll(RegExp(r'\b(?:[a-z][a-z0-9-]*-t\d+(?:-[a-z0-9:.-]+)?|t\d+|msg_id|hq-host|ci-host|hq|lease-\d+)\b', caseSensitive: false), '').replaceAll('``', '').replaceAll(RegExp(r'\s+'), ' ').trim();
+/// System transport details are not product copy. Task and message IDs stay in each tool's details,
+/// and so do the names of the machines shifts run on ([machines], from the workers' presence).
+String cleanSystemText(String text, AppLocalizations l, {Set<String> machines = const {}}) {
+  final names = [for (final m in machines) if (m.isNotEmpty) RegExp.escape(m)];
+  final cleaned = text.replaceAll(RegExp('\\b(?:[a-z][a-z0-9-]*-t\\d+(?:-[a-z0-9:.-]+)?|t\\d+|msg_id|hq|lease-\\d+${names.map((n) => '|$n').join()})\\b', caseSensitive: false), '').replaceAll('``', '').replaceAll(RegExp(r'\s+'), ' ').trim();
   return cleaned.isEmpty ? l.systemUpdates(1) : cleaned;
 }

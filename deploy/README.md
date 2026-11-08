@@ -16,7 +16,7 @@ scripts/deploy.sh hq --sha <sha>   # רק עד commit מסוים ב-main (או D
 2. **בדיקות.** `npm ci`, ‏contract, ‏`test:deploy`, ‏typecheck ו-`npm test`. ל-`app` ול-`all` גם `flutter analyze` ו-`flutter test`.
 3. **פריסה** של היעד:
    - **`hq`:** כותב את `~/.config/agent-company/hq.env` (הרשאות 600) מתוך `.env` של dictate-server. מקשר ל-`~/.config/systemd/user` את `agent-company-hq`, ‏`agent-company-drift` ו-`agent-company-disk-clean` (service ו-timer), ומסיר את `actions-runner-company` הישן אם הוא עוד שם (company-ci עבר ל-ci-host, `deploy/ci-host/`), ואחרי `daemon-reload` מריץ את השלבים המקומיים של החברה, אם יש (למטה. הם עושים `daemon-reload` משלהם אם הם מוסיפים יחידות). אחרי זה restart ל-hq. בסוף בודק ש-`/health` חזר, ושכל יחידות `company-shift@` שרצו לפני ה-restart עדיין רצות.
-   - **`app`:** בונה web בשורש ו-APK ‏(arm64, בלי כתובת שרת: האפליקציה לומדת אותה מקישור הצימוד או ממסך הכניסה). בודק את הגודל ואת חתימת השחרור, ואז כותב release ב-`/var/www/hq-app/releases/<sha>/` (web, ‏`agent-company.apk`, ‏`.well-known/assetlinks.json`). ההחלפה היא symlink אטומי `current`. נשמרים ה-release הנוכחי, הקודם ושלושת האחרונים.
+   - **`app`:** בונה web בשורש ו-APK ‏(arm64, בלי כתובת שרת: האפליקציה לומדת אותה מקישור הצימוד או ממסך הכניסה). ה-`applicationId` ו-`google-services.json` של הבעלים מ-`<COMPANY_HOME>/company/local/android/` כשהתיקייה קיימת (אחרת `app.hivecode` בלי FCM). בודק את הגודל, את חתימת השחרור (מול ה-`android:apk-key-hash` ב-`auth.origins` של hq.config.json של החברה) ושה-applicationId הוא של ה-APK שבאוויר, ואז כותב release ב-`/var/www/hq-app/releases/<sha>/` (web ו-`agent-company.apk`; את `assetlinks.json` מגיש hq). ההחלפה היא symlink אטומי `current`. נשמרים ה-release הנוכחי, הקודם ושלושת האחרונים.
    - **`caddy`:** מתקין את `deploy/caddy/agent-company.caddy` ל-`/etc/caddy/sites/agent-company.caddy`. ב-Caddyfile הראשי הוא מוודא שיש שורת `import sites/*.caddy` אחת ואין אף בלוק של החברה (`scripts/caddy-main.mjs`). בלוקים של אתרים אחרים (desk, ‏dictate, ‏calltr, ‏k8s) נשארים כמו שהם. ההגדרה נבדקת ב-`caddy validate` לפני ההתקנה, ואחרי זה `reload`.
 4. **אימות מקצה לקצה** (`scripts/verify-prod.mjs`), מבחוץ כמו טלפון:
    - `/health` עונה.
@@ -56,7 +56,7 @@ scripts/deploy.sh hq --sha <sha>   # רק עד commit מסוים ב-main (או D
 - אין גיבויי Caddyfile ידניים של החברה, ואין שאריות ב-`/var/www/hq-app`.
 - הנתיב הסודי הישן לא חזר ל-Caddy, ו-`app-path` לא נשאר.
 
-`agent-company-drift.timer` מריץ אותו כל לילה ב-03:40 (שעון בנגקוק), עם `--report`. כל סטייה נכנסת לתיבה של רן מנגה. האוטומציה היא `noga/drift-check` ב-`company/org.yaml`, ואפשר לכבות אותה בלוח. התיקון לסטייה הוא תמיד פריסה מה-repo.
+`agent-company-drift.timer` מריץ אותו כל לילה ב-03:40 (בשעון של השרת), עם `--report`. כל סטייה נכנסת לתיבה של רן מנגה. האוטומציה היא `noga/drift-check` ב-`company/org.yaml`, ואפשר לכבות אותה בלוח. התיקון לסטייה הוא תמיד פריסה מה-repo.
 
 ## שלבים מקומיים של החברה
 

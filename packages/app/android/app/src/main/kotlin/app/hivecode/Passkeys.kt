@@ -24,8 +24,8 @@ import io.flutter.plugin.common.MethodChannel
 /**
  * Passkeys through Credential Manager (#23). JSON in (hq's WebAuthn options), JSON out (the
  * response hq verifies), so the app never handles key material. The origin hq sees is
- * `android:apk-key-hash:<release cert sha256>`, and app.hq.example.com serves
- * `.well-known/assetlinks.json` for this package (deploy/caddy/assetlinks.json).
+ * `android:apk-key-hash:<release cert sha256>` (listed in the company's hq.config.json auth.origins), and hq serves
+ * `.well-known/assetlinks.json` for this package on its domain (packages/hq/src/pairing.ts).
  * Error codes for Dart: cancelled, exists (already on this device), none (no passkey here), unsupported, failed.
  */
 class Passkeys(private val activity: Activity) {

@@ -11,13 +11,18 @@ ulimit -S -f unlimited 2>/dev/null || true
 
 [[ $repo =~ ^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$ ]] || { echo "repo לא תקין: $repo"; exit 2; }
 [[ $sha =~ ^[0-9a-f]{40}$ ]] || { echo "sha חייב להיות מלא (40 תווים)"; exit 2; }
-[[ $tag =~ ^ghcr\.io/hive-owner/[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9_][A-Za-z0-9._-]*$ ]] || { echo "התג חייב להיות תחת ghcr.io/hive-owner/"; exit 2; }
+# Ours: the GitHub account gh is signed in as here (the one that holds the registry login), and its ghcr.io namespace.
+# hq's policy (access-policy.ts) checks the same against the catalog; this is the second check, on the machine itself.
+owner=${COMPANY_BUILD_OWNER:-$(gh api user --jq .login 2>/dev/null || true)}
+[[ -n $owner ]] || { echo "לא ידוע של מי ה-registry: gh לא מחובר (או COMPANY_BUILD_OWNER)"; exit 2; }
+registry=${COMPANY_BUILD_REGISTRY:-ghcr.io/${owner,,}/}
+[[ $tag == "$registry"* && ${tag#"$registry"} =~ ^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9_][A-Za-z0-9._-]*$ ]] || { echo "התג חייב להיות תחת $registry"; exit 2; }
 for p in "$dockerfile" "$context"; do
   [[ $p != /* && $p != -* && $p != *..* ]] || { echo "נתיב לא מותר: $p"; exit 2; }
 done
 
-# A repo of someone else only with WRITE for us; ours (hive-owner) needs no check.
-if [[ ${repo%%/*} != hive-owner ]]; then
+# A repo of someone else only with WRITE for us; ours needs no check.
+if [[ ${repo%%/*} != "$owner" ]]; then
   [[ $(gh api "repos/$repo" --jq .permissions.push 2>/dev/null) == true ]] || { echo "אין לנו WRITE על $repo: לא בונים ממנו"; exit 3; }
 fi
 

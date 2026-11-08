@@ -18,7 +18,6 @@
     { "term": "task-1234", "he": "שם המשימה", "en": "the task's title", "match": [{ "re": "\\btask-\\d+" }, { "re": "\\bt\\d{2,}\\b" }] },
     { "term": "MCP", "he": "(לא מוצג)", "en": "(not shown)", "match": [{ "re": "\\bMCP\\b", "i": true }] },
     { "term": "hq", "he": "השרת", "en": "Hive Code server", "match": [{ "re": "\\bhq\\b", "i": true }] },
-    { "term": "hq-host, ci-host", "he": "השרת", "en": "the server", "match": [{ "re": "\\b(?:hq-host|ci-host)\\b" }] },
     { "term": "ETA", "he": "זמן משוער", "en": "expected time", "match": [{ "re": "\\bETA\\b" }] },
     { "term": "FYI", "he": "לידיעה", "en": "for your information", "match": [{ "re": "\\bfyi\\b", "i": true }] },
     { "term": "ticket", "he": "משימה", "en": "task", "match": [{ "re": "\\btickets?\\b", "i": true }, { "re": "טיקט" }] },

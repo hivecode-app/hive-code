@@ -144,15 +144,15 @@ test('RemoteLauncher: the shift\'s files go to the same paths there, on the node
   const node = new RemoteNode(NODE, state, run);
   node.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
   try {
-    const l = new RemoteLauncher(node, '/home/owner/.local/state/agent-company');
+    const l = new RemoteLauncher(node, '/home/ran/.local/state/agent-company');
     const spec: LaunchSpec = { shiftId: 'p-t1-1', identity: 'p-t1', shiftNo: 1, sessionId: 's', resume: false, kind: 'work', cwd: '/w',
-      socketPath: '/home/owner/.local/state/agent-company/shifts/p-t1-1.sock', taskId: 1, unit: 'company-shift@p-t1-1.service',
+      socketPath: '/home/ran/.local/state/agent-company/shifts/p-t1-1.sock', taskId: 1, unit: 'company-shift@p-t1-1.service',
       account: 'node:n2', configDir: '/here/accounts/x', machine: 'n2' };
     await l.launch(spec);
     const write = calls.find((c) => c.args.at(-1)!.includes('; node -e'))!;
     const files = JSON.parse(write.input!) as Record<string, string>;
-    const args = JSON.parse(files['/home/owner/.local/state/agent-company/shifts/p-t1-1/host-args.json']!) as Record<string, unknown>;
-    assert.equal(args['oauth-token-file'], '/home/owner/.local/state/agent-company/node-oauth-token');
+    const args = JSON.parse(files['/home/ran/.local/state/agent-company/shifts/p-t1-1/host-args.json']!) as Record<string, unknown>;
+    assert.equal(args['oauth-token-file'], '/home/ran/.local/state/agent-company/node-oauth-token');
     assert.equal(args['config-dir'], undefined, 'never a config dir of here');
     assert.equal(args.cwd, '/w');
     assert.match(calls.at(-1)!.args.at(-1)!, /sc enable --now 'company-shift@p-t1-1.service'/);
@@ -481,7 +481,7 @@ test('RemoteLauncher ownLogin: a machine with a user of its own runs the shift o
   const state = mkdtempSync(join(tmpdir(), 'rl-'));
   const node = new RemoteNode({ ...NODE, ssh: 'ran@laptop.test', ownLogin: true }, state, run);
   node.spawnMaster = () => spawn('sleep', ['60'], { stdio: ['ignore', 'ignore', 'pipe'] });
-  const STATE = '/home/owner/.local/state/agent-company';
+  const STATE = '/home/ran/.local/state/agent-company';
   const launch = async () => {
     calls.length = 0;
     await new RemoteLauncher(node, STATE).launch({ shiftId: 'p-t1-1', identity: 'p-t1', shiftNo: 1, sessionId: 's', resume: false, kind: 'work', cwd: '/w',

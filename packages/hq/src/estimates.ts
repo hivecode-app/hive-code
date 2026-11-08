@@ -8,6 +8,7 @@
 // remind() is the scheduler's every-minute pass: the reminder before the due time, the one after it, the manager at +10 minutes.
 // A new estimate of the same worker on the same `what` is an update: the old row stays as given, closed as cancelled
 // with superseded_by pointing at the new one.
+import { DEFAULT_NAMES, pre } from '@company/shared';
 import type { Store } from './store.ts';
 import { hhmm, nextLocal, tzOffsetMs, wallToUtc } from './timezone.ts';
 
@@ -175,9 +176,10 @@ export class Estimates {
    *  3. ESCALATE_AFTER_MS past due and still open → `managerOf(worker)`, once. Null = nobody to tell.
    * The owner is not told: `missed` shows in the API (GET /api/estimates) and is not a push.
    */
-  remind(say: Say, tz: string, managerOf: (identity: string) => string | null): { reminded: number; missed: number; escalated: number } {
+  remind(say: Say, tz: string, managerOf: (identity: string) => string | null, owner = DEFAULT_NAMES.owner.name): { reminded: number; missed: number; escalated: number } {
     const db = this.store.db;
     const now = this.store.now();
+    const toOwner = pre('ל', owner);
     const out = { reminded: 0, missed: 0, escalated: 0 };
     const open = `closed_at IS NULL`;
     this.freezeFrozenTasks();
@@ -188,14 +190,14 @@ export class Estimates {
       if (lead >= total || now < x.due_at - lead) continue;
       if (db.prepare('UPDATE estimates SET reminded_at = ? WHERE id = ? AND reminded_at IS NULL').run(now, x.id).changes === 0) continue;
       const left = Math.max(1, Math.round((x.due_at - now) / 60_000));
-      say(x.identity, `estimate-${x.id}-remind`, `הבטחת לרן "${x.what}" עד ${hhmm(x.due_at, tz)}. נשארו ${minutes(left)}. אם לא תעמוד בזה, תגיד לו עכשיו עם הערכה חדשה (\`eta_min\`), או תסגור עם \`eta_done\`.`);
+      say(x.identity, `estimate-${x.id}-remind`, `הבטחת ${toOwner} "${x.what}" עד ${hhmm(x.due_at, tz)}. נשארו ${minutes(left)}. אם לא תעמוד בזה, תגיד לו עכשיו עם הערכה חדשה (\`eta_min\`), או תסגור עם \`eta_done\`.`);
       this.store.emit('estimate.reminded', x.identity, { id: x.id, left_min: left });
       out.reminded++;
     }
     this.sweepMissed();
     for (const x of db.prepare(`SELECT * FROM estimates WHERE ${open} AND missed_at IS NOT NULL AND missed_told_at IS NULL`).all() as EstimateRow[]) {
       if (db.prepare('UPDATE estimates SET missed_told_at = ? WHERE id = ? AND missed_told_at IS NULL').run(now, x.id).changes === 0) continue;
-      say(x.identity, `estimate-${x.id}-missed`, `היעד של "${x.what}" (${hhmm(x.due_at, tz)}) עבר, וההבטחה לרן עדיין פתוחה. תגיד לו עכשיו עם הערכה חדשה (\`eta_min\`), או תסגור עם \`eta_done\`.`);
+      say(x.identity, `estimate-${x.id}-missed`, `היעד של "${x.what}" (${hhmm(x.due_at, tz)}) עבר, וההבטחה ${toOwner} עדיין פתוחה. תגיד לו עכשיו עם הערכה חדשה (\`eta_min\`), או תסגור עם \`eta_done\`.`);
       this.store.emit('estimate.missed', x.identity, { id: x.id, due_at: x.due_at });
       out.missed++;
     }
@@ -203,7 +205,7 @@ export class Estimates {
       if (db.prepare('UPDATE estimates SET escalated_at = ? WHERE id = ? AND escalated_at IS NULL').run(now, x.id).changes === 0) continue;
       const mgr = managerOf(x.identity);
       if (!mgr) continue;
-      say(mgr, `estimate-${x.id}-escalation`, `${x.identity} הבטיח לרן "${x.what}" עד ${hhmm(x.due_at, tz)}, והיעד עבר לפני ${Math.round((now - x.due_at) / 60_000)} דקות בלי סגירה ובלי הערכה חדשה. כדאי לבדוק מה קורה.`);
+      say(mgr, `estimate-${x.id}-escalation`, `${x.identity} הבטיח ${toOwner} "${x.what}" עד ${hhmm(x.due_at, tz)}, והיעד עבר לפני ${Math.round((now - x.due_at) / 60_000)} דקות בלי סגירה ובלי הערכה חדשה. כדאי לבדוק מה קורה.`);
       this.store.emit('estimate.escalated', x.identity, { id: x.id, to: mgr });
       out.escalated++;
     }

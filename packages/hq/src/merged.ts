@@ -55,7 +55,7 @@ export function prMergedFrom(payload: unknown): Omit<PrMerged, 'project' | 'by'>
   return { repo: said?.[1] ?? t.repo ?? cwd ?? null, number, title: said?.[3]?.trim() || null };
 }
 
-/** A repo by its name: the spool knows "agent-company", a POST "hivecode-app/hive-code". */
+/** A repo by its name: the spool knows "agent-company", a POST "owner/agent-company". */
 const repoName = (r: string | null): string => (r ?? '').split('/').pop() ?? '';
 
 /** Records [m] once per repo and number; false when the event already exists. */

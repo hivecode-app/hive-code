@@ -25,7 +25,7 @@ PRIVATE = re.compile(
     r'system-reminder|tool_use_id|\[Request interrupted|ChatGPT|Termux|mitm|proxy|Magisk|root|phone number|כרטיס|card)',
     re.I,
 )
-DEV_PROJECTS = re.compile(r'(agent-company|lumo|tiki-bot|voice-bot|acme-delivery)', re.I)
+DEV_PROJECTS = re.compile(r'(agent-company|lumo|tiki-bot|voice-bot|pinto)', re.I)
 
 
 def features(t):

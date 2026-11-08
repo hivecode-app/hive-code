@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The main /etc/caddy/Caddyfile belongs to the whole server (desk, dictate, calltr, k8s…), not to
+// The main /etc/caddy/Caddyfile belongs to the whole server (other sites, other projects), not to
 // agent-company. Our part of it is one line, `import sites/*.caddy`, and no site block of ours.
 // This takes the live main Caddyfile on stdin and prints it back with exactly that: any top-level
 // block for a host of deploy/caddy/agent-company.caddy (with the comment lines right above it) is
@@ -7,11 +7,43 @@
 //
 //   node scripts/caddy-main.mjs < /etc/caddy/Caddyfile > candidate     (scripts/deploy.sh caddy)
 //   node scripts/caddy-main.mjs --check < /etc/caddy/Caddyfile         (drift-check: exit 1 + reason)
-import { readFileSync } from 'node:fs';
+//   node scripts/caddy-main.mjs --site                                 deploy/caddy/agent-company.caddy with this company's domain
+//   git show HEAD:deploy/caddy/agent-company.caddy | node scripts/caddy-main.mjs --render     the same for a file on stdin
+// The site file names its hosts under TEMPLATE_DOMAIN; the company's domain is HQ_DOMAIN, else the host of `apiUrl`
+// in its hq.config.json (<COMPANY_HOME>/company/, else the state dir) without the leading `api.`.
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 export const IMPORT_LINE = 'import sites/*.caddy';
+export const TEMPLATE_DOMAIN = 'hq.example.com';
+
+/** The site file with its hosts under `domain` instead of TEMPLATE_DOMAIN. */
+export function render(siteText, domain) {
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(domain)) throw new Error(`not a domain: ${JSON.stringify(domain)}`);
+  return siteText.split(TEMPLATE_DOMAIN).join(domain.toLowerCase());
+}
+
+/** The company's domain from a parsed hq.config.json: `apiUrl`'s host without `api.`; null without one. */
+export function domainOf(cfg) {
+  try {
+    const host = new URL(cfg?.apiUrl).hostname;
+    return host.startsWith('api.') ? host.slice(4) : null;
+  } catch { return null; }
+}
+
+async function companyDomain() {
+  if (process.env.HQ_DOMAIN?.trim()) return process.env.HQ_DOMAIN.trim();
+  const state = process.env.AGENT_COMPANY_STATE || join(homedir(), '.local', 'state', 'agent-company');
+  const { resolveCompanyHome } = await import('../packages/shared/src/company-home.ts');
+  for (const f of [join(resolveCompanyHome({ stateRoot: state }), 'company', 'hq.config.json'), join(state, 'hq.config.json')]) {
+    if (!existsSync(f)) continue;
+    const d = domainOf(JSON.parse(readFileSync(f, 'utf8')));
+    if (d) return d;
+  }
+  throw new Error('no domain for the Caddy sites: set HQ_DOMAIN, or apiUrl (https://api.<domain>) in the company\'s hq.config.json');
+}
 
 /** Net `{` minus `}` on a line, ignoring quoted text and a `#` comment (Caddy: `#` after whitespace). */
 function braces(line) {
@@ -82,12 +114,23 @@ export function check(mainText, hosts) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
-  const hosts = companyHosts(readFileSync(join(repo, 'deploy/caddy/agent-company.caddy'), 'utf8'));
-  const main = readFileSync(0, 'utf8');
-  if (process.argv.includes('--check')) {
-    const why = check(main, hosts);
-    if (why) { console.log(why); process.exit(1); }
-  } else {
-    process.stdout.write(rewrite(main, hosts));
+  const template = () => readFileSync(join(repo, 'deploy/caddy/agent-company.caddy'), 'utf8');
+  try {
+    const domain = await companyDomain();
+    if (process.argv.includes('--site')) process.stdout.write(render(template(), domain));
+    else if (process.argv.includes('--render')) process.stdout.write(render(readFileSync(0, 'utf8'), domain));
+    else {
+      const hosts = companyHosts(render(template(), domain));
+      const main = readFileSync(0, 'utf8');
+      if (process.argv.includes('--check')) {
+        const why = check(main, hosts);
+        if (why) { console.log(why); process.exit(1); }
+      } else {
+        process.stdout.write(rewrite(main, hosts));
+      }
+    }
+  } catch (e) {
+    console.error(`caddy-main: ${e.message}`);
+    process.exit(2);
   }
 }

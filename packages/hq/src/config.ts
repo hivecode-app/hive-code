@@ -1,7 +1,7 @@
 // hq configuration. Everything lives under the state dir (B.11) — never /tmp.
 // Override order: generic defaults < company/org.yaml (manager, monitoring_lead, residents)
 // < $STATE/hq.config.json < env. Nothing of one particular company lives in the defaults: a company's
-// own values (names, domains, accounts, Telegram) come from its hq.config.json (hq-host's is
+// own values (names, domains, accounts, Telegram) come from its hq.config.json (the main server's is
 // company/hq.config.json, installed by scripts/deploy.sh hq).
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -14,6 +14,7 @@ import type { NodeDef } from './nodes.ts';
 import { DEFAULT_HEAVY } from './heavy.ts';
 import { validTimeZone } from './timezone.ts';
 import type { CodemagicConfig } from './codemagic-watch.ts';
+import { APP_PACKAGE } from './pairing.ts';
 
 /** #301: the workers write in Hebrew and think in Israel time, wherever the server or he is. */
 export const DEFAULT_ETA_TIME_ZONE = 'Asia/Jerusalem';
@@ -42,7 +43,7 @@ export interface HqConfig {
   defaultCwd: string;            // cwd for shifts without a task worktree
   /** systemd template for shifts (persistent; linked into ~/.config/systemd/user on first launch). */
   shiftTemplate: string;
-  /** Extra listener serving only GET /health (for the ci-host heartbeat), e.g. "0.0.0.0:7421". Off by default. */
+  /** Extra listener serving only GET /health (for an external heartbeat), e.g. "0.0.0.0:7421". Off by default. */
   healthListen: string | null;
   morningFromHour: number;       // night mode ends on his first message from this hour (org.yaml `timezone`)
   etaTimeZone: string;           // #301: `eta_at` HH:MM (or a date and time with no zone) is read in this IANA zone, not org.yaml's
@@ -146,8 +147,14 @@ export interface HqConfig {
   appReleaseDir: string | null;
   /** Other machines that take task shifts over ssh (nodes.ts). None = everything runs here. */
   nodes: NodeDef[];
-  /** A second vantage point for probes (probes.ts): ssh target that runs curl. null = no second check. */
-  probeWitness: { ssh: string; identityFile: string | null } | null;
+  /** A second vantage point for probes (probes.ts): ssh target that runs curl; `name` is how resources.ts shows it. null = no second check. */
+  probeWitness: { ssh: string; identityFile: string | null; name?: string } | null;
+  /** Probe kinds of the company's own (probe-kit.ts): the modules in it that export `kinds`. Default <companyDir>/local/hq-probes. */
+  probeKindsDir?: string;
+  /** night.ts: how the owner says a project's name ("לילה, רק <name>"), spoken name → project id. Ids and their case need none. */
+  projectAliases: Record<string, string>;
+  /** The APK's applicationId, for assetlinks.json and the pairing page's intent (pairing.ts). Default APP_PACKAGE. */
+  appPackage: string;
   /** resources.ts: `map` sends an exact cgroup, container or compose-project name to a project id (`<machine>:<name>` on one machine only; `cmd:<text>` a scope by its command lines); what it and the defaults miss is shown as לא מזוהה. */
   resources: { map: Record<string, string> };
 }
@@ -159,10 +166,6 @@ export interface AccountDef {
   expect: string;
   managed: boolean;
 }
-
-/** The APK's origin: the sha256 of its release signing cert (public; tool/make_keystore.sh). It is the engine's
- *  own key, the same on every server, so it is always accepted. scripts/deploy.sh and verify-prod read it from here. */
-export const APK_ORIGIN = 'android:apk-key-hash:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 interface OrgDefaults { manager?: string; monitoringLead?: string; residents: string[] }
 
@@ -254,14 +257,14 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     batching: { enabled: true, gatherMs: 10 * 60_000 },
     capacity: { reserveMb: 4096, rssIdleMb: 400, rssWorkMb: 1300, residents: org.residents.length ? org.residents : [managerId], maxSlots: 8, maxLoad: 1.5,
       psiMaxPct: 10, swapLowMb: 512, swapLowExtraMb: 2048, swapPsiPct: 1 },
-    // Task 1531: 24 hourly + 7 daily of a 2.6GB hq.db (360MB each in zstd) were 29 files, 9.8GB of hq-host's disk. Five hours
+    // Task 1531: 24 hourly + 7 daily of a 2.6GB hq.db (360MB each in zstd) were 29 files, 9.8GB of the server's disk. Five hours
     // back is enough to undo a bad hour; past that, one a day for a week.
     backups: { hourly: 5, daily: 7 },
     heavy: { classes: DEFAULT_HEAVY, budgetPct: 65, machines: {}, liveSharePct: 50 },
     auth: {
       rpId: 'localhost',
       rpName: 'החברה',
-      origins: [],               // the web app's origin; APK_ORIGIN is added below
+      origins: [],               // the web app's origin and the APK's (install.sh, from the release)
       appUrl: null,
       pairCodeMs: 10 * 60_000,
       userName: 'owner',
@@ -277,7 +280,9 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
     pushContact: 'mailto:owner@localhost',
     memoryImport: [],
     nodes: [],
-    probeWitness: { ssh: 'root@203.0.113.11', identityFile: '~/.ssh/ci2_ed25519' },
+    probeWitness: null,
+    projectAliases: {},
+    appPackage: APP_PACKAGE,
     resources: { map: {} },
   };
   const cfg: HqConfig = {
@@ -296,10 +301,10 @@ export function loadConfig(overrides: Partial<HqConfig> = {}): HqConfig {
   };
   cfg.nodes = (cfg.nodes ?? []).map((n) => ({ ...n, projects: n.projects ?? [], maxSlots: n.maxSlots ?? 8, maxLoad: n.maxLoad ?? 0.85,
     identityFile: n.identityFile ? expandHome(n.identityFile) : null }));
-  if (cfg.probeWitness) cfg.probeWitness = { ssh: cfg.probeWitness.ssh, identityFile: cfg.probeWitness.identityFile ? expandHome(cfg.probeWitness.identityFile) : null };
+  if (cfg.probeWitness) cfg.probeWitness = { ssh: cfg.probeWitness.ssh, identityFile: cfg.probeWitness.identityFile ? expandHome(cfg.probeWitness.identityFile) : null,
+    ...(cfg.probeWitness.name ? { name: cfg.probeWitness.name } : {}) };
   cfg.companyHome = companyHome;
   cfg.companyDir = companyDir;
-  if (!cfg.auth.origins.includes(APK_ORIGIN)) cfg.auth.origins = [...cfg.auth.origins, APK_ORIGIN];
   if (!overrides.dbPath && !fromFile.dbPath) cfg.dbPath = join(cfg.stateDir, 'hq.db');
   if (!validTimeZone(cfg.etaTimeZone)) {
     console.warn(`[hq] etaTimeZone ${JSON.stringify(cfg.etaTimeZone)} is not an IANA zone; using ${DEFAULT_ETA_TIME_ZONE}`);

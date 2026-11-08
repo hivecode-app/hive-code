@@ -22,6 +22,8 @@ STATE="$HOME/.local/state/agent-company"
 DSTATE="$STATE/deploy"
 WWW=/var/www/hq-app
 UNITS="$HOME/.config/systemd/user"
+# This machine's own paths (DICTATE_ENV), outside git: ~/.config/agent-company/deploy.env, when there is one.
+[[ ! -f "$HOME/.config/agent-company/deploy.env" ]] || . "$HOME/.config/agent-company/deploy.env"
 DICTATE_ENV="${DICTATE_ENV:-$HOME/projects/dictate-server/server/.env}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 cd "$PROD" || exit 2
@@ -49,7 +51,8 @@ systemctl --user is-active -q agent-company-hq || d "agent-company-hq לא פע�
 
 # ── Caddy ────────────────────────────────────────────────────────────────────
 # What is live is compared with what was deployed (the checkout, after the check above), not with main.
-if ! git show "HEAD:deploy/caddy/agent-company.caddy" 2>/dev/null | cmp -s - /etc/caddy/sites/agent-company.caddy; then
+# The engine's file has a placeholder domain; caddy-main.mjs --render puts the company's in (as deploy.sh caddy does).
+if ! git show "HEAD:deploy/caddy/agent-company.caddy" 2>/dev/null | node scripts/caddy-main.mjs --render | cmp -s - /etc/caddy/sites/agent-company.caddy; then
   d "/etc/caddy/sites/agent-company.caddy שונה מ-deploy/caddy/agent-company.caddy שנפרס" "קובץ ה-Caddy בשרת שונה ממה שנפרס"
 fi
 why="$(node scripts/caddy-main.mjs --check </etc/caddy/Caddyfile)" || d "ב-/etc/caddy/Caddyfile: $why" "ה-Caddyfile הראשי בשרת שונה ממה שנפרס"

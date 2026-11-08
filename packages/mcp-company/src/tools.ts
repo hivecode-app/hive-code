@@ -140,7 +140,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       repo: s('The checkout from the charter (name), if the project has more than one. Default: the first'),
       assignee: s('The standing worker of the project whose domain it is, e.g. ido. Without: a temporary worker'),
       members: strs('Identities of the team members'),
-      local: { type: 'boolean', description: 'true when the task needs something only the main server has: ssh keys, `.env`, kubectl, hq-host secrets, a browser or a simulator. Without: runs on whichever server has room, the second one included' },
+      local: { type: 'boolean', description: 'true when the task needs something only the main server has: ssh keys, `.env`, kubectl, secrets of the main server, a browser or a simulator. Without: runs on whichever server has room, the second one included' },
       engine: { type: 'string', enum: ['claude', 'codex'], description: 'Which engine the worker runs on. Default claude. codex only in a project whose charter turns it on (`codex: { tasks: on-request }`), with no assignee, '
         + 'and for code work with a clear check (tests, typecheck). Not for production, a browser or a conversation. When the Codex quota is used up, hq rejects with the reason and does not fall back to Claude' },
       model: s('With engine codex only: the Codex model, e.g. gpt-6-astra. Default: the charter\'s'),
@@ -195,7 +195,7 @@ export function buildTools(n: CompanyNames = DEFAULT_NAMES): ToolDef[] {
       reason: s('Why this composition, one line'),
     }, ['blocks']),
     tool('request_access', 'Run a command on a company server, cluster or database in your name, without holding the keys. hq builds the command itself from closed lists, runs it and returns the output. '
-      + 'resource: `kube:<name>` (kubectl in a forced namespace), `ssh:<name>` (a command from a list), `build:<name>` (docker build and push of a commit to ghcr.io/hive-owner/*; argv = [repo, full sha, Dockerfile path, full tag, optional context]; returns a digest, and a push is not a deploy) or `hq:query` (SELECT on hq.db). argv: the words of the command, without the prefix (`["get","pods"]`, not `kubectl get pods`). '
+      + 'resource: `kube:<name>` (kubectl in a forced namespace), `ssh:<name>` (a command from a list), `build:<name>` (docker build and push of a commit to the registry of the resource; argv = [repo, full sha, Dockerfile path, full tag, optional context]; returns a digest, and a push is not a deploy) or `hq:query` (SELECT on hq.db). argv: the words of the command, without the prefix (`["get","pods"]`, not `kubectl get pods`). '
       + 'Allowed: get, describe, logs --tail, rollout status|history|restart|undo, set image, scale, delete pod/<name>, exec <pod> -- <command>. Not supported: `-f`, port-forward, apply, an interactive shell. The flags --kubeconfig, --token, --as and `-n` of another namespace are always rejected. '
       + 'Outside production (dev, ci, hq:query) everything runs at once. In production a read runs at once, and every change or exec, every time, reaches ' + O + ' as a card with the exact command: the answer is status pending; carry on with what does not depend on it, and come back with request. '
       + 'Do not know which resource? Do not guess: a name that does not exist comes back unfit, and its hint lists the resources open to the task and the commands allowed on each. '

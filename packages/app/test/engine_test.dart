@@ -38,14 +38,14 @@ void main() {
     final items = <ChatItem>[];
     LiveState? live;
     final m = EngineModel(items: items, gender: Gender.f, onLive: (l) => live = l);
-    m.apply({'seq': 0, 'ts': 1, 'type': 'engine.delta', 'identity': 'dana', 'data': {'kind': 'text_delta', 'text': 'משה ', 'messageId': 'x'}});
+    m.apply({'seq': 0, 'ts': 1, 'type': 'engine.delta', 'identity': 'dana', 'data': {'kind': 'text_delta', 'text': 'רוני ', 'messageId': 'x'}});
     m.apply({'seq': 0, 'ts': 2, 'type': 'engine.delta', 'identity': 'dana', 'data': {'kind': 'text_delta', 'text': 'יקבל', 'messageId': 'x'}});
-    expect((items.single as TextMsg).text, 'משה יקבל');
+    expect((items.single as TextMsg).text, 'רוני יקבל');
     expect((items.single as TextMsg).streaming, isTrue);
     expect(live?.phase, LivePhase.writing);
-    m.apply(ev(10, 'text', {'text': 'משה יקבל הודעה.', 'messageId': 'x'}));
+    m.apply(ev(10, 'text', {'text': 'רוני יקבל הודעה.', 'messageId': 'x'}));
     expect(items, hasLength(1));
-    expect((items.single as TextMsg).text, 'משה יקבל הודעה.');
+    expect((items.single as TextMsg).text, 'רוני יקבל הודעה.');
     expect((items.single as TextMsg).streaming, isFalse);
   });
 

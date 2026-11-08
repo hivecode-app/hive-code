@@ -52,11 +52,11 @@ test('liveReaders: a shift in an install test container on the same host (anothe
   try {
     mkdirSync(join(proc, 'self', 'ns'), { recursive: true });
     symlinkSync('mnt:[1]', join(proc, 'self', 'ns', 'mnt'));
-    pid('10', 'mnt:[1]', { COMPANY_SHIFT: 'adi-1', COMPANY_HOME: '/home/owner/company' });
+    pid('10', 'mnt:[1]', { COMPANY_SHIFT: 'adi-1', COMPANY_HOME: '/home/ran/company' });
     pid('11', 'mnt:[2]', { COMPANY_SHIFT: 'manager-1', COMPANY_HOME: '/home/tester/company' });
     pid('12', 'mnt:[1]', { COMPANY_SHIFT: 'x-1' }, 'node something-else.js');
     pid('13', 'mnt:[1]', { PATH: '/bin' });
-    assert.deepEqual(liveReaders(proc), [{ shift: 'adi-1', home: '/home/owner/company' }]);
+    assert.deepEqual(liveReaders(proc), [{ shift: 'adi-1', home: '/home/ran/company' }]);
   } finally { rmSync(proc, { recursive: true, force: true }); }
 });
 

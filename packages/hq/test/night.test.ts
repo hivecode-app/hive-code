@@ -164,18 +164,19 @@ test('a night with an hour set ends at that hour, not on his messages; the note 
 
 test('parseNightTrigger and priorityOf', () => {
   const P = ['agent-company', 'lumo', 'voice-bot'];
+  const A = { 'לומו': 'lumo' }; // hq.config.json projectAliases
   const IL = 'Asia/Jerusalem';
   const now = new Date(2026, 9, 20, 23, 0).getTime();
   assert.deepEqual(parseNightTrigger('לילה', P, now, IL), { scope: null, note: null, until: null });
   assert.deepEqual(parseNightTrigger('  לילה.  ', P, now, IL), { scope: null, note: null, until: null });
-  assert.deepEqual(parseNightTrigger('לילה, רק לומו', P, now, IL), { scope: ['lumo'], note: null, until: null });
+  assert.deepEqual(parseNightTrigger('לילה, רק לומו', P, now, IL, A), { scope: ['lumo'], note: null, until: null });
   assert.deepEqual(parseNightTrigger('לילה רק lumo ו-voice-bot', P, now, IL)?.scope, ['lumo', 'voice-bot']);
   assert.deepEqual(parseNightTrigger('לילה בלי פריסות', P, now, IL), { scope: null, note: 'בלי פריסות', until: null });
   const il23 = Date.UTC(2026, 9, 20, 20, 0); // 23:00 in Israel (IDT, UTC+3)
   assert.equal(parseNightTrigger('לילה עד 7', P, il23, IL)?.until, Date.UTC(2026, 9, 21, 4, 0), '07:00 Israel time, tomorrow');
-  assert.deepEqual(parseNightTrigger('לילה, רק לומו בלי פריסות', P, now, IL), { scope: ['lumo'], note: 'בלי פריסות', until: null });
-  assert.deepEqual(parseNightTrigger('לילה רק לומו עד 7', P, il23, IL), { scope: ['lumo'], note: null, until: Date.UTC(2026, 9, 21, 4, 0) });
-  assert.deepEqual(parseNightTrigger('לילה רק לומו, voice-bot', P, now, IL)?.scope, ['lumo', 'voice-bot']);
+  assert.deepEqual(parseNightTrigger('לילה, רק לומו בלי פריסות', P, now, IL, A), { scope: ['lumo'], note: 'בלי פריסות', until: null });
+  assert.deepEqual(parseNightTrigger('לילה רק לומו עד 7', P, il23, IL, A), { scope: ['lumo'], note: null, until: Date.UTC(2026, 9, 21, 4, 0) });
+  assert.deepEqual(parseNightTrigger('לילה רק לומו, voice-bot', P, now, IL, A)?.scope, ['lumo', 'voice-bot']);
   assert.deepEqual(parseNightTrigger('לילה רק דברים קטנים', P, now, IL), { scope: null, note: 'רק דברים קטנים', until: null });
   assert.equal(parseNightTrigger('לילה טוב', P, now, IL), null);
   assert.equal(parseNightTrigger('לילהלה', P, now, IL), null);

@@ -2,8 +2,8 @@
 Description=Every day: agent-company disk clean
 
 [Timer]
-# After the drift check (03:40), in the owner's night (company/org.yaml timezone).
-OnCalendar=*-*-* 04:20:00 Asia/Bangkok
+# After the drift check (03:40), in the server's own time zone like it.
+OnCalendar=*-*-* 04:20:00
 Persistent=true
 RandomizedDelaySec=10min
 

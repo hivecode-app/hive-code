@@ -40,7 +40,7 @@ GH_SHA256_amd64='4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91
 GH_SHA256_arm64='ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63'
 # The browser (browser-memory over Playwright MCP over one Chrome, as on the first server): pinned like the rest.
 PLAYWRIGHT_MCP_VERSION='0.0.80'
-BROWSER_MEMORY_REPO='https://github.com/hive-owner/browser-memory.git'
+BROWSER_MEMORY_REPO="${BROWSER_MEMORY_REPO:-https://github.com/hivecode-app/browser-memory.git}"
 BROWSER_MEMORY_SHA='6b95d931096adc8ca3f97a82c8daa725648fd9b8'
 CDP_PORT=9222
 PLAYWRIGHT_MCP_PORT=8931
@@ -752,7 +752,10 @@ c.auth = { ...(c.auth ?? {}) };
 // A new address means a new rpId: passkeys made for the old one stop working there (pairing still does).
 c.auth.rpId = host;
 c.auth.appUrl = origin;
-c.auth.origins = [origin];
+// Passkeys in the APK: its origin is the release key's hash (scripts/release.sh writes it next to the APK).
+let apkKey = '';
+try { apkKey = JSON.parse(fs.readFileSync(`${appReleaseDir}/app-release.json`, 'utf8')).apk_key_hash || ''; } catch {}
+c.auth.origins = /^[A-Za-z0-9_-]{43}$/.test(apkKey) ? [origin, `android:apk-key-hash:${apkKey}`] : [origin];
 c.auth.userName ??= user;
 c.auth.userDisplayName ??= user;
 // The tab handoff's links go out on the same origin, under /tab (the Caddyfile above).

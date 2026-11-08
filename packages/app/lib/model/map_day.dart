@@ -163,24 +163,22 @@ Size mapCanvas(Size avail) {
   return a >= rest ? Size(kMapSize.height * math.min(a, rest * 2.2), kMapSize.height) : Size(kMapSize.width, math.min(kMapSize.width / a, kMapSize.height * 1.6));
 }
 
-/// Where each team sits, on the rest canvas. Fixed and hand-placed (never a force graph): the owner in the middle,
-/// the standing teams along the top, the projects around, the two busiest on the sides.
+/// Where each standing team sits, on the rest canvas. Fixed and hand-placed (never a force graph): the owner in the
+/// middle, the standing teams along the top.
 const kTeamAnchors = <String, Offset>{
   'management': Offset(600, 330),
   'personal': Offset(905, 92),
   'monitoring': Offset(720, 84),
   'improvement': Offset(480, 84),
   'design': Offset(295, 92),
-  'agent-company': Offset(985, 270),
-  'voice-bot': Offset(215, 270),
-  'lumo': Offset(1010, 520),
-  'pinto': Offset(190, 520),
-  'lumo-bot': Offset(800, 545),
-  'tiki-bot-go': Offset(400, 545),
-  'nws': Offset(600, 560),
 };
 
-/// Places for a team org.yaml has and the map doesn't know yet, in order of arrival.
+/// The project teams, in org.yaml's order: around the owner, the two first on the sides.
+const _projectSlots = [
+  Offset(985, 270), Offset(1010, 520), Offset(215, 270), Offset(800, 545), Offset(400, 545), Offset(600, 560), Offset(190, 520),
+];
+
+/// Places for the project teams beyond those, in order of arrival.
 const _spare = [Offset(600, 190), Offset(110, 400), Offset(1100, 400), Offset(600, 640)];
 
 /// Rings of slots around a lead: radius and how many.
@@ -193,9 +191,9 @@ class MapLayout {
   /// [spread] pushes the owner, Yoav and hq apart when their names are drawn big (a small screen).
   MapLayout(this.day, [this.canvas = kMapSize, double spread = 1]) {
     final sx = canvas.width / kMapSize.width, sy = canvas.height / kMapSize.height;
-    var spare = 0;
+    var spare = 0, project = 0;
     for (final t in day.teams) {
-      final base = kTeamAnchors[t.id] ?? _spare[spare++ % _spare.length];
+      final base = kTeamAnchors[t.id] ?? (t.project != null && project < _projectSlots.length ? _projectSlots[project++] : _spare[spare++ % _spare.length]);
       final c = Offset(base.dx * sx, base.dy * sy);
       anchor[t.id] = c;
       if (t.id == 'management') {

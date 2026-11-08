@@ -14,12 +14,12 @@ const _teams = [
   ('improvement', 'מחלקת השיפור', 'tune', 'slate', 'noga'),
   ('design', 'עיצוב', 'palette', 'slate', 'noa'),
   ('agent-company', 'החברה', 'domain', 'blue', 'adi'),
-  ('lumo', 'האפליקציה לומו', 'forum', 'teal', 'dana'),
+  ('lumo', 'האפליקציה לומו', 'local_shipping', 'teal', 'dana'),
   ('voice-bot', 'הבוט הקולי', 'call', 'sky', 'shachar'),
   ('lumo-bot', 'לומו בוט', 'smart_toy', 'green', 'boaz'),
-  ('tiki-bot-go', 'טיקי בוט', 'directions_car', 'clay', 'inbal'),
+  ('tiki-bot-go', 'טיקי בוט', 'receipt_long', 'clay', 'inbal'),
   ('nws', 'מה חדש בעיר', 'campaign', 'rose', 'matan'),
-  ('pinto', 'פינטו', 'local_taxi', 'olive', 'shira'),
+  ('pinto', 'פינטו', 'payments', 'olive', 'shira'),
 ];
 
 const _leads = {
@@ -46,7 +46,7 @@ int _seed(String s) => s.codeUnits.fold(7, (a, c) => (a * 31 + c) & 0x7fffffff);
 MapDay demoMapDay(String date, {int upTo = kDayMs}) {
   final rnd = math.Random(_seed(date));
   final people = <Map<String, dynamic>>[
-    {'id': 'owner', 'name': 'רן', 'mono': 'עק', 'team': 'management', 'role': 'owner'},
+    {'id': 'owner', 'name': 'רן', 'mono': 'רן', 'team': 'management', 'role': 'owner'},
     {'id': 'hq', 'name': 'hq', 'mono': '', 'team': 'management', 'role': 'system'},
   ];
   for (final t in _teams) {

@@ -65,7 +65,7 @@ void main() {
 
   testWidgets('a worker that asks twice: the first, finished card does not take over the second request', (tester) async {
     await pumpApp(tester, size: const Size(390, 900), home: Scaffold(body: ListView(children: [
-      HandoffCardView(from: 'amit', card: HandoffCard(id: 'old', ts: _ts, what: 'להיכנס ל-Mercury')..ended = true),
+      HandoffCardView(from: 'amit', card: HandoffCard(id: 'old', ts: _ts, what: 'להיכנס לבנק')..ended = true),
       HandoffCardView(from: 'amit', card: HandoffCard(id: 'new', ts: _ts, what: _amitWhat)),
     ])));
     expect(find.text('סיימתי'), findsOneWidget, reason: 'only the card of the live request has buttons');

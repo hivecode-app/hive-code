@@ -64,7 +64,7 @@ test('the day: lines carry no text, his answer time, merges once per PR, and a l
     assert.deepEqual(mergedEvents().map((e) => [e.repo, e.number, e.project, e.by]), [['agent-company', 226, 'agent-company', shift.replace(/-\d+$/, '')]]);
     const post = async (b: object) => (await (await call('/api/prs/merged', { method: 'POST', body: JSON.stringify(b) })).json() as any).recorded;
     assert.equal(await post({ repo: 'agent-company', number: 226 }), false);
-    assert.equal(await post({ repo: 'hivecode-app/hive-code', number: 226 }), false, 'the same PR by its full name');
+    assert.equal(await post({ repo: 'hive-owner/agent-company', number: 226 }), false, 'the same PR by its full name');
     assert.equal(await post({ repo: 'agent-company', number: 227, project: 'agent-company' }), true);
     assert.equal((await call('/api/prs/merged', { method: 'POST', body: '{}' })).status, 400);
 

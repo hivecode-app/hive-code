@@ -10,7 +10,8 @@
 // The app finds hq itself at `<origin>/hq`, the same layout the web build uses (deploy/caddy).
 import type { IncomingMessage } from 'node:http';
 
-/** The APK's package (packages/app/android/app/build.gradle.kts): the same on every server. */
+/** The APK's package by default (packages/app/android/app/build.gradle.kts). A build with its own applicationId is named by
+ *  `appPackage` in hq.config.json. */
 export const APP_PACKAGE = 'app.hivecode';
 /** The app's own link scheme (AndroidManifest.xml). Android can't verify https links for every domain. */
 export const APP_SCHEME = 'agentcompany';
@@ -31,12 +32,12 @@ export function certFingerprint(origin: string): string | null {
   return hex.length === 64 ? hex.match(/../g)!.join(':') : null;
 }
 
-export function assetLinks(origins: readonly string[]): unknown[] {
+export function assetLinks(origins: readonly string[], pkg = APP_PACKAGE): unknown[] {
   const prints = [...new Set(origins.map(certFingerprint).filter((f): f is string => f !== null))];
   if (!prints.length) return [];
   return [{
     relation: ['delegate_permission/common.handle_all_urls', 'delegate_permission/common.get_login_creds'],
-    target: { namespace: 'android_app', package_name: APP_PACKAGE, sha256_cert_fingerprints: prints },
+    target: { namespace: 'android_app', package_name: pkg, sha256_cert_fingerprints: prints },
   }];
 }
 
@@ -52,14 +53,14 @@ function publicOrigin(req: IncomingMessage, appUrl: string | null): string | nul
 }
 
 /** GET /pair: the HTML page, and its status. */
-export function pairPage(req: IncomingMessage, url: URL, appUrl: string | null): { status: number; html: string } {
+export function pairPage(req: IncomingMessage, url: URL, appUrl: string | null, pkg = APP_PACKAGE): { status: number; html: string } {
   const raw = (url.searchParams.get('code') ?? '').trim();
   const code = CODE.test(raw) ? raw.toUpperCase() : null;
   const origin = publicOrigin(req, appUrl);
   if (!code || !origin) return { status: 400, html: page(null, null, null, null) };
   const link = `${origin}/pair?code=${encodeURIComponent(code)}`;
   const web = `${appUrl ?? `${origin}/`}?pair=${encodeURIComponent(code)}`;
-  const intent = `intent://pair?url=${encodeURIComponent(link)}#Intent;scheme=${APP_SCHEME};package=${APP_PACKAGE};`
+  const intent = `intent://pair?url=${encodeURIComponent(link)}#Intent;scheme=${APP_SCHEME};package=${pkg};`
     + `S.browser_fallback_url=${encodeURIComponent(web)};end`;
   const android = /Android/i.test(String(req.headers['user-agent'] ?? ''));
   return { status: 200, html: page(code, new URL(origin).host, android ? intent : null, web) };

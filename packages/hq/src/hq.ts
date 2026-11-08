@@ -28,6 +28,7 @@ import { Night, type IssueSource } from './night.ts';
 import { Watchdog } from './watchdog.ts';
 import { Rotator } from './rotation.ts';
 import { ProbeRunner } from './probes.ts';
+import { loadProbeKinds } from './probe-kit.ts';
 import { Pusher, loadOrCreateVapid, telegramVia, type TelegramSend, type WebPushSend } from './push.ts';
 import { fcmFromFile, type FcmSend } from './fcm.ts';
 import { backupOnce } from './backup.ts';
@@ -277,7 +278,7 @@ export class Hq {
     this.scheduler.onSweep = () => {
       if (!this.store.toggle('scheduler')) return;
       this.estimates.remind((to, msg_id, body) => { this.mailbox.tell({ msg_id, from: 'hq', to, kind: 'system', priority: 'next', body }); }, this.etaTimeZone(),
-        (id) => { const m = getIdentity(this.store, id)?.reports_to ?? this.cfg.managerId; return m === 'owner' || m === id ? null : m; });
+        (id) => { const m = getIdentity(this.store, id)?.reports_to ?? this.cfg.managerId; return m === 'owner' || m === id ? null : m; }, this.mailbox.names.owner.name);
     };
     this.conversations = new Conversations(this.store, (id) => this.conversationTitle(id));
     this.conversations.setAlert((m) => this.store.bg(this.pusher.notifyMessage(m), 'push.message'));
@@ -392,6 +393,10 @@ export class Hq {
   async start(opts: { listen?: boolean; timers?: boolean } = {}): Promise<void> {
     if (this.cfg.codexLean && this.store.getMeta('codex.lean_active') !== '1') this.store.setMeta('codex.lean_since', String(this.store.now()));
     this.store.setMeta('codex.lean_active', this.cfg.codexLean ? '1' : '0');
+    // The company's own probe kinds (probe-kit.ts), before the charters are read: a probe of a kind not loaded is unsupported, and told.
+    const pk = await loadProbeKinds(this.cfg.probeKindsDir ?? join(this.cfg.companyDir, 'local', 'hq-probes'));
+    if (pk.kinds.length || pk.errors.length) this.store.emit('probes.kinds', this.cfg.monitoringLeadId, pk);
+    for (const e of pk.errors) console.warn(`[hq] probe kinds: ${e.file}: ${e.error}`);
     this.reloadContract();
     applyWorkSettings(this.store, this.cfg);
     this.accounts.sync();

@@ -11,7 +11,7 @@ import { buildEnv } from '../../adapter/src/spec.ts';
 import { whenLocal } from '../src/timezone.ts';
 import { pushWorthy } from '../src/inbox.ts';
 
-const PRIMARY: Profile = { email: 'owner-account@example.com', accountUuid: 'uuid-aklat', org: 'hive-owner', plan: 'default_claude_max_20x' };
+const PRIMARY: Profile = { email: 'owner-account@example.com', accountUuid: 'uuid-primary', org: 'Ran', plan: 'default_claude_max_20x' };
 const SECOND: Profile = { email: 'hive-owner@example.com', accountUuid: 'uuid-1132', org: 'Ran', plan: 'default_claude_max_5x' };
 
 /** Fakes for the three things that touch real Claude: profile, get_usage, `claude auth login`. */
@@ -143,7 +143,7 @@ test('identity check: the wrong account or one already registered is rejected, a
 });
 
 test('matchesExpect: full email exact, bare handle = local part', () => {
-  assert.ok(matchesExpect('hive-owner@example.com', 'hive-owner'));
+  assert.ok(matchesExpect('Hive-Owner@example.com', 'hive-owner'));
   assert.ok(!matchesExpect('owner-account@example.com', 'hive-owner'));
   assert.ok(matchesExpect('owner-account@example.com', 'owner-account@example.com'));
   assert.ok(!matchesExpect('owner-account@other.com', 'owner-account@example.com'));

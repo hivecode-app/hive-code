@@ -102,7 +102,7 @@ test('allowlist resolves symlinks, rejects state credentials and Claude files, a
     const secret = join(env.cfg.stateDir,'hq.env'); writeFileSync(secret,'secret'); const link=join(dir,'secret'); symlinkSync(secret,link);
     assert.throws(()=>workerPath(env.hq.store,env.cfg.stateDir,'eli',link),/outside the allowed/);
     await assert.rejects(()=>env.hq.uploads.importFiles('eli',[link]),/outside the allowed/);
-    await assert.rejects(()=>env.hq.uploads.importFiles('eli',['/home/owner/.claude/settings.json']),/outside the allowed|does not exist/);
+    await assert.rejects(()=>env.hq.uploads.importFiles('eli',['/home/ran/.claude/settings.json']),/outside the allowed|does not exist/);
     await assert.rejects(()=>env.hq.uploads.importFiles('eli',[join(dir,'missing')]),/does not exist/);
     const upload=env.hq.uploads.save(Buffer.from('data'),'file.xyz'); const path=env.hq.uploads.get(upload.id)!.path;
     assert.throws(()=>workerPath(env.hq.store,env.cfg.stateDir,'eli',path),/outside the allowed/);

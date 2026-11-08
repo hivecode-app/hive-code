@@ -66,7 +66,7 @@ class FakeBackend extends Backend {
         notifyListeners();
       }));
 
-  // Dana keeps writing the list for Moshe (the streaming bubble in mockup screen 4).
+  // Dana keeps writing the list for Roni (the streaming bubble in mockup screen 4).
   void _streamDana() {
     final chat = _data!.chats['dana']!;
     final msg = chat.items.whereType<TextMsg>().lastWhere((t) => t.streaming);
@@ -345,17 +345,17 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
       kicker: 'כניסה לאתר · `mercury.com`',
       body: "נדרש קוד אימות כדי להוריד את דוח אוקטובר. בתוקף עוד 8 דק'.",
       domain: 'app.mercury.com',
-      short: 'קוד ל-Mercury',
+      short: 'קוד לבנק',
     ),
   ];
 
   final ido = Conversation(identityId: 'ido', items: [
     ShiftMarker(id: 'sm2', ts: at(12, 40), shift: 2, from: 1),
-    UserMsg(id: 'u1', ts: at(12, 41), text: 'עידו, מה עם התשלומים שנכשלים? משה אמר שיש משתמשים שחויבו פעמיים', delivery: Delivery.read),
+    UserMsg(id: 'u1', ts: at(12, 41), text: 'עידו, מה עם התשלומים שנכשלים? רוני אמר שיש משתמשים שחויבו פעמיים', delivery: Delivery.read),
     TextMsg(
         id: 't1',
         ts: at(12, 43),
-        text: 'בדקתי. אין חיוב כפול. הבעיה היא ניסיון חוזר מיידי אחרי `card_declined`. הלולאה ב-`renew.go` מנסה שוב בלי השהיה, ו-Stripe מחזיר את אותה שגיאה. משה רואה שתי שורות "נכשל" וזה נראה כמו חיוב כפול.\n\nאני משנה את זה כך שהניסיון השני יהיה אחרי 24 שעות.'),
+        text: 'בדקתי. אין חיוב כפול. הבעיה היא ניסיון חוזר מיידי אחרי `card_declined`. הלולאה ב-`renew.go` מנסה שוב בלי השהיה, ו-Stripe מחזיר את אותה שגיאה. רוני רואה שתי שורות "נכשל" וזה נראה כמו חיוב כפול.\n\nאני משנה את זה כך שהניסיון השני יהיה אחרי 24 שעות.'),
     ToolGroup(id: 'tg1', ts: at(12, 44), summary: "קרא 4 קבצים · חיפש פעמיים · 21 שנ'", tools: const [
       ToolLine(icon: 'description', label: 'internal/billing/renew.go', trail: '1–220'),
       ToolLine(icon: 'description', label: 'internal/billing/stripe.go', trail: '40–96'),
@@ -429,8 +429,8 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
             '**חזרה:** `deploy.sh rollback 1.1.19`, כדקה',
       ),
       DecidedCard(id: 'dd1', ts: at(13, 40), by: 'yoav', time: '13:40', text: 'ההעלאה ל-Play תהיה ל-`internal` ולא ל-`production`, כי עוד לא ניתן GO.'),
-      UserMsg(id: 'du2', ts: at(14, 5), text: 'מה עם ההודעה למשה על הגרסה?', delivery: Delivery.read),
-      TextMsg(id: 'dt3', ts: at(14, 5), streaming: true, text: 'משה יקבל הודעה ברגע שיינתן GO. אני מכינה לו רשימת שינויים קצרה בעברית, בלי מספרי טיקטים'),
+      UserMsg(id: 'du2', ts: at(14, 5), text: 'מה עם ההודעה לרוני על הגרסה?', delivery: Delivery.read),
+      TextMsg(id: 'dt3', ts: at(14, 5), streaming: true, text: 'רוני יקבל הודעה ברגע שיינתן GO. אני מכינה לו רשימת שינויים קצרה בעברית, בלי מספרי טיקטים'),
       UserMsg(id: 'du3', ts: at(14, 6), text: 'ותוסיפי לרשימה גם את #3711 כשהוא ימוזג', delivery: Delivery.queued),
     ],
   );
@@ -453,7 +453,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
         live: const LiveState(phase: LivePhase.tool, label: 'מריצה בדיקות', seconds: 14, runningCommand: 'flutter test')),
     'itai': simple('itai', [TextMsg(id: 'i1', ts: at(13, 44), text: 'אותה בדיקה נכשלת כבר 20 דקות')]),
     'amit': simple('amit', [
-      TextMsg(id: 'am1', ts: at(14, 4), text: 'נדרש קוד אימות ל-Mercury'),
+      TextMsg(id: 'am1', ts: at(14, 4), text: 'נדרש קוד אימות לבנק'),
       HandoffCard(id: 'am2', ts: at(14, 4), domain: 'mercury.com', expires: "בתוקף עוד 8 דק'", what: "נדרש קוד אימות כדי להוריד את דוח אוקטובר. בתוקף עוד 8 דק'."),
     ]),
     'noga': simple('noga', [TextMsg(id: 'ng1', ts: at(13, 57), text: '14 זיכרונות כפולים אוחדו הלילה')]),
@@ -464,10 +464,10 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
     ConversationSummary(identityId: 'yoav', lastLine: 'הלילה נסגר: 12 מיזוגים, 2 מחכים ל-GO.', time: '09:12', pinned: true),
     ConversationSummary(identityId: 'ido', lastLine: 'שאלה: כרטיס שנדחה פעמיים בחידוש…', time: '14:02', lastIsMine: true, unread: 2, diffStat: '+48 −11'),
     ConversationSummary(identityId: 'rotem', lastLine: 'נראה שזה מהפריסה של 13:55. העברתי ליואב את ההחלטה אם לחזור ל-`r207`.', time: '14:01', lastIsMine: true),
-    ConversationSummary(identityId: 'dana', lastLine: 'משה יקבל הודעה ברגע שיינתן GO…', time: '14:05'),
+    ConversationSummary(identityId: 'dana', lastLine: 'רוני יקבל הודעה ברגע שיינתן GO…', time: '14:05'),
     ConversationSummary(identityId: 'noa', lastLine: 'מריצה `flutter test` על הנגן ב-web', time: '14:05', diffStat: '+31 −6'),
     ConversationSummary(identityId: 'itai', lastLine: 'אותה בדיקה נכשלת כבר 20 דקות', time: '13:44', extra: '· יואב פתח לו עוזר'),
-    ConversationSummary(identityId: 'amit', lastLine: 'נדרש קוד אימות ל-Mercury', time: '14:04', lastIsMine: true),
+    ConversationSummary(identityId: 'amit', lastLine: 'נדרש קוד אימות לבנק', time: '14:04', lastIsMine: true),
     ConversationSummary(identityId: 'noga', lastLine: '14 זיכרונות כפולים אוחדו הלילה', time: '13:57', unread: 3, muted: true),
     ConversationSummary(identityId: 'eli', lastLine: 'הפוליסה חודשה. אין צורך לעשות דבר.', time: 'אתמול'),
   ];
@@ -476,9 +476,9 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
     Ticket(number: '#3711', title: 'תשלומים נכשלים בחידוש מנוי', project: 'lumo', projectName: 'לומו', group: TicketGroup.waiting, assignee: 'עידו', sub: null, status: WorkerStatus.waiting, endLine: '14:02'),
     Ticket(number: '#3698', title: 'טקסט שבור בטלפון מאז 1.1.5', project: 'lumo', projectName: 'לומו', group: TicketGroup.waiting, assignee: 'דנה', sub: 'GO לפרודקשן', status: WorkerStatus.waiting, endLine: '13:41'),
     Ticket(number: '#88', title: 'מחירי נסיעות לפי שעה', project: 'voice', projectName: 'הבוט הקולי', group: TicketGroup.attention, assignee: 'מאיה', sub: 'מחכה לגישה ל-k8s', status: WorkerStatus.blocked, endLine: '13:30'),
-    Ticket(number: '#209', title: 'פרסור "בעוד שבועיים"', project: 'easy', projectName: 'טיקיבוט', group: TicketGroup.attention, assignee: 'איתי', sub: "בדיקה נכשלת 20 דק'", status: WorkerStatus.stuck, endLine: '13:44'),
+    Ticket(number: '#209', title: 'פרסור "בעוד שבועיים"', project: 'tikibot', projectName: 'טיקיבוט', group: TicketGroup.attention, assignee: 'איתי', sub: "בדיקה נכשלת 20 דק'", status: WorkerStatus.stuck, endLine: '13:44'),
     Ticket(number: '#3720', title: 'הודעות קוליות לא מתנגנות ב-web', project: 'lumo', projectName: 'לומו', group: TicketGroup.working, assignee: 'נועה', sub: 'מריצה בדיקות', status: WorkerStatus.working, diffStat: '+31 −6'),
-    Ticket(number: '#215', title: 'סינון קבוצות כפולות', project: 'easy', projectName: 'טיקיבוט', group: TicketGroup.working, assignee: 'גיל', status: WorkerStatus.working, endLine: "לפני 4 דק'"),
+    Ticket(number: '#215', title: 'סינון קבוצות כפולות', project: 'tikibot', projectName: 'טיקיבוט', group: TicketGroup.working, assignee: 'גיל', status: WorkerStatus.working, endLine: "לפני 4 דק'"),
     Ticket(number: '#12', title: 'דוח שבועי של מדדי האיכות', project: 'co', projectName: 'החברה', group: TicketGroup.working, assignee: 'נגה', status: WorkerStatus.working, endLine: "לפני 9 דק'"),
   ];
 
@@ -499,7 +499,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
       TimelineEntry(icon: 'checklist', text: '144 בדיקות עברו אחרי עדכון של 2', time: '12:55', link: 'למה עודכנו?'),
       TimelineEntry(icon: 'edit', text: 'ניסיון שני נקבע ל-24 שעות אחרי דחייה', time: '12:48', link: 'למה?'),
       TimelineEntry(icon: 'autorenew', text: 'משמרת 2 התחילה, עם העברה', time: '12:40'),
-      TimelineEntry(icon: 'add', text: 'דנה פתחה את הטיקט מהודעה של משה', time: '12:38'),
+      TimelineEntry(icon: 'add', text: 'דנה פתחה את הטיקט מהודעה של רוני', time: '12:38'),
     ],
   );
 
@@ -564,7 +564,7 @@ CompanyData buildDemo(DateTime Function(int h, int m) at) {
       AskedRequest(
         id: 'u1',
         identity: 'ido',
-        body: 'עידו, מה עם התשלומים שנכשלים? משה אמר שיש משתמשים שחויבו פעמיים',
+        body: 'עידו, מה עם התשלומים שנכשלים? רוני אמר שיש משתמשים שחויבו פעמיים',
         at: at(12, 41),
         state: AskedState.answered,
         reply: AskedReply(id: 't1', body: 'בדקתי. אין חיוב כפול. הבעיה היא ניסיון חוזר מיידי אחרי `card_declined`.', at: at(12, 43)),

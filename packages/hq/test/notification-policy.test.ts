@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
+import { hostname } from 'node:os';
 import ts from 'typescript';
 import { ownerSystemCopy } from '../src/system-copy.ts';
 import { alertLevel, Conversations, type MessageLike } from '../src/conversations.ts';
@@ -114,11 +115,15 @@ test('GO action titles and worker notification instructions', () => {
 test('owner system lines omit routing keys and machines while retaining structured references', async () => {
   const env = await makeEnv();
   try {
-    for (const body of ['ההודעה msg_id m-abcd לא נמסרה ב-hq-host', 'העבודה agent-company-t123-1 ב-ci-host נעצרה', 'הבדיקה על branch: feature/example הסתיימה', 'הבדיקה על ענף: feature/example הסתיימה']) {
+    // This machine's own name reads as "השרת" (and so do the nodes' and the probe witness's, below).
+    const here = hostname();
+    for (const body of [`ההודעה msg_id m-abcd לא נמסרה ב-${here}`, 'העבודה agent-company-t123-1 נעצרה', 'הבדיקה על branch: feature/example הסתיימה', 'הבדיקה על ענף: feature/example הסתיימה']) {
       const m = env.hq.mailbox.tell({ from: 'hq', to: 'owner', kind: 'system', body, ref: 'task-123' });
-      assert.doesNotMatch(m.body, /t\d+|msg_id|hq-host|ci-host|feature\/example/);
+      assert.doesNotMatch(m.body, /t\d+|msg_id|feature\/example/);
+      assert.ok(!m.body.includes(here), m.body);
       assert.equal(m.ref, 'task-123');
     }
+    assert.equal(ownerSystemCopy('העבודה ב-ci-host נעצרה', (id) => id, ['ci-host']), 'העבודה ב-השרת נעצרה');
   } finally { await env.cleanup(); }
 });
 
@@ -195,7 +200,7 @@ test('system copy preserves natural branch wording and scans all system-message 
             };
             collect(body.initializer);
             const text=ownerSystemCopy(fragments.join(' '),id=>id);
-            assert.doesNotMatch(text,/t\d+|msg_id|hq-host|ci-host/,url.pathname);
+            assert.doesNotMatch(text,/t\d+|msg_id/,url.pathname);
           }
         }
         ts.forEachChild(node,visit);

@@ -78,7 +78,7 @@ test('another org: its names, its genders, none of ours', () => {
   try {
     const t = texts(dir, 'mira');
     const all = JSON.stringify(t);
-    assert.doesNotMatch(all, /(?<![א-ת])(?:רן|יואב|עדי)(?![א-ת])|Ran/); // the ticket example hivecode-app/hive-code#11 stays (an example of the format)
+    assert.doesNotMatch(all, /(?<![א-ת])(?:רן|יואב|עדי)(?![א-ת])|\bRan\b/); // the ticket example hivecode-app/hive-code#11 stays (an example of the format)
     assert.match(t.plain, /in דנה's agent company\./);
     // Her language is English: the one language line, and no Hebrew writing rules.
     assert.match(t.plain, /\*\*Write every message to the owner in English\.\*\* דנה reads English/);

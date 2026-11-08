@@ -13,6 +13,7 @@
 //   cap  — the safety net: a working shift over maxContextTokens writes a handoff at the end of its turn, and is replaced.
 // Never while background work runs, or while it waits on him (an open ask, an open GO of its own): it goes on as before.
 // `shift.rotated` carries the context the rotation dropped, for the weekly report.
+import { pre } from '@company/shared';
 import type { HqConfig } from './config.ts';
 import type { Mailbox } from './mailbox.ts';
 import type { ShiftManager, ShiftRow } from './shifts.ts';
@@ -54,13 +55,13 @@ interface Pending { why: 'rest' | 'cap'; startedAt: number; askedAt: number; con
 const k = (n: number) => `${Math.round(n / 1000)} אלף`;
 
 /** What the summary keeps: what a lead works from between turns (its open threads, who waits on what, his decisions). */
-export const COMPACT_INSTRUCTIONS = 'שמור במדויק: מה פתוח אצלך ומה הצעד הבא בכל דבר; מי מחכה למה (משימות, PRים, שאלות ובקשות GO לרן) '
-  + 'עם המזהים; הכרעות והוראות של רן עם הציטוט; הודעות שעוד לא ענית עליהן, עם ה-msg_id. פרטי כלים וקבצים שכבר נסגרו לא צריך.';
+export const compactInstructions = (owner: string): string => `שמור במדויק: מה פתוח אצלך ומה הצעד הבא בכל דבר; מי מחכה למה (משימות, PRים, שאלות ובקשות GO ${pre('ל', owner)}) `
+  + `עם המזהים; הכרעות והוראות של ${owner} עם הציטוט; הודעות שעוד לא ענית עליהן, עם ה-msg_id. פרטי כלים וקבצים שכבר נסגרו לא צריך.`;
 
 /** A task's worker works from its brief: the task, where it stands, and what each open thread waits on. */
-export const TASK_COMPACT_INSTRUCTIONS = 'שמור במדויק: המשימה כמו שנשלחה (מי שלח, msg_id, מה התבקש ומתי היא גמורה); ה-worktree והענף; '
+export const taskCompactInstructions = (owner: string): string => 'שמור במדויק: המשימה כמו שנשלחה (מי שלח, msg_id, מה התבקש ומתי היא גמורה); ה-worktree והענף; '
   + 'כל PR עם מספר, קישור ומצב (סקירה, CI, סקירת עיצוב, מיזוג); מה כבר נעשה ומה הצעד הבא; מי מחכה למה ועל מה אתה מחכה; '
-  + 'הכרעות והוראות של רן עם הציטוט; הודעות שעוד לא ענית עליהן, עם ה-msg_id. פלט של כלים וקבצים שכבר נסגרו לא צריך.';
+  + `הכרעות והוראות של ${owner} עם הציטוט; הודעות שעוד לא ענית עליהן, עם ה-msg_id. פלט של כלים וקבצים שכבר נסגרו לא צריך.`;
 
 export class Rotator {
   /** Shifts asked for a handoff (id → what for). In memory: after an hq restart the next rest or turn asks again. */
@@ -153,7 +154,7 @@ export class Rotator {
       this.compactCooldown.set(s.id, this.store.now() + r.handoffWaitMs * 3);
       this.store.emit('shift.compact_failed', s.identity, { shift: s.id, error });
     };
-    conn.send(`compact-${s.id}-${now}`, `/compact ${s.task_id != null ? TASK_COMPACT_INSTRUCTIONS : COMPACT_INSTRUCTIONS}`, 'next')
+    conn.send(`compact-${s.id}-${now}`, `/compact ${(s.task_id != null ? taskCompactInstructions : compactInstructions)(this.mailbox.names.owner.name)}`, 'next')
       .then((reply) => { if (reply?.state === 'failed') failed('the host did not take the line'); })
       .catch((e: Error) => failed(e.message));
     return true;

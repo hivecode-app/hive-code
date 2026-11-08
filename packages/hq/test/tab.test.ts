@@ -86,9 +86,9 @@ test('handoff: link in "מחכה לך" (login, pushes), one live login per site'
     const again = await env.call('POST', '/v1/handoffs', { identity: 'amit', url: 'https://github.com/login', what: 'x' });
     assert.equal(again.status, 409, 'no second link for the same login');
     assert.equal(again.json.busy.id, r.json.handoff.id);
-    const elsewhere = await env.call('POST', '/v1/handoffs', { identity: 'eli', url: 'https://mercury.com/login', what: 'x' });
+    const elsewhere = await env.call('POST', '/v1/handoffs', { identity: 'eli', url: 'https://pay.example.com/login', what: 'x' });
     assert.equal(elsewhere.status, 200);
-    assert.deepEqual(env.tabBrowser.opened, ['https://mercury.com/login'], 'no tab given → a window of its own');
+    assert.deepEqual(env.tabBrowser.opened, ['https://pay.example.com/login'], 'no tab given → a window of its own');
   } finally { await env.cleanup(); }
 });
 
@@ -176,7 +176,7 @@ test('handoff: preview bots never claim the link; the first phone owns it; "סי
 test('handoff: "סיימתי" in the app with nothing waiting wakes the worker by mail (now)', async () => {
   const env = await tabEnv();
   try {
-    const r = await env.call('POST', '/v1/handoffs', { identity: 'amit', url: 'https://mercury.com/login', what: 'קוד' });
+    const r = await env.call('POST', '/v1/handoffs', { identity: 'amit', url: 'https://pay.example.com/login', what: 'קוד' });
     const done = await env.callAsOwner('POST', `/api/inbox/${r.json.inbox_id}/done`, { note: 'done' });
     assert.equal(done.status, 200);
     assert.equal(env.hq.tab.get(r.json.handoff.id)!.state, 'done');
@@ -193,7 +193,7 @@ test('handoff: "סיימתי" in the app with nothing waiting wakes the worker b
 test('handoff: a worker closing the handoff item is not told on as "רן סיים" (#208)', async () => {
   const env = await tabEnv();
   try {
-    const r = await env.call('POST', '/v1/handoffs', { identity: 'amit', url: 'https://mercury.com/login', what: 'קוד' });
+    const r = await env.call('POST', '/v1/handoffs', { identity: 'amit', url: 'https://pay.example.com/login', what: 'קוד' });
     assert.equal((await env.call('POST', `/api/inbox/${r.json.inbox_id}/done`, { note: 'עשיתי', from: 'eli' })).status, 200);
     assert.equal(env.hq.tab.get(r.json.handoff.id)!.state, 'done');
     const mails = env.hq.mailbox.list('amit');
@@ -210,8 +210,8 @@ test('handoff: expires after its TTL (410, out of "מחכה לך"); the worker\'
   const env = await tabEnv();
   try {
     const a = await env.call('POST', '/v1/handoffs', { identity: 'amit', target: 'agent-tab', url: 'https://github.com/login' });
-    const b = await env.call('POST', '/v1/handoffs', { identity: 'eli', url: 'https://mercury.com/login' });
-    const end = await env.call('POST', `/v1/handoffs/${b.json.handoff.id}/end`, { state: 'done', final_url: 'https://mercury.com/home' });
+    const b = await env.call('POST', '/v1/handoffs', { identity: 'eli', url: 'https://pay.example.com/login' });
+    const end = await env.call('POST', `/v1/handoffs/${b.json.handoff.id}/end`, { state: 'done', final_url: 'https://pay.example.com/home' });
     assert.equal(end.json.handoff.state, 'done');
     assert.equal(end.json.handoff.ended_by, 'worker');
     assert.equal(env.hq.mailbox.list('eli').filter((m) => m.from_identity === OWNER).length, 0, 'it saw it itself');
@@ -244,7 +244,7 @@ test('handoff: "לא עכשיו"/dismiss and expiry with nothing waiting still r
     assert.ok(env.hq.mailbox.list('amit').some((m) => m.from_identity === OWNER && /דחה/.test(m.body)), 'declined, said so');
     await until(() => env.tabBrowser.released.some((x) => x.tell === 'cancelled'), 2000, 'phone told cancelled');
 
-    const b = await env.call('POST', '/v1/handoffs', { identity: 'eli', url: 'https://mercury.com/login' });
+    const b = await env.call('POST', '/v1/handoffs', { identity: 'eli', url: 'https://pay.example.com/login' });
     env.clock.advance(11 * 60_000);
     await env.hq.tab.sweep();
     const note = env.hq.mailbox.list('eli').find((m) => m.from_identity === 'hq');

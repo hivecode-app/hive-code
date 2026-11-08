@@ -651,14 +651,14 @@ export async function startApi(hq: Hq, token: string, host: string, port: number
       }
       // The pairing link's page and the APK's key for this domain (pairing.ts): open, like /health.
       if (req.method === 'GET' && url.pathname === '/pair') {
-        const { status, html } = pairPage(req, url, hq.cfg.auth.appUrl);
+        const { status, html } = pairPage(req, url, hq.cfg.auth.appUrl, hq.cfg.appPackage);
         res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
           'x-frame-options': 'DENY', 'x-robots-tag': 'noindex, nofollow' });
         return res.end(html);
       }
       if (req.method === 'GET' && url.pathname === '/.well-known/assetlinks.json') {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'max-age=300' });
-        return res.end(JSON.stringify(assetLinks(hq.cfg.auth.origins), null, 2));
+        return res.end(JSON.stringify(assetLinks(hq.cfg.auth.origins, hq.cfg.appPackage), null, 2));
       }
       if (url.pathname.startsWith('/api/auth/')) {
         if (await dispatch(authRoutes, req, res, url, null)) return;

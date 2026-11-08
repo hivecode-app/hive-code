@@ -13,6 +13,7 @@
 // The automation is `disk-watch` in org.yaml; off, nothing is read and nothing is deleted.
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, statfsSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Hq } from './hq.ts';
@@ -175,7 +176,7 @@ export class DiskWatch {
       u = await m.usage();
     }
     if (u.pct < ALERT_AT) return;
-    const where = m.name === 'local' ? 'hq-host' : m.name;
+    const where = m.name === 'local' ? hostname() : m.name;
     const critical = u.pct >= CRITICAL_AT;
     const key = `disk-${m.name}-${new Date(now).toISOString().slice(0, 10)}${critical ? '-critical' : ''}`;
     if (store.db.prepare(`SELECT 1 FROM inbox WHERE dedupe_key = ?`).get(key)) return; // today's item exists: no heavy du again

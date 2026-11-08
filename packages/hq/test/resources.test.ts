@@ -112,7 +112,7 @@ test('הלפטופ: שולחן העבודה של רן והאמולטור של ל
   const out = FAST_OUT.replace('##rc cgroups 0', [
     `user.slice/user-1000.slice/user@1000.service\t${7000 * MBc}\t1\t`,
     `user.slice/user-1000.slice/user@1000.service/app.slice/company-shift@agent-company-t394-1.service\t${500 * MBc}\t1\t`,
-    `user.slice/user-1000.slice/session-10.scope\t${2200 * MBc}\t1\t/home/owner/Android/Sdk/emulator/qemu/linux-x86_64/qemu-system-x86_64-headless -avd laya2 -no-window ;; netsimd ;; `,
+    `user.slice/user-1000.slice/session-10.scope\t${2200 * MBc}\t1\t/home/ran/Android/Sdk/emulator/qemu/linux-x86_64/qemu-system-x86_64-headless -avd laya2 -no-window ;; netsimd ;; `,
     `user.slice/user-1000.slice/session-11.scope\t${900 * MBc}\t1\tbash ./dev.sh ;; `,
     '##rc cgroups 0'].join('\n'));
   const raw = parseRaw(out, null);
@@ -294,7 +294,7 @@ test('מסך המשאבים: הזמנות פעילות ותור, ומשימה ש
   await env.cleanup();
 });
 
-test('ברירת מחדל: user@1001, דפדפן, claude-remote, gha-deploy ומשמרת בלי משימה מזוהים; map גובר; השאר נשאר "לא מזוהה"', () => {
+test('ברירת מחדל: claude-remote ומשמרת בלי משימה מזוהים; יחידות של המכונה (user@1001, דפדפן, gha-deploy) מ-map; השאר נשאר "לא מזוהה"', () => {
   const MBc = 1024 ** 2;
   const raw = { unmeasured: [], cgroups: [
     { path: 'user.slice/user-1001.slice/user@1001.service', memBytes: 5000 * MBc, cpuUsec: null },
@@ -305,8 +305,10 @@ test('ברירת מחדל: user@1001, דפדפן, claude-remote, gha-deploy ומ
     { path: 'user.slice/user-1001.slice/user@1001.service/app.slice/company-shift@yoav-6.service', memBytes: 200 * MBc, cpuUsec: null },
   ] };
   const by = (map = {}) => Object.fromEntries(attribute(raw, ctx({ map, shift: (id) => (id === 'yoav-6' ? { task: null, project: null } : null) }), new Map(), 'local', 1).map((r) => [r.name.split('/').pop()!.split(' ')[0], r.project]));
-  assert.deepEqual(by(), { 'user@1001.service': 'agent-company', 'chrome-personal.service': 'agent-company', 'claude-remote@hq-host.service': 'owner-sessions', 'gha-deploy.service': 'lumo', 'mystery.service': null, 'עבודה': 'agent-company' });
-  assert.equal(by({ 'chrome-personal.service': 'lumo' })['chrome-personal.service'], 'lumo');
+  assert.deepEqual(by(), { 'user@1001.service': null, 'chrome-personal.service': null, 'claude-remote@hq-host.service': 'owner-sessions', 'gha-deploy.service': null, 'mystery.service': null, 'עבודה': 'agent-company' });
+  const machine = { 'user@1001.service': 'agent-company', 'chrome-personal.service': 'agent-company', 'gha-deploy.service': 'lumo' };
+  assert.deepEqual(by(machine), { 'user@1001.service': 'agent-company', 'chrome-personal.service': 'agent-company', 'claude-remote@hq-host.service': 'owner-sessions', 'gha-deploy.service': 'lumo', 'mystery.service': null, 'עבודה': 'agent-company' });
+  assert.equal(by({ ...machine, 'chrome-personal.service': 'lumo' })['chrome-personal.service'], 'lumo');
 });
 
 test('docker-df שלא נשאל בסבב הזה אינו "לא נמדד"', () => {

@@ -1,7 +1,7 @@
 // Remote nodes: task shifts also run on other machines, over ssh (task 199, "קיצור התור"). Leads, residents and
 // everything with a browser stay here; a node takes task workers only, of the projects it lists.
 //
-// A node mirrors this machine's paths: the same $HOME (/home/owner, a directory there, not a user), the same
+// A node mirrors this machine's paths: the same $HOME (/home/ran, a directory there, not a user), the same
 // checkouts, the same state dir. So a task's worktree, a shift's socket and its shift dir are one path on both sides,
 // and nothing in the store needs to know where a path lives. scripts/node-install.sh sets a node up.
 //

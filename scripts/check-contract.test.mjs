@@ -248,7 +248,7 @@ for (const [name, expect, mutate] of starterCases) {
 }
 
 test('the starter kit and the fixtures carry nothing of the owner of this repo', () => {
-  const r = spawnSync('grep', ['-rniE', 'רן|יואב|ran|hivecode', join(repo, 'starter'), join(repo, 'fixtures')], { encoding: 'utf8' });
+  const r = spawnSync('grep', ['-rnP', '(?<![א-ת])(?:רן|יואב)(?![א-ת])|\\bRan\\b|(?i:hivecode)', join(repo, 'starter'), join(repo, 'fixtures')], { encoding: 'utf8' });
   assert.equal(r.stdout, '', r.stdout);
 });
 

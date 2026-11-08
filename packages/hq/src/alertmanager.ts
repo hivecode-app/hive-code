@@ -1,11 +1,11 @@
-// `alertmanager` probe (lumo root 6, 27/10): the cluster's own alerts reach רותם. Read-only, over the ssh the `cluster` probe uses:
+// `alertmanager` probe (27/10): the cluster's own alerts reach רותם. Read-only, over the ssh the `cluster` probe uses:
 // per namespace in the charter, `kubectl exec deploy/alertmanager -- wget -qO-` of /api/v2/alerts (active, not silenced, not inhibited).
 // Only GET: no POST, no silences. A critical alert (labels.severity == "critical") wakes רותם once by its fingerprint, and one note
 // when it has been gone from the list for `resolve_after` (5m): one that flaps (gone for a round, then back) says nothing more.
-// A namespace marked `prod: false` in the charter (lumo-dev) is not production: its alerts reach her at `later`, not urgent and not as
+// A namespace marked `prod: false` in the charter (a dev namespace) is not production: its alerts reach her at `later`, not urgent and not as
 // a production anomaly (the mailbox still delivers it, a resting shift included, like any message from hq). ssh or exec that failed, no alertmanager pod, garbage: that namespace is unknown, not a failure,
 // and its open alerts stay as they were. Unknown for more than BLIND_MS: one separate message, "no sight of Alertmanager".
-// One cluster's Alertmanager can carry another project's alerts (lumobot's in lumo-prod, 28/10): `match` keeps only the alerts whose
+// One cluster's Alertmanager can carry another project's alerts (a bot's in a product's prod namespace, 28/10): `match` keeps only the alerts whose
 // labels have every key=value of it, `exclude` drops those matching any of its selectors (so the two probes don't both tell), and
 // `critical`/`warning` name alerts by alertname (a named one is that severity whatever its label says). A warning goes out at `next`,
 // not urgent. `notify` is who the probe's messages go to (else רותם), `cc` who gets a copy of each.
@@ -120,7 +120,7 @@ const utc = (s: string): string => { const t = Date.parse(s); return Number.isFi
 
 /** One reading against what was open: the new state and what goes to רותם. Pure, so the rules are tested without ssh. */
 export function amRound(key: string, target: string, prev: AmState, reading: AmReading, now: number, opts: AmOptions = {}): { state: AmState; messages: AmMessage[] } {
-  const toOwner = opts.toOwner ?? 'לרן';
+  const toOwner = opts.toOwner ?? 'לבעלים';
   const nonProd = new Set(opts.nonProd ?? []);
   const resolveAfter = opts.resolveAfterMs ?? RESOLVE_AFTER_MS;
   const state: AmState = { open: { ...prev.open }, blind: { ...prev.blind } };

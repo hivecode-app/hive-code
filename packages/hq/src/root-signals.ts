@@ -172,7 +172,7 @@ export const STEAL_MAX_PERCENT = 25;
 /** The shell loop took more than this × its 24h median on the node: the node gets less than half the CPU it used to. */
 export const BENCH_FACTOR = 2;
 /** …and only with steal above this in the same round. The loop runs in a pod on the node, so our own load slows it too: on 27/10
- *  vmi1000014 (lumo) was 35% busy with 7.4% iowait during a DB move and 0% steal, and the loop on tiki's nodes ran 0.04–0.60s by
+ *  one node was 35% busy with 7.4% iowait during a DB move and 0% steal, and the loop on another cluster's nodes ran 0.04–0.60s by
  *  load and CPU model with 0.0% steal. Without steal a slow loop is not a finding. */
 export const BENCH_STEAL_MIN_PERCENT = 3;
 /** A baseline needs this many samples before anything is compared to it (an hour at `every: 5m`). */

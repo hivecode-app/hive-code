@@ -1878,9 +1878,6 @@ CompanyData mapSnapshot({
     'improve': UiCopy.copy.improvementTeam,
     'improvement': UiCopy.copy.improvementTeam,
     'design': UiCopy.copy.design,
-    'lumo': UiCopy.copy.lumo,
-    'tikibot': UiCopy.copy.tikibot,
-    'voice': 'voice-bot',
     'agent-company': UiCopy.copy.company2,
   };
   // A project and its team show the owner's name for the project (org.yaml `projects[].name`, from hq).
@@ -1894,9 +1891,14 @@ CompanyData mapSnapshot({
     for (final p in projects)
       if (p['team'] is String && projectNames.containsKey(p['id'])) p['team'] as String: projectNames[p['id']]!,
   };
-  // The team badge on every monogram. By team id first (hq's real ids and the older short ones),
-  // then a member's own symbol if the app has that icon; never an icon it doesn't have (that drew
-  // "?" on the whole personal team, QA-LOG item 3).
+  // The team badge on every monogram. The company's own teams take their fixed ones (hq's real ids and the
+  // older short ones), a project's team its org.yaml symbol (hq sends it with the project), then a
+  // member's own symbol; never an icon the app doesn't have (that drew "?" on the whole personal team,
+  // QA-LOG item 3).
+  final projectSymbols = <String, String>{
+    for (final p in projects)
+      if (p['symbol'] is String && kIcons.containsKey(p['symbol'])) (p['team'] is String ? p['team'] as String : p['id'] as String): p['symbol'] as String,
+  };
   const teamSymbols = {
     'management': 'explore',
     'mgmt': 'explore',
@@ -1907,12 +1909,6 @@ CompanyData mapSnapshot({
     'improve': 'build',
     'design': 'palette',
     'agent-company': 'architecture',
-    'lumo': 'local_shipping',
-    'tikibot': 'smart_toy',
-    'tiki-bot-go': 'directions_car',
-    'lumo-bot': 'smart_toy',
-    'voice': 'graphic_eq',
-    'voice-bot': 'graphic_eq',
   };
   final teams = <String, Team>{};
   final ids = <String, Identity>{};
@@ -1947,7 +1943,7 @@ CompanyData mapSnapshot({
     final own = b['symbol'] as String?;
     final host = b['team_kind'] == 'task' ? hostTeam(b) : null;
     final project = b['project'] as String?;
-    final symbol = teamSymbols[host ?? team] ?? (own != null && kIcons.containsKey(own) ? own : 'build');
+    final symbol = teamSymbols[host ?? team] ?? projectSymbols[host ?? team] ?? (own != null && kIcons.containsKey(own) ? own : 'build');
     final named = host ?? team;
     final teamName = teamNames[named] ?? (project != null ? projectNames[project] : null) ?? named;
     final tone = b['tone'] as String? ?? teamTone[host ?? team];

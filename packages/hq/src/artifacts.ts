@@ -43,7 +43,7 @@ export class Artifacts {
     const keyPath = join(stateDir, 'artifact-key');
     if (!existsSync(keyPath)) writeFileSync(keyPath, randomBytes(32), { mode: 0o600 });
     this.key = readFileSync(keyPath);
-    const app = new URL(appOrigin ?? 'https://app.hq.example.com');
+    const app = new URL(appOrigin ?? 'http://localhost');
     app.hostname = app.hostname.startsWith('app.') ? app.hostname.replace(/^app\./, 'art.') : `art.${app.hostname}`;
     this.origin = app.origin;
   }
@@ -177,7 +177,7 @@ export class Artifacts {
     return { path, mime: artifactMime(path), headers: this.headers(!!v.network) };
   }
   headers(network: boolean): Record<string,string> {
-    const app = this.appOrigin ? new URL(this.appOrigin).origin : 'https://app.hq.example.com';
+    const app = this.appOrigin ? new URL(this.appOrigin).origin : 'http://localhost';
     return { 'content-security-policy': `default-src 'self' 'unsafe-inline' data: blob:${network ? ' https:' : ''}; form-action 'none'; base-uri 'none'; frame-ancestors ${app}; sandbox allow-scripts`,
       'access-control-allow-origin': '*', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'x-dns-prefetch-control': 'off', 'cache-control': 'no-store' };
   }

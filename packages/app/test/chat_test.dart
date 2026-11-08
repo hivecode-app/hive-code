@@ -1,3 +1,4 @@
+import 'package:agent_company/l10n/app_localizations_he.dart';
 import 'package:agent_company/model/models.dart';
 import 'package:agent_company/ui/chat/chat_screen.dart';
 import 'package:agent_company/ui/chat/composer.dart';
@@ -9,6 +10,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'helpers.dart';
 
 void main() {
+  test('a system line drops the names of the machines shifts run on, whatever they are called', () {
+    final l = AppLocalizationsHe();
+    final out = cleanSystemText('המשמרת עברה ל-srv-77 מ-box2', l, machines: {'srv-77', 'box2'});
+    expect(out, isNot(contains('srv-77')));
+    expect(out, isNot(contains('box2')));
+    expect(cleanSystemText('המשמרת עברה ל-srv-77', l), contains('srv-77'), reason: 'no machine named in the code');
+  });
+
   for (final dark in [false, true]) {
     final t = dark ? 'dark' : 'light';
     // Tall frames show every message kind at once (the gallery view of chat.md §2).
