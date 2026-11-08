@@ -182,7 +182,7 @@ Only after "Set up". The examples to copy are in `examples/` in the company dire
    - **For every active project:** an entry in `projects` (`id`, `name`, `status: active`, `team`), a team `kind: project` with the same `id` and `project`, and an identity for the team lead (`reports_to: manager`, `lifecycle: always-on`, `may_open: [task]`, `memory_domain: projects/<p>`). The example: `examples/org-additions.yaml`.
    - **A dormant project:** only an entry in `projects` with `status: dormant`, and a charter with the same `status`.
    - **Monitoring, if there is at least one production:** a `monitoring` team with a team lead, `monitoring_lead: <id>`, and an automation `prod-probes` on that lead with `enabled: true`. Without production there is no monitoring team.
-   - **Delete the line `setup: pending`.** From now on the check requires `owner_name` and `timezone`.
+   - **Keep the line `setup: pending` until the commit (step 7).** While it is there, you may write directly in the company's folder.
 2. **`company/projects/<p>.md`** for every project: frontmatter with all the fields in the example (`project`, `status`, `repo`, `machine`, `checkouts`, `worktree_dir`, `commands`, `ceo`, `model`, `review`, `ci`, `ci_check`, `merge`, `deploy: owner-go`, `night_weight`, `deviations`, `monitoring` with the probes from question 3, and `grants: []`). `repo` is required: without it the night queue does not pull issues from the project. In the body: what the project is, how to deploy, how to roll back, and a commands table. The example: `examples/projects/example-app.md`.
 3. **`company/identities/<id>.md`** for every team lead, with the five sections (`## Personality`, `## Role`, `## Authority`, `## Automations`, `## Escalation`). The example: `examples/identities/aviv.md` (team lead) and `examples/identities/hadar.md` (monitoring). And update `company/identities/manager.md`: the name, the monogram, and deleting the setup item from "Role".
 4. **`company/directives.md`:** a directive for everything said in the conversation, with the owner's quote and today's date: the merge, the night, what is forbidden, and directives approved from the import. Do not touch the Authority block.
@@ -192,7 +192,12 @@ Only after "Set up". The examples to copy are in `examples/` in the company dire
    company check        # ~/.local/bin/company, from the engine (scripts/company)
    ```
    **Do not continue until it passes.** Fix an error in the files, not in the check. Fix warnings (a file not listed in the index) too.
-7. **Commit:** in `$COMPANY_HOME`, `git add -A && git commit -m "Set up the company"`. This is the only commit made without a PR. From now on every change to the contract goes through a PR with review, like code.
+7. **Commit:** in `$COMPANY_HOME`, in one command, because once the line is gone the folder is closed to writes. If the check fails without the line, the command puts it back, so you can fix and run it again:
+   ```bash
+   cd "$COMPANY_HOME" && cp company/org.yaml /tmp/org.yaml.setup && sed -i '/^setup: pending$/d' company/org.yaml \
+     && { company check || { cp /tmp/org.yaml.setup company/org.yaml; false; }; } && git add -A && git commit -m "Set up the company"
+   ```
+   From now on the check requires `owner_name` and `timezone`. This is the only commit made without a PR. From now on every change to the contract goes through a PR with review, like code.
 8. **A private repo on GitHub:** card `headline: "Back up the company on GitHub?"`, `question: "A private repo in your account. Without it there is no PR for contract changes and no backup."`, `options: ["Yes, private", "Not now"]`. "Yes": `gh repo create <user>/company --private --source "$COMPANY_HOME" --push` (if the name is taken, propose `<user>-company`).
 9. **Start:** hq reads `org.yaml` only at startup. `systemctl --user restart agent-company-hq`. Shifts survive a restart. Make sure the new teams appear on the board in the app.
 10. **Introductions:** `tell` every team lead, a line or two: who they are, which project, and what the owner said about it. The message wakes them.

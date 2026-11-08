@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { IdentityId, ShiftId } from '@company/shared';
@@ -141,6 +141,22 @@ export function buildEnv(spec: ShiftSpec, base: NodeJS.ProcessEnv = process.env)
 export function buildMcpConfig(companyCommand: string[], others: Record<string, unknown> = {}): Record<string, unknown> {
   const [command, ...args] = companyCommand;
   return { mcpServers: { ...others, company: { type: 'stdio', command, args } } };
+}
+
+/**
+ * The browser the installer set up (scripts/install.sh, "the browser"): `<stateRoot>/browser/mcp.json` holds one
+ * mcpServers entry for browser-memory. A shift adds it as `browser`, under the owner's own servers, so a `browser` in
+ * ~/.claude.json (the first server's) still wins. No file: no installed browser, nothing to add.
+ */
+export function installedBrowserMcp(stateRoot: string, warn: (msg: string) => void = () => {}): Record<string, unknown> {
+  const file = join(stateRoot, 'browser', 'mcp.json');
+  if (!existsSync(file)) return {};
+  try {
+    const cfg = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    if (cfg && typeof cfg === 'object' && !Array.isArray(cfg)) return { browser: cfg };
+    warn(`${file}: not an object; the shift starts without the browser`);
+  } catch (e) { warn(`${file}: ${(e as Error).message}; the shift starts without the browser`); }
+  return {};
 }
 
 /**

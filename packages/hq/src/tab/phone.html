@@ -83,6 +83,8 @@ else start();
 
 function start() {
   const token = location.pathname.split('/').pop();
+  // Behind a path (an installation serves the handoff at <origin>/tab/h/<token>), the socket sits under the same one.
+  const base = location.pathname.replace(/\/h\/[^/]*$/, '');
   // The tab gets the phone's size once, and keeps it: resizing it whenever the keyboard opened blanked the picture.
   const vw = Math.round(innerWidth), vh = Math.round(innerHeight - 52);
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -91,7 +93,7 @@ function start() {
   const send = (o) => { if (!ws || ws.readyState !== 1) return false; ws.send(JSON.stringify(o)); return true; };
 
   function connect() {
-    ws = new WebSocket(`${proto}://${location.host}/ws/${token}?w=${vw}&h=${vh}&dpr=${devicePixelRatio}`);
+    ws = new WebSocket(`${proto}://${location.host}${base}/ws/${token}?w=${vw}&h=${vh}&dpr=${devicePixelRatio}`);
     ws.onopen = () => { retry = 0; status.textContent = 'live'; };
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);

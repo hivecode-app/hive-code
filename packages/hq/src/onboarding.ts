@@ -31,7 +31,13 @@ export const setupCommand: SetupCommand = (file, args) => new Promise((resolve, 
 export async function connectionStatus(service: string, run: SetupCommand = setupCommand): Promise<boolean> {
   try {
     if (service === 'claude') {
-      const v = JSON.parse(await run('claude', ['auth', 'status', '--json']));
+      // The engine's pinned Claude Code (scripts/install-claude.sh): a new server has no `claude` on PATH at all.
+      let bin = 'claude';
+      try {
+        const { resolveClaudeBin } = (await import('@company/adapter' as string)) as { resolveClaudeBin: () => string };
+        bin = resolveClaudeBin();
+      } catch { /* not installed by the engine: whatever is on PATH */ }
+      const v = JSON.parse(await run(bin, ['auth', 'status', '--json']));
       return v.loggedIn === true;
     }
     if (service === 'github') { await run('gh', ['api', 'user', '--jq', '.login']); return true; }

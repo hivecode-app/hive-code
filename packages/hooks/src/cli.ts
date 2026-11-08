@@ -5,7 +5,8 @@ import { appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { ENV, shiftDir, statePaths } from '@company/shared';
 import { writeCompactHandoff } from './compact.ts';
-import { checkToolUse } from './guard.ts';
+import { checkToolUse, companySetupPending } from './guard.ts';
+import { checkAuthority } from './authority.ts';
 import { HEAVY_EVENT, heavyReminder } from './heavy.ts';
 import { checkMerge, detectMerges } from './merge.ts';
 import { appendSpool, mkdirp, UNKNOWN_SHIFT } from './spool.ts';
@@ -76,8 +77,11 @@ async function main(): Promise<void> {
     // #115: no writes into the main agent-company checkout. Only a block is spooled (the board sees it);
     // every other tool call passes silently.
     let reason: string | null = null;
-    try {
-      reason = checkToolUse((payload ?? {}) as object, { repo: process.env[ENV.repo], company: process.env[ENV.home], identity: process.env[ENV.identity] });
+    // #480: the five classes of the Authority section, before anything else.
+    try { reason = checkAuthority((payload ?? {}) as object); } catch (e) { logError('authority', e); }
+    if (!reason) try {
+      reason = checkToolUse((payload ?? {}) as object, { repo: process.env[ENV.repo], company: process.env[ENV.home], identity: process.env[ENV.identity],
+        setupPending: companySetupPending(process.env[ENV.home]) });
     } catch (e) { logError('guard', e); }
     if (!reason) reason = await mergeGate(payload);
     if (!reason) {

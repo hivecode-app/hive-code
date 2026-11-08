@@ -9,7 +9,7 @@ import { sufficientUntil } from '../src/usage.ts';
 
 async function setupEnv(pending = true) {
   const env = await makeEnv({ noStart: true, org: pending ? `${ORG_YAML}\nsetup: pending\n` : ORG_YAML,
-    deps: { setupCommand: async (file, args) => file === 'claude' ? '{"loggedIn":true}' : args[1] === 'user' ? 'owner' : '[]' } });
+    deps: { setupCommand: async (file, args) => /(^|\/)claude$/.test(file) ? '{"loggedIn":true}' : args[1] === 'user' ? 'owner' : '[]' } });
   await env.hq.start({ listen: true, timers: false });
   const token = readFileSync(join(env.cfg.stateDir, 'api-token'), 'utf8').trim();
   const code = env.hq.auth.createPairCode({ kind: 'admin' }).code;
@@ -79,7 +79,7 @@ test('work settings validate, persist and apply capacity without changing access
 
 test('connection failures are independent and repository pagination distinguishes permission failure', async () => {
   const run = async (file: string, args: string[]) => {
-    if (file === 'claude') throw new Error('not logged in');
+    if (/(^|\/)claude$/.test(file)) throw new Error('not logged in');
     if (args[1] === 'user') return 'owner';
     assert.match(args[1]!, /page=2/);
     return JSON.stringify([{ full_name: 'owner/a', description: 'A', permissions: { push: true } }, { full_name: 'owner/read-only', permissions: { push: false } }]);

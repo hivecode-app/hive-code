@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bashWrite, checkToolUse, companyRoot, GUARD_MATCHER, protectedRoot } from '../src/index.ts';
+import { bashWrite, checkToolUse, companyRoot, companySetupPending, GUARD_MATCHER, protectedRoot } from '../src/index.ts';
 
 const HOME = '/home/u';
 const ROOT = `${HOME}/projects/agent-company`;
@@ -200,4 +200,22 @@ test('COMPANY_HOME outside the engine is protected too; inside it (before the sp
   assert.equal(companyRoot({ home: HOME, company: ROOT }), null, 'before the split COMPANY_HOME is the engine repo');
   assert.equal(companyRoot({ home: HOME, company: `${CO}/.worktrees/t1` }), null);
   assert.equal(companyRoot({ home: HOME }), null);
+});
+
+test('a new company: while org.yaml says setup: pending, the setup writes and commits in COMPANY_HOME', () => {
+  const CO = `${HOME}/company`;
+  const e = { home: HOME, identity: 'manager', company: '~/company', setupPending: true };
+  assert.equal(companyRoot(e), null);
+  assert.equal(checkToolUse({ tool_name: 'Bash', tool_input: { command: "sed -i '/^setup: pending$/d' company/org.yaml && git add -A && git commit -m x" }, cwd: CO }, e), null);
+  assert.match(checkToolUse({ tool_name: 'Write', tool_input: { file_path: `${ROOT}/a` } }, e)!, /agent-company/, 'the engine is still guarded');
+  const dir = mkdtempSync(join(tmpdir(), 'setup-'));
+  mkdirSync(join(dir, 'company'));
+  writeFileSync(join(dir, 'company', 'org.yaml'), 'version: 1\nsetup: pending\nteams: []\n');
+  assert.equal(companySetupPending(dir), true);
+  writeFileSync(join(dir, 'company', 'org.yaml'), 'version: 1\nsetup: "pending" # until the setup\nteams: []\n');
+  assert.equal(companySetupPending(dir), true);
+  writeFileSync(join(dir, 'company', 'org.yaml'), 'version: 1\n# setup: pending\nteams: []\n');
+  assert.equal(companySetupPending(dir), false);
+  assert.equal(companySetupPending(join(dir, 'nothing')), false);
+  assert.equal(companySetupPending(undefined), false);
 });

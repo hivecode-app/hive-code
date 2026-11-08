@@ -9,7 +9,8 @@ ver="${1:?version}"
 root="$HOME/.local/share/agent-company/claude"
 prefix="$root/$ver"
 mkdir -p "$prefix"
-npm install --prefix "$prefix" --no-audit --no-fund --no-save "@anthropic-ai/claude-code@$ver" >/dev/null
+npm install --prefix "$prefix" --no-audit --no-fund --no-save --loglevel=error "@anthropic-ai/claude-code@$ver" >/dev/null 2>&1 \
+  || npm install --prefix "$prefix" --no-audit --no-fund --no-save --loglevel=error "@anthropic-ai/claude-code@$ver" >/dev/null
 native="$(ls -d "$prefix"/node_modules/@anthropic-ai/claude-code-linux-* 2>/dev/null | head -1)"
 [ -x "$native/claude" ] || { echo "native binary not found under $prefix" >&2; exit 1; }
 ln -sfn "${native#$prefix/}/claude" "$prefix/claude"

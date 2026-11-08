@@ -1,6 +1,7 @@
 // PreToolUse guard (#115): no shift writes into the main agent-company checkout, the one hq runs and
 // deploys from, nor into the company's own checkout (COMPANY_HOME), the one hq reads the contract and memory from. Work happens in a worktree under <checkout>/.worktrees/, memory files change through
 // `remember` with `file` (hq folds them into a PR). Pure and synchronous: it runs before every tool call.
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve, sep } from 'node:path';
 
@@ -21,6 +22,8 @@ export interface GuardEnv {
   company?: string;
   identity?: string;
   home?: string;
+  /** org.yaml of the company still says `setup: pending` (companySetupPending): its checkout is open to the setup. */
+  setupPending?: boolean;
 }
 
 /** Who may run scripts/deploy.sh from the main checkout: the project's CEO. hq itself is no Claude session. */
@@ -58,7 +61,9 @@ export function protectedRoot(env: GuardEnv): string | null {
 /** The company's checkout to protect too: COMPANY_HOME when set, not a worktree, and not inside the engine root
  *  (which already covers it, as before the split). */
 export function companyRoot(env: GuardEnv): string | null {
-  if (!env.company) return null;
+  // A new company: the setup conversation writes the contract into COMPANY_HOME and commits it there, the one commit
+  // without a PR (skills/setup, "What gets created"). It deletes `setup: pending` in the same command as that commit.
+  if (!env.company || env.setupPending) return null;
   const home = env.home ?? homedir();
   const c = resolve(expandHome(env.company, home));
   if (c.split(sep).includes('.worktrees')) return null;
@@ -70,6 +75,14 @@ function expandHome(p: string, home: string): string {
   if (p === '~' || p === '$HOME' || p === '${HOME}') return home;
   for (const pre of ['~/', '$HOME/', '${HOME}/']) if (p.startsWith(pre)) return join(home, p.slice(pre.length));
   return p;
+}
+
+/** COMPANY_HOME/company/org.yaml has the top-level `setup: pending` (the starter's, until the setup commits), quoted or
+ *  with a comment, as hq's YAML read of it (packages/hq/src/onboarding.ts setupPending) sees it. */
+export function companySetupPending(company: string | undefined, home = homedir()): boolean {
+  if (!company) return false;
+  try { return /^setup:\s*(["']?)pending\1\s*(?:#.*)?$/m.test(readFileSync(join(resolve(expandHome(company, home)), 'company', 'org.yaml'), 'utf8')); }
+  catch { return false; }
 }
 
 /** Under root and not under root/.worktrees/. */

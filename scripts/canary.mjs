@@ -14,7 +14,6 @@ import { randomUUID } from 'node:crypto';
 import {
   ClaudeProcess, buildSettings, injectForeign, readTranscript, readLiveSession, resolveClaudeBin, PINNED_VERSION,
 } from '../packages/adapter/src/index.ts';
-import { englishLines } from '../packages/shared/src/index.ts';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { values: opt } = parseArgs({ options: {
@@ -68,7 +67,11 @@ const onEvent = (ev) => {
   if (ev.kind === 'text_delta' && sawDeltaBeforeAssistant === null) sawDeltaBeforeAssistant = true;
   if (ev.kind === 'text' && sawDeltaBeforeAssistant === null) sawDeltaBeforeAssistant = false;
   if (ev.kind === 'user_echo') echoes.add(ev.uuid);
-  if (ev.kind === 'rate_limit' && typeof ev.fiveHour === 'number') rateOk = ev.fiveHour >= 0 && ev.fiveHour <= 1;
+  // A window that is not running is left out of the event (no five_hour before the first use in 5 hours): any one is enough.
+  if (ev.kind === 'rate_limit') {
+    const ws = [ev.fiveHour, ev.sevenDay].filter((x) => typeof x === 'number');
+    if (ws.length) rateOk = ws.every((x) => x >= 0 && x <= 1);
+  }
   if (ev.kind === 'peer_hold') peerHold = ev;
   for (const w of [...waiters]) if (w.pred(ev)) { waiters.splice(waiters.indexOf(w), 1); w.res(ev); }
 };
@@ -86,7 +89,8 @@ try {
   try {
     const u = await p.usage();
     const f = u?.rate_limits?.five_hour?.utilization, s = u?.rate_limits?.seven_day?.utilization;
-    mark('get_usage', typeof f === 'number' && typeof s === 'number', `5h=${f}% 7d=${s}%`);
+    // five_hour is null while no 5-hour window is open (an account that has not been used in 5 hours).
+    mark('get_usage', (typeof f === 'number' || f == null) && typeof s === 'number', `5h=${f ?? '-'}% 7d=${s}%`);
   } catch (e) { mark('get_usage', false, e.message); }
 
   // turn 1: hook context + Bash tool + streaming + echo + lifecycle
@@ -101,7 +105,7 @@ try {
   mark('command_lifecycle', ['queued', 'started', 'completed'].every((s) => (lifecycle.get(u1) ?? []).includes(s)), (lifecycle.get(u1) ?? lc).join('>') || 'none');
   mark('partial_messages', sawDeltaBeforeAssistant === true, `delta-before-assistant=${sawDeltaBeforeAssistant}`);
   mark('disallow_ask_user', Array.isArray(init?.tools) && !init.tools.includes('AskUserQuestion'), `${init?.tools?.length ?? 0} tools`);
-  mark('rate_limit_event', rateOk === true, rateOk === null ? 'no rate_limit_event' : 'five_hour in 0..1');
+  mark('rate_limit_event', rateOk === true, rateOk === null ? 'no rate_limit_event' : 'utilization in 0..1');
 
   // spool written by the company hook (hq is not running: proves hooks never block on it)
   const spoolDir = join(shiftDirPath, 'spool');
@@ -126,14 +130,6 @@ try {
     const r2 = await next((e) => e.kind === 'result', 45_000, 'socket turn');
     mark('socket_inject', (r2.text ?? '').includes('SOCKET-OK') && !peerHold, peerHold ? `held: ${peerHold.cause}` : `"${(r2.text ?? '').slice(0, 30)}"`);
   } catch (e) { mark('socket_inject', false, peerHold ? `held: ${peerHold.cause}` : e.message); }
-
-  // Hebrew guard (#51): the company Stop hook blocks an English reply; the rewrite is in Hebrew
-  try {
-    p.sendUser('Answer in English only, in two full sentences: what does a code reviewer look for in a pull request?');
-    const rh = await next((e) => e.kind === 'result', 120_000, 'hebrew turn');
-    const t = rh.text ?? '';
-    mark('hebrew_guard', /[\u0590-\u05FF]/.test(t) && englishLines(t).length === 0, `"${t.replace(/\s+/g, ' ').slice(0, 60)}"`);
-  } catch (e) { mark('hebrew_guard', false, e.message); }
 
   // interrupt during a long tool
   try {

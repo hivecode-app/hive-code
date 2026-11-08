@@ -6,3 +6,4 @@ export * from './compact.ts';
 export * from './guard.ts';
 export * from './merge.ts';
 export * from './heavy.ts';
+export { checkAuthority, REFUSE } from './authority.ts';

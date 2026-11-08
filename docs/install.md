@@ -6,9 +6,9 @@ Hive Code runs on a Linux server you own, as your regular user, with your Claude
 
 - **A Linux server:** Ubuntu or Debian with systemd, x86_64 or arm64. At least 16 GB of memory (each active worker uses about 5 GB) and about 40 GB of free disk.
 - **A regular user with sudo.** The installer itself runs without sudo. When it needs something that does (for example `loginctl enable-linger`), it stops and prints the command. Run it, then run the installer again.
-- **On the server:** Node 22.18 or newer, `npm`, `git`, `curl`, `tar` and the GitHub CLI `gh`. The installer checks them first and tells you what is missing.
+- **On the server:** `git`, `curl` and `tar`. If Node 22.18 or newer or the GitHub CLI `gh` is missing, the installer puts a pinned version of each in your user directory, checked against its SHA-256. `ffmpeg`, `pdftoppm` and `tesseract` are optional: without them workers cannot read voice notes, PDFs or text in images.
 - **A Claude Pro or Max subscription.** The installer signs in to it once, in your browser.
-- **A GitHub account,** signed in on the server with `gh auth login`. Workers open pull requests with it. Without it the install still finishes, but workers cannot open pull requests.
+- **A GitHub account.** The installer signs `gh` in with a one-time code you enter at `github.com/login/device`. Workers open pull requests with it.
 - **A way for your phone to reach the server,** one of:
   1. **Tailscale Funnel** (the default when you have no domain): a free Tailscale account, Tailscale on the server, and MagicDNS and HTTPS turned on in your tailnet. You get a stable `https://<server>.<tailnet>.ts.net` address.
   2. **Cloudflare Tunnel:** a domain managed by Cloudflare and a tunnel token.
@@ -34,13 +34,15 @@ The installer prints each of its eight steps as it goes. Its output is in Hebrew
 1. **Requirements.** If something is missing it says what, and stops.
 2. **Full access and responsibility.** Workers run with full permissions on the server: they can delete files, run commands, deploy and work in your repositories. You type a confirmation to continue.
 3. **Engine.** Hive Code is installed under `~/.local/share/agent-company`, from the latest release, checked against its `SHA256SUMS`.
-4. **Claude Code.** Claude Code is installed at the version this release is tested with, and you sign in: a link opens, you sign in in the browser and paste the code back. A one-minute check follows. A `claude` you already have is left as it is.
+4. **Claude Code and GitHub.** Claude Code is installed at the version this release is tested with, and you sign in: a link opens, you sign in in the browser and paste the code back. A one-minute check follows. A `claude` you already have is left as it is. Then `gh` signs in to GitHub with a one-time code, unless it already is.
 5. **Company.** Your company is created in `~/company` as a local git repository.
 6. **Public address.** You choose Funnel, Tunnel or your own domain.
-7. **`hq`.** Everything runs as systemd user services, with a daily backup and disk cleanup, so it keeps running after you log out and after a reboot. With Funnel, the installer may print a link to approve Funnel in your tailnet: open it, approve, and run the installer again. At the end of this step it prints a QR code to pair your phone.
+7. **`hq` and the browser.** The workers' browser is installed too: Chromium, Playwright MCP and browser-memory, which keeps what workers learn about each site and the sign-ins you give them. It runs headless on the server, reachable only from the server itself. If Chromium is missing system libraries, the installer stops and prints one `sudo` command that installs them. Everything runs as systemd user services, with a daily backup and disk cleanup, so it keeps running after you log out and after a reboot. With Funnel, the installer may print a link to approve Funnel in your tailnet: open it, approve, and run the installer again. At the end of this step it prints a QR code to pair your phone.
 8. **Check from outside.** The installer checks that the address answers.
 
 If it stops halfway, fix what it reported and run the same command again. It continues from what is already installed.
+
+Workers run with full permissions, but five kinds of commands are always refused, in every installation: a recursive delete of `/`, your home or a system directory, formatting a filesystem, writing directly to a disk, a fork bomb, and shutting down or rebooting the server.
 
 ## Pair your phone
 

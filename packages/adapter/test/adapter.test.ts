@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   uuidv5, shiftSessionId, normalize, buildArgs, buildSettings, buildEnv, ClaudeProcess,
   readTranscriptFile, findTranscript, projectSlug, envelope, injectForeign, toUsageReply,
-  buildMcpConfig, ownerMcpServers,
+  buildMcpConfig, installedBrowserMcp, ownerMcpServers,
 } from '../src/index.ts';
 import { createServer } from 'node:net';
 
@@ -155,6 +155,21 @@ test('injectForeign writes auth-less envelope line to the socket', async () => {
   assert.equal(line.type, 'user');
   assert.equal(line.message.content, envelope('BODY', 'yoav'));
   assert.match(line.message.content, /from-mode="bypass"/);
+});
+
+test('an installed browser (state/browser/mcp.json) becomes the shift\'s browser, under the owner\'s own', () => {
+  const state = mkdtempSync(join(tmpdir(), 'bstate-'));
+  assert.deepEqual(installedBrowserMcp(state), {});
+  mkdirSync(join(state, 'browser'));
+  const entry = { type: 'stdio', command: '/n', args: ['/bm/src/gateway/index.ts'], env: { PLAYWRIGHT_MCP_URL: 'http://127.0.0.1:8931/mcp' } };
+  writeFileSync(join(state, 'browser', 'mcp.json'), JSON.stringify(entry));
+  assert.deepEqual(installedBrowserMcp(state), { browser: entry });
+  const owner = { browser: { command: 'owner' } };
+  assert.deepEqual({ ...installedBrowserMcp(state), ...owner }, owner);
+  const warned: string[] = [];
+  writeFileSync(join(state, 'browser', 'mcp.json'), '[]');
+  assert.deepEqual(installedBrowserMcp(state, (m) => { warned.push(m); }), {});
+  assert.equal(warned.length, 1);
 });
 
 test('every shift gets the owner\'s global MCP servers (browser), and company stays ours', () => {

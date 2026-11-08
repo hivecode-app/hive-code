@@ -32,6 +32,18 @@ CADDY_SHA512_arm64='3db36ba90c7a6e8dda40ee3dd71fa08844c76b5fb08f61b31e5e78d2ed38
 CLOUDFLARED_VERSION='2026.10.2'
 CLOUDFLARED_SHA256_amd64='35fbdd2beb378436c7da377d7358cea8e33f9c94a6705d1d8036bf9b0d6d8005'
 CLOUDFLARED_SHA256_arm64='b7e55b4d9702c2ab5f8348f780bb1db044527fc555367714c78e0595750a4665'
+NODE_VERSION='24.22.2'
+NODE_SHA256_amd64='361718c444e49af2ca5a110c83ba6a8901143f23ab285ebbef0341f391f482a9'
+NODE_SHA256_arm64='95c264150aceb7f3437a29fd6984924f5f8d1511ea3cbd6c508b83f6c555dae2'
+GH_VERSION='2.103.3'
+GH_SHA256_amd64='4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d'
+GH_SHA256_arm64='ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63'
+# The browser (browser-memory over Playwright MCP over one Chrome, as on the first server): pinned like the rest.
+PLAYWRIGHT_MCP_VERSION='0.0.80'
+BROWSER_MEMORY_REPO='https://github.com/hive-owner/browser-memory.git'
+BROWSER_MEMORY_SHA='6b95d931096adc8ca3f97a82c8daa725648fd9b8'
+CDP_PORT=9222
+PLAYWRIGHT_MCP_PORT=8931
 WEB_PORT=7480
 HQ_LOCAL='http://127.0.0.1:7420'
 
@@ -39,6 +51,7 @@ SHARE="$HOME/.local/share/agent-company"
 ENGINES="$SHARE/engine"
 ENGINE="$ENGINES/current"
 BIN="$SHARE/bin"
+NODE_HOME="$SHARE/node"
 STATE="$HOME/.local/state/agent-company"
 CONF="$HOME/.config/agent-company"
 UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -129,6 +142,14 @@ has_tty() { [ -r /dev/tty ] && [ -w /dev/tty ] && { : </dev/tty; } 2>/dev/null; 
 # Under `curl | bash` stdin is the script itself: every answer comes from the terminal.
 ask() { local q="$1" a; has_tty || die "אין terminal לשאלה: $q" "הריצו מ-terminal, או העבירו את התשובה כ-flag (--help)."; printf '  %s ' "$q" >/dev/tty; IFS= read -r a </dev/tty; printf '%s' "$a"; }
 
+# Pinned downloads: the file is kept only when its hash matches the one written above.
+fetch_pinned() { # url dest algo hash
+  local tmp; tmp="$(mktemp)"
+  curl -fsSL "$1" -o "$tmp" || { rm -f "$tmp"; die "ההורדה נכשלה: $1"; }
+  echo "$4  $tmp" | "${3}sum" -c --status || { rm -f "$tmp"; die "ה-hash של $1 לא תואם. לא מתקינה."; }
+  mv "$tmp" "$2"
+}
+
 # install.json: what this machine already answered (consent, address, domain, company home). Small JSON, via node.
 record_get() { [ -f "$RECORD" ] && node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const v=r[process.argv[2]];if(v!=null)process.stdout.write(String(v))' "$RECORD" "$1" 2>/dev/null || true; }
 record_set() {
@@ -140,6 +161,7 @@ for(let i=0;i<kv.length;i+=2)r[kv[i]]=kv[i+1];fs.writeFileSync(f,JSON.stringify(
 [ "$(id -u)" -ne 0 ] || die "לא מריצים את ההתקנה כ-root." "החברה רצה כמשתמש הרגיל שלך, כ-systemd --user. הריצו שוב בלי sudo."
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 export NPM_CONFIG_UPDATE_NOTIFIER=false
+export PATH="$HOME/.local/bin:$PATH"
 
 # ── 1. requirements ──────────────────────────────────────────────────────────
 step 1 "דרישות"
@@ -149,18 +171,43 @@ if [ -r /etc/os-release ]; then os_id="$(. /etc/os-release; echo "${ID:-}")"; os
 case " $os_id $os_like " in *" ubuntu "*|*" debian "*) ;; *) missing+=("מערכת הפעלה: צריך Ubuntu או Debian (נמצא: ${os_id:-לא ידוע})") ;; esac
 [ -d /run/systemd/system ] || missing+=("systemd: המכונה לא רצה עם systemd")
 case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) arch=""; missing+=("מעבד: צריך x86_64 או arm64 (נמצא $(uname -m))") ;; esac
-if command -v node >/dev/null; then
-  nv="$(node -p 'process.versions.node')"
-  node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=18)?0:1)' \
-    || missing+=("Node $nv: צריך 22.18 ומעלה (המנוע רץ TypeScript ישירות)")
-else missing+=("Node 22.18 ומעלה: לא מותקן (https://nodejs.org או nvm)"); fi
-for c in npm git gh curl tar; do command -v "$c" >/dev/null || missing+=("$c: לא מותקן"); done
+for c in git curl tar; do command -v "$c" >/dev/null || missing+=("$c: לא מותקן (sudo apt-get install $c)"); done
+((${#missing[@]} == 0)) || die "חסרים דברים במכונה. אחרי שמסדרים אותם מריצים שוב:" "${missing[@]}"
+# Node and gh: a fresh Ubuntu has neither (its apt nodejs is 18), so a missing or old one comes here, pinned and checked,
+# into the user's own directory: no sudo. A Node or gh the user already has is used as is.
+node_ok() { command -v node >/dev/null && command -v npm >/dev/null \
+  && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=18)?0:1)' 2>/dev/null; }
+[ -x "$NODE_HOME/bin/node" ] && export PATH="$NODE_HOME/bin:$PATH"
+if ! node_ok && [ -n "$arch" ]; then
+  say "מתקין את Node $NODE_VERSION (אין Node 22.18 ומעלה במכונה). בתיקייה של המשתמש, בלי sudo."
+  nd="node-v$NODE_VERSION-linux-${arch/amd64/x64}"; sha_var="NODE_SHA256_$arch"; tgz="$(mktemp)"
+  fetch_pinned "https://nodejs.org/dist/v$NODE_VERSION/$nd.tar.gz" "$tgz" sha256 "${!sha_var}"
+  rm -rf "$NODE_HOME.partial"; mkdir -p "$NODE_HOME.partial"
+  tar -xzf "$tgz" -C "$NODE_HOME.partial" --strip-components=1 || die "פריסת Node נכשלה."
+  rm -rf "$NODE_HOME"; mv -T "$NODE_HOME.partial" "$NODE_HOME"; rm -f "$tgz"
+  export PATH="$NODE_HOME/bin:$PATH"
+fi
+if [ -x "$NODE_HOME/bin/node" ]; then
+  mkdir -p "$HOME/.local/bin"
+  for c in node npm npx; do ln -sfn "$NODE_HOME/bin/$c" "$HOME/.local/bin/$c"; done
+fi
+node_ok || missing+=("Node 22.18 ומעלה: לא מותקן, וההתקנה האוטומטית לא הצליחה (https://nodejs.org)")
+nv="$(node -p 'process.versions.node' 2>/dev/null || echo '?')"
+if ! command -v gh >/dev/null && [ -n "$arch" ]; then
+  say "מתקין את GitHub CLI (gh) $GH_VERSION, בתיקייה של המשתמש."
+  sha_var="GH_SHA256_$arch"; tgz="$(mktemp)"; gd="$(mktemp -d)"
+  fetch_pinned "https://github.com/cli/cli/releases/download/v$GH_VERSION/gh_${GH_VERSION}_linux_$arch.tar.gz" "$tgz" sha256 "${!sha_var}"
+  tar -xzf "$tgz" -C "$gd" --strip-components=1 || die "פריסת gh נכשלה."
+  mkdir -p "$BIN" "$HOME/.local/bin"; mv "$gd/bin/gh" "$BIN/gh-$GH_VERSION"; rm -rf "$tgz" "$gd"
+  ln -sfn "$BIN/gh-$GH_VERSION" "$HOME/.local/bin/gh"
+fi
+command -v gh >/dev/null || missing+=("gh: לא מותקן (https://cli.github.com)")
 min_gb="${INSTALL_MIN_MEM_GB:-16}"
 mem_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
 # A 16GB machine reports a little less (the kernel keeps some): 93% is enough.
 [ "$mem_kb" -ge $((min_gb * 1024 * 1024 * 93 / 100)) ] || missing+=("זיכרון: $((mem_kb / 1024 / 1024))GB, צריך ${min_gb}GB לפחות (כ-5GB לכל עובד פעיל)")
 # A server set up by hand (hq-host) has these units, as symlinks or without the mark: stop before writing anything.
-for u in agent-company-hq.service agent-company-web.service agent-company-tunnel.service company-shift@.service agent-company-backup.service agent-company-backup.timer agent-company-disk-clean.service agent-company-disk-clean.timer; do
+for u in agent-company-hq.service agent-company-web.service agent-company-tunnel.service company-shift@.service agent-company-backup.service agent-company-backup.timer agent-company-disk-clean.service agent-company-disk-clean.timer agent-company-chrome.service agent-company-playwright.service; do
   f="$UNITS/$u"
   if [ -L "$f" ] || { [ -e "$f" ] && ! grep -qxF "$MARK" "$f"; }; then
     missing+=("‏$f קיים ולא נוצר על ידי ההתקנה: המכונה כבר מוגדרת ביד, וההתקנה לא נוגעת בה")
@@ -169,10 +216,9 @@ done
 # Media helpers: Debian/Ubuntu packages poppler-utils, libreoffice, ffmpeg and python3.
 ((${#missing[@]} == 0)) || die "חסרים דברים במכונה. אחרי שמסדרים אותם מריצים שוב:" "${missing[@]}"
 done_ "$(. /etc/os-release; echo "$PRETTY_NAME") · systemd · Node $nv · git · gh · $((mem_kb / 1024 / 1024))GB"
-for c in python3 pdfinfo pdftoppm libreoffice ffmpeg ffprobe; do
-  command -v "$c" >/dev/null || say "‏$c לא מותקן: תצוגות ותמלול של חלק מהקבצים ימתינו. להתקנה: sudo apt-get install python3 poppler-utils libreoffice ffmpeg"
-done
-gh auth status >/dev/null 2>&1 || say "‏gh לא מחובר. לא חוסם את ההתקנה, אבל העובדים צריכים אותו ל-PR: gh auth login"
+media=()
+for c in python3 pdfinfo pdftoppm libreoffice ffmpeg ffprobe; do command -v "$c" >/dev/null || media+=("$c"); done
+((${#media[@]} == 0)) || say "לא מותקנים: ${media[*]}. תצוגות ותמלול של חלק מהקבצים ימתינו. לא חובה; להתקנה: sudo apt-get install python3 poppler-utils libreoffice ffmpeg"
 
 # ── 2. consent ───────────────────────────────────────────────────────────────
 step 2 "הגישה של העובדים"
@@ -282,7 +328,7 @@ if [ -f "$ENGINE/scripts/company-run" ]; then
 fi
 
 # ── 4. Claude Code ───────────────────────────────────────────────────────────
-step 4 "Claude Code"
+step 4 "Claude Code ו-GitHub"
 claude_ver="$(sed -n "s/^export const PINNED_VERSION = '\(.*\)';/\1/p" "$ENGINE/packages/adapter/src/binary.ts")"
 [ -n "$claude_ver" ] || die "לא מצאתי את PINNED_VERSION במנוע ($ENGINE/packages/adapter/src/binary.ts)."
 claude_root="$SHARE/claude"
@@ -309,6 +355,18 @@ elif logged_in; then
   done_ "canary עבר, current -> $claude_ver"
 else say "בלי התחברות אין canary. המנוע ישתמש ב-$claude_ver ישירות."; fi
 
+# GitHub: the workers open their pull requests with gh, and the app lists the repositories from it.
+if gh auth status >/dev/null 2>&1; then done_ "מחובר ל-GitHub ($(gh api user --jq .login 2>/dev/null || echo gh))"
+elif ((skip_login)) || ! has_tty; then say "‏gh לא מחובר. העובדים צריכים אותו לשינויים בקוד: gh auth login, ואז gh auth setup-git."
+else
+  say "מתחבר ל-GitHub: מופיע קוד חד-פעמי וקישור. פותחים את הקישור בכל מכשיר, מקלידים את הקוד ומאשרים."
+  # No questions (the git credential one is gh auth setup-git below); the code and the link are printed.
+  GH_PROMPT_DISABLED=1 GH_BROWSER=true gh auth login --hostname github.com --git-protocol https --web --scopes workflow </dev/tty >/dev/tty 2>&1 || true
+  gh auth status >/dev/null 2>&1 || die "ההתחברות ל-GitHub לא הושלמה. מריצים שוב את ההתקנה, והיא ממשיכה מכאן."
+  done_ "מחובר ל-GitHub ($(gh api user --jq .login 2>/dev/null || echo gh))"
+fi
+gh auth status >/dev/null 2>&1 && gh auth setup-git >/dev/null 2>&1 || true
+
 # ── 5. the company ───────────────────────────────────────────────────────────
 step 5 "החברה"
 company_home="${company_home:-${COMPANY_HOME:-$(record_get company_home)}}"
@@ -327,6 +385,8 @@ else
   rm -rf "$part"; mkdir -p "$part"
   cp -r "$ENGINE/starter/company" "$ENGINE/starter/memory" "$ENGINE/starter/examples" "$part/"
   git -C "$part" init --quiet -b main
+  # hq opens the contract's tasks in .worktrees/ here: never part of a `git add -A` (the setup commits with one).
+  echo '.worktrees/' >>"$part/.git/info/exclude"
   git -C "$part" add -A
   ident=()
   git -C "$part" config user.name >/dev/null || ident+=(-c "user.name=$(id -un)")
@@ -368,13 +428,6 @@ if [[ "$address" = tunnel || "$address" = domain ]]; then
   [[ "$domain" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "דומיין לא תקין: '$domain'"
 fi
 
-# Pinned downloads: the file is kept only when its hash matches the one written above.
-fetch_pinned() { # url dest algo hash
-  local tmp; tmp="$(mktemp)"
-  curl -fsSL "$1" -o "$tmp" || { rm -f "$tmp"; die "ההורדה נכשלה: $1"; }
-  echo "$4  $tmp" | "${3}sum" -c --status || { rm -f "$tmp"; die "ה-hash של $1 לא תואם. לא מתקינה."; }
-  mv "$tmp" "$2"
-}
 mkdir -p "$BIN"
 caddy="$BIN/caddy-$CADDY_VERSION"
 if [ ! -x "$caddy" ]; then
@@ -438,6 +491,13 @@ $MARK
 			flush_interval -1
 		}
 	}
+	# The tab handoff (a login a worker hands to the phone): hq's own listener, which answers only /h/<token> and /ws/<token>.
+	handle_path /tab/* {
+		reverse_proxy 127.0.0.1:7422 {
+			header_up X-Forwarded-For {http.vars.client_ip}
+			flush_interval -1
+		}
+	}
 	@pairing path /pair /.well-known/assetlinks.json
 	handle @pairing {
 		reverse_proxy 127.0.0.1:7420 {
@@ -479,6 +539,55 @@ if [ "$address" = domain ]; then
   fi
 fi
 
+# ── the browser ──────────────────────────────────────────────────────────────
+# Workers get a real browser with a memory per site (browser_* tools): one Chrome with a persistent profile, CDP on
+# 127.0.0.1:$CDP_PORT; Playwright MCP attached to it; and browser-memory, the MCP gateway each worker talks to (the shift
+# host adds it from $STATE/browser/mcp.json). A login the worker cannot do goes to the phone through hq's tab handoff.
+# Everything in the user's own directories; Chrome's system libraries are the one thing that may need sudo.
+browser_root="$SHARE/browser"
+bstate="$STATE/browser"
+mkdir -p "$browser_root" "$bstate/output" "$bstate/memory" "$bstate/work"; chmod 700 "$bstate"
+pw_mcp="$browser_root/playwright-mcp-$PLAYWRIGHT_MCP_VERSION"
+if [ ! -x "$pw_mcp/node_modules/.bin/playwright-mcp" ]; then
+  say "מתקין את הדפדפן: Playwright MCP $PLAYWRIGHT_MCP_VERSION"
+  rm -rf "$pw_mcp.partial"; mkdir -p "$pw_mcp.partial"
+  npm install --prefix "$pw_mcp.partial" --no-audit --no-fund --no-save --loglevel=error "@playwright/mcp@$PLAYWRIGHT_MCP_VERSION" >/dev/null 2>&1 \
+    || die "ההתקנה של Playwright MCP נכשלה." "npm install @playwright/mcp@$PLAYWRIGHT_MCP_VERSION"
+  rm -rf "$pw_mcp"; mv -T "$pw_mcp.partial" "$pw_mcp"
+fi
+export PLAYWRIGHT_BROWSERS_PATH="$browser_root/ms-playwright"
+chrome="$(ls -d "$PLAYWRIGHT_BROWSERS_PATH"/chromium-*/chrome-linux*/chrome 2>/dev/null | head -1 || true)"
+if [ -z "$chrome" ]; then
+  say "מוריד את Chromium (פעם אחת, כ-170MB)"
+  node "$pw_mcp/node_modules/playwright-core/cli.js" install chromium >/dev/null 2>&1 \
+    || die "ההורדה של Chromium נכשלה." "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH node $pw_mcp/node_modules/playwright-core/cli.js install chromium"
+  chrome="$(ls -d "$PLAYWRIGHT_BROWSERS_PATH"/chromium-*/chrome-linux*/chrome 2>/dev/null | head -1 || true)"
+  [ -n "$chrome" ] || die "Chromium הורד, אבל לא מצאתי אותו ב-$PLAYWRIGHT_BROWSERS_PATH."
+fi
+if ldd "$chrome" 2>/dev/null | grep -q 'not found'; then
+  die "ל-Chrome חסרות ספריות מערכת. פקודה אחת עם sudo, ואז מריצים שוב:" \
+    "sudo env PATH=\"$PATH\" PLAYWRIGHT_BROWSERS_PATH=\"$PLAYWRIGHT_BROWSERS_PATH\" node $pw_mcp/node_modules/playwright-core/cli.js install-deps chromium"
+fi
+bm="$browser_root/browser-memory-${BROWSER_MEMORY_SHA:0:12}"
+if [ ! -f "$bm/.install-ok" ]; then
+  say "מתקין את browser-memory (${BROWSER_MEMORY_SHA:0:7})"
+  rm -rf "$bm.partial" "$bm.git"; mkdir -p "$bm.partial"
+  git clone --quiet --bare "$BROWSER_MEMORY_REPO" "$bm.git" || die "לא הצלחתי להוריד את browser-memory מ-$BROWSER_MEMORY_REPO."
+  git -C "$bm.git" archive "$BROWSER_MEMORY_SHA" | tar -x -C "$bm.partial" || die "אין את ${BROWSER_MEMORY_SHA:0:7} ב-$BROWSER_MEMORY_REPO."
+  rm -rf "$bm.git"
+  (cd "$bm.partial" && npm ci --omit=dev --no-audit --no-fund --loglevel=error >/dev/null 2>&1) || die "npm ci של browser-memory נכשל."
+  touch "$bm.partial/.install-ok"; rm -rf "$bm"; mv -T "$bm.partial" "$bm"
+fi
+# What a shift adds as its `browser` MCP server (packages/shift-host/src/cli.ts). The owner's own `browser` in
+# ~/.claude.json, when there is one, wins.
+browser_mcp="$(node -e 'const [node, gw, out, mem, work, cdp, mcp] = process.argv.slice(1);
+process.stdout.write(JSON.stringify({ type: "stdio", command: node, args: [gw], env: {
+  PLAYWRIGHT_MCP_URL: `http://127.0.0.1:${mcp}/mcp`, PLAYWRIGHT_MCP_OUTPUT_DIR: out, BROWSER_CDP_URL: `http://127.0.0.1:${cdp}`,
+  BROWSER_MEMORY_DIR: mem, BROWSER_WORK_DIR: work, BROWSER_CREDENTIALS_FILE: mem + "/credentials.json" } }, null, 2) + "\n");' \
+  "$(command -v node)" "$bm/src/gateway/index.ts" "$bstate/output" "$bstate/memory" "$bstate/work" "$CDP_PORT" "$PLAYWRIGHT_MCP_PORT")"
+if [ "$(cat "$bstate/mcp.json" 2>/dev/null)" != "${browser_mcp%$'\n'}" ]; then (umask 077; printf '%s' "$browser_mcp" >"$bstate/mcp.json"); fi
+done_ "הדפדפן: Chromium, Playwright MCP $PLAYWRIGHT_MCP_VERSION ו-browser-memory"
+
 # ── units ────────────────────────────────────────────────────────────────────
 node_bin="$(command -v node)"
 unit_path="$(dirname "$node_bin"):$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
@@ -502,6 +611,35 @@ Wants=network-online.target
 ExecStart=$caddy run --config $caddyfile --adapter caddyfile
 Restart=always
 RestartSec=2
+
+[Install]
+WantedBy=default.target"
+
+write_unit agent-company-chrome.service "$MARK
+# The workers' browser: one Chrome with a persistent profile, DevTools on 127.0.0.1:$CDP_PORT only.
+[Unit]
+Description=agent-company browser (Chromium, CDP on 127.0.0.1:$CDP_PORT)
+After=network-online.target
+
+[Service]
+ExecStart=$chrome --headless=new --user-data-dir=$bstate/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=$CDP_PORT --no-first-run --no-default-browser-check --disable-dev-shm-usage --no-sandbox --window-size=1280,900 about:blank
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target"
+
+write_unit agent-company-playwright.service "$MARK
+[Unit]
+Description=agent-company Playwright MCP (attached to the browser over CDP)
+After=agent-company-chrome.service
+Wants=agent-company-chrome.service
+
+[Service]
+Environment=PATH=$unit_path
+ExecStart=$node_bin $pw_mcp/node_modules/@playwright/mcp/cli.js --port $PLAYWRIGHT_MCP_PORT --host 127.0.0.1 --allowed-hosts 127.0.0.1:$PLAYWRIGHT_MCP_PORT --cdp-endpoint http://127.0.0.1:$CDP_PORT --output-dir $bstate/output
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=default.target"
@@ -617,6 +755,8 @@ c.auth.appUrl = origin;
 c.auth.origins = [origin];
 c.auth.userName ??= user;
 c.auth.userDisplayName ??= user;
+// The tab handoff's links go out on the same origin, under /tab (the Caddyfile above).
+c.tab = { ...(c.tab ?? {}), baseUrl: `${origin}/tab` };
 const after = JSON.stringify(c);
 if (after !== before) fs.writeFileSync(file, JSON.stringify(c, null, 2) + '\n', { mode: 0o600 });
 process.stdout.write(after !== before ? '1' : '0');
@@ -663,7 +803,7 @@ EOF
 done
 
 systemctl --user daemon-reload
-units=(agent-company-hq.service agent-company-web.service agent-company-backup.timer agent-company-disk-clean.timer)
+units=(agent-company-hq.service agent-company-web.service agent-company-chrome.service agent-company-playwright.service agent-company-backup.timer agent-company-disk-clean.timer)
 [ "$address" = tunnel ] && units+=(agent-company-tunnel.service)
 systemctl --user enable --quiet "${units[@]}"
 # Restart only what changed (a restart of hq is safe: shifts are their own units and survive it).
@@ -679,6 +819,17 @@ curl -fsS "$HQ_LOCAL/health" >/dev/null 2>&1 || die "hq לא עלה." "journalct
 for _ in $(seq 20); do curl -fsS "http://127.0.0.1:$WEB_PORT/hq/health" >/dev/null 2>&1 && break; sleep 0.5; done
 curl -fsS "http://127.0.0.1:$WEB_PORT/hq/health" >/dev/null 2>&1 || die "Caddy לא מעביר ל-hq." "journalctl --user -u agent-company-web -n 30"
 done_ "hq רץ (${units[*]})"
+# The browser answers as a worker's gateway asks it: an MCP initialize at the address in $bstate/mcp.json.
+mcp_init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"install","version":"1"}}}'
+for _ in $(seq 30); do
+  curl -fsS -o /dev/null -X POST "http://127.0.0.1:$PLAYWRIGHT_MCP_PORT/mcp" -H 'content-type: application/json' \
+    -H 'accept: application/json, text/event-stream' -d "$mcp_init" 2>/dev/null && break; sleep 0.5
+done
+curl -fsS -o /dev/null -X POST "http://127.0.0.1:$PLAYWRIGHT_MCP_PORT/mcp" -H 'content-type: application/json' \
+  -H 'accept: application/json, text/event-stream' -d "$mcp_init" 2>/dev/null \
+  && curl -fsS "http://127.0.0.1:$CDP_PORT/json/version" >/dev/null 2>&1 \
+  || die "הדפדפן לא עונה." "journalctl --user -u agent-company-chrome -u agent-company-playwright -n 30"
+done_ "הדפדפן עונה (CDP על $CDP_PORT, Playwright MCP על $PLAYWRIGHT_MCP_PORT)"
 
 if [ "$address" = funnel ]; then
   # On only when the same site both proxies to our Caddy and is open to Funnel.
