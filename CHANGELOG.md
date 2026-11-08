@@ -4,6 +4,8 @@ All notable changes to Hive Code are listed here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-08
+
 ### Added
 - Three tabs in the app: Chats, Tasks and Team. Settings moved behind the account button.
 - A task page with its stages, an activity timeline, details and a side panel on desktop.
@@ -64,6 +66,5 @@ First release.
 - The app for Android and the web: conversations, approvals and questions in the chat, images, unread counts and muting, and one app that connects to any server.
 - Mixed Hebrew and English text displayed correctly everywhere.
 
-[Unreleased]: https://github.com/hivecode-app/hive-code/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/hivecode-app/hive-code/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/hivecode-app/hive-code/releases/tag/v0.1.0
+[Unreleased]: https://github.com/hivecode-app/hive-code/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/hivecode-app/hive-code/releases/tag/v0.3.0

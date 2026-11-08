@@ -1,6 +1,5 @@
-# company-ci: the check every agent-company PR must pass before a worker merges (charter ci_check).
-# Runs on our own runner on ci-host (deploy/ci-host/actions-runner-agent-company.service, label "company"):
-# GitHub-hosted runners are blocked on this account's billing, self-hosted ones are not.
+# company-ci: the check every pull request must pass before it merges.
+# GitHub-hosted runners only. A public repository must not run pull requests from forks on a self-hosted runner.
 name: company-ci
 
 on:
@@ -17,55 +16,53 @@ concurrency:
 
 jobs:
   company-ci:
-    runs-on: [self-hosted, company]
-    # 40: the flutter steps can wait minutes on the $HOME/flutter lock, shared on ci-host with the engine's runner.
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           fetch-depth: 0
-      - run: node --version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: media and artifact test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3 ffmpeg poppler-utils libreoffice-writer libreoffice-calc caddy clang
       - run: npm ci --no-audit --no-fund
       - name: contract
         run: npm run check:contract && npm run test:contract && npm run test:deploy
       - name: typecheck
         run: npm run typecheck
-      - name: media and artifact test tools
-        run: |
-          missing=0
-          for tool in python3 ffmpeg ffprobe pdfinfo pdftoppm libreoffice caddy clang; do
-            command -v "$tool" >/dev/null || missing=1
-          done
-          if [ "$missing" -eq 1 ]; then
-            sudo -n apt-get update
-            sudo -n apt-get install -y --no-install-recommends python3 ffmpeg poppler-utils libreoffice-writer libreoffice-calc caddy clang
-          fi
       - name: test
         run: npm test
-      # The app (#97): flutter analyze and test, as deploy.sh runs them, so a failure shows on the PR and
-      # not at deploy time. Only when the PR (or the push) touches packages/app, or the terms dictionary and
-      # the copy table its copy test reads. Flutter is in $HOME/flutter,
-      # and the unit sets HOME=/home/owner/company-ci-home on ci-host (3.47.2, as on hq-host).
+      # The app: flutter analyze and test, only when the pull request (or the push) touches it.
       - name: app changed?
         id: app
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
-          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null || ! git diff --quiet "$BASE" HEAD -- packages/app packages/shared/src/ui-terms.json docs/product/copy-table.md .github/workflows/company-ci.yml; then
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null || ! git diff --quiet "$BASE" HEAD -- packages/app packages/shared/src/ui-terms.json .github/workflows/company-ci.yml; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
+      - uses: subosito/flutter-action@v2
+        if: steps.app.outputs.run == 'true'
+        with:
+          flutter-version: 3.47.2
+          channel: stable
+          cache: true
       - name: flutter analyze
         if: steps.app.outputs.run == 'true'
         working-directory: packages/app
         run: |
-          "$HOME/flutter/bin/flutter" pub get
-          "$HOME/flutter/bin/flutter" analyze
+          flutter pub get
+          flutter analyze
       - name: flutter test
         if: steps.app.outputs.run == 'true'
         working-directory: packages/app
-        # The layout fixtures are a day of hq at +07 and build their times with local DateTime, so a UTC runner
-        # (ci-host) moves them across the day. Pinned here until the fixtures carry an explicit day (ticket below).
+        # The layout fixtures are a day at +07 and build their times with local DateTime.
         env:
           TZ: Asia/Bangkok
-        run: '"$HOME/flutter/bin/flutter" test'
+        run: flutter test

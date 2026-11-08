@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem
+    url: https://github.com/hivecode-app/hive-code/security/advisories/new
+    about: Report it privately, not in a public issue.
+  - name: Questions
+    url: https://github.com/hivecode-app/hive-code/blob/main/docs/faq.md
+    about: Install and first steps are in the FAQ and docs/install.md.

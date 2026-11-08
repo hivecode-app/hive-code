@@ -1,0 +1,20 @@
+name: Idea or request
+description: Something Hive Code should do, or do differently
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you are trying to do
+      description: The situation and the need, before the solution. What gets in your way today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: Optional. How it could work, on screen or on the server.
+  - type: textarea
+    id: else
+    attributes:
+      label: What you do today instead

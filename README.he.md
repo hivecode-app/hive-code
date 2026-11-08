@@ -9,6 +9,8 @@
 
 <p align="center"><strong>צוות של סוכני Claude Code שמנהלים מהטלפון.</strong></p>
 
+<p align="center"><a href="https://github.com/hivecode-app/hive-code/actions/workflows/company-ci.yml"><img src="https://github.com/hivecode-app/hive-code/actions/workflows/company-ci.yml/badge.svg" alt="company-ci"></a> <a href="https://github.com/hivecode-app/hive-code/releases/latest"><img src="https://img.shields.io/github/v/release/hivecode-app/hive-code?include_prereleases" alt="Release"></a> <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a></p>
+
 <p align="center">
   <a href="docs/install.md">התקנה</a> · <a href="docs/getting-started.md">צעדים ראשונים</a> · <a href="docs/architecture.md">איך זה עובד</a> · <a href="docs/faq.md">שאלות נפוצות</a> · <a href="README.md">English</a>
 </p>
