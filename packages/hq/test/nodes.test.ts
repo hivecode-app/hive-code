@@ -15,10 +15,10 @@ import type { LaunchSpec } from '../src/shifts.ts';
 import { BaseFetchFailed, Workspaces } from '../src/workspace.ts';
 
 test('nodeCanHost: a need goes only to a node that has it; needs-local never leaves the main server', () => {
-  const ci-host = { has: [] as NodeDef['has'] };
+  const ciHost = { has: [] as NodeDef['has'] };
   const kvm = { has: ['emulator'] as NodeDef['has'] };
-  assert.equal(nodeCanHost(ci-host, ['opened-by:yoav', 'repo:x']), true, 'labels that are not needs do not matter');
-  assert.equal(nodeCanHost(ci-host, ['needs-emulator']), false);
+  assert.equal(nodeCanHost(ciHost, ['opened-by:yoav', 'repo:x']), true, 'labels that are not needs do not matter');
+  assert.equal(nodeCanHost(ciHost, ['needs-emulator']), false);
   assert.equal(nodeCanHost(kvm, ['needs-emulator']), true);
   assert.equal(nodeCanHost(kvm, ['needs-simulator']), true, 'the old name');
   assert.equal(nodeCanHost(kvm, ['needs-emulator', 'needs-browser']), false, 'every need');
